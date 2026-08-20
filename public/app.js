@@ -108,6 +108,56 @@ async function refreshSlotsFromServer(slots) {
   return slots;
 }
 
+async function refreshConfluxUi(domains) {
+  const list = Array.isArray(domains)
+    ? domains
+    : await fetch('/api/domains').then((r) => r.json());
+
+  for (const selId of ['confluxA', 'confluxB']) {
+    const sel = $(selId);
+    const prev = sel.value;
+    sel.innerHTML = '';
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.textContent = list.length ? '— выбери —' : 'нет доменов';
+    sel.appendChild(empty);
+    for (const d of list) {
+      const opt = document.createElement('option');
+      opt.value = d.id;
+      opt.textContent = `${d.name} (${d.id})`;
+      sel.appendChild(opt);
+    }
+    if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
+  }
+
+  if (list.length >= 2 && !$('confluxA').value) {
+    $('confluxA').value = list[0].id;
+    $('confluxB').value = list[1].id !== list[0].id ? list[1].id : list[0].id;
+    if ($('confluxA').value === $('confluxB').value && list[1]) {
+      $('confluxB').value = list[1].id;
+    }
+  }
+
+  const data = await fetch('/api/confluxes').then((r) => r.json());
+  const rows = data.confluxes || [];
+  if (!rows.length) {
+    $('confluxPanel').textContent = 'активных conflux нет';
+    return;
+  }
+  $('confluxPanel').textContent = rows
+    .map((c) => {
+      const names = (c.domainNames || c.domainIds || []).join(' ↔ ');
+      const eta =
+        c.status === 'approaching'
+          ? `eta ${c.monthsUntilDock} мес. (dock@${c.dockAtTick})`
+          : c.contact
+            ? `contact: ${c.contact.kind || '?'} · ${String(c.contact.description || '').slice(0, 120)}`
+            : `docked ${c.monthsDocked}/${c.durationMonths}`;
+      return `• [${c.status}] ${names}\n  ${c.id}\n  ${eta}`;
+    })
+    .join('\n\n');
+}
+
 async function refresh({ loadHistory = false } = {}) {
   const userId = currentUserId();
   let slots = loadSlots();
@@ -116,6 +166,9 @@ async function refresh({ loadHistory = false } = {}) {
 
   const status = await fetch('/api/status').then((r) => r.json());
   $('status').textContent = JSON.stringify(status, null, 2);
+
+  const domains = await fetch('/api/domains').then((r) => r.json());
+  await refreshConfluxUi(domains);
 
   const { domain } = await fetch(`/api/users/${encodeURIComponent(userId)}/domain`).then((r) => r.json());
   if (!domain) {
@@ -149,6 +202,7 @@ async function refresh({ loadHistory = false } = {}) {
           }
         : null,
       stateEvents: domain.state?.events,
+      stateModifiers: domain.state?.modifiers,
       loreCount: domain.lore?.length,
     },
     null,
@@ -209,8 +263,56 @@ $('btnNewSlot').addEventListener('click', async () => {
 
 $('btnRefresh').addEventListener('click', () => refresh().catch(console.error));
 
+$('btnConfluxRefresh').addEventListener('click', () => {
+  refreshConfluxUi().catch(console.error);
+});
+
+$('btnConflux').addEventListener('click', async () => {
+  const domainIdA = $('confluxA').value;
+  const domainIdB = $('confluxB').value;
+  const etaMonths = Number($('confluxEta').value || 3);
+  const durationMonths = Number($('confluxDuration').value || 3);
+  if (!domainIdA || !domainIdB) {
+    appendMessage('assistant', 'Выбери два города для conflux.', 'error');
+    return;
+  }
+  if (domainIdA === domainIdB) {
+    appendMessage('assistant', 'Нужны два разных города.', 'error');
+    return;
+  }
+  const btn = $('btnConflux');
+  btn.disabled = true;
+  try {
+    const data = await fetch('/api/dev/conflux', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domainIdA, domainIdB, etaMonths, durationMonths }),
+    }).then(async (r) => {
+      const body = await r.json();
+      if (!r.ok) throw new Error(body.error || r.statusText);
+      return body;
+    });
+    const c = data.conflux;
+    appendMessage(
+      'assistant',
+      `Conflux создан: ${(c.domainNames || []).join(' ↔ ')} · ${c.status} · стыковка через ${c.monthsUntilDock} мес.`,
+      'system · conflux',
+    );
+    await refresh();
+  } catch (err) {
+    appendMessage('assistant', `Conflux не создан: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 $('btnWipe').addEventListener('click', async () => {
-  if (!confirm('Стереть ВСЕ домены, слоты и сбросить мир?')) return;
+  if (!confirm('Стереть ВСЕ домены, слоты и сбросить мир?\n\nЭто необратимо.')) return;
+  const typed = prompt('Для подтверждения введи WIPE заглавными буквами:');
+  if (typed !== 'WIPE') {
+    appendMessage('assistant', 'Wipe отменён.', 'system');
+    return;
+  }
   $('btnWipe').disabled = true;
   try {
     await fetch('/api/dev/wipe', { method: 'POST' }).then((r) => r.json());

@@ -27,6 +27,21 @@ function chunk(arr, size) {
   return out;
 }
 
+function cosmologyBlock(config) {
+  return [
+    config.world.cosmology || '',
+    '',
+    'КОСМОЛОГИЯ ДЛЯ ГЕНЕЗИСА (жёстко):',
+    '- Мир — летающие острова в небе. Большую часть времени каждый остров ИЗОЛИРОВАН.',
+    '- Нет регулярных путей, паломничеств, караванов и «соседних регионов» на твёрдой земле.',
+    '- Нет материка, соседних провинций, приезжих из других городов как бытовой нормы.',
+    '- Чужие острова — редкие далёкие силуэты; без имён, договоров, войн и обмена людьми,',
+    '  пока мир явно не дал стыковку (conflux). Не выдумывай чужие народы у ворот.',
+    '- Хозяйство, вера, праздники, торговля — внутри СВОЕГО острова (~20 км до обрыва).',
+    '- «Паломничество» может быть только местным (свой храм, свой край), не из-за моря/с других островов.',
+  ].join('\n');
+}
+
 function fallbackName() {
   const names = ['Ветроград', 'Острокрыл', 'Туманск', 'Крутолом', 'Яснояр', 'Шипоград', 'Небокрай'];
   return names[Math.floor(Math.random() * names.length)];
@@ -157,7 +172,7 @@ async function generateCore({
 
   const basePrompt = [
     'Создай ЯДРО города. Обязательно вызови submit_core.',
-    config.world.cosmology || '',
+    cosmologyBlock(config),
     `Население (внутреннее): ${population}`,
     lockedName
       ? `Имя города УЖЕ выбрано: «${lockedName}» — поле domainName = точно это.`
@@ -169,10 +184,11 @@ async function generateCore({
     'Статы (не называй в текстах):',
     formatStatsForPrompt(stats, config),
     '',
-    'Теги:',
+    'Теги / тон (свободные слова игрока или random-базис; не механика):',
     formatTagsForPrompt(tags),
     '',
     `openingLore: минимум ${loreMin} коротких ПОСТОЯННЫХ фактов (не новости месяца).`,
+    'Учти изоляцию острова: без паломников/торговцев «из соседних регионов».',
   ].join('\n');
 
   for (let attempt = 1; attempt <= 3 && !draft.submitted; attempt += 1) {
@@ -310,8 +326,8 @@ async function generateAspectBatch({
         role: 'user',
         content: [
           `Город «${core.domainName}», правитель ${core.rulerName}.`,
-          config.world.cosmology || '',
-          `Население ~${population}. Теги: ${formatTagsForPrompt(tags)}`,
+          cosmologyBlock(config),
+          `Население ~${population}. Теги / тон: ${formatTagsForPrompt(tags)}`,
           'Статы (скрыто):',
           formatStatsForPrompt(stats, config),
           '',
@@ -322,6 +338,7 @@ async function generateAspectBatch({
           '',
           'Заполни ТОЛЬКО эти аспекты через submit_aspects. Каждый уникален и конкретен.',
           'Пиши устойчивый лор (годы), не сиюминутные события — те для хроники/тика.',
+          'Изоляция острова: без регулярных гостей с чужих островов и «соседних земель».',
           titles,
         ].join('\n'),
       },
@@ -461,6 +478,7 @@ export async function generateDomain({
     description,
     aspects,
     milestones,
+    tags,
     stats,
     population,
     character,
@@ -499,6 +517,8 @@ export function domainSummary(domain) {
     ownerUserId: domain.ownerUserId,
     population: domain.population,
     stats: domain.stats,
+    tags: domain.tags || [],
+    patronName: domain.state?.patronName || null,
     milestones: domain.milestones || [],
     character: domain.characters[0]
       ? {

@@ -3,6 +3,10 @@ import path from 'node:path';
 import { projectRoot } from '../../config.js';
 import { runWorldTick } from '../../game/tick.js';
 import { domainSummary } from '../../game/genesis.js';
+import {
+  forceCreateConflux,
+  confluxSummary,
+} from '../../game/conflux.js';
 import { getLogger, requestLogger, truncate } from '../../log.js';
 
 export function createWebServer({ config, app, runtime, storage }) {
@@ -165,6 +169,58 @@ export function createWebServer({ config, app, runtime, storage }) {
     } catch (err) {
       req.log?.error('http.error', { error: err.message, stack: err.stack });
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  server.get('/api/confluxes', async (req, res) => {
+    try {
+      const world = await storage.getWorld();
+      const domains = await storage.listDomains();
+      const byId = Object.fromEntries(domains.map((d) => [d.id, d]));
+      const activeOnly = req.query.all !== '1';
+      const list = await storage.listConfluxes(
+        activeOnly ? { status: ['approaching', 'docked'] } : {},
+      );
+      res.json({
+        confluxes: list.map((c) => confluxSummary(c, world, byId)),
+      });
+    } catch (err) {
+      req.log?.error('http.error', { error: err.message });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  server.post('/api/dev/conflux', async (req, res) => {
+    try {
+      const domainIdA = String(req.body.domainIdA || '').trim();
+      const domainIdB = String(req.body.domainIdB || '').trim();
+      const etaMonths = Number(req.body.etaMonths ?? 3);
+      const durationMonths = Number(req.body.durationMonths ?? 3);
+      if (!domainIdA || !domainIdB) {
+        return res.status(400).json({ error: 'domainIdA and domainIdB required' });
+      }
+      const { conflux, domains } = await forceCreateConflux({
+        storage,
+        domainIdA,
+        domainIdB,
+        etaMonths,
+        durationMonths,
+      });
+      const world = await storage.getWorld();
+      const byId = Object.fromEntries(domains.map((d) => [d.id, d]));
+      getLogger().info('dev.conflux', {
+        id: conflux.id,
+        domainIdA,
+        domainIdB,
+        etaMonths: conflux.etaMonths,
+      });
+      res.json({
+        ok: true,
+        conflux: confluxSummary(conflux, world, byId),
+      });
+    } catch (err) {
+      req.log?.error('http.error', { error: err.message, stack: err.stack });
+      res.status(400).json({ error: err.message });
     }
   });
 

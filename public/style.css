@@ -62,7 +62,7 @@ input, button {
   font: inherit;
 }
 
-label input, .composer input {
+label input, label select, .composer input {
   width: 100%;
   margin-top: 0.35rem;
   padding: 0.55rem 0.7rem;
@@ -106,6 +106,26 @@ button.danger {
   background: #3a2020;
   border-color: #c45a5a;
   color: #f3c4c4;
+}
+
+.danger-zone {
+  margin-top: 2.5rem;
+  padding-top: 1rem;
+  border-top: 1px dashed #6a3030;
+}
+
+.danger-zone h2 {
+  color: #c45a5a;
+}
+
+.danger-hint {
+  font-size: 0.75rem;
+  margin: 0 0 0.6rem;
+  line-height: 1.35;
+}
+
+.danger-zone .danger {
+  width: 100%;
 }
 
 .panel {

@@ -19,8 +19,26 @@
       </div>
       <div class="row">
         <button type="button" id="btnTick" class="accent">Force tick</button>
-        <button type="button" id="btnWipe" class="danger">Wipe all</button>
       </div>
+
+      <h2>Conflux (dev)</h2>
+      <label class="muted">Город A
+        <select id="confluxA"></select>
+      </label>
+      <label class="muted">Город B
+        <select id="confluxB"></select>
+      </label>
+      <label class="muted">Стыковка через (месяцев)
+        <input id="confluxEta" type="number" min="1" max="24" value="3" />
+      </label>
+      <label class="muted">Длительность стыка (месяцев)
+        <input id="confluxDuration" type="number" min="1" max="12" value="3" />
+      </label>
+      <div class="row">
+        <button type="button" id="btnConflux">Создать conflux</button>
+        <button type="button" id="btnConfluxRefresh">Обновить</button>
+      </div>
+      <pre id="confluxPanel" class="panel"></pre>
 
       <label class="muted">User ID
         <input id="userId" value="local-user" readonly />
@@ -39,6 +57,12 @@
       <pre id="chronicle" class="panel tall"></pre>
       <h2>Факты</h2>
       <pre id="facts" class="panel tall"></pre>
+
+      <div class="danger-zone">
+        <h2>Опасно</h2>
+        <p class="muted danger-hint">Стирает все домены, слоты и сбрасывает мир. Не рядом с обычными действиями.</p>
+        <button type="button" id="btnWipe" class="danger">Wipe all…</button>
+      </div>
     </aside>
     <main class="chat">
       <div id="messages" class="messages"></div>

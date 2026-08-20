@@ -4,8 +4,14 @@ import {
   loreToPromptText,
   recentChronicleText,
   advanceGameDate,
+  filterChronicleForDomain,
 } from './models.js';
 import { formatStatsForPrompt } from './stats.js';
+import {
+  processConfluxApproachingPhase,
+  advanceDockedConfluxes,
+} from './conflux.js';
+import { resolveConfluxTick } from './confluxResolve.js';
 import { getLogger } from '../log.js';
 
 function clampStat(n) {
@@ -113,8 +119,8 @@ export async function resolveDomainTick({ config, runtime, storage, domain, worl
         rules: {
           maxStatDeltaPerEvent: deltaCap,
           note:
-            'Статы через statDeltas в add_chronicle. Pending: chronicle + advance_pending. ' +
-            'Важные постоянные итоги → upsert_modifier; мелочи только в хронике. Майлстоунов нет — они невидимы.',
+            'Статы через statDeltas в add_chronicle. Pending: chronicle + advance_pending или cancel_pending. ' +
+            'Важные постоянные итоги → upsert_modifier; мелочи только в хронике. Будь смелым, не статус-кво.',
         },
       }),
     },
@@ -336,6 +342,39 @@ export async function resolveDomainTick({ config, runtime, storage, domain, worl
         };
       },
     },
+    {
+      name: 'cancel_pending',
+      description:
+        'Отменить active pending (сорвано, разрушено, потеряло смысл). Обычно вместе с add_chronicle о причине. Можно по воле резолвера, если мир логично ломает намерение.',
+      parameters: {
+        type: 'object',
+        required: ['actionId', 'reason'],
+        properties: {
+          actionId: { type: 'string' },
+          reason: {
+            type: 'string',
+            description: 'Кратко: почему отменено (для лога; детали — в хронике)',
+          },
+        },
+      },
+      handler: async ({ actionId, reason }) => {
+        const action = working.state.pendingActions.find(
+          (a) => a.id === actionId && a.status === 'active',
+        );
+        if (!action) return { ok: false, error: 'pending не найден' };
+        action.status = 'cancelled';
+        action.cancelReason = String(reason || '').trim() || 'сорвано';
+        action.updatedAt = new Date().toISOString();
+        action.resolvedTick = world.tickIndex;
+        advancedIds.add(actionId);
+        log.info('resolver.cancel_pending', {
+          actionId,
+          reason: action.cancelReason,
+          summary: action.summary,
+        });
+        return { ok: true, action: { id: action.id, summary: action.summary, status: action.status } };
+      },
+    },
   ];
 
   const pendingBlock = activePending.length
@@ -351,13 +390,14 @@ export async function resolveDomainTick({ config, runtime, storage, domain, worl
     `Резольв месяца для города «${working.name}» (${world.gameDate.label}).`,
     'Сначала read_context. Учти описание, state и недавнюю хронику.',
     '',
-    'ПРИОРИТЕТ — для КАЖДОГО active pending: add_chronicle (relatedPendingId) + advance_pending:',
+    'ПРИОРИТЕТ — для КАЖДОГО active pending: add_chronicle (relatedPendingId) + advance_pending',
+    'ИЛИ cancel_pending, если дело сорвано/разрушено (с хроникой о причине).',
     pendingBlock,
     '',
     `Затем другие события. Всего записей хроники около ${eventTarget} (включая прогресс pending).`,
     `Статы — только statDeltas в add_chronicle, каждый ключ ≤ ±${deltaCap} за запись.`,
     'State: временные процессы → set_state_events; важные постоянные итоги → upsert_modifier; мелочи — только хроника.',
-    'Майлстоуны сезона тебе НЕ видны и не существуют как механика — не выдумывай «заветы сезона».',
+    'Будь смелым: избегай стагнации и «всё спокойно». Месяц должен сдвинуть город.',
     'Не завершай многомесячную стройку за один тик без сильной причины.',
     'Интересные исходы; не сглаживай жёсткие приказы. Текст: OK.',
   ].join('\n');
@@ -451,10 +491,66 @@ export async function runWorldTick({ config, runtime, storage, app }) {
   advanceGameDate(world);
   await storage.saveWorld(world);
 
+  const confluxPhase = await processConfluxApproachingPhase({
+    config,
+    runtime,
+    storage,
+    world,
+  });
+
   const domains = await storage.listDomains();
   const results = [];
+  const handled = new Set();
+  const confluxNotes = [...(confluxPhase.notes || [])];
 
+  // Docked pairs: one shared resolve (no solo for either domain)
+  for (const conflux of confluxPhase.dockedConfluxes || []) {
+    const preludeAddsByDomain = {};
+    for (const id of conflux.domainIds || []) {
+      preludeAddsByDomain[id] = confluxPhase.chronicleAddsByDomain.get(id) || [];
+    }
+
+    const resolved = await resolveConfluxTick({
+      config,
+      runtime,
+      storage,
+      conflux,
+      world,
+      preludeAddsByDomain,
+    });
+
+    for (const domain of resolved.domains) {
+      handled.add(domain.id);
+      const newsAdds = filterChronicleForDomain(
+        resolved.newsChronicleByDomain[domain.id] || [],
+        domain.id,
+      );
+      const news = await app.narrateTickNews(domain, newsAdds, world.gameDate);
+      await app.persistDialog(domain, 'assistant', news, { kind: 'tick_news' });
+      await app.emitOutbound(domain.ownerUserId, news, {
+        agent: 'ruler',
+        domainId: domain.id,
+        kind: 'tick_news',
+      });
+
+      results.push({
+        domainId: domain.id,
+        name: domain.name,
+        chronicleCount: newsAdds.length,
+        status: domain.status,
+        inConfluxDocked: true,
+        confluxId: conflux.id,
+        news,
+        statChanges: newsAdds
+          .filter((c) => c.statChanges)
+          .map((c) => ({ id: c.id, changes: c.statChanges })),
+      });
+    }
+  }
+
+  // Solo: everyone not in an active docked pair (incl. approaching)
   for (const domain of domains) {
+    if (handled.has(domain.id)) continue;
     if (domain.status && domain.status !== 'playing') {
       results.push({ domainId: domain.id, skipped: true, reason: domain.status });
       continue;
@@ -468,8 +564,13 @@ export async function runWorldTick({ config, runtime, storage, app }) {
       world,
     });
 
-    const news = await app.narrateTickNews(resolved.domain, resolved.chronicleAdds, world.gameDate);
-    await app.persistDialog(resolved.domain, 'assistant', news);
+    const prelude = confluxPhase.chronicleAddsByDomain.get(domain.id) || [];
+    const newsAdds = filterChronicleForDomain(
+      [...prelude, ...resolved.chronicleAdds],
+      domain.id,
+    );
+    const news = await app.narrateTickNews(resolved.domain, newsAdds, world.gameDate);
+    await app.persistDialog(resolved.domain, 'assistant', news, { kind: 'tick_news' });
     await app.emitOutbound(resolved.domain.ownerUserId, news, {
       agent: 'ruler',
       domainId: resolved.domain.id,
@@ -479,14 +580,21 @@ export async function runWorldTick({ config, runtime, storage, app }) {
     results.push({
       domainId: resolved.domain.id,
       name: resolved.domain.name,
-      chronicleCount: resolved.chronicleAdds.length,
+      chronicleCount: newsAdds.length,
       status: resolved.domain.status,
+      inConfluxDocked: false,
       news,
-      statChanges: resolved.chronicleAdds
+      statChanges: newsAdds
         .filter((c) => c.statChanges)
         .map((c) => ({ id: c.id, changes: c.statChanges })),
     });
   }
+
+  const advanced = await advanceDockedConfluxes(
+    { storage, world },
+    confluxPhase.dockedConfluxes,
+  );
+  confluxNotes.push(...(advanced.notes || []));
 
   return {
     world: {
@@ -494,6 +602,7 @@ export async function runWorldTick({ config, runtime, storage, app }) {
       tickIndex: world.tickIndex,
       gameDate: world.gameDate,
     },
+    conflux: confluxNotes,
     results,
   };
 }

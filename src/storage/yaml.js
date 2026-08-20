@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import yaml from 'js-yaml';
-import { createWorldFromConfig } from '../game/models.js';
+import { createWorldFromConfig, normalizeDomain } from '../game/models.js';
 
 async function ensureDir(dir) {
   await fs.mkdir(dir, { recursive: true });
@@ -35,6 +35,7 @@ export class YamlStorage {
     await ensureDir(this.root);
     await ensureDir(path.join(this.root, 'domains'));
     await ensureDir(path.join(this.root, 'users'));
+    await ensureDir(path.join(this.root, 'confluxes'));
 
     let world = await this.getWorld();
     if (!world) {
@@ -55,6 +56,10 @@ export class YamlStorage {
     return path.join(this.root, 'users', `${userId}.yaml`);
   }
 
+  confluxPath(confluxId) {
+    return path.join(this.root, 'confluxes', `${confluxId}.yaml`);
+  }
+
   async getWorld() {
     return readYaml(this.worldPath(), null);
   }
@@ -66,10 +71,12 @@ export class YamlStorage {
   }
 
   async getDomain(domainId) {
-    return readYaml(this.domainPath(domainId), null);
+    const domain = await readYaml(this.domainPath(domainId), null);
+    return domain ? normalizeDomain(domain) : null;
   }
 
   async saveDomain(domain) {
+    normalizeDomain(domain);
     domain.updatedAt = new Date().toISOString();
     await writeYaml(this.domainPath(domain.id), domain);
     return domain;
@@ -82,7 +89,7 @@ export class YamlStorage {
     for (const file of files) {
       if (!file.endsWith('.yaml')) continue;
       const domain = await readYaml(path.join(dir, file), null);
-      if (domain) domains.push(domain);
+      if (domain) domains.push(normalizeDomain(domain));
     }
     return domains;
   }
@@ -105,6 +112,33 @@ export class YamlStorage {
     return this.getDomain(binding.domainId);
   }
 
+  async getConflux(confluxId) {
+    return readYaml(this.confluxPath(confluxId), null);
+  }
+
+  async saveConflux(conflux) {
+    conflux.updatedAt = new Date().toISOString();
+    await writeYaml(this.confluxPath(conflux.id), conflux);
+    return conflux;
+  }
+
+  async listConfluxes({ status } = {}) {
+    const dir = path.join(this.root, 'confluxes');
+    const files = await fs.readdir(dir).catch(() => []);
+    const out = [];
+    const statusFilter = status
+      ? new Set(Array.isArray(status) ? status : [status])
+      : null;
+    for (const file of files) {
+      if (!file.endsWith('.yaml')) continue;
+      const c = await readYaml(path.join(dir, file), null);
+      if (!c) continue;
+      if (statusFilter && !statusFilter.has(c.status)) continue;
+      out.push(c);
+    }
+    return out;
+  }
+
   async wipeAll() {
     const domains = await this.listDomains();
     for (const d of domains) {
@@ -115,6 +149,13 @@ export class YamlStorage {
     for (const file of userFiles) {
       if (file.endsWith('.yaml')) {
         await fs.unlink(path.join(usersDir, file)).catch(() => {});
+      }
+    }
+    const confluxDir = path.join(this.root, 'confluxes');
+    const confluxFiles = await fs.readdir(confluxDir).catch(() => []);
+    for (const file of confluxFiles) {
+      if (file.endsWith('.yaml')) {
+        await fs.unlink(path.join(confluxDir, file)).catch(() => {});
       }
     }
     await fs.unlink(this.worldPath()).catch(() => {});

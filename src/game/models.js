@@ -5,7 +5,24 @@ export function emptyState() {
     // Важные постоянные модификаторы (институты, установленный порядок, хронические условия)
     modifiers: [],
     pendingActions: [],
+    // Как обращаться к божеству-покровителю; null = ещё не названо
+    patronName: null,
   };
+}
+
+/** Подтянуть новые поля state/tags у старых доменов без миграции файлов. */
+export function normalizeDomain(domain) {
+  if (!domain || typeof domain !== 'object') return domain;
+  if (!domain.state || typeof domain.state !== 'object') {
+    domain.state = emptyState();
+  } else {
+    if (!Array.isArray(domain.state.events)) domain.state.events = [];
+    if (!Array.isArray(domain.state.modifiers)) domain.state.modifiers = [];
+    if (!Array.isArray(domain.state.pendingActions)) domain.state.pendingActions = [];
+    if (!('patronName' in domain.state)) domain.state.patronName = null;
+  }
+  if (!Array.isArray(domain.tags)) domain.tags = [];
+  return domain;
 }
 
 export function createWorldFromConfig(config) {
@@ -39,6 +56,7 @@ export function createDomainRecord({
   population,
   aspects = {},
   milestones = [],
+  tags = [],
   character,
   lore = [],
 }) {
@@ -51,6 +69,14 @@ export function createDomainRecord({
     description,
     aspects,
     milestones,
+    /** Стартовые теги генезиса (groupId/tagId + имена) — для отладки и контекста */
+    tags: (tags || []).map((t) => ({
+      groupId: t.groupId,
+      groupName: t.groupName,
+      tagId: t.tagId,
+      tagName: t.tagName,
+      source: t.source || null,
+    })),
     stats,
     population,
     state: emptyState(),
@@ -85,6 +111,8 @@ export function createLoreFact({
   importance = null,
   relatedPendingId = null,
   statChanges = null,
+  secret = false,
+  secretForDomainId = null,
 }) {
   const fact = {
     id,
@@ -98,7 +126,19 @@ export function createLoreFact({
   };
   if (relatedPendingId) fact.relatedPendingId = relatedPendingId;
   if (statChanges && Object.keys(statChanges).length) fact.statChanges = statChanges;
+  if (secret) {
+    fact.secret = true;
+    if (secretForDomainId) fact.secretForDomainId = String(secretForDomainId);
+  }
   return fact;
+}
+
+/** Записи месяца, видимые правителю домена (учитывает secret). */
+export function filterChronicleForDomain(entries = [], domainId) {
+  return (entries || []).filter((e) => {
+    if (!e?.secret) return true;
+    return String(e.secretForDomainId || '') === String(domainId);
+  });
 }
 
 export function loreToPromptText(lore = [], { excludeTags = [] } = {}) {

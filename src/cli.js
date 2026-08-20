@@ -160,4 +160,27 @@ program
     );
   });
 
+program
+  .command('conflux')
+  .description('Force-create conflux между двумя доменами')
+  .requiredOption('--a <domainId>', 'Domain A')
+  .requiredOption('--b <domainId>', 'Domain B')
+  .option('--eta <n>', 'Месяцев до стыковки', '3')
+  .option('--duration <n>', 'Длительность фазы docked', '3')
+  .action(async (opts) => {
+    const { forceCreateConflux, confluxSummary } = await import('./game/conflux.js');
+    await withApp(async ({ storage }) => {
+      const { conflux, domains } = await forceCreateConflux({
+        storage,
+        domainIdA: opts.a,
+        domainIdB: opts.b,
+        etaMonths: Number(opts.eta),
+        durationMonths: Number(opts.duration),
+      });
+      const world = await storage.getWorld();
+      const byId = Object.fromEntries(domains.map((d) => [d.id, d]));
+      console.log(JSON.stringify(confluxSummary(conflux, world, byId), null, 2));
+    });
+  });
+
 program.parseAsync(process.argv);

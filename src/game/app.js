@@ -1,5 +1,9 @@
 import { generateDomain, domainSummary } from './genesis.js';
-import { chronicleEntries, newsChronicleEntries } from './models.js';
+import {
+  chronicleEntries,
+  newsChronicleEntries,
+  filterChronicleForDomain,
+} from './models.js';
 import { qualitativePopulation, qualitativeStatsBrief } from './stats.js';
 import { askLoremaster } from './loremaster.js';
 import { newId } from './ids.js';
@@ -10,8 +14,21 @@ import {
   listTagCatalog,
   formatPlayerBrief,
   formatTagCatalogForPrompt,
+  inferTagChoicesFromText,
+  collectOnboardingPreferenceText,
 } from './onboarding.js';
 import { getLogger, truncate } from '../log.js';
+
+/** Сколько подряд tick_news в конце истории без ответа игрока. */
+function countTrailingUnansweredDigests(dialogHistory = []) {
+  let n = 0;
+  for (let i = dialogHistory.length - 1; i >= 0; i -= 1) {
+    const m = dialogHistory[i];
+    if (m.role === 'user') break;
+    if (m.role === 'assistant' && m.kind === 'tick_news') n += 1;
+  }
+  return n;
+}
 
 function characterTools(domain, storage, character, ctx) {
   const save = async () => storage.saveDomain(domain);
@@ -26,6 +43,7 @@ function characterTools(domain, storage, character, ctx) {
         ok: true,
         name: domain.name,
         status: domain.status,
+        patronName: domain.state?.patronName || null,
         populationFeel: qualitativePopulation(domain.population || 0),
         conditionFeel: qualitativeStatsBrief(domain.stats || {}, ctx.config),
         guidance:
@@ -41,6 +59,38 @@ function characterTools(domain, storage, character, ctx) {
             durationMonths: a.durationMonths ?? 1,
           })),
       }),
+    },
+    {
+      name: 'set_patron_name',
+      description:
+        'Запомнить или сменить имя/обращение к божеству-покровителю. Вызови, когда покровитель впервые назвал, как к нему обращаться, или попросил сменить имя.',
+      parameters: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Имя или культовый титул обращения (напр. «Красный Змей», «Тот-Кто-Смотрит»)',
+          },
+        },
+      },
+      handler: async ({ name }) => {
+        const cleaned = String(name || '')
+          .trim()
+          .replace(/\s+/g, ' ')
+          .slice(0, 64);
+        if (cleaned.length < 2) return { ok: false, error: 'Слишком коротко' };
+        if (!domain.state) domain.state = { events: [], modifiers: [], pendingActions: [], patronName: null };
+        const prev = domain.state.patronName || null;
+        domain.state.patronName = cleaned;
+        await save();
+        return {
+          ok: true,
+          patronName: cleaned,
+          previous: prev,
+          hint: `Дальше обращайся так: «${cleaned}». Не путай с чужими богами.`,
+        };
+      },
     },
     {
       name: 'consult_loremaster',
@@ -460,7 +510,7 @@ export class GameApp {
       {
         name: 'set_tag_choices',
         description:
-          'Задать сразу несколько тегов из РЕАЛЬНОГО каталога (после свободного пожелания игрока). Остальное — random.',
+          'Задать теги по группам. Можно tagId из каталога ИЛИ свободные слова (tagLabel) — любые формулировки игрока. Остальные группы — random из каталога.',
         parameters: {
           type: 'object',
           required: ['choices'],
@@ -469,10 +519,17 @@ export class GameApp {
               type: 'array',
               items: {
                 type: 'object',
-                required: ['groupId', 'tagId'],
+                required: ['groupId'],
                 properties: {
                   groupId: { type: 'string' },
-                  tagId: { type: 'string' },
+                  tagId: {
+                    type: 'string',
+                    description: 'id из каталога (опционально)',
+                  },
+                  tagLabel: {
+                    type: 'string',
+                    description: 'Свободные слова игрока (предпочтительно, если говорил своими словами)',
+                  },
                 },
               },
             },
@@ -487,13 +544,19 @@ export class GameApp {
               errors.push(`unknown group ${c.groupId}`);
               continue;
             }
+            const label = String(c.tagLabel || '').trim();
+            if (label) {
+              draft.tagChoices[c.groupId] = label;
+              applied.push({ group: group.name, tag: label, freeform: true });
+              continue;
+            }
             const tag = group.tags.find((t) => t.id === c.tagId);
             if (!tag) {
-              errors.push(`unknown tag ${c.tagId} in ${c.groupId}`);
+              errors.push(`нужен tagId из каталога или tagLabel (свободные слова) для ${c.groupId}`);
               continue;
             }
             draft.tagChoices[c.groupId] = c.tagId;
-            applied.push({ group: group.name, tag: tag.name });
+            applied.push({ group: group.name, tag: tag.name, freeform: false });
           }
           await saveDraft();
           const total = (this.config.genesis.tagGroups || []).length;
@@ -502,27 +565,45 @@ export class GameApp {
             applied,
             errors,
             chosen: draft.tagChoices,
-            note: `${Object.keys(draft.tagChoices).length}/${total} групп задано; остальное random.`,
+            note: `${Object.keys(draft.tagChoices).length}/${total} групп задано; остальное random из каталога.`,
           };
         },
       },
       {
         name: 'set_tag_choice',
         description:
-          'Выбрать один тег в группе из каталога. Остальные без выбора — случайные.',
+          'Один тег в группе: либо tagId из каталога, либо свободные слова (tagLabel). Без выбора — random.',
         parameters: {
           type: 'object',
-          required: ['groupId', 'tagId'],
+          required: ['groupId'],
           properties: {
             groupId: { type: 'string' },
             tagId: { type: 'string' },
+            tagLabel: {
+              type: 'string',
+              description: 'Свободные слова (не обязаны совпадать с каталогом)',
+            },
           },
         },
-        handler: async ({ groupId, tagId }) => {
+        handler: async ({ groupId, tagId, tagLabel }) => {
           const group = (this.config.genesis.tagGroups || []).find((g) => g.id === groupId);
           if (!group) return { ok: false, error: 'Неизвестная группа' };
+          const label = String(tagLabel || '').trim();
+          if (label) {
+            draft.tagChoices[groupId] = label;
+            await saveDraft();
+            return {
+              ok: true,
+              group: group.name,
+              tag: label,
+              freeform: true,
+              chosen: draft.tagChoices,
+            };
+          }
           const tag = group.tags.find((t) => t.id === tagId);
-          if (!tag) return { ok: false, error: 'Неизвестный тег в группе' };
+          if (!tag) {
+            return { ok: false, error: 'Нужен tagId из каталога или tagLabel со свободными словами' };
+          }
           draft.tagChoices[groupId] = tagId;
           await saveDraft();
           const totalGroups = (this.config.genesis.tagGroups || []).length;
@@ -531,8 +612,9 @@ export class GameApp {
             ok: true,
             group: group.name,
             tag: tag.name,
+            freeform: false,
             chosen: draft.tagChoices,
-            note: `Выбрано ${chosenCount} из ${totalGroups} групп; остальные будут случайными.`,
+            note: `Выбрано ${chosenCount} из ${totalGroups} групп; остальные — random из каталога.`,
           };
         },
       },
@@ -570,6 +652,19 @@ export class GameApp {
           if (this.isGenerating(userId)) {
             return { ok: true, status: 'generating' };
           }
+
+          // Если агент назвал теги словами, но не вызвал tools — добираем из brief/реплик.
+          const prefText = collectOnboardingPreferenceText(draft);
+          const before = { ...draft.tagChoices };
+          draft.tagChoices = inferTagChoicesFromText(
+            this.config,
+            prefText,
+            draft.tagChoices || {},
+          );
+          if (Object.keys(draft.tagChoices).length !== Object.keys(before).length) {
+            await saveDraft();
+          }
+
           this.startDomainGeneration(userId, {
             channel,
             forcedName: draft.cityName,
@@ -586,6 +681,7 @@ export class GameApp {
             tagsForced: forced,
             tagsRandom: Math.max(0, total - forced),
             briefPreview: formatPlayerBrief(draft.playerBrief),
+            inferredTags: draft.tagChoices,
           };
         },
       },
@@ -620,6 +716,41 @@ export class GameApp {
       extraSystem,
       log,
     });
+
+    // Страховка: агент сказал «записал», но не вызвал tools — сохраняем freeform сами.
+    const usedTools = new Set((result.toolTrace || []).map((t) => t.name));
+    const userSaidSomething =
+      !bootstrap && String(text || '').trim().length >= 8 && !/^\[Игрок/.test(String(text));
+    if (userSaidSomething && !usedTools.has('set_player_brief') && !usedTools.has('start_new_game')) {
+      const looksLikeNameOnly =
+        draft.cityNameApproved ||
+        /^(давай|ок|хорошо|ладно|этот|выбираю)\b/i.test(String(text).trim()) ||
+        (String(text).trim().length < 40 &&
+          /^[\p{L}\p{M}\d\s\-']+$/u.test(String(text).trim()));
+      if (!looksLikeNameOnly) {
+        if (!draft.playerBrief) draft.playerBrief = { city: '', ruler: '', freeform: '' };
+        const prev = draft.playerBrief.freeform || '';
+        const chunk = String(text).trim();
+        if (!prev.includes(chunk.slice(0, 40))) {
+          draft.playerBrief.freeform = prev ? `${prev}\n${chunk}` : chunk;
+        }
+      }
+    }
+    if (
+      userSaidSomething &&
+      !usedTools.has('set_tag_choices') &&
+      !usedTools.has('set_tag_choice') &&
+      !usedTools.has('start_new_game')
+    ) {
+      const prefText = [
+        draft.playerBrief?.city,
+        draft.playerBrief?.freeform,
+        text,
+      ]
+        .filter(Boolean)
+        .join('\n');
+      draft.tagChoices = inferTagChoicesFromText(this.config, prefText, draft.tagChoices || {});
+    }
 
     let reply = result.text;
     if (startedGenerating && !String(reply || '').trim()) {
@@ -680,10 +811,15 @@ export class GameApp {
     }));
 
     const conditionFeel = qualitativeStatsBrief(domain.stats || {}, this.config);
+    const patronName = domain.state?.patronName || null;
+    const patronLine = patronName
+      ? `Имя покровителя (обращение): «${patronName}». Обращайся так. Чужих богов и имён с других островов НЕ используй.`
+      : 'Имя покровителя ещё НЕ названо — коротко спроси, как к нему обращаться; когда скажет — сразу set_patron_name.';
     const extraSystem = [
       `Ты ${character.name}, ${character.title || 'правитель'} города «${domain.name}».`,
       character.description,
       this.config.world.cosmology || '',
+      patronLine,
       'ОБСТОЯТЕЛЬСТВА ГОРОДА СЕЙЧАС (внутренняя правда; числа игроку не называй):',
       `Население: ${qualitativePopulation(domain.population || 0)}`,
       conditionFeel,
@@ -692,6 +828,7 @@ export class GameApp {
       'Форма: 1–3 абзаца прозы. Без списков, markdown, английских слов, сервисных «чем помочь».',
       'Стройки/проекты: сначала declare_action с durationMonths, потом: намерение на N месяцев — НЕ «уже строим».',
       'Факты лормастера перескажи своими словами.',
+      'Если покровитель просит сменить имя/обращение — set_patron_name, затем подтверди.',
     ].join('\n');
 
     const result = await this.runtime.run({
@@ -728,7 +865,10 @@ export class GameApp {
 
   async narrateTickNews(domain, chronicleAdds, gameDate) {
     const character = domain.characters[0];
-    const forNews = newsChronicleEntries(chronicleAdds);
+    const forNews = filterChronicleForDomain(
+      newsChronicleEntries(chronicleAdds),
+      domain.id,
+    );
     if (!character) {
       return forNews.map((c) => c.text).join('\n');
     }
@@ -737,6 +877,21 @@ export class GameApp {
     }
 
     const facts = forNews.map((c) => `- [${c.importance || 'event'}] ${c.text}`).join('\n');
+    const patronName = domain.state?.patronName || null;
+    const addressHint = patronName
+      ? `Обращайся к покровителю как «${patronName}». Не подменяй чужим именем бога.`
+      : 'Имя покровителя неизвестно — обратись «покровитель», без выдуманных имён.';
+
+    const unanswered = countTrailingUnansweredDigests(character.dialogHistory || []);
+    // Это будет очередной дайджест без ответа игрока; на 3-м — спросить, здесь ли он
+    const askPresence = unanswered >= 2;
+    const presenceHint = askPresence
+      ? [
+          'ВАЖНО: покровитель молчит уже несколько месяцев подряд (не отвечал после прошлых писем о месяце).',
+          'В конце письма коротко, по-человечески спроси: слышит ли он тебя ещё, не оставил ли город без знака.',
+          'Без истерики и без сервисного тона — тревога слуги, 1–2 предложения.',
+        ].join(' ')
+      : '';
 
     const result = await this.runtime.run({
       agentId: 'ruler',
@@ -749,9 +904,13 @@ export class GameApp {
             'Выбери одну-две нити, что важнее всего; остальное можно опустить или мельком.',
             'Связная проза от первого лица, 1–3 коротких абзаца. Без списков, markdown, нумерации.',
             'Не копируй формулировки хроники. Не упоминай статы и механики.',
+            addressHint,
+            presenceHint,
             '',
             facts,
-          ].join('\n'),
+          ]
+            .filter(Boolean)
+            .join('\n'),
         },
       ],
       tools: [],
@@ -759,6 +918,7 @@ export class GameApp {
       extraSystem: [
         `Ты ${character.name}, ${character.title || 'правитель'} города «${domain.name}».`,
         character.description,
+        addressHint,
         'Ты пишешь покровителю новости месяца живой речью, как человек, а не сводку событий.',
       ].join('\n'),
     });
@@ -766,15 +926,17 @@ export class GameApp {
     return result.text || 'Покровитель, за месяц многое сдвинулось.';
   }
 
-  async persistDialog(domain, role, content) {
+  async persistDialog(domain, role, content, { kind = null } = {}) {
     const character = domain.characters[0];
     if (!character) return;
     character.dialogHistory = character.dialogHistory || [];
-    character.dialogHistory.push({
+    const entry = {
       role,
       content,
       at: new Date().toISOString(),
-    });
+    };
+    if (kind) entry.kind = kind;
+    character.dialogHistory.push(entry);
     if (character.dialogHistory.length > 200) {
       character.dialogHistory = character.dialogHistory.slice(-150);
     }

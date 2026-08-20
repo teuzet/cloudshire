@@ -1,5 +1,5 @@
 import { MongoClient } from 'mongodb';
-import { createWorldFromConfig } from '../game/models.js';
+import { createWorldFromConfig, normalizeDomain } from '../game/models.js';
 
 /**
  * Mongo implementation of the same storage surface as YamlStorage.
@@ -46,10 +46,11 @@ export class MongoStorage {
     const doc = await this.col('domains').findOne({ _id: domainId });
     if (!doc) return null;
     const { _id, ...rest } = doc;
-    return { id: _id, ...rest };
+    return normalizeDomain({ id: _id, ...rest });
   }
 
   async saveDomain(domain) {
+    normalizeDomain(domain);
     domain.updatedAt = new Date().toISOString();
     const { id, ...rest } = domain;
     await this.col('domains').replaceOne({ _id: id }, { _id: id, ...rest }, { upsert: true });
@@ -58,7 +59,7 @@ export class MongoStorage {
 
   async listDomains() {
     const docs = await this.col('domains').find({}).toArray();
-    return docs.map(({ _id, ...rest }) => ({ id: _id, ...rest }));
+    return docs.map(({ _id, ...rest }) => normalizeDomain({ id: _id, ...rest }));
   }
 
   async getUserBinding(userId) {
@@ -86,9 +87,34 @@ export class MongoStorage {
     return this.getDomain(binding.domainId);
   }
 
+  async getConflux(confluxId) {
+    const doc = await this.col('confluxes').findOne({ _id: confluxId });
+    if (!doc) return null;
+    const { _id, ...rest } = doc;
+    return { id: _id, ...rest };
+  }
+
+  async saveConflux(conflux) {
+    conflux.updatedAt = new Date().toISOString();
+    const { id, ...rest } = conflux;
+    await this.col('confluxes').replaceOne({ _id: id }, { _id: id, ...rest }, { upsert: true });
+    return conflux;
+  }
+
+  async listConfluxes({ status } = {}) {
+    const filter = {};
+    if (status) {
+      const list = Array.isArray(status) ? status : [status];
+      filter.status = { $in: list };
+    }
+    const docs = await this.col('confluxes').find(filter).toArray();
+    return docs.map(({ _id, ...rest }) => ({ id: _id, ...rest }));
+  }
+
   async wipeAll() {
     await this.col('domains').deleteMany({});
     await this.col('users').deleteMany({});
+    await this.col('confluxes').deleteMany({});
     await this.col('world').deleteMany({});
     await this.saveWorld(createWorldFromConfig(this.config));
     return { ok: true, driver: 'mongo' };

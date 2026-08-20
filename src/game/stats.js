@@ -37,15 +37,40 @@ export function rollPopulation(config, rng = Math.random) {
 
 export function pickTags(config, rng = Math.random, forcedChoices = {}) {
   return (config.genesis.tagGroups || []).map((group) => {
-    const forcedId = forcedChoices[group.id];
-    const tag =
-      (forcedId && group.tags.find((t) => t.id === forcedId)) ||
-      group.tags[Math.floor(rng() * group.tags.length)];
+    const forced = forcedChoices[group.id];
+    if (forced != null && String(forced).trim()) {
+      const raw = String(forced).trim();
+      const fromCatalog = group.tags.find((t) => t.id === raw || t.name === raw);
+      if (fromCatalog) {
+        return {
+          groupId: group.id,
+          groupName: group.name,
+          tagId: fromCatalog.id,
+          tagName: fromCatalog.name,
+          source: 'catalog',
+        };
+      }
+      // Свободные слова игрока — не обязаны совпадать с каталогом
+      const slug = raw
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, '_')
+        .replace(/^_|_$/g, '')
+        .slice(0, 40);
+      return {
+        groupId: group.id,
+        groupName: group.name,
+        tagId: `free:${slug || 'custom'}`,
+        tagName: raw,
+        source: 'freeform',
+      };
+    }
+    const tag = group.tags[Math.floor(rng() * group.tags.length)];
     return {
       groupId: group.id,
       groupName: group.name,
       tagId: tag.id,
       tagName: tag.name,
+      source: 'random',
     };
   });
 }
@@ -122,7 +147,13 @@ export function qualitativeStatsBrief(stats, config) {
 }
 
 export function formatTagsForPrompt(tags) {
-  return tags.map((t) => `${t.groupName}: ${t.tagName}`).join('\n');
+  return tags
+    .map((t) => {
+      const src =
+        t.source === 'freeform' ? ' (слова игрока)' : t.source === 'random' ? ' (random)' : '';
+      return `${t.groupName}: ${t.tagName}${src}`;
+    })
+    .join('\n');
 }
 
 export function qualitativePopulation(n) {
