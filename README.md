@@ -38,7 +38,9 @@ npm run playtest -- --scripted --ticks 5
 
 Хранилище по умолчанию — YAML в `data/`. Переключение на Mongo: в `config/default.yaml` поставь `storage.driver: mongo`.
 
-Telegram: `telegram.enabled: true` и `TELEGRAM_BOT_TOKEN` в `.env`.
+Telegram: положи `TELEGRAM_BOT_TOKEN` в `.env` и перезапусти `npm start` — бот поднимется сам
+(polling). Явно выключить: `TELEGRAM_ENABLED=0`. Веб на http://127.0.0.1:3000 остаётся админкой
+и видит все домены, в том числе заведённые из Telegram (`[tg]` в слотах).
 
 ### Локальный клиент
 

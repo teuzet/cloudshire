@@ -69,6 +69,11 @@ export class MongoStorage {
     return rest;
   }
 
+  async listUserBindings() {
+    const docs = await this.col('users').find({}).toArray();
+    return docs.map(({ _id, ...rest }) => rest);
+  }
+
   async saveUserBinding(binding) {
     binding.updatedAt = new Date().toISOString();
     await this.col('users').replaceOne(

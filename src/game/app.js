@@ -268,6 +268,9 @@ export class GameApp {
       domainCount: domains.length,
       tickIntervalHours: this.config.tick.intervalHours,
       generatingCount: this.generatingUsers.size,
+      telegram: {
+        enabled: Boolean(this.config.telegram?.enabled),
+      },
     };
   }
 
@@ -332,6 +335,7 @@ export class GameApp {
           runtime: this.runtime,
           storage: this.storage,
           ownerUserId: uid,
+          channel,
           forcedName: forcedName || null,
           forcedTagChoices: forcedTagChoices || {},
           playerBrief: playerBrief || null,
@@ -412,6 +416,7 @@ export class GameApp {
 
     const saveDraft = async () => {
       binding.onboarding = draft;
+      binding.channel = channel || binding.channel || null;
       binding.updatedAt = new Date().toISOString();
       await this.storage.saveUserBinding(binding);
     };

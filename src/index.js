@@ -21,7 +21,11 @@ async function main() {
     });
   });
 
-  const telegram = startTelegramBot({ config, app });
+  const telegram = startTelegramBot({ config, app, storage });
+  log.info('telegram.status', {
+    enabled: Boolean(config.telegram?.enabled),
+    running: Boolean(telegram.enabled),
+  });
 
   const scheduler = startTickScheduler({
     config,

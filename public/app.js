@@ -96,16 +96,28 @@ async function refreshSlotsFromServer(slots) {
   const byUser = new Map(slots.map((s) => [s.userId, s]));
   for (const d of domains) {
     if (!d.ownerUserId) continue;
+    const channel = d.channel || 'unknown';
+    const label = `${channelTag(channel)} ${d.name} · ${d.ownerUserId}`;
     if (!byUser.has(d.ownerUserId)) {
-      const slot = { userId: d.ownerUserId, label: `${d.name} (${d.ownerUserId})` };
+      const slot = { userId: d.ownerUserId, label, channel };
       slots.push(slot);
       byUser.set(d.ownerUserId, slot);
     } else {
-      byUser.get(d.ownerUserId).label = `${d.name} · ${d.ownerUserId}`;
+      const existing = byUser.get(d.ownerUserId);
+      existing.label = label;
+      existing.channel = channel;
     }
   }
   saveSlots(slots);
   return slots;
+}
+
+function channelTag(channel) {
+  if (channel === 'telegram') return '[tg]';
+  if (channel === 'web') return '[web]';
+  if (channel === 'cli') return '[cli]';
+  if (channel === 'playtest') return '[test]';
+  return `[${channel || '?'}]`;
 }
 
 async function refreshConfluxUi(domains) {

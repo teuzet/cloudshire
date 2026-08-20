@@ -24,7 +24,24 @@ export function loadConfig(configPath = process.env.CLOUDSHIRE_CONFIG || 'config
   config.server = config.server || {};
   config.server.port = Number(process.env.PORT || config.server.port || 3000);
 
+  config.telegram = config.telegram || {};
+  config.telegram.enabled = resolveTelegramEnabled(config.telegram);
+
   return config;
+}
+
+/**
+ * TELEGRAM_ENABLED=1/0 overrides YAML.
+ * If unset: enable when TELEGRAM_BOT_TOKEN (or tokenEnv) is present, else YAML flag.
+ */
+function resolveTelegramEnabled(telegram) {
+  const envFlag = process.env.TELEGRAM_ENABLED;
+  if (envFlag != null && String(envFlag).trim() !== '') {
+    return /^(1|true|yes|on)$/i.test(String(envFlag).trim());
+  }
+  const tokenEnv = telegram.tokenEnv || 'TELEGRAM_BOT_TOKEN';
+  if (process.env[tokenEnv]) return true;
+  return Boolean(telegram.enabled);
 }
 
 export function projectRoot() {

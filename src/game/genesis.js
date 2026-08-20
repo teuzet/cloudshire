@@ -47,6 +47,35 @@ function fallbackName() {
   return names[Math.floor(Math.random() * names.length)];
 }
 
+function looksLikeTouristGreeting(text) {
+  const t = String(text || '');
+  return (
+    /добро\s+пожалов/i.test(t) ||
+    /пронизыва/i.test(t) ||
+    /каждый\s+уголок/i.test(t) ||
+    /добро\s+пожаловать\s+в/i.test(t) ||
+    /здесь\s+вас?\s+ждут/i.test(t) ||
+    /волшебство\s+прониз/i.test(t) ||
+    /приятного\s+пребыв/i.test(t)
+  );
+}
+
+function looksLikePatronAddress(text) {
+  const t = String(text || '');
+  return (
+    /покровител|божеств|как\s+(тебя|вам|нам)\s+(звать|обращ)|назов|имя|знак|воли|слышу\s+тебя|алтар/i.test(
+      t,
+    ) && !looksLikeTouristGreeting(t)
+  );
+}
+
+function defaultGreeting(domainName) {
+  return (
+    `Покровитель, я слышу тебя над «${domainName}». ` +
+    'Как нам к тебе обращаться — скажи имя или знак. Город ждёт твоего слова.'
+  );
+}
+
 function fallbackCore(lockedName, playerBrief) {
   const name = lockedName || fallbackName();
   const rulerWish = playerBrief?.ruler || 'Сдержанный правитель, внимательный к знамениям покровителя.';
@@ -55,7 +84,7 @@ function fallbackCore(lockedName, playerBrief) {
     rulerName: /жриц/i.test(rulerWish) ? 'Ицка' : 'Кайрен',
     rulerTitle: /жриц/i.test(rulerWish) ? 'Верховная жрица' : 'Правитель',
     rulerDescription: rulerWish,
-    greeting: `Покровитель, я слышу тебя. Город «${name}» ждёт твоей воли.`,
+    greeting: defaultGreeting(name),
     openingLore: [
       `Город «${name}» стоит в центре летающего острова.`,
       'От стен до края острова — порядка двадцати километров земли.',
@@ -121,7 +150,13 @@ async function generateCore({
             type: 'string',
             description: 'Характер правителя-связного; учти пожелания игрока',
           },
-          greeting: { type: 'string' },
+          greeting: {
+            type: 'string',
+            description:
+              'Первая реплика правителя/жреца К божеству-покровителю (1–3 предложения). ' +
+              'Слуга снизу вверх: слышит голос, просит имя/знак обращения, ждёт воли. ' +
+              'НЕ туристическое «добро пожаловать в город», НЕ реклама острова.',
+          },
           openingLore: {
             type: 'array',
             items: { type: 'string' },
@@ -145,10 +180,18 @@ async function generateCore({
         fixed.openingLore = lore.slice(0, 20);
 
         if (!String(fixed.greeting || '').trim()) {
-          fixed.greeting = `Покровитель, я слышу тебя. «${fixed.domainName}» ждёт знака.`;
+          fixed.greeting = defaultGreeting(fixed.domainName);
         }
         if (String(fixed.greeting).length > 600) {
           fixed.greeting = String(fixed.greeting).slice(0, 500);
+        }
+        if (
+          looksLikeTouristGreeting(fixed.greeting) ||
+          !looksLikePatronAddress(fixed.greeting)
+        ) {
+          draft.lastError =
+            'greeting: нужна речь слуги к божеству (имя/знак), не «добро пожаловать в город»';
+          return { ok: false, error: draft.lastError };
         }
         if (!fixed.rulerName) fixed.rulerName = 'Кайрен';
         if (!fixed.rulerTitle) fixed.rulerTitle = 'Правитель';
@@ -189,6 +232,14 @@ async function generateCore({
     '',
     `openingLore: минимум ${loreMin} коротких ПОСТОЯННЫХ фактов (не новости месяца).`,
     'Учти изоляцию острова: без паломников/торговцев «из соседних регионов».',
+    '',
+    'greeting — ПЕРВАЯ РЕПЛИКА правителя/жреца божеству-покровителю (не игроку-туристу):',
+    '- Ты слуга снизу вверх: голос дошёл до алтаря / ты слышишь покровителя.',
+    '- Попроси, как обращаться: имя, титул или знак. Или попроси сказать волю.',
+    '- 1–3 коротких предложения, живая речь от первого лица.',
+    '- ЗАПРЕЩЕНО: «Добро пожаловать в …», реклама острова («волшебство пронизывает…»),',
+    '  гид по достопримечательностям, тон онбординга/брошюры.',
+    '- Пример тона: «Покровитель, я слышу тебя над [город]. Как нам звать тебя? Скажи знак — народ ждёт.»',
   ].join('\n');
 
   for (let attempt = 1; attempt <= 3 && !draft.submitted; attempt += 1) {
@@ -200,7 +251,12 @@ async function generateCore({
             '',
             `Попытка ${attempt}: прошлый вызов не принят (${draft.lastError || 'нет submit_core'}).`,
             'Снова вызови submit_core. Имя не меняй. openingLore — простой массив строк.',
-          ].join('\n');
+            draft.lastError && /greeting/i.test(draft.lastError)
+              ? 'greeting перепиши: слуга к божеству, просьба имени/знака; без «добро пожаловать».'
+              : '',
+          ]
+            .filter(Boolean)
+            .join('\n');
 
     const result = await runtime.run({
       agentId: 'genesis',
@@ -373,6 +429,7 @@ export async function generateDomain({
   runtime,
   storage,
   ownerUserId,
+  channel = null,
   onProgress,
   forcedName = null,
   forcedTagChoices = {},
@@ -474,6 +531,7 @@ export async function generateDomain({
     id: newId('domain'),
     worldId: world.id,
     ownerUserId: String(ownerUserId),
+    channel: channel || null,
     name: domainName,
     description,
     aspects,
@@ -486,16 +544,21 @@ export async function generateDomain({
   });
 
   await storage.saveDomain(domain);
+  const prev = await storage.getUserBinding(String(ownerUserId));
   await storage.saveUserBinding({
+    ...(prev || {}),
     userId: String(ownerUserId),
     worldId: world.id,
     domainId: domain.id,
-    createdAt: new Date().toISOString(),
+    channel: channel || prev?.channel || null,
+    telegramChatId: prev?.telegramChatId ?? null,
+    createdAt: prev?.createdAt || new Date().toISOString(),
   });
 
   domain._greeting =
-    core.greeting ||
-    `${character.name}: Покровитель, я слышу тебя. Город «${domain.name}» ждёт твоей воли.`;
+    core.greeting && looksLikePatronAddress(core.greeting) && !looksLikeTouristGreeting(core.greeting)
+      ? core.greeting
+      : defaultGreeting(domain.name);
 
   onProgress?.(`Остров «${domain.name}» готов.`);
   log.info('genesis.saved', {
@@ -509,12 +572,23 @@ export async function generateDomain({
   return domain;
 }
 
+export function inferChannel(ownerUserId, explicit = null) {
+  if (explicit) return String(explicit);
+  const id = String(ownerUserId || '');
+  if (/^\d+$/.test(id)) return 'telegram';
+  if (id === 'local-user' || id.startsWith('local-')) return 'web';
+  if (id.startsWith('playtest')) return 'playtest';
+  if (id.startsWith('cli')) return 'cli';
+  return 'unknown';
+}
+
 export function domainSummary(domain) {
   return {
     id: domain.id,
     name: domain.name,
     status: domain.status,
     ownerUserId: domain.ownerUserId,
+    channel: inferChannel(domain.ownerUserId, domain.channel),
     population: domain.population,
     stats: domain.stats,
     tags: domain.tags || [],

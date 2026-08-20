@@ -98,6 +98,18 @@ export class YamlStorage {
     return readYaml(this.userPath(String(userId)), null);
   }
 
+  async listUserBindings() {
+    const dir = path.join(this.root, 'users');
+    const files = await fs.readdir(dir).catch(() => []);
+    const out = [];
+    for (const file of files) {
+      if (!file.endsWith('.yaml')) continue;
+      const binding = await readYaml(path.join(dir, file), null);
+      if (binding) out.push(binding);
+    }
+    return out;
+  }
+
   async saveUserBinding(binding) {
     binding.updatedAt = new Date().toISOString();
     await writeYaml(this.userPath(String(binding.userId)), binding);
