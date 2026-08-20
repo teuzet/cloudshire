@@ -230,12 +230,25 @@ $('btnWipe').addEventListener('click', async () => {
 });
 
 $('btnTick').addEventListener('click', async () => {
-  $('btnTick').disabled = true;
+  const btn = $('btnTick');
+  if (btn.disabled) return;
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.classList.add('busy');
+  btn.textContent = 'Тик…';
+  appendMessage('assistant', 'Force tick запущен — жду ответ сервера…', 'system · force tick');
   try {
-    const result = await fetch('/api/tick', { method: 'POST' }).then((r) => r.json());
+    const result = await fetch('/api/tick', { method: 'POST' }).then(async (r) => {
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || r.statusText);
+      return data;
+    });
+    const date = result.world?.gameDate?.label || '';
+    const n = result.results?.length || 0;
+    const failed = (result.results || []).filter((x) => x.error || x.skipped);
     appendMessage(
       'assistant',
-      `Тик ${result.world?.gameDate?.label || ''} · доменов: ${result.results?.length || 0}`,
+      `Тик готов: ${date} · доменов: ${n}${failed.length ? ` · сбоев/пропусков: ${failed.length}` : ''}`,
       'system · force tick',
     );
     const userId = currentUserId();
@@ -245,9 +258,11 @@ $('btnTick').addEventListener('click', async () => {
     if (last) appendMessage('assistant', last.content, `push · ${last.kind}`);
     await refresh();
   } catch (err) {
-    appendMessage('assistant', err.message, 'error');
+    appendMessage('assistant', `Force tick не удался: ${err.message}`, 'error');
   } finally {
-    $('btnTick').disabled = false;
+    btn.disabled = false;
+    btn.classList.remove('busy');
+    btn.textContent = label;
   }
 });
 

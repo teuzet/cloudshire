@@ -88,6 +88,14 @@ button {
 }
 
 button:hover { border-color: var(--accent); }
+button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+button.busy {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 button.accent {
   background: #3a3220;
   border-color: var(--accent);
