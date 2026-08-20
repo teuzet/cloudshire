@@ -3,6 +3,7 @@ import {
   createLoreFact,
   filterChronicleForDomain,
   chronicleEntries,
+  formatChronicleScope,
 } from './models.js';
 import { formatStatsForPrompt } from './stats.js';
 import { getLogger } from '../log.js';
@@ -132,7 +133,33 @@ function domainBriefBlock(domain, config, { chronicleLimit = 10 } = {}) {
 function sharedLoreTail(conflux, limit = 8) {
   const list = (conflux.sharedLore || []).slice(-limit);
   if (!list.length) return '(shared lore пока пуст)';
-  return list.map((f) => `- (${f.gameDateLabel || '?'}) ${f.text}`).join('\n');
+  return list
+    .map((f) => `- (${f.gameDateLabel || '?'}) ${formatChronicleScope(f)}${f.text}`)
+    .join('\n');
+}
+
+function resolveConcerns(domains, concernsDomainIds, relatedDomainId) {
+  let ids = Array.isArray(concernsDomainIds)
+    ? concernsDomainIds.map(String).filter(Boolean)
+    : [];
+  if (!ids.length && relatedDomainId) ids = [String(relatedDomainId)];
+  ids = [...new Set(ids)];
+  if (!ids.length) {
+    return { ok: false, error: 'concernsDomainIds required (1–2 id городов, которых касается событие)' };
+  }
+  if (ids.length > 2) {
+    return { ok: false, error: 'concernsDomainIds: максимум 2 города пары' };
+  }
+  for (const id of ids) {
+    if (!domains[id]) {
+      return { ok: false, error: `concernsDomainIds: неизвестный домен ${id}` };
+    }
+  }
+  return {
+    ok: true,
+    ids,
+    names: ids.map((id) => domains[id].name),
+  };
 }
 
 /**
@@ -206,6 +233,8 @@ export async function resolveConfluxTick({
             'Оба домена равноправны. Не привилегируй блок ближе к концу промпта.',
           secret:
             'secret=true только при явной тайной операции; иначе публично (оба города).',
+          scope:
+            'У каждой записи обязательны location (где) и concernsDomainIds (кого касается). Внутренний сюжет одного города — не secret, но location+concerns указывают его город.',
           note: 'Статы через statDeltas + domainId. Pending: chronicle + advance_pending или cancel_pending. Смело, не статус-кво.',
         },
       }),
@@ -213,13 +242,30 @@ export async function resolveConfluxTick({
     {
       name: 'add_chronicle',
       description:
-        'Хроника стыка/месяца. По умолчанию публичная (оба домена). secret=true + secretForDomainId — только одному городу.',
+        'Хроника стыка/месяца. Публичная по умолчанию. ОБЯЗАТЕЛЬНО location + concernsDomainIds (где и каких городов касается).',
       parameters: {
         type: 'object',
-        required: ['text', 'importance'],
+        required: ['text', 'importance', 'location', 'concernsDomainIds'],
         properties: {
-          text: { type: 'string' },
+          text: {
+            type: 'string',
+            description:
+              'Событие. Город/место должны быть ясны: не пиши так, будто чужой мастер — житель любого читающего города.',
+          },
           importance: { type: 'string', enum: ['minor', 'major', 'critical'] },
+          location: {
+            type: 'string',
+            description:
+              'Где произошло: город, квартал, мостик, храм… Напр. «Ровенна, мастерская у старых выработок» или «мостик между Этеменау и Ровенной».',
+          },
+          concernsDomainIds: {
+            type: 'array',
+            items: { type: 'string' },
+            minItems: 1,
+            maxItems: 2,
+            description:
+              'Id городов пары, которых касается событие (1 — локальный сюжет; оба — общий инцидент на стыке).',
+          },
           secret: { type: 'boolean' },
           secretForDomainId: {
             type: 'string',
@@ -243,6 +289,8 @@ export async function resolveConfluxTick({
       handler: async ({
         text,
         importance,
+        location,
+        concernsDomainIds,
         secret = false,
         secretForDomainId = null,
         relatedPendingId,
@@ -250,6 +298,13 @@ export async function resolveConfluxTick({
         statDeltas,
         statDomainId,
       }) => {
+        const place = String(location || '').trim();
+        if (place.length < 3) {
+          return { ok: false, error: 'location required (где произошло, ≥3 символа)' };
+        }
+        const concerns = resolveConcerns(domains, concernsDomainIds, relatedDomainId);
+        if (!concerns.ok) return concerns;
+
         const isSecret = Boolean(secret);
         if (isSecret && !secretForDomainId) {
           return { ok: false, error: 'secretForDomainId required when secret=true' };
@@ -283,6 +338,9 @@ export async function resolveConfluxTick({
             statChanges: statChanges && Object.keys(statChanges).length ? statChanges : null,
             secret: isSecret,
             secretForDomainId: isSecret ? secretForDomainId : null,
+            location: place,
+            concernsDomainIds: concerns.ids,
+            concernsDomainNames: concerns.names,
           });
 
         if (isSecret) {
@@ -291,6 +349,8 @@ export async function resolveConfluxTick({
           chronicleAddsByDomain[secretForDomainId].push(fact);
           log.info('conflux.chronicle.secret', {
             domainId: secretForDomainId,
+            location: place,
+            concerns: concerns.names,
             textPreview: String(text).slice(0, 160),
           });
           return { ok: true, factId: fact.id, secret: true, domainId: secretForDomainId };
@@ -298,18 +358,24 @@ export async function resolveConfluxTick({
 
         const factA = makeFact();
         const factB = makeFact();
-        // same text, distinct ids
         domains[ids[0]].lore.push(factA);
         domains[ids[1]].lore.push(factB);
         chronicleAddsByDomain[ids[0]].push(factA);
         chronicleAddsByDomain[ids[1]].push(factB);
         conflux.sharedLore = conflux.sharedLore || [];
         conflux.sharedLore.push({ ...factA });
-        log.info('conflux.chronicle.public', { textPreview: String(text).slice(0, 160) });
+        log.info('conflux.chronicle.public', {
+          location: place,
+          concerns: concerns.names,
+          textPreview: String(text).slice(0, 160),
+        });
         return {
           ok: true,
           factIds: [factA.id, factB.id],
           secret: false,
+          location: place,
+          concernsDomainIds: concerns.ids,
+          concernsDomainNames: concerns.names,
           statChanges,
         };
       },
@@ -504,6 +570,8 @@ export async function resolveConfluxTick({
     '',
     `Всего записей хроники около ${eventTarget} (включая pending). Большинство — без secret.`,
     'secret только для явно тайных операций; secretForDomainId = id заказчика.',
+    'Каждая add_chronicle: location (где) + concernsDomainIds (1–2 id городов пары).',
+    'Локальный сюжет одного города — публично ок, но concerns = только его id и location в его городе.',
     'Учитывай contact. Будь смелым: стык должен жить, не статус-кво. Можно ломать чужие pending.',
     'Не выдумывай третьи острова. Текст: OK.',
   ].join('\n');
@@ -539,6 +607,9 @@ export async function resolveConfluxTick({
         author: 'conflux-pending-fallback',
         importance: 'major',
         relatedPendingId: action.id,
+        location: working.name,
+        concernsDomainIds: [domainId],
+        concernsDomainNames: [working.name],
       });
       working.lore.push(fact);
       chronicleAddsByDomain[domainId].push(fact);
@@ -572,6 +643,9 @@ export async function resolveConfluxTick({
         tick: world.tickIndex,
         author: 'conflux-fallback',
         importance: 'minor',
+        location: `стык у «${domains[id].name}»`,
+        concernsDomainIds: [id],
+        concernsDomainNames: [domains[id].name],
       });
       domains[id].lore.push(fact);
       chronicleAddsByDomain[id].push(fact);

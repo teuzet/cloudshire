@@ -58,6 +58,15 @@ export function createWebServer({ config, app, runtime, storage }) {
     }
   });
 
+  server.get('/api/users', async (_req, res) => {
+    try {
+      res.json(await app.listUsers());
+    } catch (err) {
+      _req.log?.error('http.error', { error: err.message });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   server.get('/api/domains', async (_req, res) => {
     try {
       const domains = await app.listDomains();

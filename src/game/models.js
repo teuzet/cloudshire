@@ -115,6 +115,9 @@ export function createLoreFact({
   statChanges = null,
   secret = false,
   secretForDomainId = null,
+  location = null,
+  concernsDomainIds = null,
+  concernsDomainNames = null,
 }) {
   const fact = {
     id,
@@ -132,7 +135,24 @@ export function createLoreFact({
     fact.secret = true;
     if (secretForDomainId) fact.secretForDomainId = String(secretForDomainId);
   }
+  if (location) fact.location = String(location).trim();
+  if (Array.isArray(concernsDomainIds) && concernsDomainIds.length) {
+    fact.concernsDomainIds = concernsDomainIds.map(String);
+  }
+  if (Array.isArray(concernsDomainNames) && concernsDomainNames.length) {
+    fact.concernsDomainNames = concernsDomainNames.map(String);
+  }
   return fact;
+}
+
+/** Краткая пометка «где / кого касается» для хроники стыка. */
+export function formatChronicleScope(entry) {
+  if (!entry) return '';
+  const parts = [];
+  if (entry.location) parts.push(`где: ${entry.location}`);
+  const names = entry.concernsDomainNames || [];
+  if (names.length) parts.push(`касается: ${names.join(', ')}`);
+  return parts.length ? `(${parts.join('; ')}) ` : '';
 }
 
 /** Записи месяца, видимые правителю домена (учитывает secret). */
@@ -162,7 +182,8 @@ export function loreToPromptText(lore = [], { excludeTags = [] } = {}) {
         );
         if (parts.length) stats = ` «статы: ${parts.join(', ')}»`;
       }
-      return `#${n} (${date})${tags}${imp}${stats}: ${f.text}`;
+      const scope = formatChronicleScope(f);
+      return `#${n} (${date})${tags}${imp}${stats}: ${scope}${f.text}`;
     })
     .join('\n');
 }

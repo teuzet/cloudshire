@@ -3,6 +3,7 @@ import {
   chronicleEntries,
   newsChronicleEntries,
   filterChronicleForDomain,
+  formatChronicleScope,
 } from './models.js';
 import { qualitativePopulation, qualitativeStatsBrief } from './stats.js';
 import { askLoremaster } from './loremaster.js';
@@ -31,6 +32,65 @@ function recentUndockFact(domain) {
       (f.tags || []).some((t) => String(t).startsWith('conflux:')),
   );
   return byEnded.length ? byEnded[byEnded.length - 1] : null;
+}
+
+/** Ответ агента похож на сырой tool-call / JSON, а не на речь. */
+function looksLikeToolDump(text) {
+  const t = String(text || '');
+  if (!t.trim()) return false;
+  if (/tools\.\w+/i.test(t)) return true;
+  if (/天天送json|комментary|commentary\s+json/i.test(t)) return true;
+  if (/declare_action|consult_loremaster|set_patron_name|read_domain_brief/i.test(t) && /\{/.test(t)) {
+    return true;
+  }
+  if (/"summary"\s*:/.test(t) && /"durationMonths"\s*:/.test(t)) return true;
+  return false;
+}
+
+function claimsOnboardingGenerating(text) {
+  return /созда(ёт|ется|ётся|ю)|начинается\s+процесс|поднимаю\s+остров|остров.{0,30}созда|правитель.{0,50}(напиш|свяж)|жди.{0,30}минут/i.test(
+    String(text || ''),
+  );
+}
+
+function claimsOnboardingAlreadyCreated(text) {
+  return /успешно\s+создан|уже\s+создан|остров.{0,20}готов|был\s+создан/i.test(String(text || ''));
+}
+
+function normPendingSummary(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[«»"'„“]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function findDuplicatePending(domain, summary) {
+  const n = normPendingSummary(summary);
+  if (n.length < 4) return null;
+  return (domain.state?.pendingActions || []).find((a) => {
+    if (a.status !== 'active') return false;
+    const s = normPendingSummary(a.summary);
+    if (!s) return false;
+    return s === n || s.includes(n) || n.includes(s);
+  });
+}
+
+/** Минимальная длительность pending по смыслу поручения. */
+function clampPendingDuration(summary, detail, duration) {
+  const t = `${summary || ''} ${detail || ''}`.toLowerCase();
+  let min = 1;
+  if (/войн|штурм|ополчен|войск|взят.{0,20}ворот|поход|осад|арми|завосв|вторжен/.test(t)) {
+    min = Math.max(min, 3);
+  }
+  if (/строит|винодел|храм|академи|библиотек|крепост|канал|дворец|мануфакт|верф/.test(t)) {
+    min = Math.max(min, 3);
+  }
+  if (/посольств|лазут|развед|шпион|наблюд/.test(t)) {
+    min = Math.max(min, 2);
+  }
+  const d = Math.max(1, Math.min(12, Math.round(Number(duration) || 1)));
+  return Math.max(min, d);
 }
 
 /** Сколько подряд tick_news в конце истории без ответа игрока. */
@@ -144,7 +204,7 @@ function characterTools(domain, storage, character, ctx) {
     {
       name: 'declare_action',
       description:
-        'Обязательно для строек/проектов до ответа. Укажи durationMonths (реалистично: винодельня 3–6, мелочь 1).',
+        'Обязательно для строек/проектов до ответа. Укажи durationMonths (реалистично: мелочь 1; посольство/разведка ≥2; стройка/поход/штурм ≥3). Не дублируй уже active pending — update_action / revoke_action.',
       parameters: {
         type: 'object',
         required: ['summary', 'detail', 'durationMonths'],
@@ -164,7 +224,16 @@ function characterTools(domain, storage, character, ctx) {
         },
       },
       handler: async ({ summary, detail, durationMonths, onBehalfOf = 'patron', characterNote }) => {
-        const duration = Math.max(1, Math.min(12, Math.round(Number(durationMonths) || 1)));
+        const dup = findDuplicatePending(domain, summary);
+        if (dup) {
+          return {
+            ok: false,
+            error: `Похожее дело уже в работе: «${dup.summary}» (${dup.id}, ${dup.monthsDone}/${dup.durationMonths}). Уточни через update_action или revoke_action, не дублируй.`,
+            existingActionId: dup.id,
+          };
+        }
+        const asked = Math.max(1, Math.min(12, Math.round(Number(durationMonths) || 1)));
+        const duration = clampPendingDuration(summary, detail, asked);
         const action = {
           id: newId('act'),
           summary,
@@ -181,10 +250,14 @@ function characterTools(domain, storage, character, ctx) {
         };
         domain.state.pendingActions.push(action);
         await save();
+        const clamped =
+          duration > asked
+            ? ` Срок поднят до ${duration} мес. (по масштабу дела; было ${asked}).`
+            : '';
         return {
           ok: true,
           action,
-          hint: `В речи: намерение на ~${duration} мес., ещё НЕ «уже строим». Только русский.`,
+          hint: `В речи: намерение на ~${duration} мес., ещё НЕ «уже строим». Только русский.${clamped}`,
         };
       },
     },
@@ -783,6 +856,41 @@ export class GameApp {
       reply = `Отлично. Поднимаю остров «${draft.cityName}» — обычно минута-две. Правитель напишет сам.`;
     }
 
+    // Страховка: агент написал «создаётся», но не вызвал start_new_game.
+    if (
+      draft.cityNameApproved &&
+      draft.cityName &&
+      !usedTools.has('start_new_game') &&
+      !this.isGenerating(userId) &&
+      (claimsOnboardingGenerating(reply) || claimsOnboardingAlreadyCreated(reply))
+    ) {
+      log.warn('onboarding.auto_start_new_game', {
+        cityName: draft.cityName,
+        reason: 'reply claimed generating without tool',
+      });
+      const prefText = collectOnboardingPreferenceText(draft);
+      draft.tagChoices = inferTagChoicesFromText(
+        this.config,
+        prefText,
+        draft.tagChoices || {},
+      );
+      this.startDomainGeneration(userId, {
+        channel,
+        forcedName: draft.cityName,
+        forcedTagChoices: { ...draft.tagChoices },
+        playerBrief: { ...(draft.playerBrief || {}) },
+      });
+      startedGenerating = true;
+      reply = `Отлично. Поднимаю остров «${draft.cityName}» — обычно минута-две. Правитель напишет сам.`;
+    }
+
+    // Нельзя говорить «уже создан», пока генезис только стартовал.
+    if (startedGenerating || this.isGenerating(userId)) {
+      if (claimsOnboardingAlreadyCreated(reply) || !String(reply || '').trim()) {
+        reply = `Отлично. Поднимаю остров «${draft.cityName}» — обычно минута-две. Правитель напишет сам.`;
+      }
+    }
+
     draft.messages = draft.messages || [];
     if (!bootstrap || String(text || '').trim()) {
       draft.messages.push({ role: 'user', content: text || userContent, at: new Date().toISOString() });
@@ -879,12 +987,45 @@ export class GameApp {
       log,
     });
 
+    let reply = result.text || '';
+    if (looksLikeToolDump(reply)) {
+      log.warn('ruler.tool_dump_sanitized', { preview: truncate(reply, 200) });
+      const retry = await this.runtime.run({
+        agentId: 'ruler',
+        userMessages: [
+          ...history,
+          { role: 'user', content: text },
+          {
+            role: 'assistant',
+            content: '(черновик отклонён: похож на вызов инструмента, не на речь)',
+          },
+          {
+            role: 'user',
+            content:
+              'Перепиши ответ обычной речью правителя по-русски, 1–3 абзаца. ' +
+              'Без tools.*, JSON, declare_action и англоязычного мусора. ' +
+              'Если нужно действие — оно уже могло уйти через tools; в речи только намерение.',
+          },
+        ],
+        tools: [],
+        maxTurns: 1,
+        extraSystem,
+        log,
+      });
+      reply = retry.text || '';
+      if (looksLikeToolDump(reply) || !String(reply).trim()) {
+        reply =
+          `${patronName || 'Покровитель'}, прости — мысль сбилась. ` +
+          'Повтори волю коротко, и я исполню без путаницы.';
+      }
+    }
+
     const fresh = await this.storage.getDomain(domain.id);
     await this.persistDialog(fresh, 'user', text);
-    await this.persistDialog(fresh, 'assistant', result.text);
+    await this.persistDialog(fresh, 'assistant', reply);
 
     log.info('ruler.reply', {
-      replyPreview: truncate(result.text, 400),
+      replyPreview: truncate(reply, 400),
       tools: (result.toolTrace || []).map((t) => ({
         name: t.name,
         ok: t.result?.ok !== false,
@@ -892,7 +1033,7 @@ export class GameApp {
     });
 
     return {
-      reply: result.text,
+      reply,
       domainId: fresh.id,
       agent: 'ruler',
       toolTrace: result.toolTrace,
@@ -913,11 +1054,31 @@ export class GameApp {
       return `${character.name}: Покровитель, месяц прошёл тихо — рассказывать почти нечего.`;
     }
 
-    const facts = forNews.map((c) => `- [${c.importance || 'event'}] ${c.text}`).join('\n');
+    const facts = forNews
+      .map((c) => {
+        const scope = formatChronicleScope(c);
+        const onlyOther =
+          Array.isArray(c.concernsDomainIds) &&
+          c.concernsDomainIds.length === 1 &&
+          String(c.concernsDomainIds[0]) !== String(domain.id);
+        const framing = onlyOther
+          ? ' [чужой город — перескажи как новость ОТТУДА, кратко кто/что; НЕ говори «я сделал»]'
+          : '';
+        return `- [${c.importance || 'event'}] ${scope}${c.text}${framing}`;
+      })
+      .join('\n');
     const patronName = domain.state?.patronName || null;
     const addressHint = patronName
       ? `Обращайся к покровителю как «${patronName}». Не подменяй чужим именем бога.`
       : 'Имя покровителя неизвестно — обратись «покровитель», без выдуманных имён.';
+
+    const scopeHint = forNews.some((c) => c.location || c.concernsDomainNames?.length)
+      ? [
+          'У записей есть пометки «где» и «касается».',
+          'События только чужого города — новости с соседнего острова: назови город, коротко представь незнакомых людей.',
+          'Не присваивай чужие дела себе и своему городу.',
+        ].join(' ')
+      : '';
 
     const unanswered = countTrailingUnansweredDigests(character.dialogHistory || []);
     const askPresence = unanswered >= 2;
@@ -965,6 +1126,7 @@ export class GameApp {
               'Не копируй формулировки хроники. Не упоминай статы и механики.',
               addressHint,
               presenceHint,
+              scopeHint,
               undockHint,
               extraUserNote,
               '',
@@ -1026,6 +1188,30 @@ export class GameApp {
 
   async inspectDomain(domainId) {
     return this.storage.getDomain(domainId);
+  }
+
+  async listUsers() {
+    const bindings = await this.storage.listUserBindings();
+    const domains = await this.storage.listDomains();
+    const byId = new Map(domains.map((d) => [d.id, d]));
+    return bindings.map((b) => {
+      const domain = b.domainId ? byId.get(b.domainId) : null;
+      const channel =
+        b.channel ||
+        (domain?.channel) ||
+        (/^\d+$/.test(String(b.userId || '')) ? 'telegram' : null);
+      return {
+        userId: String(b.userId),
+        channel: channel || 'unknown',
+        domainId: b.domainId || null,
+        domainName: domain?.name || null,
+        cityName: b.onboarding?.cityName || null,
+        cityNameApproved: Boolean(b.onboarding?.cityNameApproved),
+        onboarding: !b.domainId,
+        telegramChatId: b.telegramChatId ?? null,
+        updatedAt: b.updatedAt || null,
+      };
+    });
   }
 
   async listDomains() {

@@ -73,7 +73,13 @@ async function loadLorePanels(domainId) {
           );
           if (parts.length) stats = ` [${parts.join(', ')}] `;
         }
-        return `${e.gameDateLabel || '?'} ${imp}${stats}${e.text}`;
+        const scopeParts = [];
+        if (e.location) scopeParts.push(`где: ${e.location}`);
+        if (e.concernsDomainNames?.length) {
+          scopeParts.push(`касается: ${e.concernsDomainNames.join(', ')}`);
+        }
+        const scope = scopeParts.length ? `(${scopeParts.join('; ')}) ` : '';
+        return `${e.gameDateLabel || '?'} ${imp}${stats}${scope}${e.text}`;
       })
       .join('\n\n');
   }
@@ -92,8 +98,11 @@ async function loadLorePanels(domainId) {
 }
 
 async function refreshSlotsFromServer(slots) {
-  const domains = await fetch('/api/domains').then((r) => r.json());
+  const domains = await fetch('/api/domains').then((r) => r.json()).catch(() => []);
+  const usersRes = await fetch('/api/users');
+  const users = usersRes.ok ? await usersRes.json() : [];
   const byUser = new Map(slots.map((s) => [s.userId, s]));
+
   for (const d of domains) {
     if (!d.ownerUserId) continue;
     const channel = d.channel || 'unknown';
@@ -108,6 +117,31 @@ async function refreshSlotsFromServer(slots) {
       existing.channel = channel;
     }
   }
+
+  for (const u of users) {
+    if (!u.userId) continue;
+    const channel = u.channel || 'unknown';
+    let label;
+    if (u.domainName) {
+      label = `${channelTag(channel)} ${u.domainName} · ${u.userId}`;
+    } else if (u.cityName) {
+      label = `${channelTag(channel)} ${u.cityName} (онбординг) · ${u.userId}`;
+    } else {
+      label = `${channelTag(channel)} онбординг · ${u.userId}`;
+    }
+    if (!byUser.has(u.userId)) {
+      slots.push({ userId: u.userId, label, channel });
+      byUser.set(u.userId, { userId: u.userId, label, channel });
+    } else if (!u.domainName) {
+      // Не затирай label готового домена черновиком онбординга
+      const existing = byUser.get(u.userId);
+      if (!domains.some((d) => d.ownerUserId === u.userId)) {
+        existing.label = label;
+        existing.channel = channel;
+      }
+    }
+  }
+
   saveSlots(slots);
   return slots;
 }
@@ -258,6 +292,17 @@ function switchSlot(userId) {
 
 $('slotSelect').addEventListener('change', (e) => {
   switchSlot(e.target.value);
+});
+
+$('userId').addEventListener('change', (e) => {
+  const uid = String(e.target.value || '').trim();
+  if (!uid) return;
+  const slots = loadSlots();
+  if (!slots.some((s) => s.userId === uid)) {
+    slots.push({ userId: uid, label: `manual · ${uid}` });
+    saveSlots(slots);
+  }
+  switchSlot(uid);
 });
 
 $('btnNewSlot').addEventListener('click', async () => {
