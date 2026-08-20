@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cloudshire — локальный чат</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="side">
+      <h1>Cloudshire</h1>
+
+      <h2>Слоты городов</h2>
+      <select id="slotSelect"></select>
+      <div class="row">
+        <button type="button" id="btnNewSlot">Новый город</button>
+        <button type="button" id="btnRefresh">Обновить</button>
+      </div>
+      <div class="row">
+        <button type="button" id="btnTick" class="accent">Force tick</button>
+        <button type="button" id="btnWipe" class="danger">Wipe all</button>
+      </div>
+
+      <label class="muted">User ID
+        <input id="userId" value="local-user" readonly />
+      </label>
+
+      <pre id="status" class="panel"></pre>
+      <h2>Домен</h2>
+      <pre id="domain" class="panel"></pre>
+      <h2>Майлстоуны</h2>
+      <pre id="milestones" class="panel"></pre>
+      <h2>Pending</h2>
+      <pre id="pending" class="panel"></pre>
+      <h2>Описание города</h2>
+      <pre id="genesis" class="panel tall"></pre>
+      <h2>Хроника</h2>
+      <pre id="chronicle" class="panel tall"></pre>
+    </aside>
+    <main class="chat">
+      <div id="messages" class="messages"></div>
+      <form id="form" class="composer">
+        <input id="text" autocomplete="off" placeholder="Напиши правителю или проводнику…" />
+        <button type="submit">Отправить</button>
+      </form>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

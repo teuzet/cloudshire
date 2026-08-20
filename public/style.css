@@ -1,0 +1,190 @@
+:root {
+  --bg: #1a1f24;
+  --panel: #242b33;
+  --ink: #e8eef4;
+  --muted: #9aabba;
+  --line: #34404c;
+  --accent: #c4a35a;
+  --user: #2f4a3c;
+  --bot: #2a3340;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, #2c3a48 0%, transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, #3a2f22 0%, transparent 50%),
+    var(--bg);
+  color: var(--ink);
+  min-height: 100vh;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  min-height: 100vh;
+}
+
+.side {
+  border-right: 1px solid var(--line);
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.2);
+  overflow: auto;
+}
+
+.side h1 {
+  font-family: "IBM Plex Serif", Georgia, serif;
+  font-weight: 600;
+  font-size: 1.4rem;
+  margin: 0 0 1rem;
+  color: var(--accent);
+}
+
+.side h2 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 1rem 0 0.4rem;
+}
+
+label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 0.75rem;
+}
+
+input, button {
+  font: inherit;
+}
+
+label input, .composer input {
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.row {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+button {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+}
+
+button:hover { border-color: var(--accent); }
+button.accent {
+  background: #3a3220;
+  border-color: var(--accent);
+  color: #f3e6c4;
+}
+
+button.danger {
+  background: #3a2020;
+  border-color: #c45a5a;
+  color: #f3c4c4;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.6rem;
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+  color: var(--muted);
+}
+
+.panel.tall {
+  max-height: 320px;
+}
+
+select {
+  width: 100%;
+  margin-bottom: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+}
+
+label.muted input[readonly] {
+  opacity: 0.85;
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.messages {
+  flex: 1;
+  overflow: auto;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.bubble {
+  max-width: 70%;
+  padding: 0.75rem 0.9rem;
+  border-radius: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.bubble.user {
+  align-self: flex-end;
+  background: var(--user);
+}
+
+.bubble.assistant {
+  align-self: flex-start;
+  background: var(--bot);
+  border: 1px solid var(--line);
+}
+
+.bubble .meta {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.composer {
+  display: flex;
+  gap: 0.5rem;
+  padding: 1rem;
+  border-top: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.composer input { flex: 1; margin-top: 0; }
+
+@media (max-width: 860px) {
+  .layout { grid-template-columns: 1fr; }
+  .side { border-right: none; border-bottom: 1px solid var(--line); max-height: 40vh; }
+  .bubble { max-width: 90%; }
+}
