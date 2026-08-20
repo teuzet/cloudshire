@@ -4,12 +4,13 @@ import { createAppContext } from './bootstrap.js';
 import { runWorldTick } from './game/tick.js';
 import { domainSummary } from './game/genesis.js';
 import { loreToPromptText } from './game/models.js';
+import { runPlayerSim } from './playtest/runPlayerSim.js';
 
 const program = new Command();
 program.name('cloudshire').description('CLI управления Cloudshire').version('0.1.0');
 
-async function withApp(fn) {
-  const ctx = await createAppContext();
+async function withApp(fn, opts = {}) {
+  const ctx = await createAppContext(opts);
   try {
     await fn(ctx);
   } finally {
@@ -110,6 +111,53 @@ program
       console.log(result.text);
       console.log(`[model=${result.model} agent=${result.agentId}]`);
     });
+  });
+
+program
+  .command('playtest')
+  .description('Полный генезис + агент-игрок до N force-tick; артефакты в artifacts/')
+  .option('--ticks <n>', 'Сколько игровых месяцев (force_tick) должно пройти', '5')
+  .option('--max-steps <n>', 'Потолок шагов (talk+tick), защита от бесконечной болтовни', '40')
+  .option('--scenario <path>', 'YAML сценария', 'scenarios/smoke.yaml')
+  .option('--scripted', 'Действия из scenario.scriptedActions вместо LLM-player', false)
+  .option('--data-dir <dir>', 'Каталог YAML store (не трогает ./data)', 'data-test')
+  .option('--out <dir>', 'Куда писать артефакты')
+  .option('--no-wipe', 'Не wipe store перед прогоном')
+  .action(async (opts) => {
+    await withApp(
+      async (ctx) => {
+        const result = await runPlayerSim(ctx, {
+          scenarioPath: opts.scenario,
+          ticks: Number(opts.ticks),
+          maxSteps: Number(opts.maxSteps),
+          scripted: Boolean(opts.scripted),
+          outDir: opts.out || null,
+          wipe: opts.wipe !== false,
+        });
+        console.log(
+          JSON.stringify(
+            {
+              ok: result.ok,
+              domainId: result.domainId,
+              domainName: result.domainName,
+              ticksDone: result.ticksDone,
+              ticks: result.ticks,
+              steps: result.steps,
+              forcedRemaining: result.forcedRemaining,
+              outDir: result.outDir,
+              flags: result.flags,
+              pending: result.snapshot.pending.length,
+              chronicle: result.snapshot.chronicle.length,
+              facts: result.snapshot.facts.length,
+            },
+            null,
+            2,
+          ),
+        );
+        console.error(`Playtest artifacts: ${result.outDir}/summary.md`);
+      },
+      { dataDir: opts.dataDir },
+    );
   });
 
 program.parseAsync(process.argv);

@@ -1,11 +1,28 @@
-import { loadConfig } from './config.js';
+import path from 'node:path';
+import { loadConfig, projectRoot } from './config.js';
 import { createStorage } from './storage/index.js';
 import { AgentRuntime } from './agents/runtime.js';
 import { GameApp } from './game/app.js';
 import { initLogger } from './log.js';
 
-export async function createAppContext(configPath) {
-  const config = loadConfig(configPath);
+/**
+ * @param {string | { configPath?: string, dataDir?: string }} [opts]
+ */
+export async function createAppContext(opts) {
+  const options =
+    typeof opts === 'string' || opts == null
+      ? { configPath: opts }
+      : opts;
+
+  const config = loadConfig(options.configPath);
+  if (options.dataDir) {
+    const dir = path.isAbsolute(options.dataDir)
+      ? options.dataDir
+      : path.join(projectRoot(), options.dataDir);
+    config.storage = config.storage || {};
+    config.storage.yaml = { ...(config.storage.yaml || {}), dir };
+  }
+
   const log = initLogger(config);
   const storage = await createStorage(config);
   const runtime = new AgentRuntime(config);

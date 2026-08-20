@@ -85,6 +85,10 @@ export async function resolveDomainTick({ config, runtime, storage, domain, worl
     .map(normalizePending);
   const deltaCap = maxStatDelta(config);
 
+  if (!working.state) working.state = { events: [], modifiers: [], pendingActions: [] };
+  if (!Array.isArray(working.state.modifiers)) working.state.modifiers = [];
+  if (!Array.isArray(working.state.events)) working.state.events = [];
+
   const tools = [
     {
       name: 'read_context',
@@ -101,14 +105,16 @@ export async function resolveDomainTick({ config, runtime, storage, domain, worl
         stats: working.stats,
         statsGuide: formatStatsForPrompt(working.stats, config),
         population: working.population,
-        milestones: working.milestones,
         stateEvents: working.state.events,
+        stateModifiers: working.state.modifiers,
         pendingActionsPriority: activePending,
         recentChronicle: recentChronicleText(working.lore, 14),
         fullLore: loreToPromptText(working.lore),
         rules: {
           maxStatDeltaPerEvent: deltaCap,
-          note: 'Статы через statDeltas в add_chronicle. Pending: chronicle + advance_pending; не закрывай длинные стройки за 1 месяц.',
+          note:
+            'Статы через statDeltas в add_chronicle. Pending: chronicle + advance_pending. ' +
+            'Важные постоянные итоги → upsert_modifier; мелочи только в хронике. Майлстоунов нет — они невидимы.',
         },
       }),
     },
@@ -166,7 +172,8 @@ export async function resolveDomainTick({ config, runtime, storage, domain, worl
     },
     {
       name: 'set_state_events',
-      description: 'Заменить текущие процессы состояния (ongoing)',
+      description:
+        'Заменить ВРЕМЕННЫЕ процессы state.events (бунт, фестиваль, осада, нехватка…). Не для постоянных порядков.',
       parameters: {
         type: 'object',
         required: ['events'],
@@ -181,7 +188,73 @@ export async function resolveDomainTick({ config, runtime, storage, domain, worl
           tick: world.tickIndex,
           at: new Date().toISOString(),
         }));
+        log.info('resolver.set_state_events', { count: working.state.events.length });
         return { ok: true, count: working.state.events.length };
+      },
+    },
+    {
+      name: 'upsert_modifier',
+      description:
+        'Добавить/обновить ВАЖНЫЙ постоянный модификатор state.modifiers (институт, установленный порядок, хроническое условие). ' +
+        'Пример: ежемесячный осмотр амбаров; водоотводы на уступах приведены в порядок. Мелочи — только хроника.',
+      parameters: {
+        type: 'object',
+        required: ['text'],
+        properties: {
+          id: {
+            type: 'string',
+            description: 'Если обновляешь существующий — передай его id',
+          },
+          text: { type: 'string', description: 'Краткая формулировка постоянного условия' },
+          kind: {
+            type: 'string',
+            enum: ['institution', 'order', 'condition', 'other'],
+            description: 'Тип модификатора',
+          },
+        },
+      },
+      handler: async ({ id, text, kind }) => {
+        const body = String(text || '').trim();
+        if (!body) return { ok: false, error: 'text required' };
+        const list = working.state.modifiers;
+        let mod = id ? list.find((m) => m.id === id) : null;
+        if (!mod) {
+          mod = {
+            id: id || newId('mod'),
+            text: body,
+            kind: kind || 'other',
+            sinceTick: world.tickIndex,
+            updatedTick: world.tickIndex,
+            at: new Date().toISOString(),
+          };
+          list.push(mod);
+          log.info('resolver.modifier.add', { id: mod.id, text: body.slice(0, 160) });
+          return { ok: true, created: true, modifier: mod };
+        }
+        mod.text = body;
+        if (kind) mod.kind = kind;
+        mod.updatedTick = world.tickIndex;
+        mod.at = new Date().toISOString();
+        log.info('resolver.modifier.update', { id: mod.id, text: body.slice(0, 160) });
+        return { ok: true, created: false, modifier: mod };
+      },
+    },
+    {
+      name: 'remove_modifier',
+      description: 'Убрать постоянный модификатор, если он больше не действует',
+      parameters: {
+        type: 'object',
+        required: ['id'],
+        properties: {
+          id: { type: 'string' },
+        },
+      },
+      handler: async ({ id }) => {
+        const before = working.state.modifiers.length;
+        working.state.modifiers = working.state.modifiers.filter((m) => m.id !== id);
+        const removed = before !== working.state.modifiers.length;
+        log.info('resolver.modifier.remove', { id, removed });
+        return { ok: removed, removed };
       },
     },
     {
@@ -283,6 +356,8 @@ export async function resolveDomainTick({ config, runtime, storage, domain, worl
     '',
     `Затем другие события. Всего записей хроники около ${eventTarget} (включая прогресс pending).`,
     `Статы — только statDeltas в add_chronicle, каждый ключ ≤ ±${deltaCap} за запись.`,
+    'State: временные процессы → set_state_events; важные постоянные итоги → upsert_modifier; мелочи — только хроника.',
+    'Майлстоуны сезона тебе НЕ видны и не существуют как механика — не выдумывай «заветы сезона».',
     'Не завершай многомесячную стройку за один тик без сильной причины.',
     'Интересные исходы; не сглаживай жёсткие приказы. Текст: OK.',
   ].join('\n');

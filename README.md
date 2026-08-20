@@ -26,6 +26,16 @@ npm run cli -- tick
 npm run cli -- domains
 ```
 
+Автопрогон (полный генезис + агент-игрок до N force-tick, store в `data-test/`, отчёт в `artifacts/`):
+
+```bash
+npm run playtest
+npm run playtest -- --ticks 5
+npm run playtest -- --scripted --ticks 5
+```
+
+План: [docs/PLAYTEST_AGENT.md](docs/PLAYTEST_AGENT.md).
+
 Хранилище по умолчанию — YAML в `data/`. Переключение на Mongo: в `config/default.yaml` поставь `storage.driver: mongo`.
 
 Telegram: `telegram.enabled: true` и `TELEGRAM_BOT_TOKEN` в `.env`.

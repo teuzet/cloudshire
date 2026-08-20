@@ -31,6 +31,7 @@ function characterTools(domain, storage, character, ctx) {
         guidance:
           'Отвечай СТРОГО в духе conditionFeel. Если благосостояние «скорее слабо / скудная жизнь» — не говори, что народ сыт и хлеба вдоволь. Числа и названия статов игроку не называй.',
         stateEvents: domain.state.events,
+        stateModifiers: domain.state.modifiers || [],
         pendingActions: (domain.state.pendingActions || [])
           .filter((a) => a.status === 'active')
           .map((a) => ({
@@ -39,7 +40,6 @@ function characterTools(domain, storage, character, ctx) {
             monthsDone: a.monthsDone ?? 0,
             durationMonths: a.durationMonths ?? 1,
           })),
-        milestones: (domain.milestones || []).map((m) => ({ text: m.text, status: m.status })),
       }),
     },
     {
@@ -744,10 +744,11 @@ export class GameApp {
         {
           role: 'user',
           content: [
-            `Прошёл месяц (${gameDate.label}). Ниже сухая хроника (не факты лормастера).`,
-            'Перескажи покровителю живой речью, без списков, без markdown, без нумерации. От первого лица.',
-            'Только связная проза: имена и события вплетай в предложения, не колонкой.',
-            'Не копируй формулировки дословно. Не упоминай статы и механики.',
+            `Прошёл месяц (${gameDate.label}). Ниже сырая хроника для тебя (не факты лормастера).`,
+            'Напиши покровителю письмо о месяце — вольный пересказ, НЕ дайджест.',
+            'Выбери одну-две нити, что важнее всего; остальное можно опустить или мельком.',
+            'Связная проза от первого лица, 1–3 коротких абзаца. Без списков, markdown, нумерации.',
+            'Не копируй формулировки хроники. Не упоминай статы и механики.',
             '',
             facts,
           ].join('\n'),
@@ -758,7 +759,7 @@ export class GameApp {
       extraSystem: [
         `Ты ${character.name}, ${character.title || 'правитель'} города «${domain.name}».`,
         character.description,
-        'Ты сам пишешь покровителю новости месяца.',
+        'Ты пишешь покровителю новости месяца живой речью, как человек, а не сводку событий.',
       ].join('\n'),
     });
 
