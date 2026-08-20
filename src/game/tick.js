@@ -503,7 +503,8 @@ export async function runWorldTick({ config, runtime, storage, app }) {
   const handled = new Set();
   const confluxNotes = [...(confluxPhase.notes || [])];
 
-  // Docked pairs: one shared resolve (no solo for either domain)
+  // Docked pairs: resolve first, then undock (so news can include parting), then narrate
+  const pairBatches = [];
   for (const conflux of confluxPhase.dockedConfluxes || []) {
     const preludeAddsByDomain = {};
     for (const id of conflux.domainIds || []) {
@@ -518,14 +519,30 @@ export async function runWorldTick({ config, runtime, storage, app }) {
       world,
       preludeAddsByDomain,
     });
+    pairBatches.push({ conflux, resolved });
+  }
 
+  const advanced = await advanceDockedConfluxes(
+    { storage, runtime, world },
+    confluxPhase.dockedConfluxes,
+  );
+  confluxNotes.push(...(advanced.notes || []));
+
+  for (const { conflux, resolved } of pairBatches) {
     for (const domain of resolved.domains) {
       handled.add(domain.id);
+      const undockAdds = advanced.undockAddsByDomain?.get(domain.id) || [];
       const newsAdds = filterChronicleForDomain(
-        resolved.newsChronicleByDomain[domain.id] || [],
+        [...(resolved.newsChronicleByDomain[domain.id] || []), ...undockAdds],
         domain.id,
       );
-      const news = await app.narrateTickNews(domain, newsAdds, world.gameDate);
+      const partnerId = (conflux.domainIds || []).find((id) => id !== domain.id);
+      const partnerName =
+        resolved.domains.find((d) => d.id === partnerId)?.name || null;
+      const news = await app.narrateTickNews(domain, newsAdds, world.gameDate, {
+        undock: undockAdds.length > 0,
+        partnerName,
+      });
       await app.persistDialog(domain, 'assistant', news, { kind: 'tick_news' });
       await app.emitOutbound(domain.ownerUserId, news, {
         agent: 'ruler',
@@ -538,7 +555,8 @@ export async function runWorldTick({ config, runtime, storage, app }) {
         name: domain.name,
         chronicleCount: newsAdds.length,
         status: domain.status,
-        inConfluxDocked: true,
+        inConfluxDocked: undockAdds.length === 0,
+        confluxEnded: undockAdds.length > 0,
         confluxId: conflux.id,
         news,
         statChanges: newsAdds
@@ -589,12 +607,6 @@ export async function runWorldTick({ config, runtime, storage, app }) {
         .map((c) => ({ id: c.id, changes: c.statChanges })),
     });
   }
-
-  const advanced = await advanceDockedConfluxes(
-    { storage, world },
-    confluxPhase.dockedConfluxes,
-  );
-  confluxNotes.push(...(advanced.notes || []));
 
   return {
     world: {

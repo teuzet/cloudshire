@@ -7,6 +7,7 @@ import {
 import { qualitativePopulation, qualitativeStatsBrief } from './stats.js';
 import { askLoremaster } from './loremaster.js';
 import { newId } from './ids.js';
+import { assertsIslandsParted } from './conflux.js';
 import {
   emptyOnboardingDraft,
   validateCityName,
@@ -18,6 +19,19 @@ import {
   collectOnboardingPreferenceText,
 } from './onboarding.js';
 import { getLogger, truncate } from '../log.js';
+
+/** Недавняя запись расстыковки из хроники домена (если есть). */
+function recentUndockFact(domain) {
+  const lore = domain.lore || [];
+  const byUndock = chronicleEntries(lore).filter((f) => (f.tags || []).includes('undock'));
+  if (byUndock.length) return byUndock[byUndock.length - 1];
+  const byEnded = chronicleEntries(lore).filter(
+    (f) =>
+      (f.tags || []).includes('ended') &&
+      (f.tags || []).some((t) => String(t).startsWith('conflux:')),
+  );
+  return byEnded.length ? byEnded[byEnded.length - 1] : null;
+}
 
 /** Сколько подряд tick_news в конце истории без ответа игрока. */
 function countTrailingUnansweredDigests(dialogHistory = []) {
@@ -694,15 +708,22 @@ export class GameApp {
 
     const isFirst = history.length === 0;
     const userContent = bootstrap || !String(text || '').trim()
-      ? '[Игрок только что открыл чат. Это первый контакт.]'
+      ? '[Игрок только что открыл чат. Это первый контакт — нужна вступительная речь.]'
       : text;
 
     const extraSystem = [
-      'КАТАЛОГ ТЕГОВ (единственный допустимый; не выдумывай другие группы):',
+      'КАТАЛОГ ТЕГОВ (базис для random / быстрой генерации; группы не выдумывай):',
       formatTagCatalogForPrompt(this.config),
       '',
       isFirst
-        ? 'ПЕРВЫЙ КОНТАКТ: питч — игрок БОЖЕСТВО-покровитель, правитель будет НПС. Предложи описать характер острова свободно или пропустить теги.'
+        ? [
+            'ПЕРВЫЙ КОНТАКТ — только речь, без tools.',
+            'Расскажи: игрок — бог-покровитель города-государства на изолированном летающем острове;',
+            'правитель — НПС-связной; дальше общение с ним; месяц сдвигается миром.',
+            'Предложи создать свой домен.',
+            'Предложи два пути: быстрая генерация (ты всё решаешь, показываешь предложение и ждёшь аппрува)',
+            'или наводящие вопросы. Без нумерованных списков. Не вызывай start_new_game.',
+          ].join(' ')
         : [
             `Черновик: теги=${JSON.stringify(draft.tagChoices)};`,
             `brief=${JSON.stringify(draft.playerBrief || {})};`,
@@ -815,11 +836,20 @@ export class GameApp {
     const patronLine = patronName
       ? `Имя покровителя (обращение): «${patronName}». Обращайся так. Чужих богов и имён с других островов НЕ используй.`
       : 'Имя покровителя ещё НЕ названо — коротко спроси, как к нему обращаться; когда скажет — сразу set_patron_name.';
+    const undock = recentUndockFact(domain);
+    const undockCanon = undock
+      ? [
+          'КАНОН НЕДАВНЕЙ РАССТЫКОВКИ (если спрашивают про мост/соседа/конец стыка — опирайся на это):',
+          undock.text,
+          'Суть: чужой ЛЕТАЮЩИЙ ОСТРОВ ушёл в небо. Мост/переход кончился потому, что края островов разъехались — не «просто мостик обвалился».',
+        ].join('\n')
+      : '';
     const extraSystem = [
       `Ты ${character.name}, ${character.title || 'правитель'} города «${domain.name}».`,
       character.description,
       this.config.world.cosmology || '',
       patronLine,
+      undockCanon,
       'ОБСТОЯТЕЛЬСТВА ГОРОДА СЕЙЧАС (внутренняя правда; числа игроку не называй):',
       `Население: ${qualitativePopulation(domain.population || 0)}`,
       conditionFeel,
@@ -829,7 +859,9 @@ export class GameApp {
       'Стройки/проекты: сначала declare_action с durationMonths, потом: намерение на N месяцев — НЕ «уже строим».',
       'Факты лормастера перескажи своими словами.',
       'Если покровитель просит сменить имя/обращение — set_patron_name, затем подтверди.',
-    ].join('\n');
+    ]
+      .filter(Boolean)
+      .join('\n');
 
     const result = await this.runtime.run({
       agentId: 'ruler',
@@ -863,7 +895,7 @@ export class GameApp {
     };
   }
 
-  async narrateTickNews(domain, chronicleAdds, gameDate) {
+  async narrateTickNews(domain, chronicleAdds, gameDate, opts = {}) {
     const character = domain.characters[0];
     const forNews = filterChronicleForDomain(
       newsChronicleEntries(chronicleAdds),
@@ -883,7 +915,6 @@ export class GameApp {
       : 'Имя покровителя неизвестно — обратись «покровитель», без выдуманных имён.';
 
     const unanswered = countTrailingUnansweredDigests(character.dialogHistory || []);
-    // Это будет очередной дайджест без ответа игрока; на 3-м — спросить, здесь ли он
     const askPresence = unanswered >= 2;
     const presenceHint = askPresence
       ? [
@@ -893,37 +924,82 @@ export class GameApp {
         ].join(' ')
       : '';
 
-    const result = await this.runtime.run({
-      agentId: 'ruler',
-      userMessages: [
-        {
-          role: 'user',
-          content: [
-            `Прошёл месяц (${gameDate.label}). Ниже сырая хроника для тебя (не факты лормастера).`,
-            'Напиши покровителю письмо о месяце — вольный пересказ, НЕ дайджест.',
-            'Выбери одну-две нити, что важнее всего; остальное можно опустить или мельком.',
-            'Связная проза от первого лица, 1–3 коротких абзаца. Без списков, markdown, нумерации.',
-            'Не копируй формулировки хроники. Не упоминай статы и механики.',
-            addressHint,
-            presenceHint,
-            '',
-            facts,
-          ]
-            .filter(Boolean)
-            .join('\n'),
-        },
-      ],
-      tools: [],
-      maxTurns: 1,
-      extraSystem: [
-        `Ты ${character.name}, ${character.title || 'правитель'} города «${domain.name}».`,
-        character.description,
-        addressHint,
-        'Ты пишешь покровителю новости месяца живой речью, как человек, а не сводку событий.',
-      ].join('\n'),
-    });
+    const partner = opts.partnerName ? `«${opts.partnerName}»` : 'чужой город';
+    const undockHint = opts.undock
+      ? [
+          'ГЛАВНОЕ СОБЫТИЕ МЕСЯЦА — расстыковка летающих островов.',
+          `Чужой остров (${partner}) УЛЕТЕЛ / ушёл в небо: пути между вами больше нет.`,
+          'В письме ОБЯЗАТЕЛЬНО скажи прямо: острова разошлись в небе; силуэт чужого края ушёл в даль.',
+          'Мост/переход можно упомянуть только как следствие: он исчез, ПОТОМУ ЧТО острова разъехались.',
+          'ЗАПРЕЩЕНО оставлять впечатление, будто «просто мостик обвалился», а острова на месте.',
+          `Назови ${partner} или «чужой остров» и глагол ухода (ушёл, улетел, растворился вдали, разошлись).`,
+        ].join(' ')
+      : '';
 
-    return result.text || 'Покровитель, за месяц многое сдвинулось.';
+    const undockSystem = opts.undock
+      ? [
+          'Этот месяц — конец стыковки: два летающих острова РАЗОШЛИСЬ.',
+          'Письмо покровителю должно сделать это очевидным с первого абзаца.',
+          'Нельзя звучать так, будто рухнул только мост, а соседний остров всё ещё рядом.',
+        ].join(' ')
+      : '';
+
+    const runLetter = async (extraUserNote = '') => {
+      const result = await this.runtime.run({
+        agentId: 'ruler',
+        userMessages: [
+          {
+            role: 'user',
+            content: [
+              `Прошёл месяц (${gameDate.label}). Ниже сырая хроника для тебя (не факты лормастера).`,
+              'Напиши покровителю письмо о месяце — вольный пересказ, НЕ дайджест.',
+              undockHint
+                ? 'Сделай уход чужого острова в небо центральной нитью письма.'
+                : 'Выбери одну-две нити, что важнее всего; остальное можно опустить или мельком.',
+              'Связная проза от первого лица, 1–3 коротких абзаца. Без списков, markdown, нумерации.',
+              'Не копируй формулировки хроники. Не упоминай статы и механики.',
+              addressHint,
+              presenceHint,
+              undockHint,
+              extraUserNote,
+              '',
+              facts,
+            ]
+              .filter(Boolean)
+              .join('\n'),
+          },
+        ],
+        tools: [],
+        maxTurns: 1,
+        extraSystem: [
+          `Ты ${character.name}, ${character.title || 'правитель'} города «${domain.name}».`,
+          character.description,
+          addressHint,
+          undockSystem,
+          'Ты пишешь покровителю новости месяца живой речью, как человек, а не сводку событий.',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      });
+      return result.text || 'Покровитель, за месяц многое сдвинулось.';
+    };
+
+    let letter = await runLetter();
+    if (opts.undock && !assertsIslandsParted(letter)) {
+      letter = await runLetter(
+        'ПЕРЕПИСИ: в прошлом черновике событие звучало как обвал моста. ' +
+          `Нужно ясно: остров ${partner} ушёл в небо, края разошлись, пути нет. ` +
+          'Мост — только следствие ухода островов.',
+      );
+    }
+    if (opts.undock && !assertsIslandsParted(letter) && opts.partnerName) {
+      // Жёсткий хвост, если модель снова свела к мосту
+      letter = `${letter.trim()} Чужой остров «${opts.partnerName}» ушёл в небо — края разошлись, и пути между нами больше нет.`;
+    } else if (opts.undock && !assertsIslandsParted(letter)) {
+      letter = `${letter.trim()} Чужой остров ушёл в небо — края разошлись, и пути между нами больше нет.`;
+    }
+
+    return letter;
   }
 
   async persistDialog(domain, role, content, { kind = null } = {}) {

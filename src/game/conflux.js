@@ -3,6 +3,25 @@ import { createLoreFact } from './models.js';
 import { getLogger } from '../log.js';
 
 /**
+ * Текст явно про разлёт/уход островов в небе, а не только «мостик обвалился».
+ * @param {string} body
+ */
+export function assertsIslandsParted(body) {
+  const t = String(body || '');
+  const parting =
+    /(разошл|разъедин|разъехал).{0,50}остров/i.test(t) ||
+    /остров.{0,50}(разошл|разъедин|разъехал|улетел|ушёл|ушла|ушли)/i.test(t) ||
+    /(разошл|разъедин|разъехал).{0,40}(в\s+небе|в\s+дал|над\s+бездн)/i.test(t) ||
+    /чужой\s+(край|остров).{0,40}(уш[её]л|ушла|улетел|тает|растворился)/i.test(t) ||
+    /(край|силуэт).{0,30}(тает|растворился|уш[её]л|ушла).{0,40}(неб|облак|дал|бездн)/i.test(t) ||
+    /между.{0,20}(город|остров).{0,40}(нет|больше нет).{0,20}(путь|пути)/i.test(t) ||
+    /(улетел|ушёл|ушла|ушли).{0,30}(в\s+неб|в\s+дал|в\s+облак)/i.test(t);
+  const bridgeOnly =
+    /мост.{0,30}(рухн|обвал|разруш|облом|рухнул)/i.test(t) && !parting;
+  return Boolean(parting) && !bridgeOnly;
+}
+
+/**
  * @param {object} opts
  * @param {string[]} opts.domainIds
  * @param {number} opts.etaMonths
@@ -223,13 +242,22 @@ export async function processConfluxApproachingPhase({
     conflux.monthsDocked = 0;
     conflux.dockedTick = world.tickIndex;
 
-    const contactText =
-      `Стыковка свершилась. ${contact.description} ` +
-      `Города «${domains[0].name}» и «${domains[1].name}» теперь связаны этим контактом.`;
+    // Внеочередное идентичное событие стыка в хронику обоих (один и тот же текст)
+    const contactText = contact.description;
 
     let sharedOnce = false;
     for (const d of domains) {
-      const f = pushPublicChronicle(d, world, contactText, conflux, ['docked', 'contact']);
+      const f = createLoreFact({
+        id: newId('lore'),
+        text: contactText,
+        tags: ['chronicle', 'conflux', `conflux:${conflux.id}`, 'shared', 'docked', 'contact'],
+        gameDateLabel: world.gameDate.label,
+        tick: world.tickIndex,
+        author: 'conflux-resolver',
+        importance: 'critical',
+      });
+      d.lore = d.lore || [];
+      d.lore.push(f);
       if (!sharedOnce) {
         mirrorToShared(conflux, f);
         sharedOnce = true;
@@ -253,10 +281,14 @@ export async function processConfluxApproachingPhase({
 
 /**
  * After pair resolve: count docked months and end when duration elapses.
+ * Undock chronicle is returned so tick news can include it the same month.
+ *
+ * @returns {{ notes: object[], undockAddsByDomain: Map<string, object[]> }}
  */
-export async function advanceDockedConfluxes({ storage, world }, dockedConfluxes) {
+export async function advanceDockedConfluxes({ storage, runtime, world }, dockedConfluxes) {
   const log = getLogger().child({ scope: 'conflux.tick' });
   const notes = [];
+  const undockAddsByDomain = new Map();
 
   for (const stub of dockedConfluxes || []) {
     const conflux = (await storage.getConflux(stub.id)) || stub;
@@ -266,22 +298,54 @@ export async function advanceDockedConfluxes({ storage, world }, dockedConfluxes
     if (conflux.monthsDocked >= Number(conflux.durationMonths || 3)) {
       conflux.status = 'ended';
       conflux.endedTick = world.tickIndex;
-      const endText =
-        'Стыковка островов ослабла: контакт расходится, чужой остров снова уходит в даль неба.';
+
+      const domains = [];
       for (const id of conflux.domainIds || []) {
         const d = await storage.getDomain(id);
-        if (!d) continue;
-        const f = pushPublicChronicle(d, world, endText, conflux, ['ended']);
-        mirrorToShared(conflux, f);
+        if (d) domains.push(d);
+      }
+      const endText =
+        domains.length >= 2
+          ? await generateUndockChronicle({ runtime, conflux, domains, world, log })
+          : 'Острова разошлись в небе; пути между ними больше нет.';
+
+      let sharedOnce = false;
+      for (const d of domains) {
+        const f = createLoreFact({
+          id: newId('lore'),
+          text: endText,
+          tags: ['chronicle', 'conflux', `conflux:${conflux.id}`, 'shared', 'ended', 'undock'],
+          gameDateLabel: world.gameDate.label,
+          tick: world.tickIndex,
+          author: 'conflux-resolver',
+          importance: 'critical',
+        });
+        d.lore = d.lore || [];
+        d.lore.push(f);
+        if (!sharedOnce) {
+          mirrorToShared(conflux, f);
+          sharedOnce = true;
+        }
+        if (!undockAddsByDomain.has(d.id)) undockAddsByDomain.set(d.id, []);
+        undockAddsByDomain.get(d.id).push(f);
         await storage.saveDomain(d);
       }
-      notes.push({ confluxId: conflux.id, phase: 'ended', monthsDocked: conflux.monthsDocked });
-      log.info('conflux.ended', { id: conflux.id, monthsDocked: conflux.monthsDocked });
+      notes.push({
+        confluxId: conflux.id,
+        phase: 'ended',
+        monthsDocked: conflux.monthsDocked,
+        text: endText,
+      });
+      log.info('conflux.ended', {
+        id: conflux.id,
+        monthsDocked: conflux.monthsDocked,
+        textPreview: endText.slice(0, 160),
+      });
     }
     await storage.saveConflux(conflux);
   }
 
-  return { notes };
+  return { notes, undockAddsByDomain };
 }
 
 /** Active docked conflux containing this domain, or null. */
@@ -290,12 +354,103 @@ export async function findDockedConfluxForDomain(storage, domainId) {
   return list.find((c) => (c.domainIds || []).includes(domainId)) || null;
 }
 
+async function generateUndockChronicle({ runtime, conflux, domains, world, log }) {
+  const nameA = domains[0].name;
+  const nameB = domains[1].name;
+  const draft = { text: null };
+
+  const looksLikeIslandsParted = (body) => assertsIslandsParted(body);
+
+  const tools = [
+    {
+      name: 'submit_undock',
+      description:
+        'Канон расстыковки: ОСТРОВА разошлись в небе. Не «мостик сломался» — именно разлёт островов.',
+      parameters: {
+        type: 'object',
+        required: ['text'],
+        properties: {
+          text: {
+            type: 'string',
+            description:
+              `2–4 предложения. ОБЯЗАТЕЛЬНО «${nameA}» и «${nameB}». ` +
+              'Главное: два летающих острова разошлись в небе; пути между ними больше нет. ' +
+              'НЕ своди к обвалу моста — мост/переход исчезает потому, что острова ушли.',
+          },
+        },
+      },
+      handler: async ({ text }) => {
+        const body = String(text || '').trim();
+        if (body.length < 40) return { ok: false, error: 'too short' };
+        if (!body.includes(nameA) || !body.includes(nameB)) {
+          return {
+            ok: false,
+            error: `Нужны оба названия: «${nameA}» и «${nameB}»`,
+          };
+        }
+        if (!looksLikeIslandsParted(body)) {
+          return {
+            ok: false,
+            error:
+              'Нужен разлёт ОСТРОВОВ в небе (не только обвал моста). Перепиши: острова разошлись, пути нет.',
+          };
+        }
+        draft.text = body;
+        return { ok: true };
+      },
+    },
+  ];
+
+  const contactHint = conflux.contact?.description
+    ? `Бывший контакт: ${conflux.contact.description}`
+    : '';
+
+  try {
+    await runtime.run({
+      agentId: 'confluxResolver',
+      tools,
+      maxTurns: 5,
+      toolChoice: { type: 'function', function: { name: 'submit_undock' } },
+      log,
+      userMessages: [
+        {
+          role: 'user',
+          content: [
+            `Расстыковка. Дата: ${world.gameDate?.label || ''}.`,
+            `Летающие острова городов «${nameA}» и «${nameB}» расходятся.`,
+            contactHint,
+            '',
+            'Вызови submit_undock. Одна каноническая запись для хроники обоих.',
+            `Обязательный смысл: «${nameA} и ${nameB} разошлись в небе — между ними снова нет никакого пути».`,
+            'ЗАПРЕЩЕНО сводить событие к «мостик обвалился». Мост/переход кончается потому, что острова ушли.',
+            'Глорифицируй: ветер, бездна, силуэт чужого края тает вдали. Без третьего острова.',
+          ]
+            .filter(Boolean)
+            .join('\n'),
+        },
+      ],
+    });
+  } catch (err) {
+    log.warn('conflux.undock_llm_failed', { error: err.message });
+  }
+
+  if (draft.text) return draft.text;
+
+  return (
+    `«${nameA}» и «${nameB}» разошлись в небе: чужой край ушёл в даль облаков, ` +
+    'и между городами снова нет никакого пути — ни моста, ни щели, лишь ветер над бездной.'
+  );
+}
+
 async function generateContact({ runtime, conflux, domains, world, log }) {
+  const nameA = domains[0].name;
+  const nameB = domains[1].name;
   const draft = { contact: null };
   const tools = [
     {
       name: 'submit_contact',
-      description: 'Опиши характер стыковки двух летающих островов',
+      description:
+        'Внеочередное событие стыка: как устроен переход между двумя городами (пойдёт в хронику обоих дословно)',
       parameters: {
         type: 'object',
         required: ['description', 'kind'],
@@ -308,13 +463,21 @@ async function generateContact({ runtime, conflux, domains, world, log }) {
           },
           description: {
             type: 'string',
-            description: '2–4 предложения по-русски: как выглядит контакт, что можно/нельзя',
+            description:
+              `2–4 предложения по-русски. ОБЯЗАТЕЛЬНО назови оба города «${nameA}» и «${nameB}». ` +
+              'Опиши, как именно устроен переход между ними и что можно/нельзя.',
           },
         },
       },
       handler: async ({ kind, description }) => {
         const text = String(description || '').trim();
-        if (text.length < 20) return { ok: false, error: 'description too short' };
+        if (text.length < 40) return { ok: false, error: 'description too short' };
+        if (!text.includes(nameA) || !text.includes(nameB)) {
+          return {
+            ok: false,
+            error: `В description должны быть названия обоих городов: «${nameA}» и «${nameB}»`,
+          };
+        }
         draft.contact = {
           kind: kind || 'other',
           description: text,
@@ -327,22 +490,23 @@ async function generateContact({ runtime, conflux, domains, world, log }) {
 
   try {
     await runtime.run({
-      agentId: 'genesis',
+      agentId: 'confluxResolver',
       tools,
-      maxTurns: 4,
+      maxTurns: 5,
       toolChoice: { type: 'function', function: { name: 'submit_contact' } },
       log,
       userMessages: [
         {
           role: 'user',
           content: [
-            `Два летающих острова стыкуются: «${domains[0].name}» и «${domains[1].name}».`,
-            'Дата:',
-            world.gameDate?.label,
+            `Внеочередное событие стыка. Дата: ${world.gameDate?.label || ''}.`,
+            `Острова городов «${nameA}» и «${nameB}» сошлись.`,
             '',
-            'Вызови submit_contact. Характер контакта — ВАЖНОЕ свойство: узкий каменный мостик,',
-            'щель с прыжком, провал (нужен мост), или сплошной земляной контакт.',
-            'Конкретно, без мета; только русский. Не выдумывай третьи острова.',
+            'Вызови submit_contact.',
+            'description — канон перехода: как выглядит контакт, как ходят между городами, ограничения.',
+            `В тексте ОБЯЗАТЕЛЬНО оба имени: «${nameA}» и «${nameB}».`,
+            'Варианты: узкий каменный мостик / щель с прыжком / провал (нужен мост) / сплошной земляной контакт.',
+            'Конкретно, по-русски. Не выдумывай третий остров. Это одна запись на оба города.',
           ].join('\n'),
         },
       ],
@@ -356,8 +520,9 @@ async function generateContact({ runtime, conflux, domains, world, log }) {
   return {
     kind: 'bridge',
     description:
-      `Между краями островов «${domains[0].name}» и «${domains[1].name}» легла узкая каменная перемычка: ` +
-      'по ней можно пройти цепочкой, но обозы и тяжёлые грузы не пройдут, пока не укрепят стык.',
+      `Между краями островов «${nameA}» и «${nameB}» легла узкая каменная перемычка: ` +
+      `по ней можно пройти цепочкой из одного города в другой, но обозы и тяжёлые грузы не пройдут, ` +
+      'пока не укрепят стык.',
     atTick: world.tickIndex,
     fallback: true,
   };
