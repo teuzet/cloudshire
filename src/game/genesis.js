@@ -176,7 +176,7 @@ async function generateCore({
     'Майлстоуны:',
     milestones.map((m) => `- ${m.text}`).join('\n'),
     '',
-    `openingLore: минимум ${loreMin} коротких строк.`,
+    `openingLore: минимум ${loreMin} коротких ПОСТОЯННЫХ фактов (не новости месяца).`,
   ].join('\n');
 
   for (let attempt = 1; attempt <= 3 && !draft.submitted; attempt += 1) {
@@ -328,7 +328,8 @@ async function generateAspectBatch({
           '',
           known ? `Контекст уже написанных разделов (не копируй):\n${known}` : '',
           '',
-          'Заполни ТОЛЬКО эти аспекты через submit_aspects. Каждый уникален и конкретен:',
+          'Заполни ТОЛЬКО эти аспекты через submit_aspects. Каждый уникален и конкретен.',
+          'Пиши устойчивый лор (годы), не сиюминутные события — те для хроники/тика.',
           titles,
         ].join('\n'),
       },

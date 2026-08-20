@@ -56,6 +56,10 @@ export class OpenAiProvider {
       if (tools?.length) {
         body.tools = tools;
         if (toolChoice) body.tool_choice = toolChoice;
+        // gpt-5.x chat/completions + tools require reasoning_effort none
+        if (/^gpt-5/i.test(body.model || '')) {
+          body.reasoning_effort = 'none';
+        }
       }
       if (maxTokens) {
         // GPT-5+ chat completions expect max_completion_tokens

@@ -1,6 +1,6 @@
 import { generateDomain, domainSummary } from './genesis.js';
 import { chronicleEntries, newsChronicleEntries } from './models.js';
-import { qualitativePopulation } from './stats.js';
+import { qualitativePopulation, qualitativeStatsBrief } from './stats.js';
 import { askLoremaster } from './loremaster.js';
 import { newId } from './ids.js';
 import {
@@ -19,18 +19,27 @@ function characterTools(domain, storage, character, ctx) {
   return [
     {
       name: 'read_domain_brief',
-      description: 'Кратко: имя, статус, ощущение населения, текущие процессы, pending, крючки',
+      description:
+        'Текущее состояние города: население, качественная картина благосостояния/веры/мощи и т.д., pending, процессы. Вызови, когда спрашивают «как дела / богаты ли / сыты ли / спокойно ли».',
       parameters: { type: 'object', properties: {} },
       handler: async () => ({
         ok: true,
         name: domain.name,
         status: domain.status,
         populationFeel: qualitativePopulation(domain.population || 0),
+        conditionFeel: qualitativeStatsBrief(domain.stats || {}, ctx.config),
+        guidance:
+          'Отвечай СТРОГО в духе conditionFeel. Если благосостояние «скорее слабо / скудная жизнь» — не говори, что народ сыт и хлеба вдоволь. Числа и названия статов игроку не называй.',
         stateEvents: domain.state.events,
-        pendingActions: domain.state.pendingActions,
+        pendingActions: (domain.state.pendingActions || [])
+          .filter((a) => a.status === 'active')
+          .map((a) => ({
+            summary: a.summary,
+            detail: a.detail,
+            monthsDone: a.monthsDone ?? 0,
+            durationMonths: a.durationMonths ?? 1,
+          })),
         milestones: (domain.milestones || []).map((m) => ({ text: m.text, status: m.status })),
-        _internalStats: domain.stats,
-        _internalPopulation: domain.population,
       }),
     },
     {
@@ -670,12 +679,18 @@ export class GameApp {
       content: m.content,
     }));
 
+    const conditionFeel = qualitativeStatsBrief(domain.stats || {}, this.config);
     const extraSystem = [
       `Ты ${character.name}, ${character.title || 'правитель'} города «${domain.name}».`,
       character.description,
       this.config.world.cosmology || '',
+      'ОБСТОЯТЕЛЬСТВА ГОРОДА СЕЙЧАС (внутренняя правда; числа игроку не называй):',
+      `Население: ${qualitativePopulation(domain.population || 0)}`,
+      conditionFeel,
+      'На вопросы о сытости, богатстве, вере, порядке, силе, знаниях опирайся на эти ориентиры.',
+      'Пример: благосостояние «скорее слабо / скудная жизнь» → люди едва сводят концы, запасы тонкие; не «сыты и хватает».',
       'Форма: 1–3 абзаца прозы. Без списков, markdown, английских слов, сервисных «чем помочь».',
-      'Стройки/проекты: сначала declare_action с durationMonths, потом: намерение принято на N месяцев — НЕ «уже строим».',
+      'Стройки/проекты: сначала declare_action с durationMonths, потом: намерение на N месяцев — НЕ «уже строим».',
       'Факты лормастера перескажи своими словами.',
     ].join('\n');
 

@@ -92,6 +92,35 @@ export function formatStatsForPrompt(stats, config) {
     .join('\n');
 }
 
+/**
+ * Качественная картина статов для правителя: без чисел, с тоном по шкале.
+ * Берём ориентир с ближайшей нижней ступени шкалы (33 → ступень 25 «скудная жизнь»).
+ */
+export function qualitativeStatsBrief(stats, config) {
+  return (config.stats || [])
+    .map((def) => {
+      const value = Number(stats?.[def.id]);
+      const v = Number.isFinite(value) ? value : 50;
+      const scale = def.scale || {};
+      const keys = Object.keys(scale)
+        .map(Number)
+        .sort((a, b) => a - b);
+      let key = keys[0] ?? 0;
+      for (const k of keys) {
+        if (k <= v) key = k;
+      }
+      const hint = scale[key] || scale[String(key)] || 'неясно';
+      let tone = 'средний';
+      if (v < 30) tone = 'плохо / низко';
+      else if (v < 42) tone = 'скорее слабо';
+      else if (v < 58) tone = 'обычно';
+      else if (v < 72) tone = 'скорее сильно';
+      else tone = 'хорошо / высоко';
+      return `- ${def.name}: ${tone}. Ориентир: ${hint}`;
+    })
+    .join('\n');
+}
+
 export function formatTagsForPrompt(tags) {
   return tags.map((t) => `${t.groupName}: ${t.tagName}`).join('\n');
 }
