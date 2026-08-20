@@ -57,7 +57,11 @@ export class OpenAiProvider {
         body.tools = tools;
         if (toolChoice) body.tool_choice = toolChoice;
       }
-      if (maxTokens) body.max_tokens = maxTokens;
+      if (maxTokens) {
+        // GPT-5+ chat completions expect max_completion_tokens
+        if (/^gpt-5/i.test(body.model || '')) body.max_completion_tokens = maxTokens;
+        else body.max_tokens = maxTokens;
+      }
       const completion = await this.client.chat.completions.create(body);
       const message = completion.choices[0]?.message;
       if (!message) throw new LlmError('Empty completion from OpenAI');

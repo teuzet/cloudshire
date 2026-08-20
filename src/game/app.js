@@ -3,6 +3,15 @@ import { chronicleEntries, newsChronicleEntries } from './models.js';
 import { qualitativePopulation } from './stats.js';
 import { askLoremaster } from './loremaster.js';
 import { newId } from './ids.js';
+import {
+  emptyOnboardingDraft,
+  validateCityName,
+  suggestCityNames,
+  listTagCatalog,
+  formatPlayerBrief,
+  formatTagCatalogForPrompt,
+} from './onboarding.js';
+import { getLogger, truncate } from '../log.js';
 
 function characterTools(domain, storage, character, ctx) {
   const save = async () => storage.saveDomain(domain);
@@ -27,7 +36,7 @@ function characterTools(domain, storage, character, ctx) {
     {
       name: 'consult_loremaster',
       description:
-        'Спросить лормастера о фактах мира (источники воды, люди, места…). Обязательно перед утверждением нового факта.',
+        'Спросить лормастера о фактах мира (имена, места, детали недавних событий, слухи…). Обязательно, когда покровитель просит подробности.',
       parameters: {
         type: 'object',
         required: ['questions'],
@@ -35,7 +44,7 @@ function characterTools(domain, storage, character, ctx) {
           questions: {
             type: 'array',
             items: { type: 'string' },
-            description: '1–5 вопросов',
+            description: '1–5 конкретных вопросов',
           },
         },
       },
@@ -51,32 +60,44 @@ function characterTools(domain, storage, character, ctx) {
         return {
           ok: true,
           answers: result.answers,
+          summary: result.loreTextForAsker,
           newFactsCount: result.addedFacts.length,
+          newFactTexts: result.addedFacts.map((f) => f.text),
+          hint:
+            'Перескажи СУТЬ своими словами и тоном правителя. Не копируй текст фактов/answers дословно. Не говори «неизвестно», если answers заполнены.',
         };
       },
     },
     {
       name: 'declare_action',
-      description: 'Объявить намерение на текущий месяц',
+      description:
+        'Обязательно для строек/проектов до ответа. Укажи durationMonths (реалистично: винодельня 3–6, мелочь 1).',
       parameters: {
         type: 'object',
-        required: ['summary', 'detail'],
+        required: ['summary', 'detail', 'durationMonths'],
         properties: {
-          summary: { type: 'string' },
-          detail: { type: 'string' },
+          summary: { type: 'string', description: 'Кратко: «Винодельня»…' },
+          detail: { type: 'string', description: 'Что делать и зачем' },
+          durationMonths: {
+            type: 'number',
+            description: 'Оценка длительности в игровых месяцах (1–12)',
+          },
           onBehalfOf: {
             type: 'string',
             description: 'ruler | patron | people | other',
-            default: 'ruler',
+            default: 'patron',
           },
           characterNote: { type: 'string' },
         },
       },
-      handler: async ({ summary, detail, onBehalfOf = 'ruler', characterNote }) => {
+      handler: async ({ summary, detail, durationMonths, onBehalfOf = 'patron', characterNote }) => {
+        const duration = Math.max(1, Math.min(12, Math.round(Number(durationMonths) || 1)));
         const action = {
           id: newId('act'),
           summary,
           detail,
+          durationMonths: duration,
+          monthsDone: 0,
           onBehalfOf,
           characterId: character.id,
           characterName: character.name,
@@ -87,7 +108,11 @@ function characterTools(domain, storage, character, ctx) {
         };
         domain.state.pendingActions.push(action);
         await save();
-        return { ok: true, action };
+        return {
+          ok: true,
+          action,
+          hint: `В речи: намерение на ~${duration} мес., ещё НЕ «уже строим». Только русский.`,
+        };
       },
     },
     {
@@ -177,12 +202,22 @@ export class GameApp {
     return this.generatingUsers.has(String(userId));
   }
 
-  async handleUserMessage(userId, text, { channel = 'web' } = {}) {
+  async handleUserMessage(userId, text, { channel = 'web', bootstrap = false } = {}) {
+    const log = getLogger().child({ userId: String(userId), channel, scope: 'chat' });
     const world = await this.storage.getWorld();
     const domain = await this.storage.getDomainForUser(userId, world.id);
 
+    log.info('chat.inbound', {
+      bootstrap,
+      text: truncate(text, 400),
+      hasDomain: Boolean(domain),
+      domainId: domain?.id || null,
+      generating: this.isGenerating(userId),
+    });
+
     if (!domain) {
       if (this.isGenerating(userId)) {
+        log.info('chat.busy_generating');
         return {
           reply:
             'Остров ещё создаётся — обычно минута-две. Правитель напишет сам, как будет готов. Подожди немного.',
@@ -191,21 +226,29 @@ export class GameApp {
           domainId: null,
         };
       }
-      return this.runOnboarding(userId, text, { channel });
+      return this.runOnboarding(userId, text, { channel, bootstrap, log });
     }
 
-    return this.runRuler(domain, text, { channel });
+    return this.runRuler(domain, text, { channel, log });
   }
 
-  startDomainGeneration(userId, { channel }) {
+  startDomainGeneration(userId, { channel, forcedName, forcedTagChoices, playerBrief }) {
     const uid = String(userId);
-    if (this.generatingUsers.has(uid)) return;
+    if (this.generatingUsers.has(uid)) {
+      getLogger().warn('genesis.already_running', { userId: uid });
+      return;
+    }
     this.generatingUsers.add(uid);
+    const log = getLogger().child({ userId: uid, scope: 'genesis' });
 
     const run = async () => {
       try {
-        console.log(`[genesis] start user=${uid}`);
-        await this.emitOutbound(uid, 'Создаю твой летающий остров… Это займёт около минуты.', {
+        log.info('genesis.start', {
+          forcedName: forcedName || null,
+          tagChoices: forcedTagChoices || {},
+          playerBrief: truncate(playerBrief, 500),
+        });
+        await this.emitOutbound(uid, 'Создаю твой летающий остров… Это займёт около минуты-двух.', {
           channel,
           agent: 'onboarding',
           kind: 'generating',
@@ -216,7 +259,11 @@ export class GameApp {
           runtime: this.runtime,
           storage: this.storage,
           ownerUserId: uid,
-          onProgress: (msg) => console.log(`[genesis] ${uid}: ${msg}`),
+          forcedName: forcedName || null,
+          forcedTagChoices: forcedTagChoices || {},
+          playerBrief: playerBrief || null,
+          log,
+          onProgress: (msg) => log.info('genesis.progress', { message: msg }),
         });
 
         const intro = domain._greeting.startsWith(domain.characters[0].name)
@@ -230,12 +277,19 @@ export class GameApp {
           domainId: domain.id,
           kind: 'game_start',
         });
-        console.log(`[genesis] done user=${uid} domain=${domain.id} name=${domain.name}`);
+        log.info('genesis.done', {
+          domainId: domain.id,
+          name: domain.name,
+          greetingPreview: truncate(intro, 300),
+        });
       } catch (err) {
-        console.error(`[genesis] failed user=${uid}`, err);
+        log.error('genesis.failed', {
+          error: err.message,
+          stack: err.stack,
+        });
         await this.emitOutbound(
           uid,
-          `Не удалось создать остров: ${err.message || err}. Попробуй написать «начнём игру» ещё раз.`,
+          `Не удалось создать остров: ${err.message || err}. Можно поправить имя/теги и снова попросить старт.`,
           { channel, agent: 'onboarding', kind: 'generating_error' },
         );
       } finally {
@@ -244,33 +298,253 @@ export class GameApp {
     };
 
     setImmediate(() => {
-      run().catch((err) => console.error('[genesis] unhandled', err));
+      run().catch((err) =>
+        log.error('genesis.unhandled', { error: err.message, stack: err.stack }),
+      );
     });
   }
 
-  async runOnboarding(userId, text, { channel }) {
+  async getOrCreateOnboardingBinding(userId) {
+    const world = await this.storage.getWorld();
+    let binding = await this.storage.getUserBinding(userId);
+    if (!binding || binding.worldId !== world.id) {
+      binding = {
+        userId: String(userId),
+        worldId: world.id,
+        domainId: null,
+        onboarding: emptyOnboardingDraft(),
+        createdAt: new Date().toISOString(),
+      };
+    }
+    if (!binding.onboarding) binding.onboarding = emptyOnboardingDraft();
+    if (!binding.onboarding.playerBrief) {
+      binding.onboarding.playerBrief = { city: '', ruler: '', freeform: '' };
+    }
+    return binding;
+  }
+
+  async runOnboarding(userId, text, { channel, bootstrap = false, log: parentLog } = {}) {
+    const log = (parentLog || getLogger()).child({ scope: 'onboarding' });
+    const binding = await this.getOrCreateOnboardingBinding(userId);
+    const draft = binding.onboarding;
     let startedGenerating = false;
+
+    log.info('onboarding.turn', {
+      bootstrap,
+      historyLen: (draft.messages || []).length,
+      cityName: draft.cityName,
+      approved: draft.cityNameApproved,
+      tags: draft.tagChoices,
+    });
+
+    const saveDraft = async () => {
+      binding.onboarding = draft;
+      binding.updatedAt = new Date().toISOString();
+      await this.storage.saveUserBinding(binding);
+    };
 
     const tools = [
       {
-        name: 'check_player',
-        description: 'Проверить, есть ли у игрока домен или идёт генерация',
+        name: 'get_setup',
+        description: 'Текущий черновик старта: теги, brief, имя, готовность',
         parameters: { type: 'object', properties: {} },
-        handler: async () => {
-          const world = await this.storage.getWorld();
-          const domain = await this.storage.getDomainForUser(userId, world.id);
+        handler: async () => ({
+          ok: true,
+          tagChoices: draft.tagChoices,
+          playerBrief: draft.playerBrief,
+          cityName: draft.cityName,
+          cityNameApproved: draft.cityNameApproved,
+          canStart: Boolean(draft.cityNameApproved && draft.cityName),
+        }),
+      },
+      {
+        name: 'set_player_brief',
+        description:
+          'Записать/обновить саммари пожеланий игрока для генезиса (город и правитель-связной). Можно вызывать несколько раз.',
+        parameters: {
+          type: 'object',
+          properties: {
+            city: {
+              type: 'string',
+              description: 'Пожелания к городу/острову: тон, проблемы, атмосфера…',
+            },
+            ruler: {
+              type: 'string',
+              description: 'Каким видит правителя-связного: характер, титул, слабости…',
+            },
+            freeform: {
+              type: 'string',
+              description: 'Прочие пожелания одной прозой',
+            },
+            replace: {
+              type: 'boolean',
+              description: 'Если true — заменить brief целиком; иначе дополнить непустые поля',
+            },
+          },
+        },
+        handler: async ({ city, ruler, freeform, replace = false }) => {
+          if (!draft.playerBrief) {
+            draft.playerBrief = { city: '', ruler: '', freeform: '' };
+          }
+          if (replace) {
+            draft.playerBrief = {
+              city: city || '',
+              ruler: ruler || '',
+              freeform: freeform || '',
+            };
+          } else {
+            if (city) draft.playerBrief.city = city;
+            if (ruler) draft.playerBrief.ruler = ruler;
+            if (freeform) draft.playerBrief.freeform = freeform;
+          }
+          await saveDraft();
+          return { ok: true, playerBrief: draft.playerBrief };
+        },
+      },
+      {
+        name: 'suggest_city_names',
+        description: 'Предложить варианты имён города (обычно ближе к концу онбординга)',
+        parameters: {
+          type: 'object',
+          properties: {
+            count: { type: 'number', description: 'Сколько вариантов (3–7)' },
+          },
+        },
+        handler: async ({ count = 5 }) => ({
+          ok: true,
+          suggestions: suggestCityNames(Math.max(3, Math.min(7, count || 5))),
+        }),
+      },
+      {
+        name: 'set_city_name',
+        description: 'Проверить и зафиксировать имя города после согласия игрока (в конце онбординга)',
+        parameters: {
+          type: 'object',
+          required: ['name'],
+          properties: {
+            name: { type: 'string' },
+          },
+        },
+        handler: async ({ name }) => {
+          const v = validateCityName(name);
+          if (!v.ok) {
+            draft.cityNameApproved = false;
+            await saveDraft();
+            return { ok: false, reason: v.reason };
+          }
+          draft.cityName = v.name;
+          draft.cityNameApproved = true;
+          await saveDraft();
+          return { ok: true, cityName: v.name };
+        },
+      },
+      {
+        name: 'list_tag_groups',
+        description: 'Показать группы характеристик острова и варианты (климат, уклад…)',
+        parameters: { type: 'object', properties: {} },
+        handler: async () => ({
+          ok: true,
+          groups: listTagCatalog(this.config),
+          chosen: draft.tagChoices,
+        }),
+      },
+      {
+        name: 'set_tag_choices',
+        description:
+          'Задать сразу несколько тегов из РЕАЛЬНОГО каталога (после свободного пожелания игрока). Остальное — random.',
+        parameters: {
+          type: 'object',
+          required: ['choices'],
+          properties: {
+            choices: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['groupId', 'tagId'],
+                properties: {
+                  groupId: { type: 'string' },
+                  tagId: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        handler: async ({ choices }) => {
+          const applied = [];
+          const errors = [];
+          for (const c of choices || []) {
+            const group = (this.config.genesis.tagGroups || []).find((g) => g.id === c.groupId);
+            if (!group) {
+              errors.push(`unknown group ${c.groupId}`);
+              continue;
+            }
+            const tag = group.tags.find((t) => t.id === c.tagId);
+            if (!tag) {
+              errors.push(`unknown tag ${c.tagId} in ${c.groupId}`);
+              continue;
+            }
+            draft.tagChoices[c.groupId] = c.tagId;
+            applied.push({ group: group.name, tag: tag.name });
+          }
+          await saveDraft();
+          const total = (this.config.genesis.tagGroups || []).length;
           return {
-            ok: true,
-            hasDomain: Boolean(domain),
-            generating: this.isGenerating(userId),
-            worldName: world.name,
-            domain: domain ? domainSummary(domain) : null,
+            ok: errors.length === 0,
+            applied,
+            errors,
+            chosen: draft.tagChoices,
+            note: `${Object.keys(draft.tagChoices).length}/${total} групп задано; остальное random.`,
           };
         },
       },
       {
+        name: 'set_tag_choice',
+        description:
+          'Выбрать один тег в группе из каталога. Остальные без выбора — случайные.',
+        parameters: {
+          type: 'object',
+          required: ['groupId', 'tagId'],
+          properties: {
+            groupId: { type: 'string' },
+            tagId: { type: 'string' },
+          },
+        },
+        handler: async ({ groupId, tagId }) => {
+          const group = (this.config.genesis.tagGroups || []).find((g) => g.id === groupId);
+          if (!group) return { ok: false, error: 'Неизвестная группа' };
+          const tag = group.tags.find((t) => t.id === tagId);
+          if (!tag) return { ok: false, error: 'Неизвестный тег в группе' };
+          draft.tagChoices[groupId] = tagId;
+          await saveDraft();
+          const totalGroups = (this.config.genesis.tagGroups || []).length;
+          const chosenCount = Object.keys(draft.tagChoices).length;
+          return {
+            ok: true,
+            group: group.name,
+            tag: tag.name,
+            chosen: draft.tagChoices,
+            note: `Выбрано ${chosenCount} из ${totalGroups} групп; остальные будут случайными.`,
+          };
+        },
+      },
+      {
+        name: 'clear_tag_choice',
+        description: 'Сбросить ручной выбор тега в группе — снова случайный',
+        parameters: {
+          type: 'object',
+          required: ['groupId'],
+          properties: { groupId: { type: 'string' } },
+        },
+        handler: async ({ groupId }) => {
+          delete draft.tagChoices[groupId];
+          await saveDraft();
+          return { ok: true, chosen: draft.tagChoices };
+        },
+      },
+      {
         name: 'start_new_game',
-        description: 'Запустить создание нового домена (в фоне). Вернёт status=generating.',
+        description:
+          'Запуск генерации. Нужно утверждённое имя. Невыбранные теги — случайные. Brief уходит в генезис.',
         parameters: { type: 'object', properties: {} },
         handler: async () => {
           const world = await this.storage.getWorld();
@@ -278,27 +552,94 @@ export class GameApp {
           if (existing) {
             return { ok: false, error: 'У игрока уже есть домен в этом сезоне' };
           }
+          if (!draft.cityNameApproved || !draft.cityName) {
+            return {
+              ok: false,
+              error: 'Сначала утверди имя города через set_city_name (с согласия игрока).',
+            };
+          }
           if (this.isGenerating(userId)) {
             return { ok: true, status: 'generating' };
           }
-          this.startDomainGeneration(userId, { channel });
+          this.startDomainGeneration(userId, {
+            channel,
+            forcedName: draft.cityName,
+            forcedTagChoices: { ...draft.tagChoices },
+            playerBrief: { ...(draft.playerBrief || {}) },
+          });
           startedGenerating = true;
-          return { ok: true, status: 'generating' };
+          const forced = Object.keys(draft.tagChoices).length;
+          const total = (this.config.genesis.tagGroups || []).length;
+          return {
+            ok: true,
+            status: 'generating',
+            cityName: draft.cityName,
+            tagsForced: forced,
+            tagsRandom: Math.max(0, total - forced),
+            briefPreview: formatPlayerBrief(draft.playerBrief),
+          };
         },
       },
     ];
 
+    const history = (draft.messages || []).slice(-16).map((m) => ({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: m.content,
+    }));
+
+    const isFirst = history.length === 0;
+    const userContent = bootstrap || !String(text || '').trim()
+      ? '[Игрок только что открыл чат. Это первый контакт.]'
+      : text;
+
+    const extraSystem = [
+      'КАТАЛОГ ТЕГОВ (единственный допустимый; не выдумывай другие группы):',
+      formatTagCatalogForPrompt(this.config),
+      '',
+      isFirst
+        ? 'ПЕРВЫЙ КОНТАКТ: питч — игрок БОЖЕСТВО-покровитель, правитель будет НПС. Предложи описать характер острова свободно или пропустить теги.'
+        : [
+            `Черновик: теги=${JSON.stringify(draft.tagChoices)};`,
+            `brief=${JSON.stringify(draft.playerBrief || {})};`,
+            `имя=${draft.cityName || '—'} approved=${draft.cityNameApproved}`,
+          ].join(' '),
+    ].join('\n');
     const result = await this.runtime.run({
       agentId: 'onboarding',
-      userMessages: [{ role: 'user', content: text }],
+      userMessages: [...history, { role: 'user', content: userContent }],
       tools,
+      extraSystem,
+      log,
     });
 
     let reply = result.text;
     if (startedGenerating && !String(reply || '').trim()) {
-      reply =
-        'Хорошо. Поднимаю остров из облаков — обычно минута-две. Правитель напишет тебе сам, когда город будет готов.';
+      reply = `Отлично. Поднимаю остров «${draft.cityName}» — обычно минута-две. Правитель напишет сам.`;
     }
+
+    draft.messages = draft.messages || [];
+    if (!bootstrap || String(text || '').trim()) {
+      draft.messages.push({ role: 'user', content: text || userContent, at: new Date().toISOString() });
+    }
+    draft.messages.push({ role: 'assistant', content: reply, at: new Date().toISOString() });
+    if (draft.messages.length > 40) draft.messages = draft.messages.slice(-30);
+    draft.pitched = true;
+    await saveDraft();
+
+    log.info('onboarding.reply', {
+      generating: startedGenerating || this.isGenerating(userId),
+      replyPreview: truncate(reply, 400),
+      tools: (result.toolTrace || []).map((t) => ({
+        name: t.name,
+        ok: t.result?.ok !== false,
+        error: t.result?.error || t.result?.reason,
+      })),
+      setup: {
+        cityName: draft.cityName,
+        cityNameApproved: draft.cityNameApproved,
+        tagChoices: draft.tagChoices,
+      },
+    });
 
     return {
       reply,
@@ -306,11 +647,23 @@ export class GameApp {
       agent: 'onboarding',
       created: false,
       generating: startedGenerating || this.isGenerating(userId),
+      setup: {
+        cityName: draft.cityName,
+        cityNameApproved: draft.cityNameApproved,
+        tagChoices: draft.tagChoices,
+        playerBrief: draft.playerBrief,
+      },
       toolTrace: result.toolTrace,
     };
   }
 
-  async runRuler(domain, text, { channel }) {
+  async runRuler(domain, text, { channel, log: parentLog }) {
+    const log = (parentLog || getLogger()).child({
+      scope: 'ruler',
+      domainId: domain.id,
+      domainName: domain.name,
+    });
+    log.info('ruler.turn', { text: truncate(text, 400) });
     const character = domain.characters[0];
     const history = (character.dialogHistory || []).slice(-20).map((m) => ({
       role: m.role === 'assistant' ? 'assistant' : 'user',
@@ -321,7 +674,9 @@ export class GameApp {
       `Ты ${character.name}, ${character.title || 'правитель'} города «${domain.name}».`,
       character.description,
       this.config.world.cosmology || '',
-      'Не вставляй в ответ длинное описание города и не используй списки.',
+      'Форма: 1–3 абзаца прозы. Без списков, markdown, английских слов, сервисных «чем помочь».',
+      'Стройки/проекты: сначала declare_action с durationMonths, потом: намерение принято на N месяцев — НЕ «уже строим».',
+      'Факты лормастера перескажи своими словами.',
     ].join('\n');
 
     const result = await this.runtime.run({
@@ -332,11 +687,20 @@ export class GameApp {
         runtime: this.runtime,
       }),
       extraSystem,
+      log,
     });
 
     const fresh = await this.storage.getDomain(domain.id);
     await this.persistDialog(fresh, 'user', text);
     await this.persistDialog(fresh, 'assistant', result.text);
+
+    log.info('ruler.reply', {
+      replyPreview: truncate(result.text, 400),
+      tools: (result.toolTrace || []).map((t) => ({
+        name: t.name,
+        ok: t.result?.ok !== false,
+      })),
+    });
 
     return {
       reply: result.text,
@@ -366,7 +730,8 @@ export class GameApp {
           role: 'user',
           content: [
             `Прошёл месяц (${gameDate.label}). Ниже сухая хроника (не факты лормастера).`,
-            'Перескажи покровителю живой речью, без списков и markdown. От первого лица.',
+            'Перескажи покровителю живой речью, без списков, без markdown, без нумерации. От первого лица.',
+            'Только связная проза: имена и события вплетай в предложения, не колонкой.',
             'Не копируй формулировки дословно. Не упоминай статы и механики.',
             '',
             facts,

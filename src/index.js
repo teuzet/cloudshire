@@ -3,17 +3,22 @@ import { createWebServer } from './clients/web/server.js';
 import { startTelegramBot } from './clients/telegram/bot.js';
 import { startTickScheduler } from './scheduler/ticks.js';
 import { runWorldTick } from './game/tick.js';
+import { getLogger } from './log.js';
 
 async function main() {
-  const { config, storage, runtime, app } = await createAppContext();
+  const { config, storage, runtime, app, log } = await createAppContext();
 
   const web = createWebServer({ config, app, runtime, storage });
   const host = config.server.host || '127.0.0.1';
   const port = config.server.port || 3000;
 
   const server = web.listen(port, host, () => {
-    console.log(`[cloudshire] web http://${host}:${port}`);
-    console.log(`[cloudshire] storage=${storage.driver} world=${config.world.id}`);
+    log.info('server.listen', {
+      url: `http://${host}:${port}`,
+      storage: storage.driver,
+      world: config.world.id,
+      logFile: log.filePath,
+    });
   });
 
   const telegram = startTelegramBot({ config, app });
@@ -21,14 +26,18 @@ async function main() {
   const scheduler = startTickScheduler({
     config,
     onTick: async ({ reason }) => {
-      console.log(`[tick] starting (${reason})`);
+      const tickLog = getLogger().child({ scope: 'tick', reason });
+      tickLog.info('tick.start', { reason });
       const result = await runWorldTick({ config, runtime, storage, app });
-      console.log(`[tick] done tick=${result.world.tickIndex} domains=${result.results.length}`);
+      tickLog.info('tick.done', {
+        tickIndex: result.world.tickIndex,
+        domains: result.results.length,
+      });
     },
   });
 
   const shutdown = async () => {
-    console.log('\n[cloudshire] shutting down…');
+    log.info('session.shutdown');
     scheduler.stop();
     await telegram.stop?.();
     server.close();

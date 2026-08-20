@@ -50,22 +50,45 @@ function appendMessage(role, content, meta = '') {
 let historyLoadedFor = null;
 let activeDomainId = null;
 
-async function loadChronicle(domainId) {
+async function loadLorePanels(domainId) {
   if (!domainId) {
     $('chronicle').textContent = '—';
+    $('facts').textContent = '—';
     return;
   }
-  const data = await fetch(`/api/domains/${encodeURIComponent(domainId)}/chronicle`).then((r) => r.json());
+  const data = await fetch(`/api/domains/${encodeURIComponent(domainId)}/chronicle`).then((r) =>
+    r.json(),
+  );
+
   if (!data.entries?.length) {
     $('chronicle').textContent = 'записей пока нет';
-    return;
+  } else {
+    $('chronicle').textContent = data.entries
+      .map((e) => {
+        const imp = e.importance ? `{${e.importance}} ` : '';
+        let stats = '';
+        if (e.statChanges && typeof e.statChanges === 'object') {
+          const parts = Object.entries(e.statChanges).map(
+            ([k, v]) => `${k} ${v.from}→${v.to}`,
+          );
+          if (parts.length) stats = ` [${parts.join(', ')}] `;
+        }
+        return `${e.gameDateLabel || '?'} ${imp}${stats}${e.text}`;
+      })
+      .join('\n\n');
   }
-  $('chronicle').textContent = data.entries
-    .map((e) => {
-      const imp = e.importance ? `{${e.importance}} ` : '';
-      return `${e.gameDateLabel || '?'} ${imp}${e.text}`;
-    })
-    .join('\n\n');
+
+  if (!data.facts?.length) {
+    $('facts').textContent = 'фактов пока нет';
+  } else {
+    $('facts').textContent = data.facts
+      .map((f) => {
+        const who = f.author ? `(${f.author}) ` : '';
+        const date = f.gameDateLabel ? `${f.gameDateLabel} ` : '';
+        return `${date}${who}${f.text}`;
+      })
+      .join('\n\n');
+  }
 }
 
 async function refreshSlotsFromServer(slots) {
@@ -100,6 +123,7 @@ async function refresh({ loadHistory = false } = {}) {
     $('domain').textContent = 'нет домена — напиши проводнику «хочу начать игру»';
     $('pending').textContent = '—';
     $('chronicle').textContent = '—';
+    $('facts').textContent = '—';
     $('genesis').textContent = '—';
     $('milestones').textContent = '—';
     if (loadHistory || historyLoadedFor !== userId) {
@@ -137,9 +161,17 @@ async function refresh({ loadHistory = false } = {}) {
   $('genesis').textContent = domain.description || '—';
 
   const pending = (domain.state?.pendingActions || []).filter((a) => a.status === 'active');
-  $('pending').textContent = pending.length ? JSON.stringify(pending, null, 2) : 'пусто';
+  $('pending').textContent = pending.length
+    ? pending
+        .map((a) => {
+          const dur = a.durationMonths ?? '?';
+          const done = a.monthsDone ?? 0;
+          return `• ${a.summary} [${done}/${dur} мес.]\n  ${a.detail || ''}`;
+        })
+        .join('\n\n')
+    : 'пусто';
 
-  await loadChronicle(domain.id);
+  await loadLorePanels(domain.id);
 
   if (loadHistory || historyLoadedFor !== userId) {
     $('messages').innerHTML = '';
@@ -287,5 +319,20 @@ async function waitForDomain(userId) {
   const first = slots[0].userId;
   $('userId').value = first;
   renderSlotSelect(slots, first);
-  refresh({ loadHistory: true }).catch(console.error);
+  refresh({ loadHistory: true })
+    .then(async () => {
+      const userId = currentUserId();
+      const { domain } = await fetch(`/api/users/${encodeURIComponent(userId)}/domain`).then((r) =>
+        r.json(),
+      );
+      if (domain) return;
+      if ($('messages').children.length > 0) return;
+      const result = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, bootstrap: true }),
+      }).then((r) => r.json());
+      if (result.reply) appendMessage('assistant', result.reply, result.agent || 'onboarding');
+    })
+    .catch(console.error);
 })();

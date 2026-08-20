@@ -80,8 +80,10 @@ export function createLoreFact({
   tick,
   author = 'system',
   importance = null,
+  relatedPendingId = null,
+  statChanges = null,
 }) {
-  return {
+  const fact = {
     id,
     text,
     tags,
@@ -91,6 +93,9 @@ export function createLoreFact({
     importance,
     createdAt: new Date().toISOString(),
   };
+  if (relatedPendingId) fact.relatedPendingId = relatedPendingId;
+  if (statChanges && Object.keys(statChanges).length) fact.statChanges = statChanges;
+  return fact;
 }
 
 export function loreToPromptText(lore = [], { excludeTags = [] } = {}) {
@@ -105,9 +110,23 @@ export function loreToPromptText(lore = [], { excludeTags = [] } = {}) {
       const date = f.gameDateLabel || 'без даты';
       const tags = (f.tags || []).length ? ` [${f.tags.join(', ')}]` : '';
       const imp = f.importance ? ` {${f.importance}}` : '';
-      return `#${n} (${date})${tags}${imp}: ${f.text}`;
+      let stats = '';
+      if (f.statChanges && typeof f.statChanges === 'object') {
+        const parts = Object.entries(f.statChanges).map(
+          ([k, v]) => `${k} ${v.from}→${v.to}`,
+        );
+        if (parts.length) stats = ` «статы: ${parts.join(', ')}»`;
+      }
+      return `#${n} (${date})${tags}${imp}${stats}: ${f.text}`;
     })
     .join('\n');
+}
+
+/** Последние N записей хроники (для контекста резолвера). */
+export function recentChronicleText(lore = [], limit = 12) {
+  const chron = chronicleEntries(lore).slice(-limit);
+  if (!chron.length) return '(хроники ещё нет)';
+  return loreToPromptText(chron);
 }
 
 export function chronicleEntries(lore = []) {

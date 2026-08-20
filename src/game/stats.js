@@ -35,9 +35,12 @@ export function rollPopulation(config, rng = Math.random) {
   return Math.round(value / 100) * 100;
 }
 
-export function pickTags(config, rng = Math.random) {
-  return config.genesis.tagGroups.map((group) => {
-    const tag = group.tags[Math.floor(rng() * group.tags.length)];
+export function pickTags(config, rng = Math.random, forcedChoices = {}) {
+  return (config.genesis.tagGroups || []).map((group) => {
+    const forcedId = forcedChoices[group.id];
+    const tag =
+      (forcedId && group.tags.find((t) => t.id === forcedId)) ||
+      group.tags[Math.floor(rng() * group.tags.length)];
     return {
       groupId: group.id,
       groupName: group.name,
