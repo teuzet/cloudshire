@@ -25,7 +25,7 @@
 
 1. [railway.app](https://railway.app) → Login (лучше через GitHub).
 2. **New Project** → **Deploy from GitHub repo** → `teuzet/cloudshire`.
-3. Branch: **`release`** (релизы катим с этой ветки; `dev` — для разработки).
+3. Branch: **`main`** (релизы; разработка — в `dev`, потом merge в `main`).
 4. Railway подхватит Node (engines >= 20) и `npm start` → `node src/index.js`.
 5. В сервисе: **Settings** → **Networking** → **Generate Domain** (публичный HTTPS URL админки).
 
