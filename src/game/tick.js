@@ -5,18 +5,25 @@ import {
   recentChronicleText,
   advanceGameDate,
   filterChronicleForDomain,
+  normalizeDomain,
 } from './models.js';
-import { formatStatsForPrompt } from './stats.js';
+import { formatStatsForPrompt, statDeltaLimits, applyStatDeltas } from './stats.js';
 import {
   processConfluxApproachingPhase,
   advanceDockedConfluxes,
 } from './conflux.js';
 import { resolveConfluxTick } from './confluxResolve.js';
+import {
+  normalizePlotlines,
+  heatPlotlines,
+  rollBreakthroughs,
+  clearBreakthroughFlags,
+  formatPlotlinesForPrompt,
+  formatBreakthroughMandate,
+  plotlinesConfig,
+} from './plotlines.js';
+import { runDirector, runConfluxDirector } from './director.js';
 import { getLogger } from '../log.js';
-
-function clampStat(n) {
-  return Math.max(0, Math.min(100, Math.round(n)));
-}
 
 function clampPopulation(n, config) {
   const min = 1000;
@@ -29,8 +36,8 @@ function pickEventCount(config, rng = Math.random) {
   return min + Math.floor(rng() * (max - min + 1));
 }
 
-function maxStatDelta(config) {
-  return Math.abs(config.tick?.maxStatDeltaPerEvent ?? 5);
+function typicalStatDelta(config) {
+  return statDeltaLimits(config).typicalMax;
 }
 
 function normalizePending(action) {
@@ -46,27 +53,6 @@ function normalizePending(action) {
   return action;
 }
 
-/**
- * Apply per-event deltas (each key capped to ±maxDelta). Returns map of { from, to, delta }.
- */
-function applyStatDeltas(stats, deltas, maxDelta) {
-  const changes = {};
-  for (const [key, raw] of Object.entries(deltas || {})) {
-    if (!(key in stats)) continue;
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n === 0) continue;
-    const delta = Math.max(-maxDelta, Math.min(maxDelta, Math.round(n)));
-    if (delta === 0) continue;
-    const from = stats[key];
-    const to = clampStat(from + delta);
-    const applied = to - from;
-    if (applied === 0) continue;
-    stats[key] = to;
-    changes[key] = { from, to, delta: applied };
-  }
-  return changes;
-}
-
 function descriptionBrief(domain, max = 2500) {
   const text = String(domain.description || '').trim();
   if (!text) {
@@ -79,9 +65,18 @@ function descriptionBrief(domain, max = 2500) {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
-export async function resolveDomainTick({ config, runtime, storage, domain, world }) {
+export async function resolveDomainTick({
+  config,
+  runtime,
+  storage,
+  domain,
+  world,
+  breakthroughs = [],
+}) {
   const log = getLogger().child({ scope: 'resolver', domainId: domain.id, name: domain.name });
   const working = structuredClone(domain);
+  normalizeDomain(working);
+  normalizePlotlines(working);
   if (typeof working.population !== 'number') working.population = config.genesis.population.min;
   const chronicleAdds = [];
   const advancedIds = new Set();
@@ -89,7 +84,11 @@ export async function resolveDomainTick({ config, runtime, storage, domain, worl
   const activePending = (working.state.pendingActions || [])
     .filter((a) => a.status === 'active')
     .map(normalizePending);
-  const deltaCap = maxStatDelta(config);
+  const deltaTypical = typicalStatDelta(config);
+  const breakthroughList =
+    breakthroughs.length > 0
+      ? breakthroughs
+      : (working.plotlines || []).filter((p) => p.breakthroughThisTick);
 
   if (!working.state) working.state = { events: [], modifiers: [], pendingActions: [] };
   if (!Array.isArray(working.state.modifiers)) working.state.modifiers = [];
@@ -98,7 +97,7 @@ export async function resolveDomainTick({ config, runtime, storage, domain, worl
   const tools = [
     {
       name: 'read_context',
-      description: 'Контекст домена: космология, описание, state, статы, pending, недавняя хроника',
+      description: 'Контекст домена: космология, описание, state, статы, pending, плотлайны, недавняя хроника',
       parameters: { type: 'object', properties: {} },
       handler: async () => ({
         ok: true,
@@ -114,20 +113,28 @@ export async function resolveDomainTick({ config, runtime, storage, domain, worl
         stateEvents: working.state.events,
         stateModifiers: working.state.modifiers,
         pendingActionsPriority: activePending,
+        plotlines: formatPlotlinesForPrompt(working),
+        breakthroughsThisTick: breakthroughList.map((p) => ({
+          id: p.id,
+          title: p.title,
+          summary: p.summary,
+        })),
         recentChronicle: recentChronicleText(working.lore, 14),
         fullLore: loreToPromptText(working.lore),
         rules: {
-          maxStatDeltaPerEvent: deltaCap,
+          typicalStatDelta: deltaTypical,
           note:
-            'Статы через statDeltas в add_chronicle. Pending: chronicle + advance_pending или cancel_pending. ' +
-            'Важные постоянные итоги → upsert_modifier; мелочи только в хронике. Будь смелым, не статус-кво.',
+            `Статы через statDeltas: обычно ±1…${deltaTypical}; при катастрофе/триумфе — любая величина ` +
+            '(напр. разорение → prosperity почти к 0). Итог клипится 0–100. ' +
+            'Pending: chronicle + advance_pending или cancel_pending. ' +
+            'ПРОРЫВЫ плотлайнов — сильный сдвиг ПЕРВЫМИ. Важные постоянные итоги → upsert_modifier. Будь смелым.',
         },
       }),
     },
     {
       name: 'add_chronicle',
       description:
-        'Запись хроники месяца. Опционально statDeltas (например {faith: 3, stability: -2}), каждый ≤ ±cap. Сначала pending.',
+        `Запись хроники месяца. Опционально statDeltas (напр. {faith: 3} или {prosperity: -70} при разорении). Обычно ≤±${deltaTypical}. Сначала pending.`,
       parameters: {
         type: 'object',
         required: ['text', 'importance'],
@@ -141,12 +148,12 @@ export async function resolveDomainTick({ config, runtime, storage, domain, worl
           statDeltas: {
             type: 'object',
             additionalProperties: { type: 'number' },
-            description: `Дельты статов, каждый ключ в [−${deltaCap}, +${deltaCap}]`,
+            description: `Дельты статов; типично ±${deltaTypical}, при катастрофе — сколько нужно (итог 0–100)`,
           },
         },
       },
       handler: async ({ text, importance, relatedPendingId, statDeltas }) => {
-        const statChanges = applyStatDeltas(working.stats, statDeltas, deltaCap);
+        const statChanges = applyStatDeltas(working.stats, statDeltas);
         const fact = createLoreFact({
           id: newId('lore'),
           text,
@@ -386,21 +393,27 @@ export async function resolveDomainTick({ config, runtime, storage, domain, worl
         .join('\n')
     : '(нет активных pending)';
 
+  const breakthroughBlock = formatBreakthroughMandate(breakthroughList);
+
   const userPrompt = [
     `Резольв месяца для города «${working.name}» (${world.gameDate.label}).`,
-    'Сначала read_context. Учти описание, state и недавнюю хронику.',
+    'Сначала read_context. Учти описание, state, плотлайны и недавнюю хронику.',
     '',
+    breakthroughBlock,
+    breakthroughBlock ? '' : null,
     'ПРИОРИТЕТ — для КАЖДОГО active pending: add_chronicle (relatedPendingId) + advance_pending',
     'ИЛИ cancel_pending, если дело сорвано/разрушено (с хроникой о причине).',
     pendingBlock,
     '',
     `Затем другие события. Всего записей хроники около ${eventTarget} (включая прогресс pending).`,
-    `Статы — только statDeltas в add_chronicle, каждый ключ ≤ ±${deltaCap} за запись.`,
+    `Статы — только statDeltas в add_chronicle: обычно ≤±${deltaTypical}; при катастрофе — обвал/взлёт без потолка (итог 0–100).`,
     'State: временные процессы → set_state_events; важные постоянные итоги → upsert_modifier; мелочи — только хроника.',
     'Будь смелым: избегай стагнации и «всё спокойно». Месяц должен сдвинуть город.',
     'Не завершай многомесячную стройку за один тик без сильной причины.',
     'Интересные исходы; не сглаживай жёсткие приказы. Текст: OK.',
-  ].join('\n');
+  ]
+    .filter((line) => line != null)
+    .join('\n');
 
   await runtime.run({
     agentId: 'resolver',
@@ -503,12 +516,31 @@ export async function runWorldTick({ config, runtime, storage, app }) {
   const handled = new Set();
   const confluxNotes = [...(confluxPhase.notes || [])];
 
-  // Docked pairs: resolve first, then undock (so news can include parting), then narrate
+  // Docked pairs: heat/roll → resolve → undock → director → narrate
   const pairBatches = [];
+  const plotCfg = plotlinesConfig(config);
   for (const conflux of confluxPhase.dockedConfluxes || []) {
     const preludeAddsByDomain = {};
+    const breakthroughsByDomain = {};
     for (const id of conflux.domainIds || []) {
       preludeAddsByDomain[id] = confluxPhase.chronicleAddsByDomain.get(id) || [];
+      const d = await storage.getDomain(id);
+      if (!d) continue;
+      normalizeDomain(d);
+      if (plotCfg.enabled) {
+        heatPlotlines(d, plotCfg.heatPerTick);
+        breakthroughsByDomain[id] = rollBreakthroughs(d);
+        getLogger().info('plotlines.roll', {
+          domainId: id,
+          name: d.name,
+          heat: plotCfg.heatPerTick,
+          breakthroughs: breakthroughsByDomain[id].map((p) => p.title),
+          board: formatPlotlinesForPrompt(d),
+        });
+      } else {
+        breakthroughsByDomain[id] = [];
+      }
+      await storage.saveDomain(d);
     }
 
     const resolved = await resolveConfluxTick({
@@ -518,6 +550,7 @@ export async function runWorldTick({ config, runtime, storage, app }) {
       conflux,
       world,
       preludeAddsByDomain,
+      breakthroughsByDomain,
     });
     pairBatches.push({ conflux, resolved });
   }
@@ -529,13 +562,30 @@ export async function runWorldTick({ config, runtime, storage, app }) {
   confluxNotes.push(...(advanced.notes || []));
 
   for (const { conflux, resolved } of pairBatches) {
+    const chronicleByDomain = {};
     for (const domain of resolved.domains) {
       handled.add(domain.id);
+      chronicleByDomain[domain.id] = resolved.newsChronicleByDomain[domain.id] || [];
+    }
+
+    if (plotCfg.enabled) {
+      await runConfluxDirector({
+        config,
+        runtime,
+        domains: resolved.domains,
+        world,
+        chronicleByDomain,
+        conflux,
+      });
+    }
+
+    for (const domain of resolved.domains) {
+      clearBreakthroughFlags(domain, world.tickIndex);
+      await storage.saveDomain(domain);
+
+      const newsBase = chronicleByDomain[domain.id] || [];
       const undockAdds = advanced.undockAddsByDomain?.get(domain.id) || [];
-      const newsAdds = filterChronicleForDomain(
-        [...(resolved.newsChronicleByDomain[domain.id] || []), ...undockAdds],
-        domain.id,
-      );
+      const newsAdds = filterChronicleForDomain([...newsBase, ...undockAdds], domain.id);
       const partnerId = (conflux.domainIds || []).find((id) => id !== domain.id);
       const partnerName =
         resolved.domains.find((d) => d.id === partnerId)?.name || null;
@@ -558,6 +608,11 @@ export async function runWorldTick({ config, runtime, storage, app }) {
         inConfluxDocked: undockAdds.length === 0,
         confluxEnded: undockAdds.length > 0,
         confluxId: conflux.id,
+        plotlines: (domain.plotlines || []).map((p) => ({
+          id: p.id,
+          title: p.title,
+          temperature: p.temperature,
+        })),
         news,
         statChanges: newsAdds
           .filter((c) => c.statChanges)
@@ -574,13 +629,40 @@ export async function runWorldTick({ config, runtime, storage, app }) {
       continue;
     }
 
+    normalizeDomain(domain);
+    let breakthroughs = [];
+    if (plotCfg.enabled) {
+      heatPlotlines(domain, plotCfg.heatPerTick);
+      breakthroughs = rollBreakthroughs(domain);
+      getLogger().info('plotlines.roll', {
+        domainId: domain.id,
+        name: domain.name,
+        heat: plotCfg.heatPerTick,
+        breakthroughs: breakthroughs.map((p) => p.title),
+        board: formatPlotlinesForPrompt(domain),
+      });
+    }
+
     const resolved = await resolveDomainTick({
       config,
       runtime,
       storage,
       domain,
       world,
+      breakthroughs,
     });
+
+    if (plotCfg.enabled) {
+      await runDirector({
+        config,
+        runtime,
+        domain: resolved.domain,
+        world,
+        chronicleAdds: resolved.chronicleAdds,
+      });
+    }
+    clearBreakthroughFlags(resolved.domain, world.tickIndex);
+    await storage.saveDomain(resolved.domain);
 
     const prelude = confluxPhase.chronicleAddsByDomain.get(domain.id) || [];
     const newsAdds = filterChronicleForDomain(
@@ -601,6 +683,11 @@ export async function runWorldTick({ config, runtime, storage, app }) {
       chronicleCount: newsAdds.length,
       status: resolved.domain.status,
       inConfluxDocked: false,
+      plotlines: (resolved.domain.plotlines || []).map((p) => ({
+        id: p.id,
+        title: p.title,
+        temperature: p.temperature,
+      })),
       news,
       statChanges: newsAdds
         .filter((c) => c.statChanges)

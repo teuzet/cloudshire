@@ -22,6 +22,16 @@ export function normalizeDomain(domain) {
     if (!('patronName' in domain.state)) domain.state.patronName = null;
   }
   if (!Array.isArray(domain.tags)) domain.tags = [];
+  if (!Array.isArray(domain.plotlines)) domain.plotlines = [];
+  if (Array.isArray(domain.characters)) {
+    for (const ch of domain.characters) {
+      if (!ch || typeof ch !== 'object') continue;
+      if (!Number.isFinite(Number(ch.loyalty))) ch.loyalty = 50;
+      else ch.loyalty = Math.max(0, Math.min(100, Math.round(Number(ch.loyalty))));
+      if (!Number.isFinite(Number(ch.terror))) ch.terror = 50;
+      else ch.terror = Math.max(0, Math.min(100, Math.round(Number(ch.terror))));
+    }
+  }
   return domain;
 }
 
@@ -84,6 +94,7 @@ export function createDomainRecord({
     state: emptyState(),
     characters: [character],
     lore,
+    plotlines: [],
     status: 'playing',
     lastTickAt: null,
     createdAt: now,
@@ -100,6 +111,10 @@ export function createCharacter({ id, name, description, role = 'ruler', title =
     role,
     portrait: null,
     dialogHistory: [],
+    /** Преданность покровителю 0–100 */
+    loyalty: 50,
+    /** Священный ужас / благоговение перед покровителем 0–100 */
+    terror: 50,
   };
 }
 

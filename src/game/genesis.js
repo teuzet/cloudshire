@@ -603,6 +603,12 @@ export function domainSummary(domain) {
         }
       : null,
     pendingCount: (domain.state?.pendingActions || []).filter((a) => a.status === 'active').length,
+    plotlineCount: (domain.plotlines || []).length,
+    plotlines: (domain.plotlines || []).map((p) => ({
+      id: p.id,
+      title: p.title,
+      temperature: p.temperature,
+    })),
     loreCount: domain.lore?.length || 0,
     chronicleCount: (domain.lore || []).filter((f) => (f.tags || []).includes('chronicle')).length,
   };

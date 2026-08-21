@@ -105,43 +105,110 @@ function nearestScaleKey(value, scale) {
   return best;
 }
 
+/** Ближайшая нижняя (или равная) ступень шкалы. */
+function floorScaleKey(value, scale) {
+  const keys = Object.keys(scale)
+    .map(Number)
+    .sort((a, b) => a - b);
+  if (!keys.length) return 0;
+  let key = keys[0];
+  for (const k of keys) {
+    if (k <= value) key = k;
+  }
+  return key;
+}
+
+const DEFAULT_EPITHETS = {
+  0: 'ужасающе',
+  12: 'плачевно',
+  25: 'скудно',
+  37: 'скромно',
+  50: 'обычно',
+  62: 'заметно',
+  75: 'сильно',
+  87: 'блистательно',
+  100: 'божественно',
+};
+
+export function getStatEpithetScale(config) {
+  const raw = config?.statEpithets;
+  if (raw && typeof raw === 'object' && Object.keys(raw).length) return raw;
+  return DEFAULT_EPITHETS;
+}
+
+/** Эпитет 0–100: ужасающе … божественно. */
+export function statEpithet(value, config) {
+  const v = Number.isFinite(Number(value)) ? Number(value) : 50;
+  const scale = getStatEpithetScale(config);
+  const key = floorScaleKey(v, scale);
+  return scale[key] || scale[String(key)] || 'обычно';
+}
+
+export function formatStatValue(value, config) {
+  const v = Number.isFinite(Number(value)) ? Math.round(Number(value)) : 50;
+  return `${v} (${statEpithet(v, config)})`;
+}
+
+export function statDeltaLimits(config) {
+  const typical = Math.abs(config?.tick?.typicalStatDelta ?? 5);
+  return { typicalMax: typical };
+}
+
+/**
+ * Применить дельты статов. Без потолка на величину дельты — итог клипится в 0–100.
+ * @returns {{ [key: string]: { from: number, to: number, delta: number } }}
+ */
+export function applyStatDeltas(stats, deltas) {
+  const changes = {};
+  if (!stats || typeof stats !== 'object') return changes;
+  for (const [key, raw] of Object.entries(deltas || {})) {
+    if (!(key in stats)) continue;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n === 0) continue;
+    const delta = Math.round(n);
+    if (delta === 0) continue;
+    const from = Number(stats[key]) || 0;
+    const to = Math.max(0, Math.min(100, Math.round(from + delta)));
+    const applied = to - from;
+    if (applied === 0) continue;
+    stats[key] = to;
+    changes[key] = { from, to, delta: applied };
+  }
+  return changes;
+}
+
+/**
+ * Статы для агентов со стейтом: число + эпитет + about + ориентир шкалы.
+ */
 export function formatStatsForPrompt(stats, config) {
-  return config.stats
+  return (config.stats || [])
     .map((def) => {
-      const value = stats[def.id];
+      const value = Number(stats?.[def.id]);
+      const v = Number.isFinite(value) ? value : 50;
       const scale = def.scale || {};
-      const key = nearestScaleKey(value, scale);
+      const key = nearestScaleKey(v, scale);
       const hint = scale[key] || scale[String(key)] || '';
-      return `${def.name} (${def.id}): ${value}/100 — ориентир: ${hint}`;
+      const about = def.about ? ` ${def.about}` : '';
+      const orient = hint ? ` Ориентир: ${hint}` : '';
+      return `${def.name} (${def.id}): ${formatStatValue(v, config)}.${about}${orient}`;
     })
     .join('\n');
 }
 
 /**
- * Качественная картина статов для правителя: без чисел, с тоном по шкале.
- * Берём ориентир с ближайшей нижней ступени шкалы (33 → ступень 25 «скудная жизнь»).
+ * Качественная картина для правителя: без чисел, эпитет + about + ориентир.
  */
 export function qualitativeStatsBrief(stats, config) {
   return (config.stats || [])
     .map((def) => {
       const value = Number(stats?.[def.id]);
       const v = Number.isFinite(value) ? value : 50;
+      const epithet = statEpithet(v, config);
       const scale = def.scale || {};
-      const keys = Object.keys(scale)
-        .map(Number)
-        .sort((a, b) => a - b);
-      let key = keys[0] ?? 0;
-      for (const k of keys) {
-        if (k <= v) key = k;
-      }
+      const key = floorScaleKey(v, scale);
       const hint = scale[key] || scale[String(key)] || 'неясно';
-      let tone = 'средний';
-      if (v < 30) tone = 'плохо / низко';
-      else if (v < 42) tone = 'скорее слабо';
-      else if (v < 58) tone = 'обычно';
-      else if (v < 72) tone = 'скорее сильно';
-      else tone = 'хорошо / высоко';
-      return `- ${def.name}: ${tone}. Ориентир: ${hint}`;
+      const about = def.about ? ` ${def.about}` : '';
+      return `- ${def.name} (${epithet}).${about} Ориентир: ${hint}`;
     })
     .join('\n');
 }
@@ -167,4 +234,38 @@ export function isForbiddenDomainName(name) {
   const n = String(name || '').toLowerCase().replace(/\s+/g, '');
   const banned = ['cloudshire', 'облачныйшир', 'cloudshir', 'клаудшир'];
   return banned.some((b) => n.includes(b));
+}
+
+/** Лояльность / ужас правителя к покровителю. */
+export function formatRulerAttitudes(character, config) {
+  normalizeRulerAttitudes(character);
+  const loy = formatStatValue(character.loyalty, config);
+  const ter = formatStatValue(character.terror, config);
+  return [
+    `Лояльность: ${loy} — преданность и готовность служить добровольно.`,
+    `Ужас: ${ter} — священный страх / благоговение перед покровителем.`,
+    'Высокое значение ЛЮБОГО повышает шанс сотрудничества (особенно при должном тоне покровителя).',
+    'Меняй adjust_loyalty / adjust_terror по ходу разговора (милость, угроза, унижение, чудо…).',
+  ].join('\n');
+}
+
+export function normalizeRulerAttitudes(character) {
+  if (!character || typeof character !== 'object') return character;
+  if (!Number.isFinite(Number(character.loyalty))) character.loyalty = 50;
+  else character.loyalty = clamp(character.loyalty, 0, 100);
+  if (!Number.isFinite(Number(character.terror))) character.terror = 50;
+  else character.terror = clamp(character.terror, 0, 100);
+  return character;
+}
+
+export function adjustAttitude(character, field, delta, { maxStep = 25 } = {}) {
+  normalizeRulerAttitudes(character);
+  if (field !== 'loyalty' && field !== 'terror') {
+    return { ok: false, error: 'field must be loyalty|terror' };
+  }
+  const d = Math.max(-maxStep, Math.min(maxStep, Math.round(Number(delta) || 0)));
+  if (d === 0) return { ok: false, error: 'delta=0' };
+  const from = character[field];
+  character[field] = clamp(from + d, 0, 100);
+  return { ok: true, field, from, to: character[field], delta: character[field] - from };
 }

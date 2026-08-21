@@ -221,6 +221,7 @@ async function refresh({ loadHistory = false } = {}) {
     activeDomainId = null;
     $('domain').textContent = 'нет домена — напиши проводнику «хочу начать игру»';
     $('pending').textContent = '—';
+    $('plotlines').textContent = '—';
     $('chronicle').textContent = '—';
     $('facts').textContent = '—';
     $('genesis').textContent = '—';
@@ -245,6 +246,8 @@ async function refresh({ loadHistory = false } = {}) {
             name: domain.characters[0].name,
             title: domain.characters[0].title,
             role: domain.characters[0].role,
+            loyalty: domain.characters[0].loyalty ?? 50,
+            terror: domain.characters[0].terror ?? 50,
           }
         : null,
       stateEvents: domain.state?.events,
@@ -267,6 +270,17 @@ async function refresh({ loadHistory = false } = {}) {
           const dur = a.durationMonths ?? '?';
           const done = a.monthsDone ?? 0;
           return `• ${a.summary} [${done}/${dur} мес.]\n  ${a.detail || ''}`;
+        })
+        .join('\n\n')
+    : 'пусто';
+
+  const plots = domain.plotlines || [];
+  $('plotlines').textContent = plots.length
+    ? plots
+        .map((p) => {
+          const bt = p.breakthroughThisTick ? ' ★ПРОРЫВ' : '';
+          const sum = p.summary ? `\n  ${p.summary}` : '';
+          return `• T=${p.temperature}${bt} «${p.title}» [${p.id}]${sum}`;
         })
         .join('\n\n')
     : 'пусто';

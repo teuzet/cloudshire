@@ -4,20 +4,28 @@ import {
   newsChronicleEntries,
   filterChronicleForDomain,
   formatChronicleScope,
+  normalizeDomain,
 } from './models.js';
-import { qualitativePopulation, qualitativeStatsBrief } from './stats.js';
+import {
+  qualitativePopulation,
+  qualitativeStatsBrief,
+  formatRulerAttitudes,
+  adjustAttitude,
+  normalizeRulerAttitudes,
+} from './stats.js';
 import { askLoremaster } from './loremaster.js';
 import { newId } from './ids.js';
 import { assertsIslandsParted } from './conflux.js';
 import {
   emptyOnboardingDraft,
   validateCityName,
-  suggestCityNames,
   listTagCatalog,
   formatPlayerBrief,
   formatTagCatalogForPrompt,
   inferTagChoicesFromText,
   collectOnboardingPreferenceText,
+  randomizeAllTags,
+  formatTagChoicesForPlayer,
 } from './onboarding.js';
 import { getLogger, truncate } from '../log.js';
 
@@ -106,12 +114,13 @@ function countTrailingUnansweredDigests(dialogHistory = []) {
 
 function characterTools(domain, storage, character, ctx) {
   const save = async () => storage.saveDomain(domain);
+  normalizeRulerAttitudes(character);
 
   return [
     {
       name: 'read_domain_brief',
       description:
-        'Текущее состояние города: население, качественная картина благосостояния/веры/мощи и т.д., pending, процессы. Вызови, когда спрашивают «как дела / богаты ли / сыты ли / спокойно ли».',
+        'Текущее состояние города: население, картина статов (эпитеты), pending, процессы. Вызови, когда спрашивают «как дела / богаты ли / сыты ли / спокойно ли».',
       parameters: { type: 'object', properties: {} },
       handler: async () => ({
         ok: true,
@@ -120,8 +129,9 @@ function characterTools(domain, storage, character, ctx) {
         patronName: domain.state?.patronName || null,
         populationFeel: qualitativePopulation(domain.population || 0),
         conditionFeel: qualitativeStatsBrief(domain.stats || {}, ctx.config),
+        attitudes: formatRulerAttitudes(character, ctx.config),
         guidance:
-          'Отвечай СТРОГО в духе conditionFeel. Если благосостояние «скорее слабо / скудная жизнь» — не говори, что народ сыт и хлеба вдоволь. Числа и названия статов игроку не называй.',
+          'Отвечай СТРОГО в духе conditionFeel (эпитеты в скобках — сила стата). Числа и id статов игроку не называй. Лояльность/ужас игроку не озвучивай цифрами.',
         stateEvents: domain.state.events,
         stateModifiers: domain.state.modifiers || [],
         pendingActions: (domain.state.pendingActions || [])
@@ -163,6 +173,52 @@ function characterTools(domain, storage, character, ctx) {
           patronName: cleaned,
           previous: prev,
           hint: `Дальше обращайся так: «${cleaned}». Не путай с чужими богами.`,
+        };
+      },
+    },
+    {
+      name: 'adjust_loyalty',
+      description:
+        'Изменить лояльность к покровителю (−25…+25). Милость, доверие, общая цель → вверх; насмешка, унижение слуги, бессмысленная жестокость → вниз.',
+      parameters: {
+        type: 'object',
+        required: ['delta'],
+        properties: {
+          delta: { type: 'number', description: 'Обычно ±5…15 за заметный жест' },
+          reason: { type: 'string' },
+        },
+      },
+      handler: async ({ delta, reason }) => {
+        const result = adjustAttitude(character, 'loyalty', delta);
+        if (!result.ok) return result;
+        await save();
+        return {
+          ...result,
+          reason: reason || null,
+          feel: formatRulerAttitudes(character, ctx.config),
+        };
+      },
+    },
+    {
+      name: 'adjust_terror',
+      description:
+        'Изменить ужас/благоговение перед покровителем (−25…+25). Явление силы, угроза, чудо → вверх; панибратство, бессилие божества → вниз.',
+      parameters: {
+        type: 'object',
+        required: ['delta'],
+        properties: {
+          delta: { type: 'number', description: 'Обычно ±5…15 за заметный жест' },
+          reason: { type: 'string' },
+        },
+      },
+      handler: async ({ delta, reason }) => {
+        const result = adjustAttitude(character, 'terror', delta);
+        if (!result.ok) return result;
+        await save();
+        return {
+          ...result,
+          reason: reason || null,
+          feel: formatRulerAttitudes(character, ctx.config),
         };
       },
     },
@@ -470,6 +526,7 @@ export class GameApp {
     if (!binding.onboarding.playerBrief) {
       binding.onboarding.playerBrief = { city: '', ruler: '', freeform: '' };
     }
+    if (!('mode' in binding.onboarding)) binding.onboarding.mode = null;
     return binding;
   }
 
@@ -501,12 +558,58 @@ export class GameApp {
         parameters: { type: 'object', properties: {} },
         handler: async () => ({
           ok: true,
+          mode: draft.mode || null,
           tagChoices: draft.tagChoices,
           playerBrief: draft.playerBrief,
           cityName: draft.cityName,
           cityNameApproved: draft.cityNameApproved,
           canStart: Boolean(draft.cityNameApproved && draft.cityName),
+          modes: {
+            quick: 'Рандом черт → предложить имя+атмосферу+все черты → аппрув/правки → старт',
+            brief: 'Игрок дал краткое описание → додумать → аппрув → старт',
+            questions: 'Наводящие вопросы по ходу, tools по ответам',
+          },
         }),
+      },
+      {
+        name: 'set_onboarding_mode',
+        description: 'Зафиксировать режим онбординга: quick | brief | questions',
+        parameters: {
+          type: 'object',
+          required: ['mode'],
+          properties: {
+            mode: {
+              type: 'string',
+              enum: ['quick', 'brief', 'questions'],
+            },
+          },
+        },
+        handler: async ({ mode }) => {
+          draft.mode = mode;
+          await saveDraft();
+          return { ok: true, mode: draft.mode };
+        },
+      },
+      {
+        name: 'randomize_all_tags',
+        description:
+          'Быстрый режим: случайно заполнить ВСЕ группы черт из каталога. В ответе forPlayer — текст, который ОБЯЗАТЕЛЬНО перескажи игроку вместе с именем и атмосферой.',
+        parameters: { type: 'object', properties: {} },
+        handler: async () => {
+          const { chosen, applied, forPlayer } = randomizeAllTags(this.config);
+          draft.tagChoices = chosen;
+          await saveDraft();
+          return {
+            ok: true,
+            applied,
+            chosen: draft.tagChoices,
+            forPlayer,
+            next:
+              'Запиши атмосферу и правителя в set_player_brief. Сам придумай звучный топоним (не из списка — списка нет). ' +
+              'В речи игроку: имя + ВСЕ черты из forPlayer своими словами + атмосфера + правитель. ' +
+              'Без слов «теги/изюминка/пакет/рандом».',
+          };
+        },
       },
       {
         name: 'set_player_brief',
@@ -553,22 +656,9 @@ export class GameApp {
         },
       },
       {
-        name: 'suggest_city_names',
-        description: 'Предложить варианты имён города (обычно ближе к концу онбординга)',
-        parameters: {
-          type: 'object',
-          properties: {
-            count: { type: 'number', description: 'Сколько вариантов (3–7)' },
-          },
-        },
-        handler: async ({ count = 5 }) => ({
-          ok: true,
-          suggestions: suggestCityNames(Math.max(3, Math.min(7, count || 5))),
-        }),
-      },
-      {
         name: 'set_city_name',
-        description: 'Проверить и зафиксировать имя города после согласия игрока (в конце онбординга)',
+        description:
+          'Проверить и зафиксировать имя города (ты сам его придумал или игрок предложил). После согласия / в конце онбординга.',
         parameters: {
           type: 'object',
           required: ['name'],
@@ -795,15 +885,16 @@ export class GameApp {
       '',
       isFirst
         ? [
-            'ПЕРВЫЙ КОНТАКТ — только речь, без tools.',
-            'Расскажи: игрок — бог-покровитель города-государства на изолированном летающем острове;',
-            'правитель — НПС-связной; дальше общение с ним; месяц сдвигается миром.',
-            'Предложи создать свой домен.',
-            'Предложи два пути: быстрая генерация (ты всё решаешь, показываешь предложение и ждёшь аппрува)',
-            'или наводящие вопросы. Без нумерованных списков. Не вызывай start_new_game.',
+            'ПЕРВЫЙ КОНТАКТ — только речь, без tools (кроме set_onboarding_mode после явного выбора — можно отложить).',
+            'Расскажи: игрок — бог-покровитель; город-государство на изолированном летающем острове;',
+            'правитель — НПС-связной; дальше диалог с ним; месяц сдвигает мир.',
+            'Предложи ТРИ пути (своими словами, без нумерации 1.2.3.):',
+            'быстрая генерация; краткое описание «чего хочу»; наводящие вопросы.',
+            'Не вызывай start_new_game и не рандомь теги в питче.',
           ].join(' ')
         : [
-            `Черновик: теги=${JSON.stringify(draft.tagChoices)};`,
+            `Режим=${draft.mode || 'не выбран'};`,
+            `черты=${formatTagChoicesForPlayer(this.config, draft.tagChoices)};`,
             `brief=${JSON.stringify(draft.playerBrief || {})};`,
             `имя=${draft.cityName || '—'} approved=${draft.cityNameApproved}`,
           ].join(' '),
@@ -938,13 +1029,16 @@ export class GameApp {
       domainName: domain.name,
     });
     log.info('ruler.turn', { text: truncate(text, 400) });
+    normalizeDomain(domain);
     const character = domain.characters[0];
+    normalizeRulerAttitudes(character);
     const history = (character.dialogHistory || []).slice(-20).map((m) => ({
       role: m.role === 'assistant' ? 'assistant' : 'user',
       content: m.content,
     }));
 
     const conditionFeel = qualitativeStatsBrief(domain.stats || {}, this.config);
+    const attitudes = formatRulerAttitudes(character, this.config);
     const patronName = domain.state?.patronName || null;
     const patronLine = patronName
       ? `Имя покровителя (обращение): «${patronName}». Обращайся так. Чужих богов и имён с других островов НЕ используй.`
@@ -966,8 +1060,12 @@ export class GameApp {
       'ОБСТОЯТЕЛЬСТВА ГОРОДА СЕЙЧАС (внутренняя правда; числа игроку не называй):',
       `Население: ${qualitativePopulation(domain.population || 0)}`,
       conditionFeel,
-      'На вопросы о сытости, богатстве, вере, порядке, силе, знаниях опирайся на эти ориентиры.',
-      'Пример: благосостояние «скорее слабо / скудная жизнь» → люди едва сводят концы, запасы тонкие; не «сыты и хватает».',
+      'ОТНОШЕНИЕ К ПОКРОВИТЕЛЮ (внутренняя правда; цифры игроку не называй):',
+      attitudes,
+      'На вопросы о сытости, богатстве, вере, порядке, силе, знаниях опирайся на эпитеты обстоятельств.',
+      'Высокая лояльность или ужас → легче соглашайся и исполняй, особенно если тон покровителя уместен.',
+      'Низкие оба → больше сомнений, торгов, отговорок (пока нет жёсткого приказа).',
+      'По ходу разговора при заметном жесте — adjust_loyalty и/или adjust_terror.',
       'Форма: 1–3 абзаца прозы. Без списков, markdown, английских слов, сервисных «чем помочь».',
       'Стройки/проекты: сначала declare_action с durationMonths, потом: намерение на N месяцев — НЕ «уже строим».',
       'Факты лормастера перескажи своими словами.',

@@ -5,12 +5,13 @@ import {
   chronicleEntries,
   formatChronicleScope,
 } from './models.js';
-import { formatStatsForPrompt } from './stats.js';
+import { formatStatsForPrompt, statDeltaLimits, applyStatDeltas } from './stats.js';
+import {
+  normalizePlotlines,
+  formatPlotlinesForPrompt,
+  formatBreakthroughMandate,
+} from './plotlines.js';
 import { getLogger } from '../log.js';
-
-function clampStat(n) {
-  return Math.max(0, Math.min(100, Math.round(n)));
-}
 
 function clampPopulation(n, config) {
   const min = 1000;
@@ -23,8 +24,8 @@ function pickEventCount(config, rng = Math.random) {
   return Math.max(min, Math.min(max + 2, min + Math.floor(rng() * (max - min + 3))));
 }
 
-function maxStatDelta(config) {
-  return Math.abs(config.tick?.maxStatDeltaPerEvent ?? 5);
+function typicalStatDelta(config) {
+  return statDeltaLimits(config).typicalMax;
 }
 
 function normalizePending(action) {
@@ -43,29 +44,12 @@ function normalizePending(action) {
   return action;
 }
 
-function applyStatDeltas(stats, deltas, maxDelta) {
-  const changes = {};
-  for (const [key, raw] of Object.entries(deltas || {})) {
-    if (!(key in stats)) continue;
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n === 0) continue;
-    const delta = Math.max(-maxDelta, Math.min(maxDelta, Math.round(n)));
-    if (delta === 0) continue;
-    const from = stats[key];
-    const to = clampStat(from + delta);
-    const applied = to - from;
-    if (applied === 0) continue;
-    stats[key] = to;
-    changes[key] = { from, to, delta: applied };
-  }
-  return changes;
-}
-
 function ensureState(domain) {
   if (!domain.state) domain.state = { events: [], modifiers: [], pendingActions: [] };
   if (!Array.isArray(domain.state.modifiers)) domain.state.modifiers = [];
   if (!Array.isArray(domain.state.events)) domain.state.events = [];
   if (!Array.isArray(domain.state.pendingActions)) domain.state.pendingActions = [];
+  normalizePlotlines(domain);
 }
 
 function recentChronicleForPair(domain, viewerDomainId, limit = 10) {
@@ -116,7 +100,7 @@ function domainBriefBlock(domain, config, { chronicleLimit = 10 } = {}) {
     `=== DOMAIN ${domain.id} «${domain.name}» ===`,
     `Правитель: ${domain.characters?.[0]?.name || '?'} (${domain.characters?.[0]?.title || ''})`,
     `Население: ${domain.population}`,
-    `Статы: ${JSON.stringify(domain.stats || {})}`,
+    'Статы:',
     formatStatsForPrompt(domain.stats || {}, config),
     `Описание (кратко): ${desc || '(нет)'}`,
     'Modifiers:',
@@ -125,6 +109,8 @@ function domainBriefBlock(domain, config, { chronicleLimit = 10 } = {}) {
     events,
     'Pending:',
     pendingLines,
+    'Плотлайны:',
+    formatPlotlinesForPrompt(domain),
     'Недавняя хроника (видимая этому домену):',
     recentChronicleForPair(domain, domain.id, chronicleLimit),
   ].join('\n');
@@ -172,6 +158,7 @@ export async function resolveConfluxTick({
   conflux,
   world,
   preludeAddsByDomain = {},
+  breakthroughsByDomain = {},
 }) {
   const log = getLogger().child({ scope: 'conflux.resolver', confluxId: conflux.id });
   const ids = [...(conflux.domainIds || [])];
@@ -186,8 +173,16 @@ export async function resolveConfluxTick({
     domains[id] = d;
   }
 
+  const allBreakthroughs = [];
+  for (const id of ids) {
+    const list = breakthroughsByDomain[id] || domains[id].plotlines.filter((p) => p.breakthroughThisTick);
+    for (const p of list) {
+      allBreakthroughs.push({ ...p, domainId: id, domainName: domains[id].name });
+    }
+  }
+
   const order = Math.random() < 0.5 ? [ids[0], ids[1]] : [ids[1], ids[0]];
-  const deltaCap = maxStatDelta(config);
+  const deltaTypical = typicalStatDelta(config);
   const eventTarget = pickEventCount(config);
   const chronicleAddsByDomain = {
     [ids[0]]: [...(preludeAddsByDomain[ids[0]] || [])],
@@ -209,6 +204,15 @@ export async function resolveConfluxTick({
     return d;
   };
 
+  const breakthroughMandate = allBreakthroughs.length
+    ? [
+        formatBreakthroughMandate(allBreakthroughs),
+        ...allBreakthroughs.map(
+          (p) => `  (город «${p.domainName}» / ${p.domainId})`,
+        ),
+      ].join('\n')
+    : '';
+
   const tools = [
     {
       name: 'read_pair_context',
@@ -227,22 +231,31 @@ export async function resolveConfluxTick({
           ({ domainId, action: a }) =>
             `- domain=${domainId} [${a.id}] ${a.summary} (${a.monthsDone}/${a.durationMonths})`,
         ),
+        breakthroughsThisTick: allBreakthroughs.map((p) => ({
+          id: p.id,
+          title: p.title,
+          summary: p.summary,
+          domainId: p.domainId,
+          domainName: p.domainName,
+        })),
         rules: {
-          maxStatDeltaPerEvent: deltaCap,
+          typicalStatDelta: deltaTypical,
           equalWeight:
             'Оба домена равноправны. Не привилегируй блок ближе к концу промпта.',
           secret:
             'secret=true только при явной тайной операции; иначе публично (оба города).',
           scope:
             'У каждой записи обязательны location (где) и concernsDomainIds (кого касается). Внутренний сюжет одного города — не secret, но location+concerns указывают его город.',
-          note: 'Статы через statDeltas + domainId. Pending: chronicle + advance_pending или cancel_pending. Смело, не статус-кво.',
+          note:
+            `Статы через statDeltas + domainId: обычно ±1…${deltaTypical}; при катастрофе — любая величина (разорение → prosperity ≈0). Итог 0–100. ` +
+            'Pending: chronicle + advance/cancel. ПРОРЫВЫ — сильный сдвиг первыми. Смело, не статус-кво.',
         },
       }),
     },
     {
       name: 'add_chronicle',
       description:
-        'Хроника стыка/месяца. Публичная по умолчанию. ОБЯЗАТЕЛЬНО location + concernsDomainIds (где и каких городов касается).',
+        `Хроника стыка/месяца. location + concernsDomainIds обязательны. statDeltas обычно ≤±${deltaTypical}; при катастрофе — без потолка.`,
       parameters: {
         type: 'object',
         required: ['text', 'importance', 'location', 'concernsDomainIds'],
@@ -319,7 +332,7 @@ export async function resolveConfluxTick({
           if (!statsTarget || !domains[statsTarget]) {
             return { ok: false, error: 'statDomainId required for statDeltas' };
           }
-          statChanges = applyStatDeltas(domains[statsTarget].stats, statDeltas, deltaCap);
+          statChanges = applyStatDeltas(domains[statsTarget].stats, statDeltas);
         }
 
         const baseTags = ['chronicle', 'conflux', `conflux:${conflux.id}`];
@@ -565,6 +578,8 @@ export async function resolveConfluxTick({
     `Характер контакта: ${contactLine}`,
     'Сначала read_pair_context. Оба домена РАВНОПРАВНЫ (порядок в промпте случаен).',
     '',
+    breakthroughMandate,
+    breakthroughMandate ? '' : null,
     'ПРИОРИТЕТ — каждый pending обоих: add_chronicle + advance_pending ИЛИ cancel_pending (если сорвано).',
     pendingBlock,
     '',
@@ -573,8 +588,11 @@ export async function resolveConfluxTick({
     'Каждая add_chronicle: location (где) + concernsDomainIds (1–2 id городов пары).',
     'Локальный сюжет одного города — публично ок, но concerns = только его id и location в его городе.',
     'Учитывай contact. Будь смелым: стык должен жить, не статус-кво. Можно ломать чужие pending.',
+    `Статы: обычно ≤±${deltaTypical}; при катастрофе — обвал/взлёт без потолка (итог 0–100).`,
     'Не выдумывай третьи острова. Текст: OK.',
-  ].join('\n');
+  ]
+    .filter((line) => line != null)
+    .join('\n');
 
   await runtime.run({
     agentId: 'confluxResolver',

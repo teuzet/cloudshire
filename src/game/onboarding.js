@@ -37,27 +37,23 @@ const BANNED_SUBSTR = [
   'dick',
 ];
 
-const NAME_SUGGESTIONS = [
-  'Ветроград',
-  'Острокрыл',
-  'Туманск',
-  'Крутолом',
-  'Яснояр',
-  'Шипоград',
-  'Небокрай',
-  'Сребролом',
-  'Ирийск',
-  'Заоблачье',
-  'Камнепад',
-  'Лучезёрск',
-  'Буревск',
-  'Тихокрай',
-  'Златоуступ',
-  'Пеплоград',
-  'Росопад',
-  'Скитальск',
-  'Громолом',
-  'Белокрыл',
+/** Слова, от которых лучше уходить в именах (все острова и так летают / не вывески). */
+const NAME_CLICHE_SUBSTR = [
+  'облак',
+  'небо',
+  'летаю',
+  'остров',
+  'аэро',
+  'скай',
+  'cloud',
+  'шире',
+  'cloudshire',
+  'верстак',
+  'наковальн',
+  'базар',
+  'рынок',
+  'колодец',
+  'жернов',
 ];
 
 export function emptyOnboardingDraft() {
@@ -65,12 +61,14 @@ export function emptyOnboardingDraft() {
     messages: [],
     cityName: null,
     cityNameApproved: false,
-    tagChoices: {}, // groupId -> tagId
+    tagChoices: {}, // groupId -> tagId | freeform label
+    /** quick | brief | questions | null */
+    mode: null,
     /** Саммари пожеланий игрока для генезиса */
     playerBrief: {
-      city: '', // каким видит город/остров
-      ruler: '', // каким хочет правителя-связного
-      freeform: '', // прочее
+      city: '',
+      ruler: '',
+      freeform: '',
     },
     pitched: false,
   };
@@ -89,8 +87,8 @@ export function validateCityName(raw) {
   if (name.length < 2) {
     return { ok: false, reason: 'Слишком коротко.' };
   }
-  if (name.length > 32) {
-    return { ok: false, reason: 'Слишком длинно (до 32 символов).' };
+  if (name.length > 40) {
+    return { ok: false, reason: 'Слишком длинно (до 40 символов).' };
   }
   if (!/^[\p{L}\p{M}\d\s\-']+$/u.test(name)) {
     return { ok: false, reason: 'Только буквы, цифры, пробел, дефис.' };
@@ -114,16 +112,41 @@ export function validateCityName(raw) {
   if (['остров', 'небо', 'облако', 'земля', 'мир'].includes(lower)) {
     return { ok: false, reason: 'Слишком общее. Сделай имя конкретнее и характернее.' };
   }
+  for (const cliche of NAME_CLICHE_SUBSTR) {
+    if (lower.includes(cliche)) {
+      return {
+        ok: false,
+        reason:
+          'Имя слишком «про летающий остров/небо». Назови город по местным чертам (камень, торг, храм, руда…), не по полёту.',
+      };
+    }
+  }
   return { ok: true, name };
 }
 
-export function suggestCityNames(count = 5, rng = Math.random) {
-  const pool = [...NAME_SUGGESTIONS];
-  for (let i = pool.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(rng() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
+/** Случайно заполнить все группы тегов из каталога (перезаписывает текущие). */
+export function randomizeAllTags(config, rng = Math.random) {
+  const chosen = {};
+  const applied = [];
+  for (const group of config.genesis?.tagGroups || []) {
+    const tag = group.tags[Math.floor(rng() * group.tags.length)];
+    chosen[group.id] = tag.id;
+    applied.push({ groupId: group.id, group: group.name, tagId: tag.id, tag: tag.name });
   }
-  return pool.slice(0, Math.min(count, pool.length));
+  return { chosen, applied, forPlayer: formatTagChoicesForPlayer(config, chosen) };
+}
+
+/** Человекочитаемая сводка выбранных тегов для речи к игроку. */
+export function formatTagChoicesForPlayer(config, tagChoices = {}) {
+  const lines = [];
+  for (const group of config.genesis?.tagGroups || []) {
+    const raw = tagChoices[group.id];
+    if (raw == null || raw === '') continue;
+    const fromCatalog = group.tags.find((t) => t.id === raw);
+    const label = fromCatalog ? fromCatalog.name : String(raw);
+    lines.push(`${group.name}: ${label}`);
+  }
+  return lines.length ? lines.join('\n') : '(теги ещё не заданы)';
 }
 
 export function listTagCatalog(config) {
