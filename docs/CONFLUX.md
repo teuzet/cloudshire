@@ -1,11 +1,11 @@
 # План Conflux: хроника, факты, резолв
 
-Статус: **MVP реализован** (force create + approaching → contact → docked pair-resolve + secret + loremaster partner brief). Playtest-harness: [PLAYTEST_AGENT.md](PLAYTEST_AGENT.md).
+Статус: **MVP + мета-матчмейкинг** (авто 50/50 соло/docked, grace 6 мес, rematch в хронике, ГСЧ ширины прохода). Playtest-harness: [PLAYTEST_AGENT.md](PLAYTEST_AGENT.md).
 
 ## Что уже есть
 
 - Лор домена — `domain.lore[]` с тегами `chronicle` / `fact`; опционально `secret` / `secretForDomainId`.
-- Тик: `runWorldTick` → прелюдия/стык → **pair `resolveConfluxTick`** для `docked` → соло для остальных → advance duration.
+- Тик: `runWorldTick` → **matchmake** → прелюдия/стык → счётчики соло/docked → **pair `resolveConfluxTick`** для `docked` → соло для остальных → advance duration.
 - Космология запрещает агентам **придумывать** чужие острова; стыковка — только явный объект мира.
 - В `docs/PROJECT.md` § Conflux: временный объект, общий Resolver вместо двух одиночных.
 
@@ -44,10 +44,12 @@ stateDiagram-v2
 
 ## Поток тика
 
-1. `processConfluxApproachingPhase`: прелюдия / dock + `contact` (без advance duration).
-2. Для каждого `docked`: `resolveConfluxTick` (новости через `filterChronicleForDomain`).
-3. Соло для доменов вне docked-пары (включая `approaching`); прелюдия месяца входит в новости.
-4. `advanceDockedConfluxes`: `monthsDocked++`; при исчерпании → `ended` + chronicle.
+1. `maybeMatchmakeConfluxes`: пары по дефициту docked-доли (цель `targetDockedFraction`), возраст ≥ `minDomainAgeMonths`, prefer never-met; rematch → тег/фраза в хронике.
+2. `processConfluxApproachingPhase`: прелюдия / dock + `contact` (kind — системный ГСЧ по `contactWeights`; LLM только текст).
+3. `advanceConfluxLifetimeCounters`: docked-месяц → `confluxMonthsDocked`, иначе (соло + approaching) → `confluxMonthsSolo`.
+4. Для каждого `docked`: `resolveConfluxTick` (новости через `filterChronicleForDomain`).
+5. Соло для доменов вне docked-пары (включая `approaching`); прелюдия месяца входит в новости.
+6. `advanceDockedConfluxes`: `monthsDocked++`; при исчерпании → `ended` + chronicle.
 
 ## Секретные записи (фаза `docked`)
 
@@ -65,7 +67,16 @@ stateDiagram-v2
 - `approaching`: чужой остров — далёкий; partner brief нет.
 - `docked`: `contact` + `sharedLore` + урезанный partner brief; чужие `secret` не отдаются.
 
-## Матчмейкинг MVP
+## Матчмейкинг
+
+Авто (код, `tick.conflux` в `config/default.yaml`):
+
+- Цель: ~50% времени в `docked`, ~50% соло (**approaching считается соло**).
+- Grace: домен младше `minDomainAgeMonths` (6) не матчится.
+- Prefer пары, которые ещё не стыковались (`confluxPartners`); rematch помечается в хронике («повторный конфлюкс»).
+- `contact.kind`: `hairline` → `bridge` → `gap_jump` → `causeway` → `landmass` (ГСЧ).
+
+Ручной force (dev):
 
 ```bash
 POST /api/dev/conflux { domainIdA, domainIdB, etaMonths, durationMonths }

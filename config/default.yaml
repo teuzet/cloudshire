@@ -35,6 +35,28 @@ tick:
   typicalStatDelta: 5
   # Сколько длительных дел может идти параллельно (5-е и далее declare_process отклоняет программно).
   maxActiveProcesses: 4
+  # Conflux: матчмейкинг и геометрия стыка — только код (не LLM).
+  # Approaching считается соло для доли времени; docked — конфлюкс.
+  conflux:
+    enabled: true
+    targetDockedFraction: 0.5
+    minDomainAgeMonths: 6
+    preferNeverMet: true
+    rematchChronicle: true
+    maxNewPairsPerTick: 2
+    etaMonths:
+      min: 2
+      max: 4
+    durationMonths:
+      min: 2
+      max: 4
+    # Ширина прохода: ГСЧ выбирает kind, LLM только описывает.
+    contactWeights:
+      hairline: 1
+      bridge: 1.2
+      gap_jump: 1
+      causeway: 1
+      landmass: 0.9
   plotlines:
     enabled: true
     heatPerTick: 10

@@ -27,6 +27,12 @@ export function normalizeDomain(domain) {
   if (!Array.isArray(domain.plotlines)) domain.plotlines = [];
   if (typeof domain.chronicleDigest !== 'string') domain.chronicleDigest = domain.chronicleDigest || '';
   if (domain.chronicleDigestThroughTick == null) domain.chronicleDigestThroughTick = null;
+  if (!Number.isInteger(domain.createdTick)) domain.createdTick = 0;
+  if (!Number.isFinite(domain.confluxMonthsDocked)) domain.confluxMonthsDocked = 0;
+  if (!Number.isFinite(domain.confluxMonthsSolo)) domain.confluxMonthsSolo = 0;
+  if (!domain.confluxPartners || typeof domain.confluxPartners !== 'object') {
+    domain.confluxPartners = {};
+  }
   // pendingActions = длительные процессы; нормализация полей — в processes.normalizeDomainProcesses
   if (Array.isArray(domain.characters)) {
     for (const ch of domain.characters) {
@@ -94,6 +100,7 @@ export function createDomainRecord({
   tags = [],
   character,
   lore = [],
+  createdTick = 0,
 }) {
   const now = new Date().toISOString();
   return {
@@ -121,6 +128,12 @@ export function createDomainRecord({
     plotlines: [],
     status: 'playing',
     lastTickAt: null,
+    createdTick: Number.isInteger(createdTick) ? createdTick : 0,
+    /** Месяцы в фазе docked (доля «конфлюкса»); approaching считается соло. */
+    confluxMonthsDocked: 0,
+    confluxMonthsSolo: 0,
+    /** Сколько раз стыковались с другим domainId (после dock). */
+    confluxPartners: {},
     createdAt: now,
     updatedAt: now,
   };

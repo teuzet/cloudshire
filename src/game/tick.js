@@ -10,6 +10,8 @@ import { formatStatsForPrompt, statDeltaLimits, applyStatDeltas } from './stats.
 import {
   processConfluxApproachingPhase,
   advanceDockedConfluxes,
+  maybeMatchmakeConfluxes,
+  advanceConfluxLifetimeCounters,
 } from './conflux.js';
 import { resolveConfluxTick } from './confluxResolve.js';
 import {
@@ -573,17 +575,20 @@ export async function runWorldTick({ config, runtime, storage, app }) {
   advanceGameDate(world);
   await storage.saveWorld(world);
 
+  const matchmake = await maybeMatchmakeConfluxes({ config, storage, world });
   const confluxPhase = await processConfluxApproachingPhase({
     config,
     runtime,
     storage,
     world,
   });
+  // После стыка/прелюдии: docked = конфлюкс, approaching+solo = соло (~50/50 цель).
+  await advanceConfluxLifetimeCounters({ storage, world });
 
   const domains = await storage.listDomains();
   const results = [];
   const handled = new Set();
-  const confluxNotes = [...(confluxPhase.notes || [])];
+  const confluxNotes = [...(matchmake.notes || []), ...(confluxPhase.notes || [])];
 
   // Docked pairs: heat/roll → resolve → undock → director → narrate
   const pairBatches = [];
