@@ -48,23 +48,21 @@ function pendingLines(domain) {
 }
 
 const SOLO_GUIDANCE = [
-  'Задача — сделать сюжет интересным, не забивать доску нитями.',
-  'Новый плотлайн — только при явном сюжетном крючке (интерес покровителя, major сдвиг в хронике, живой конфликт). Пустая доска — нормально.',
-  'Не обязан ничего создавать. submit_direction без изменений — ок, если крючков нет.',
-  'Где логично — связывай нити натурально (общие люди, места, последствия), без роялей в кустах.',
-  'Если нить про длительное дело — укажи relatedPendingIds из activePending.',
-  'Температура: +heat за тик уже начислен; после ★ПРОРЫВ T=0. bump только за интерес в ПЕРЕПИСКЕ ТИКА или явную связку (+5…20).',
-  'После прорыва не копи «за сам прорыв». complete — когда нить закрыта или бессмысленна.',
+  'Задача — интересный переплетающийся сюжет при короткой доске (мало нитей).',
+  'Новый плотлайн — только при явном крючке. Пустая доска ок, если крючков нет.',
+  'ОБЯЗАТЕЛЬНО: для КАЖДОЙ открытой нити, если месяц её затронул (хроника, процесс, переписка) —',
+  'upsert_plotline с НОВЫМ summary: текущее состояние + что сдвинулось в этом месяце + крючок дальше.',
+  'summary — rolling (перепиши целиком ≤400 символов), НЕ дописывай бесконечную летопись.',
+  'Где логично — переплетай нити (relatedPlotlineIds) и процессы (relatedPendingIds), без роялей.',
+  'Температура: heat уже начислен; после ★ПРОРЫВ T=0. bump только за интерес в ПЕРЕПИСКЕ ТИКА или явную связку (+5…20).',
+  'complete — когда нить закрыта или бессмысленна.',
 ].join(' ');
 
 const PAIR_GUIDANCE = [
   'Ты — общий режиссёр стыка двух городов. Обе доски равноправны.',
-  'Задача — интересный сюжет стыка и городов, не забивать доски.',
-  'Новый плотлайн — только при крючке. Не создавай нити «на всякий случай».',
-  'Связывай цепочки между городами, где это естественно из хроники/переписки (контакт, обмен, конфликт) — без натянутых совпадений.',
-  'relatedPendingIds — если нить опирается на процессы из activePending соответствующего города.',
-  'Температура и прорывы — как обычно; bump по переписке ЭТОГО тика каждого покровителя.',
-  'upsert/bump/complete всегда с domainId.',
+  'Мало нитей, сильное переплетение между городами, где естественно.',
+  'ОБЯЗАТЕЛЬНО обновляй summary затронутых нитей (rolling, ≤400), relatedPendingIds / relatedPlotlineIds.',
+  'upsert/bump/complete всегда с domainId. Не плоди нити без крючка.',
 ].join(' ');
 
 /**
@@ -189,8 +187,17 @@ async function runDirectorSession({
             description: 'Существующий id для обновления; без id — новый',
           },
           title: { type: 'string' },
-          summary: { type: 'string' },
+          summary: {
+            type: 'string',
+            description:
+              'Актуальное состояние нити целиком (rolling ≤400): что сейчас + сдвиг месяца + крючок дальше',
+          },
           relatedPendingIds: { type: 'array', items: { type: 'string' } },
+          relatedPlotlineIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Id других плотлайнов, с которыми нить переплелась',
+          },
           initialTemperature: {
             type: 'number',
             description: 'Только для НОВОГО: старт 15–35',
@@ -203,6 +210,7 @@ async function runDirectorSession({
         title,
         summary,
         relatedPendingIds,
+        relatedPlotlineIds,
         initialTemperature,
       }) => {
         const domain = resolveDomain(byId, domainId, domains, isPair);
@@ -217,10 +225,14 @@ async function runDirectorSession({
           if (relatedPendingIds) {
             existing.relatedPendingIds = relatedPendingIds.map(String);
           }
+          if (relatedPlotlineIds) {
+            existing.relatedPlotlineIds = relatedPlotlineIds.map(String);
+          }
+          existing.updatedTick = world.tickIndex;
           return { ok: true, domainId: d.id, plotline: existing, created: false };
         }
-        if (d.plotlines.length >= 8) {
-          return { ok: false, error: 'Слишком много плотлайнов (макс 8). Заверши старые.' };
+        if (d.plotlines.length >= 6) {
+          return { ok: false, error: 'Слишком много плотлайнов (макс 6). Заверши или сшей старые.' };
         }
         const plot = createPlotline({
           title,
@@ -228,6 +240,7 @@ async function runDirectorSession({
           temperature: initialTemperature ?? 25,
           tick: world.tickIndex,
           relatedPendingIds,
+          relatedPlotlineIds,
         });
         d.plotlines.push(plot);
         log.info('director.plot_created', { domainId: d.id, id: plot.id, title: plot.title });
@@ -333,16 +346,17 @@ async function runDirectorSession({
     ? [
         `Общая режиссура стыка ${names} (${world.gameDate?.label || ''}).`,
         'Сначала read_plot_board.',
-        'Крючок → upsert; интерес в переписке тика / связка → bump; закрыто → complete.',
-        'Не плоди нити без крючка. Связывай города только натурально. Затем submit_direction.',
+        'Затронутые нити → upsert с новым rolling summary; связка → relatedPlotlineIds / bump; закрыто → complete.',
+        'Не плоди нити. Переплетай города только натурально. Затем submit_direction.',
         '',
         boardSnapshot(),
       ].join('\n')
     : [
         `Режиссура месяца ${names} (${world.gameDate?.label || ''}).`,
         'Сначала read_plot_board.',
-        'Крючок → upsert; интерес в переписке тика / связка → bump; закрыто → complete.',
-        'Не обязан создавать нити. Пустая доска ок. Затем submit_direction.',
+        'Открытые нити, которых коснулся месяц → обязательно upsert (новый summary целиком).',
+        'Крючок → новый plotline; интерес в переписке / сплетение → bump + relatedPlotlineIds; закрыто → complete.',
+        'Мало нитей, сильное движение. Затем submit_direction.',
         '',
         boardSnapshot(),
       ].join('\n');
@@ -362,7 +376,19 @@ async function runDirectorSession({
     log.warn('director.failed', { error: err.message });
   }
 
-  for (const d of domains) normalizePlotlines(d);
+  for (const d of domains) {
+    normalizePlotlines(d);
+    const stale = (d.plotlines || []).filter(
+      (p) => p.updatedTick == null || p.updatedTick < (world.tickIndex ?? 0),
+    );
+    if (stale.length && Object.values(chronicleByDomain).some((a) => a?.length)) {
+      log.info('director.stale_plotlines', {
+        domainId: d.id,
+        tick: world.tickIndex,
+        stale: stale.map((p) => ({ id: p.id, title: p.title, updatedTick: p.updatedTick })),
+      });
+    }
+  }
   return domains.map((d) => ({ domainId: d.id, plotlines: d.plotlines }));
 }
 

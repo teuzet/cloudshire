@@ -1,12 +1,11 @@
 import { newId } from './ids.js';
 import {
   createLoreFact,
-  loreToPromptText,
-  recentChronicleText,
   advanceGameDate,
   filterChronicleForDomain,
   normalizeDomain,
 } from './models.js';
+import { formatChroniclePromptBlock, refreshChronicleDigest } from './memory.js';
 import { formatStatsForPrompt, statDeltaLimits, applyStatDeltas } from './stats.js';
 import {
   processConfluxApproachingPhase,
@@ -142,8 +141,7 @@ export async function resolveDomainTick({
           summary: p.summary,
           relatedPendingIds: p.relatedPendingIds || [],
         })),
-        recentChronicle: recentChronicleText(working.lore, 14),
-        fullLore: loreToPromptText(working.lore),
+        chronicle: formatChroniclePromptBlock(working, config),
         rules: {
           typicalStatDelta: deltaTypical,
           note:
@@ -151,7 +149,8 @@ export async function resolveDomainTick({
             'ПРОЦЕССЫ: add_chronicle(relatedPendingId) + advance_process(advance из processRollsThisTick). ' +
             'Если хроника говорит «готово/сорвано» — complete/cancel в том же тике. ' +
             'ЗАСТОЙ(0)/РЫВОК(2) обязательно обыграй. cancel_process если сорвано. ' +
-            'ПРОРЫВЫ плотлайнов — первыми; связанные процессы прорыва затронь. Постоянные итоги → upsert_modifier.',
+            'ПРОРЫВЫ плотлайнов — первыми; связанные процессы прорыва затронь. Постоянные итоги → upsert_modifier. ' +
+            'Полный лор не приложен — опирайся на chronicle (digest+recent), описание и state.',
         },
       }),
     },
@@ -495,6 +494,8 @@ export async function resolveDomainTick({
   }
 
   syncProcessesFromChronicle(working, chronicleAdds, { tick: world.tickIndex, log });
+
+  refreshChronicleDigest(working, config);
 
   if (!chronicleAdds.length) {
     const fallback = createLoreFact({

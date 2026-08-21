@@ -1,10 +1,6 @@
 import { newId } from './ids.js';
-import {
-  createLoreFact,
-  loreToPromptText,
-  recentChronicleText,
-  chronicleEntries,
-} from './models.js';
+import { createLoreFact } from './models.js';
+import { formatChroniclePromptBlock, formatFactsForPrompt } from './memory.js';
 import { findDockedConfluxForDomain } from './conflux.js';
 import { getLogger, truncate } from '../log.js';
 
@@ -87,10 +83,10 @@ export async function askLoremaster({
           domainName: working.name,
           ruler: working.characters?.[0]?.name,
           description,
-          recentChronicle: recentChronicleText(visible, 16),
-          loreText: loreToPromptText(visible),
+          chronicle: formatChroniclePromptBlock({ ...working, lore: visible }, config),
+          facts: formatFactsForPrompt(visible, { limit: 36 }),
           reminder:
-            'Если хроника упоминает явление без деталей — add_fact с конкретными именами/деталями. «Неизвестно» при уже упомянутом явлении запрещено.',
+            'Если хроника упоминает явление без деталей — add_fact с конкретными именами/деталями. «Неизвестно» при уже упомянутом явлении запрещено. Полный архив хроники не приложен — digest+recent.',
         };
 
         if (conflux) {

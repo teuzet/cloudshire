@@ -38,6 +38,8 @@ import {
   canStartProcess,
   maxActiveProcesses,
 } from './processes.js';
+import { formatPlotBriefForSpeech } from './plotlines.js';
+import { dialogHistoryForPrompt } from './memory.js';
 import { getLogger, truncate, setLoggerWorldId } from '../log.js';
 import { initUsageRecording } from '../llm/usage.js';
 
@@ -1216,10 +1218,7 @@ export class GameApp {
     normalizeDomain(domain);
     const character = domain.characters[0];
     normalizeRulerAttitudes(character);
-    const history = (character.dialogHistory || []).slice(-20).map((m) => ({
-      role: m.role === 'assistant' ? 'assistant' : 'user',
-      content: m.content,
-    }));
+    const history = dialogHistoryForPrompt(character.dialogHistory || [], this.config);
 
     const conditionFeel = qualitativeStatsBrief(domain.stats || {}, this.config);
     const attitudes = formatRulerAttitudes(character, this.config);
@@ -1235,6 +1234,7 @@ export class GameApp {
           'Суть: чужой ЛЕТАЮЩИЙ ОСТРОВ ушёл в небо. Мост/переход кончился потому, что края островов разъехались — не «просто мостик обвалился».',
         ].join('\n')
       : '';
+    const plotBrief = formatPlotBriefForSpeech(domain);
     const extraSystem = [
       `Ты ${character.name}, ${character.title || 'правитель'} города «${domain.name}».`,
       character.description,
@@ -1246,6 +1246,12 @@ export class GameApp {
       conditionFeel,
       'ОТНОШЕНИЕ К ПОКРОВИТЕЛЮ (внутренняя правда; цифры игроку не называй):',
       attitudes,
+      plotBrief
+        ? [
+            'ЖИВЫЕ НИТИ СЮЖЕТА (внутренняя правда; не рапортуй списком — вплетай в речь, если уместно):',
+            plotBrief,
+          ].join('\n')
+        : '',
       'На вопросы о сытости, богатстве, вере, порядке, силе, знаниях опирайся на эпитеты обстоятельств.',
       'Высокая лояльность или ужас → охотнее соглашайся и исполняй, особенно при должном тоне; меньше торгов и отговорок.',
       'Низкие оба → больше сомнений и торгов (пока нет жёсткого приказа).',
@@ -1439,6 +1445,9 @@ export class GameApp {
           undockSystem,
           'Ты пишешь покровителю новости месяца живой речью, как человек, а не сводку событий.',
           `Не начинай письмо с «${character.name}:».`,
+          formatPlotBriefForSpeech(domain)
+            ? `Если уместно, вплети живые нити (не списком):\n${formatPlotBriefForSpeech(domain)}`
+            : '',
         ]
           .filter(Boolean)
           .join('\n'),

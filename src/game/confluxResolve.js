@@ -2,7 +2,6 @@ import { newId } from './ids.js';
 import {
   createLoreFact,
   filterChronicleForDomain,
-  chronicleEntries,
   formatChronicleScope,
 } from './models.js';
 import { formatStatsForPrompt, statDeltaLimits, applyStatDeltas } from './stats.js';
@@ -11,6 +10,7 @@ import {
   formatPlotlinesForPrompt,
   formatBreakthroughMandate,
 } from './plotlines.js';
+import { formatChroniclePromptBlock, refreshChronicleDigest } from './memory.js';
 import {
   normalizeDomainProcesses,
   normalizeProcess,
@@ -52,23 +52,7 @@ function ensureState(domain) {
   normalizePlotlines(domain);
 }
 
-function recentChronicleForPair(domain, viewerDomainId, limit = 10) {
-  const chron = chronicleEntries(domain.lore || [])
-    .filter((e) => {
-      if (!e.secret) return true;
-      return String(e.secretForDomainId || '') === String(viewerDomainId);
-    })
-    .slice(-limit);
-  if (!chron.length) return '(хроники мало)';
-  return chron
-    .map((f) => {
-      const sec = f.secret ? ' [secret]' : '';
-      return `- (${f.gameDateLabel || '?'})${sec} ${f.text}`;
-    })
-    .join('\n');
-}
-
-function domainBriefBlock(domain, config, { chronicleLimit = 10 } = {}) {
+function domainBriefBlock(domain, config) {
   ensureState(domain);
   normalizeDomainProcesses(domain);
   const pending = activeProcesses(domain);
@@ -105,8 +89,7 @@ function domainBriefBlock(domain, config, { chronicleLimit = 10 } = {}) {
     pendingLines,
     'Плотлайны:',
     formatPlotlinesForPrompt(domain),
-    'Недавняя хроника (видимая этому домену):',
-    recentChronicleForPair(domain, domain.id, chronicleLimit),
+    formatChroniclePromptBlock(domain, config),
   ].join('\n');
 }
 
@@ -669,6 +652,7 @@ export async function resolveConfluxTick({
       tick: world.tickIndex,
       log,
     });
+    refreshChronicleDigest(domains[id], config);
   }
 
   for (const id of ids) {

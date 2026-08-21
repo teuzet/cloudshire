@@ -25,6 +25,8 @@ export function normalizeDomain(domain) {
   }
   if (!Array.isArray(domain.tags)) domain.tags = [];
   if (!Array.isArray(domain.plotlines)) domain.plotlines = [];
+  if (typeof domain.chronicleDigest !== 'string') domain.chronicleDigest = domain.chronicleDigest || '';
+  if (domain.chronicleDigestThroughTick == null) domain.chronicleDigestThroughTick = null;
   // pendingActions = длительные процессы; нормализация полей — в processes.normalizeDomainProcesses
   if (Array.isArray(domain.characters)) {
     for (const ch of domain.characters) {

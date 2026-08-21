@@ -12,6 +12,7 @@ export function normalizePlotlines(domain) {
     .map((p) => ({
       id: String(p.id),
       title: String(p.title || 'Без названия').slice(0, 120),
+      // Rolling status: режиссёр переписывает, не наращивает бесконечно.
       summary: String(p.summary || '').slice(0, 400),
       temperature: clampTemp(p.temperature ?? 0),
       status: 'open',
@@ -19,8 +20,12 @@ export function normalizePlotlines(domain) {
       lastBreakthroughTick:
         p.lastBreakthroughTick == null ? null : Number(p.lastBreakthroughTick),
       createdTick: p.createdTick == null ? null : Number(p.createdTick),
+      updatedTick: p.updatedTick == null ? null : Number(p.updatedTick),
       relatedPendingIds: Array.isArray(p.relatedPendingIds)
         ? p.relatedPendingIds.map(String)
+        : [],
+      relatedPlotlineIds: Array.isArray(p.relatedPlotlineIds)
+        ? p.relatedPlotlineIds.map(String)
         : [],
     }));
   return domain;
@@ -36,6 +41,7 @@ export function createPlotline({
   temperature = 20,
   tick = null,
   relatedPendingIds = [],
+  relatedPlotlineIds = [],
 }) {
   return {
     id: newId('plot'),
@@ -46,7 +52,9 @@ export function createPlotline({
     breakthroughThisTick: false,
     lastBreakthroughTick: null,
     createdTick: tick,
+    updatedTick: tick,
     relatedPendingIds: (relatedPendingIds || []).map(String),
+    relatedPlotlineIds: (relatedPlotlineIds || []).map(String),
   };
 }
 
@@ -96,15 +104,33 @@ export function formatPlotlinesForPrompt(domain) {
   return domain.plotlines
     .map((p) => {
       const bt = p.breakthroughThisTick ? ' ★ПРОРЫВ' : '';
-      const rel =
+      const relP =
         p.relatedPendingIds?.length > 0
           ? ` | процессы: ${p.relatedPendingIds.join(', ')}`
+          : '';
+      const relL =
+        p.relatedPlotlineIds?.length > 0
+          ? ` | нити: ${p.relatedPlotlineIds.join(', ')}`
           : '';
       return (
         `- [${p.id}] «${p.title}» T=${p.temperature}${bt}` +
         (p.summary ? ` — ${p.summary}` : '') +
-        rel
+        relP +
+        relL
       );
+    })
+    .join('\n');
+}
+
+/** Короткий бриф для речи правителя / письма месяца — без id и температур. */
+export function formatPlotBriefForSpeech(domain, { max = 4 } = {}) {
+  normalizePlotlines(domain);
+  const list = (domain.plotlines || []).slice(0, max);
+  if (!list.length) return '';
+  return list
+    .map((p) => {
+      const s = String(p.summary || '').trim();
+      return s ? `«${p.title}»: ${s}` : `«${p.title}»`;
     })
     .join('\n');
 }
