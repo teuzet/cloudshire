@@ -33,11 +33,178 @@ tick:
   # Ориентир для резолвера: обычные месячные сдвиги мелкие.
   # Жёсткого потолка нет — катастрофа может обвалить стат почти до нуля за одну запись.
   typicalStatDelta: 5
-  # Сколько длительных дел может идти параллельно (правитель отказывает, если лимит).
+  # Сколько длительных дел может идти параллельно (5-е и далее declare_process отклоняет программно).
   maxActiveProcesses: 4
   plotlines:
     enabled: true
     heatPerTick: 10
+    maxOpen: 6
+    softMax: 4
+    hooksMaxLen: 120
+    attention:
+      initial: 20
+      bumpFactor: 1
+      chronicleLink: 12
+      breakthroughBonus: 8
+      decayPerTick: 3
+    survival:
+      minAgeTicks: 3
+      keepBarBase: 8
+      keepBarPerAge: 4
+    spawn:
+      baseChance: 0.10
+      emptyBoardBonus: 0.25
+      perPlotPenalty: 0.03
+      perTempSumPenalty: 0.0004
+      softMaxFactor: 0.45
+      minChance: 0.02
+      maxChance: 0.45
+    # Посев для мандата «новой крови» (режиссёр, не генезис города).
+    seedTagGroups:
+      - id: spark_source
+        name: Источник искры
+        tags:
+          - { id: rim, name: Край обрыва }
+          - { id: rim_mist, name: Туман у края }
+          - { id: depths, name: Недра / шахта }
+          - { id: cave, name: Пещера }
+          - { id: temple, name: Храм / алтарь }
+          - { id: heretic_chapel, name: Еретический придел }
+          - { id: archive, name: Архив }
+          - { id: ruin, name: Руина предков }
+          - { id: dream, name: Сон / видение }
+          - { id: market, name: Рынок }
+          - { id: sky_yard, name: Верфь небесных судов }
+          - { id: workshop, name: Мастерская }
+          - { id: quarry, name: Каменоломня }
+          - { id: field, name: Виноградник / поле }
+          - { id: children_yard, name: Детский двор }
+          - { id: infirmary, name: Больница / лечебница }
+          - { id: prison, name: Тюрьма }
+          - { id: drains, name: Канализация / стоки }
+          - { id: well, name: Забытый колодец }
+          - { id: sky_silhouette, name: Силуэт в небе (без имени) }
+          - { id: skyfall, name: Обломок с неба }
+          - { id: burial, name: Погребение }
+          - { id: beacon, name: Маяк / сигнальный огонь }
+      - id: phenomenon
+        name: Природа явления
+        tags:
+          - { id: artifact, name: Артефакт }
+          - { id: miracle_shard, name: Осколок чуда }
+          - { id: new_cult, name: Новый культ }
+          - { id: heresy, name: Ересь внутри культа }
+          - { id: plague, name: Болезнь }
+          - { id: blight, name: Порча земли }
+          - { id: sky_beast, name: Небесная тварь }
+          - { id: beast_trace, name: След твари }
+          - { id: prophecy, name: Пророчество }
+          - { id: forbidden_book, name: Запретная книга }
+          - { id: stolen_relic, name: Украденная реликвия }
+          - { id: disappearances, name: Исчезновение людей }
+          - { id: changeling, name: Подмена ребёнка / наследника }
+          - { id: wind_anomaly, name: Аномалия ветра }
+          - { id: path_rift, name: Разлом тропы }
+          - { id: speaking_object, name: Говорящий предмет }
+          - { id: sudden_fertility, name: Внезапное плодородие }
+          - { id: sudden_famine, name: Внезапный неурожай }
+          - { id: false_miracle, name: Ложное чудо }
+          - { id: oath_curse, name: Клятва / проклятие }
+          - { id: abyss_voice, name: Голос из бездны }
+          - { id: impossible_map, name: Карта, которой не должно быть }
+          - { id: growing_metal, name: Металл, который растёт }
+          - { id: sourceless_light, name: Свет без источника }
+      - id: stakeholders
+        name: Кто зацеплен
+        tags:
+          - { id: poor_quarter, name: Чернь квартала }
+          - { id: temple_poor, name: Бедняки у храма }
+          - { id: merchants, name: Гильдия торговцев }
+          - { id: crafts, name: Гильдия ремесленников }
+          - { id: patron_priests, name: Жрецы покровителя }
+          - { id: old_gods_priests, name: Жрецы старых богов }
+          - { id: guard, name: Стража }
+          - { id: sergeants, name: Десятники }
+          - { id: scholars, name: Учёные }
+          - { id: engineers, name: Инженеры }
+          - { id: children, name: Дети }
+          - { id: heirs, name: Наследники домов }
+          - { id: widows, name: Вдовы / сироты }
+          - { id: wanderers, name: Чужаки-скитальцы }
+          - { id: smugglers, name: Контрабандисты }
+          - { id: ruler, name: Сам правитель }
+          - { id: court, name: Двор / совет }
+          - { id: farmers, name: Фермеры края }
+          - { id: skysailors, name: Матросы небесных судов }
+          - { id: healers, name: Лекари }
+          - { id: scribes, name: Писцы }
+          - { id: elders, name: Старейшины квартала }
+      - id: stake
+        name: Ставка
+        tags:
+          - { id: faith, name: Вера }
+          - { id: hunger, name: Голод / запасы }
+          - { id: water, name: Вода }
+          - { id: power, name: Власть }
+          - { id: law, name: Закон }
+          - { id: family_honor, name: Честь рода }
+          - { id: city_secret, name: Тайна города }
+          - { id: rim_safety, name: Безопасность обрыва }
+          - { id: craft_prestige, name: Престиж ремесла }
+          - { id: miracle_right, name: Право толковать чудо }
+          - { id: inheritance, name: Наследство }
+          - { id: monopoly, name: Монополия на ресурс }
+          - { id: council_seat, name: Место в совете }
+          - { id: quarter_freedom, name: Свобода квартала }
+          - { id: rite_purity, name: Чистота крови / обряда }
+          - { id: patron_mercy_price, name: Цена милости покровителя }
+          - { id: knowledge_control, name: Контроль над знанием }
+          - { id: punish_right, name: Право карать }
+          - { id: rim_land, name: Земля у края }
+      - id: tone
+        name: Тон
+        tags:
+          - { id: ominous, name: Зловещее }
+          - { id: wondrous, name: Чудесное }
+          - { id: political, name: Политическое }
+          - { id: domestic_sharp, name: Бытовое-острое }
+          - { id: detective, name: Детективное }
+          - { id: tragic, name: Трагическое }
+          - { id: ironic, name: Ироничное }
+          - { id: epic, name: Эпическое }
+          - { id: folk_revolt, name: Народный бунт }
+          - { id: quiet_horror, name: Тихий ужас }
+          - { id: pious_dispute, name: Благочестивый спор }
+          - { id: greed, name: Алчность }
+          - { id: school_rivalry, name: Ревность школ }
+          - { id: family_drama, name: Семейная драма }
+          - { id: dark_miracle, name: Чудо с чёрным хвостом }
+          - { id: farce_blood, name: Фарс, который станет кровью }
+      - id: scale
+        name: Масштаб
+        tags:
+          - { id: one_yard, name: Один двор }
+          - { id: one_workshop, name: Одна мастерская }
+          - { id: quarter, name: Квартал }
+          - { id: temple_square, name: Храмовая площадь }
+          - { id: whole_city, name: Весь город }
+          - { id: fields_to_rim, name: Поля до края }
+          - { id: whole_isle, name: Весь остров }
+          - { id: still_whisper, name: Пока шёпот }
+          - { id: two_know, name: Двое знают }
+          - { id: market_cry, name: Уже кричат на рынке }
+      - id: urgency
+        name: Давление времени
+        tags:
+          - { id: smolders_years, name: Тлеет годами }
+          - { id: this_season, name: Этот сезон }
+          - { id: before_feast, name: До праздника }
+          - { id: month_end, name: До конца месяца }
+          - { id: already_seen, name: Уже видели }
+          - { id: before_ruler_knows, name: Пока правитель не узнал }
+          - { id: while_priests_silent, name: Пока жрецы молчат }
+          - { id: wind_window, name: Окно до смены ветра }
+          - { id: before_stores_empty, name: Пока запасы не кончились }
   # Долгая память без раздувания промптов (оригиналы хроники/писем хранятся целиком).
   memory:
     chronicleRecent: 15
@@ -506,7 +673,7 @@ agents:
 
   ruler:
     provider: openai
-    model: gpt-5.6-terra
+    model: gpt-5.6-luna
     instructions: |
       Ты — правитель (или верховный жрец/глава) города на летающем острове. Пиши от первого лица, по-русски.
       Собеседник — божество-покровитель города. Ты ЕГО слуга и голос народа, не коллега и не администратор чата.
@@ -540,10 +707,15 @@ agents:
       Если срок нереален — честно возрази ДО declare_process; если настаивает — объяви короткий срок
       и предупреди о риске срыва, но не подменяй его волю длинной оценкой.
       Одна смысловая нить: не заводи второй суд / ту же стройку / то же снабжение параллельно —
-      update_process / revoke_process. Одновременно не больше 4 долгих дел: если declare_process
-      вернул busy — в речи откажи по-человечески («мастера уже на других работах»), перечисли занятость
-      и предложи подождать или свернуть одно.
-      Без declare_process нельзя обещать долгое дело.
+      update_process / revoke_process (processId = id из read_domain_brief.processes[].id
+      или краткий смысл дела вроде «университет» — не выдумывай латиницей university_curriculum).
+      Отмена/отсрочка по слову покровителя — сначала revoke_process или update_process; при ошибке
+      tool смотри agentMessage и список дел, не ври что «приказа нет», если дело ещё active.
+      Если declare_process вернул отказ — смотри error / reason / agentMessage:
+      - too_many_processes (reason=limit) — город уже тянет max дел; отмазка про занятость рук, предложи ждать/свернуть.
+      - duplicate_process (reason=duplicate) — та же смысловая нить уже идёт; отчитайся о ней, НЕ говори «слишком много дел».
+      Дело при любом отказе НЕ создано: не обещай новое большое дело.
+      Без успешного declare_process нельзя обещать долгое дело.
 
       ПОСТОЯННЫЕ ПРИКАЗЫ (не процессы):
       Мгновенный постоянный порядок (запрет, правило улиц, регулярный осмотр) —
@@ -593,7 +765,7 @@ agents:
 
   resolver:
     provider: openai
-    model: gpt-5.6-terra
+    model: gpt-5.6-luna
     instructions: |
       Ты — Resolver. Единственный автор новых записей хроники (тег chronicle).
       Тик = один игровой месяц на летающем острове-городе (не королевство).
@@ -615,6 +787,8 @@ agents:
 
       ПРОРЫВЫ плотлайнов — первыми. Если у прорыва указаны связанные процессы (relatedPendingIds) —
       обязательно затронь их в хронике и advance/cancel.
+      relatedPlotlineIds в add_chronicle — опционально: только если событие явно продолжает нить
+      (не обязано на каждую запись; не своди весь месяц только к старым плотлайнам).
 
       STATE:
       - events — временные процессы (бунт, фестиваль, осада). Меняй через set_state_events.
@@ -641,18 +815,22 @@ agents:
 
       АКТУАЛИЗАЦИЯ (жёстко):
       Если открытая нить затронута хроникой месяца, процессом или перепиской —
-      ОБЯЗАТЕЛЬНО upsert_plotline с новым summary ЦЕЛИКОМ (rolling ≤400 символов):
-      что сейчас важно + что сдвинулось в этом месяце + куда клонится дальше.
+      ОБЯЗАТЕЛЬНО upsert_plotline с новым summary ЦЕЛИКОМ (rolling ≤400) плюс openHook и closeWhen:
+      openHook — крючок дальше; closeWhen — при каком исходе снять нить.
       Не дописывай летопись — перепиши состояние. Без актуализации нить «застывает».
 
-      ПЕРЕПЛЕТЕНИЕ: где логично — relatedPlotlineIds и relatedPendingIds; bump за связку (+5…20).
-      Без роялей в кустах. complete — когда нить закрыта или бессмысленна.
+      ПЕРЕПЛЕТЕНИЕ: где логично — relatedPlotlineIds и relatedPendingIds; bump за связку (+5…20)
+      даёт и T, и attention. complete — когда closeWhen выполнено, нить бессмысленна,
+      или движок пометил кандидата (низкий attention при возрасте).
+      МАНДАТ НОВОЙ КРОВИ в read_plot_board.engine — обязателен: самостоятельная нить по посеву
+      без relatedPlotlineIds (культ, артефакт, аномалия…).
+      При открытых ≥ softMax и кандидатах на закрытие — complete хотя бы одну.
       На conflux — domainId на каждом инструменте; обе доски равноправны.
       Язык tools — факты; note в submit_direction коротко.
 
   confluxResolver:
     provider: openai
-    model: gpt-5.6-terra
+    model: gpt-5.6-luna
     instructions: |
       Ты — Conflux Resolver. Автор хроники для ПАРЫ стыкованных летающих островов.
       Тик = один игровой месяц на стыке двух городов.

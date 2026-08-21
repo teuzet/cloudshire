@@ -261,10 +261,22 @@ export function normalizeRulerAttitudes(character) {
 export function adjustAttitude(character, field, delta, { maxStep = 25 } = {}) {
   normalizeRulerAttitudes(character);
   if (field !== 'loyalty' && field !== 'terror') {
-    return { ok: false, error: 'field must be loyalty|terror' };
+    return {
+      ok: false,
+      error: 'invalid_field',
+      agentMessage:
+        'field должен быть loyalty или terror. Вызови adjust_loyalty / adjust_terror с delta ≠ 0.',
+    };
   }
   const d = Math.max(-maxStep, Math.min(maxStep, Math.round(Number(delta) || 0)));
-  if (d === 0) return { ok: false, error: 'delta=0' };
+  if (d === 0) {
+    return {
+      ok: false,
+      error: 'delta_zero',
+      agentMessage:
+        'delta=0 — изменения нет. Передай заметный шаг (±5…15, макс ±25) или не вызывай tool.',
+    };
+  }
   const from = character[field];
   character[field] = clamp(from + d, 0, 100);
   return { ok: true, field, from, to: character[field], delta: character[field] - from };

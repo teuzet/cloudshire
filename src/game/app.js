@@ -34,14 +34,16 @@ import {
   hasHardPatronDeadline,
   findDuplicateProcess,
   resolveLinkedStats,
+  resolveActiveProcess,
+  formatActiveProcessesForAgent,
   activeProcesses,
   canStartProcess,
-  maxActiveProcesses,
 } from './processes.js';
 import { formatPlotBriefForSpeech } from './plotlines.js';
 import { dialogHistoryForPrompt } from './memory.js';
 import { getLogger, truncate, setLoggerWorldId } from '../log.js';
 import { initUsageRecording } from '../llm/usage.js';
+import { toolFail } from '../agents/toolResult.js';
 
 /** Недавняя запись расстыковки из хроники домена (если есть). */
 function recentUndockFact(domain) {
@@ -130,6 +132,7 @@ function characterTools(domain, storage, character, ctx) {
         stateEvents: domain.state.events,
         stateModifiers: domain.state.modifiers || [],
         processes: activeProcesses(domain, ctx.config).map((a) => ({
+          id: a.id,
           summary: a.summary,
           detail: a.detail,
           monthsLeft: a.monthsLeft,
@@ -137,6 +140,9 @@ function characterTools(domain, storage, character, ctx) {
           linkedStats: a.linkedStats,
         })),
         processSlots: canStartProcess(domain, ctx.config),
+        guidanceProcesses:
+          'Для update_process / revoke_process бери id из processes[].id. ' +
+          'Если id не помнишь — передай краткий смысл дела в processId (например «университет»), система найдёт.',
       }),
     },
     {
@@ -158,7 +164,12 @@ function characterTools(domain, storage, character, ctx) {
           .trim()
           .replace(/\s+/g, ' ')
           .slice(0, 64);
-        if (cleaned.length < 2) return { ok: false, error: 'Слишком коротко' };
+        if (cleaned.length < 2) {
+          return toolFail(
+            'too_short',
+            'Имя покровителя слишком короткое. Передай нормальное имя или титул (от 2 символов).',
+          );
+        }
         if (!domain.state) domain.state = { events: [], modifiers: [], pendingActions: [], patronName: null };
         const prev = domain.state.patronName || null;
         domain.state.patronName = cleaned;
@@ -255,8 +266,8 @@ function characterTools(domain, storage, character, ctx) {
     {
       name: 'declare_process',
       description:
-        `Длительное дело (лимит ${maxActiveProcesses(ctx.config)} сразу): стройка, суд, поход, снабжение. ` +
-        'Не для мгновенных постоянных приказов — declare_standing_order. Не дублируй нить — update/revoke.',
+        'Длительное дело: стройка, суд, поход, снабжение. Не для мгновенных постоянных приказов — declare_standing_order. ' +
+        'Отказы: too_many_processes (лимит слотов) vs duplicate_process (та же нить) — разные отговорки в речи.',
       parameters: {
         type: 'object',
         required: ['summary', 'detail', 'expectedMonths', 'linkedStats'],
@@ -294,13 +305,18 @@ function characterTools(domain, storage, character, ctx) {
         if (!slots.ok) {
           return {
             ok: false,
-            error: 'busy',
+            error: 'too_many_processes',
+            reason: 'limit',
             active: slots.active,
             max: slots.max,
             busyWith: slots.busy,
-            hint:
-              'В речи: люди и мастера уже заняты текущими делами; новое большое поручение сейчас не потянуть. ' +
-              'Предложи сначала дождаться/свернуть одно из текущих (назови их по смыслу). Без слова «лимит»/process.',
+            agentMessage:
+              'ОТКАЗ: лимит параллельных дел (' +
+              `${slots.active}/${slots.max}` +
+              '). Это НЕ «похожее дело». ' +
+              'В речи: люди/мастера уже заняты перечисленными делами — назови их по смыслу; ' +
+              'предложи дождаться или свернуть одно через revoke_process. ' +
+              'Не говори «лимит», process, tool. Новое дело НЕ объявляй и НЕ путай с дублем.',
           };
         }
         const dup = findDuplicateProcess(domain, summary, detail);
@@ -308,10 +324,18 @@ function characterTools(domain, storage, character, ctx) {
           normalizeProcess(dup, ctx.config);
           return {
             ok: false,
-            error: `Похожее дело уже идёт: «${dup.summary}» (${dup.id}, ещё ~${dup.monthsLeft} мес.).`,
+            error: 'duplicate_process',
+            reason: 'duplicate',
             existingProcessId: dup.id,
-            hint:
-              'Не заводи вторую нить. В речи отчитайся о текущем деле или update_process / revoke_process.',
+            existingSummary: dup.summary,
+            monthsLeft: dup.monthsLeft,
+            agentMessage:
+              'ОТКАЗ: похожее дело уже идёт — «' +
+              dup.summary +
+              `» (id ${dup.id}, ещё ~${dup.monthsLeft} мес.). ` +
+              'Это НЕ нехватка слотов и НЕ общая занятость города. ' +
+              'В речи: отчитайся об уже идущем деле; при нужде update_process или revoke_process. ' +
+              'Не выдумывай отговорку про «слишком много дел» и не обещай вторую такую же нить.',
           };
         }
         const asked = Math.max(1, Math.min(12, Math.round(Number(expectedMonths) || 1)));
@@ -319,10 +343,11 @@ function characterTools(domain, storage, character, ctx) {
         const duration = hard ? asked : clampPendingDuration(summary, detail, asked);
         const linked = resolveLinkedStats(linkedStats, ctx.config);
         if (!linked.length) {
-          return {
-            ok: false,
-            error: `linkedStats обязательны (из: ${(ctx.config.stats || []).map((s) => s.id).join(', ')})`,
-          };
+          return toolFail(
+            'linked_stats_required',
+            `linkedStats обязательны — выбери 1+ id из: ${(ctx.config.stats || []).map((s) => s.id).join(', ')}. ` +
+              'Повтори declare_process с валидными linkedStats.',
+          );
         }
         const action = {
           id: newId('act'),
@@ -379,7 +404,12 @@ function characterTools(domain, storage, character, ctx) {
       },
       handler: async ({ text, id }) => {
         const body = String(text || '').trim().slice(0, 400);
-        if (body.length < 3) return { ok: false, error: 'Слишком коротко' };
+        if (body.length < 3) {
+          return toolFail(
+            'too_short',
+            'Текст постоянного порядка слишком короткий. Сформулируй правило (≥3 символа) и вызови снова.',
+          );
+        }
         if (!domain.state) domain.state = { events: [], modifiers: [], pendingActions: [], patronName: null };
         if (!Array.isArray(domain.state.modifiers)) domain.state.modifiers = [];
         const list = domain.state.modifiers;
@@ -436,12 +466,16 @@ function characterTools(domain, storage, character, ctx) {
     },
     {
       name: 'update_process',
-      description: 'Уточнить активное длительное дело',
+      description:
+        'Уточнить активное длительное дело. processId — id из read_domain_brief или краткий смысл («университет»).',
       parameters: {
         type: 'object',
         required: ['processId'],
         properties: {
-          processId: { type: 'string' },
+          processId: {
+            type: 'string',
+            description: 'Id процесса (act_…) или ключевые слова из summary',
+          },
           summary: { type: 'string' },
           detail: { type: 'string' },
           linkedStats: { type: 'array', items: { type: 'string' } },
@@ -449,8 +483,18 @@ function characterTools(domain, storage, character, ctx) {
         },
       },
       handler: async ({ processId, summary, detail, linkedStats, characterNote }) => {
-        const action = domain.state.pendingActions.find((a) => a.id === processId && a.status === 'active');
-        if (!action) return { ok: false, error: 'process not found' };
+        const { process: action, candidates } = resolveActiveProcess(domain, processId, ctx.config);
+        if (!action) {
+          return {
+            ok: false,
+            error: 'process not found',
+            activeProcesses: candidates.map((a) => ({ id: a.id, summary: a.summary })),
+            agentMessage:
+              'Дело не найдено по processId. Возьми id из списка ниже и вызови update_process снова. ' +
+              'Игроку не говори «не среди дел», если список не пуст — сначала уточни id.\n' +
+              formatActiveProcessesForAgent(domain, ctx.config),
+          };
+        }
         if (summary) action.summary = summary;
         if (detail) action.detail = detail;
         if (linkedStats) {
@@ -466,23 +510,42 @@ function characterTools(domain, storage, character, ctx) {
     },
     {
       name: 'revoke_process',
-      description: 'Отозвать длительное дело',
+      description:
+        'Отозвать / свернуть длительное дело. processId — id из brief или смысл («университет», «учебная программа»).',
       parameters: {
         type: 'object',
         required: ['processId'],
         properties: {
-          processId: { type: 'string' },
+          processId: {
+            type: 'string',
+            description: 'Id процесса (act_…) или ключевые слова из summary',
+          },
           reason: { type: 'string' },
         },
       },
       handler: async ({ processId, reason }) => {
-        const action = domain.state.pendingActions.find((a) => a.id === processId && a.status === 'active');
-        if (!action) return { ok: false, error: 'process not found' };
+        const { process: action, candidates } = resolveActiveProcess(domain, processId, ctx.config);
+        if (!action) {
+          return {
+            ok: false,
+            error: 'process not found',
+            activeProcesses: candidates.map((a) => ({ id: a.id, summary: a.summary })),
+            agentMessage:
+              'Дело не найдено по processId. Не говори покровителю, что приказа нет, если ниже есть активные дела — ' +
+              'вызови revoke_process с верным id из списка.\n' +
+              formatActiveProcessesForAgent(domain, ctx.config),
+          };
+        }
         action.status = 'revoked';
         action.revokeReason = reason || '';
         action.updatedAt = new Date().toISOString();
         await save();
-        return { ok: true };
+        return {
+          ok: true,
+          revokedId: action.id,
+          summary: action.summary,
+          hint: 'В речи: дело свёрнуто/отложено по воле покровителя. Без id/process.',
+        };
       },
     },
     {
@@ -856,7 +919,7 @@ export class GameApp {
           if (!v.ok) {
             draft.cityNameApproved = false;
             await saveDraft();
-            return { ok: false, reason: v.reason };
+            return toolFail('invalid_city_name', v.reason, { reason: v.reason });
           }
           draft.cityName = v.name;
           draft.cityNameApproved = true;
@@ -908,7 +971,7 @@ export class GameApp {
           for (const c of choices || []) {
             const group = (this.config.genesis.tagGroups || []).find((g) => g.id === c.groupId);
             if (!group) {
-              errors.push(`unknown group ${c.groupId}`);
+              errors.push(`неизвестная группа «${c.groupId}»`);
               continue;
             }
             const label = String(c.tagLabel || '').trim();
@@ -919,7 +982,7 @@ export class GameApp {
             }
             const tag = group.tags.find((t) => t.id === c.tagId);
             if (!tag) {
-              errors.push(`нужен tagId из каталога или tagLabel (свободные слова) для ${c.groupId}`);
+              errors.push(`для «${c.groupId}» нужен tagId из каталога или свободный tagLabel`);
               continue;
             }
             draft.tagChoices[c.groupId] = c.tagId;
@@ -927,8 +990,17 @@ export class GameApp {
           }
           await saveDraft();
           const total = (this.config.genesis.tagGroups || []).length;
+          if (errors.length) {
+            const groupIds = (this.config.genesis.tagGroups || []).map((g) => g.id).join(', ');
+            return toolFail(
+              'tag_choices_partial',
+              'Часть choices не применена. Для каждой группы нужен известный groupId и tagId из каталога ' +
+                `или свободный tagLabel. Допустимые groupId: ${groupIds}. Смотри errors[].`,
+              { applied, errors, chosen: draft.tagChoices },
+            );
+          }
           return {
-            ok: errors.length === 0,
+            ok: true,
             applied,
             errors,
             chosen: draft.tagChoices,
@@ -954,7 +1026,13 @@ export class GameApp {
         },
         handler: async ({ groupId, tagId, tagLabel }) => {
           const group = (this.config.genesis.tagGroups || []).find((g) => g.id === groupId);
-          if (!group) return { ok: false, error: 'Неизвестная группа' };
+          if (!group) {
+            const groupIds = (this.config.genesis.tagGroups || []).map((g) => g.id).join(', ');
+            return toolFail(
+              'unknown_group',
+              `Неизвестная группа «${groupId}». Допустимые groupId: ${groupIds}. Вызови list_tag_groups.`,
+            );
+          }
           const label = String(tagLabel || '').trim();
           if (label) {
             draft.tagChoices[groupId] = label;
@@ -969,7 +1047,10 @@ export class GameApp {
           }
           const tag = group.tags.find((t) => t.id === tagId);
           if (!tag) {
-            return { ok: false, error: 'Нужен tagId из каталога или tagLabel со свободными словами' };
+            return toolFail(
+              'tag_required',
+              `Для группы «${group.name}» нужен tagId из каталога или свободный tagLabel. Вызови list_tag_groups.`,
+            );
           }
           draft.tagChoices[groupId] = tagId;
           await saveDraft();
@@ -1008,13 +1089,16 @@ export class GameApp {
           const world = await this.storage.getWorld();
           const existing = await this.storage.getDomainForUser(userId, world.id);
           if (existing) {
-            return { ok: false, error: 'У игрока уже есть домен в этом сезоне' };
+            return toolFail(
+              'already_has_domain',
+              'У игрока уже есть домен в этом сезоне. Не запускай генерацию повторно; направь к правителю города.',
+            );
           }
           if (!draft.cityNameApproved || !draft.cityName) {
-            return {
-              ok: false,
-              error: 'Сначала утверди имя города через set_city_name (с согласия игрока).',
-            };
+            return toolFail(
+              'city_name_required',
+              'Сначала утверди имя города через set_city_name (с согласия игрока), затем start_new_game.',
+            );
           }
           if (this.isGenerating(userId)) {
             return { ok: true, status: 'generating' };
@@ -1261,7 +1345,7 @@ export class GameApp {
       'Постоянные приказы без стройки (запреты, осмотры, правила) → declare_standing_order, не declare_process.',
       'Долгие дела: declare_process (срок + linkedStats). Если покровитель сказал «в этом месяце» — отрази в detail, expectedMonths=1; не раздувай срок. Если нереально — честно возрази ДО declare.',
       'Не дублируй уже идущую смысловую нить (второй суд, вторая та же стройка) — update/revoke.',
-      'Если declare_process вернул busy — не обещай новое дело: люди заняты; предложи дождаться или свернуть текущее.',
+      'Если declare_process вернул отказ (слишком много дел) — придумай отмазку; новое дело не обещай.',
       'ЗАПРЕЩЕНО в речи: «намерение объявлено», «процесс запущен», pending, declare, JSON.',
       'Факты лормастера перескажи своими словами.',
       'Если покровитель просит сменить имя/обращение — set_patron_name, затем подтверди.',

@@ -9,6 +9,8 @@ import {
   normalizePlotlines,
   formatPlotlinesForPrompt,
   formatBreakthroughMandate,
+  plotlinesConfig,
+  grantAttentionToIds,
 } from './plotlines.js';
 import { formatChroniclePromptBlock, refreshChronicleDigest } from './memory.js';
 import {
@@ -19,9 +21,10 @@ import {
   applyProcessAdvance,
   formatProcessLine,
   formatProcessRollsForPrompt,
-  syncProcessesFromChronicle,
+  formatActiveProcessesForAgent,
 } from './processes.js';
 import { getLogger } from '../log.js';
+import { toolFail } from '../agents/toolResult.js';
 
 function clampPopulation(n, config) {
   const min = 1000;
@@ -108,14 +111,24 @@ function resolveConcerns(domains, concernsDomainIds, relatedDomainId) {
   if (!ids.length && relatedDomainId) ids = [String(relatedDomainId)];
   ids = [...new Set(ids)];
   if (!ids.length) {
-    return { ok: false, error: 'concernsDomainIds required (1–2 id городов, которых касается событие)' };
+    return toolFail(
+      'concerns_required',
+      'Нужен concernsDomainIds: 1–2 id городов пары, которых касается событие. Повтори add_chronicle.',
+    );
   }
   if (ids.length > 2) {
-    return { ok: false, error: 'concernsDomainIds: максимум 2 города пары' };
+    return toolFail(
+      'concerns_too_many',
+      'concernsDomainIds: максимум 2 города этой пары. Убери лишние id.',
+    );
   }
   for (const id of ids) {
     if (!domains[id]) {
-      return { ok: false, error: `concernsDomainIds: неизвестный домен ${id}` };
+      const known = Object.keys(domains).join(', ');
+      return toolFail(
+        'unknown_domain',
+        `concernsDomainIds: неизвестный домен «${id}». Допустимые: ${known}.`,
+      );
     }
   }
   return {
@@ -183,10 +196,16 @@ export async function resolveConfluxTick({
     }
   }
 
-  const getDomain = (domainId) => {
+  const requireDomain = (domainId) => {
     const d = domains[domainId];
-    if (!d) throw new Error(`unknown domain ${domainId}`);
-    return d;
+    if (!d) {
+      const known = Object.keys(domains).join(', ');
+      return toolFail(
+        'unknown_domain',
+        `Неизвестный domainId «${domainId}». Допустимые в стыке: ${known}.`,
+      );
+    }
+    return { ok: true, domain: d };
   };
 
   const breakthroughMandate = allBreakthroughs.length
@@ -274,6 +293,12 @@ export async function resolveConfluxTick({
             description: 'Обязателен если secret=true — id домена, которому видна запись',
           },
           relatedPendingId: { type: 'string' },
+          relatedPlotlineIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description:
+              'Опционально: id плотлайнов, которые событие явно продолжает (не на каждую запись)',
+          },
           relatedDomainId: {
             type: 'string',
             description: 'Домен pending/статов, если запись про один город',
@@ -296,36 +321,53 @@ export async function resolveConfluxTick({
         secret = false,
         secretForDomainId = null,
         relatedPendingId,
+        relatedPlotlineIds,
         relatedDomainId,
         statDeltas,
         statDomainId,
       }) => {
         const place = String(location || '').trim();
         if (place.length < 3) {
-          return { ok: false, error: 'location required (где произошло, ≥3 символа)' };
+          return toolFail(
+            'location_required',
+            'location обязателен: где произошло (≥3 символа). Добавь место и вызови add_chronicle снова.',
+          );
         }
         const concerns = resolveConcerns(domains, concernsDomainIds, relatedDomainId);
         if (!concerns.ok) return concerns;
 
         const isSecret = Boolean(secret);
         if (isSecret && !secretForDomainId) {
-          return { ok: false, error: 'secretForDomainId required when secret=true' };
+          return toolFail(
+            'secret_domain_required',
+            'secret=true требует secretForDomainId — id города, для которого тайна. Передай id одного из доменов пары.',
+          );
         }
         if (isSecret && !domains[secretForDomainId]) {
-          return { ok: false, error: 'secretForDomainId not in conflux' };
+          const known = Object.keys(domains).join(', ');
+          return toolFail(
+            'secret_domain_unknown',
+            `secretForDomainId «${secretForDomainId}» не в стыке. Допустимые: ${known}.`,
+          );
         }
 
         let statChanges = null;
         const statsTarget = statDomainId || relatedDomainId || (isSecret ? secretForDomainId : null);
         if (statDeltas && Object.keys(statDeltas).length) {
           if (!statsTarget || !domains[statsTarget]) {
-            return { ok: false, error: 'statDomainId required for statDeltas' };
+            const known = Object.keys(domains).join(', ');
+            return toolFail(
+              'stat_domain_required',
+              `При statDeltas нужен statDomainId одного из городов пары (${known}).`,
+            );
           }
           statChanges = applyStatDeltas(domains[statsTarget].stats, statDeltas);
         }
 
         const baseTags = ['chronicle', 'conflux', `conflux:${conflux.id}`];
         if (!isSecret) baseTags.push('shared');
+        const plotCfg = plotlinesConfig(config);
+        const plotIds = relatedPlotlineIds || null;
 
         const makeFact = () =>
           createLoreFact({
@@ -337,6 +379,7 @@ export async function resolveConfluxTick({
             author: 'conflux-resolver',
             importance: importance || 'minor',
             relatedPendingId: relatedPendingId || null,
+            relatedPlotlineIds: plotIds,
             statChanges: statChanges && Object.keys(statChanges).length ? statChanges : null,
             secret: isSecret,
             secretForDomainId: isSecret ? secretForDomainId : null,
@@ -345,17 +388,29 @@ export async function resolveConfluxTick({
             concernsDomainNames: concerns.names,
           });
 
+        const grantPlotAttention = (domainId) =>
+          grantAttentionToIds(domains[domainId], plotIds, plotCfg.attention.chronicleLink);
+
         if (isSecret) {
           const fact = makeFact();
           domains[secretForDomainId].lore.push(fact);
           chronicleAddsByDomain[secretForDomainId].push(fact);
+          const attentionGranted = grantPlotAttention(secretForDomainId);
           log.info('conflux.chronicle.secret', {
             domainId: secretForDomainId,
             location: place,
             concerns: concerns.names,
+            relatedPlotlineIds: plotIds,
+            attentionGranted,
             textPreview: String(text).slice(0, 160),
           });
-          return { ok: true, factId: fact.id, secret: true, domainId: secretForDomainId };
+          return {
+            ok: true,
+            factId: fact.id,
+            secret: true,
+            domainId: secretForDomainId,
+            attentionGranted,
+          };
         }
 
         const factA = makeFact();
@@ -366,9 +421,15 @@ export async function resolveConfluxTick({
         chronicleAddsByDomain[ids[1]].push(factB);
         conflux.sharedLore = conflux.sharedLore || [];
         conflux.sharedLore.push({ ...factA });
+        const attentionGranted = [
+          ...grantPlotAttention(ids[0]),
+          ...grantPlotAttention(ids[1]),
+        ];
         log.info('conflux.chronicle.public', {
           location: place,
           concerns: concerns.names,
+          relatedPlotlineIds: plotIds,
+          attentionGranted,
           textPreview: String(text).slice(0, 160),
         });
         return {
@@ -379,6 +440,7 @@ export async function resolveConfluxTick({
           concernsDomainIds: concerns.ids,
           concernsDomainNames: concerns.names,
           statChanges,
+          attentionGranted,
         };
       },
     },
@@ -397,11 +459,19 @@ export async function resolveConfluxTick({
         },
       },
       handler: async ({ domainId, processId, advance, complete = false, failed = false }) => {
-        const working = getDomain(domainId);
+        const got = requireDomain(domainId);
+        if (!got.ok) return got;
+        const working = got.domain;
         const action = working.state.pendingActions.find(
           (a) => a.id === processId && a.status === 'active',
         );
-        if (!action) return { ok: false, error: 'process not found' };
+        if (!action) {
+          return toolFail(
+            'process_not_found',
+            `В домене ${domainId} нет active processId=${processId}. Активные:\n` +
+              formatActiveProcessesForAgent(working, config),
+          );
+        }
         normalizeProcess(action, config);
         const rolled = processRollByKey[`${domainId}:${processId}`];
         const step =
@@ -443,11 +513,19 @@ export async function resolveConfluxTick({
         },
       },
       handler: async ({ domainId, processId, reason }) => {
-        const working = getDomain(domainId);
+        const got = requireDomain(domainId);
+        if (!got.ok) return got;
+        const working = got.domain;
         const action = working.state.pendingActions.find(
           (a) => a.id === processId && a.status === 'active',
         );
-        if (!action) return { ok: false, error: 'process not found' };
+        if (!action) {
+          return toolFail(
+            'process_not_found',
+            `В домене ${domainId} нет active processId=${processId}. Активные:\n` +
+              formatActiveProcessesForAgent(working, config),
+          );
+        }
         action.status = 'cancelled';
         action.cancelReason = String(reason || '').trim() || 'сорвано';
         action.updatedAt = new Date().toISOString();
@@ -479,9 +557,16 @@ export async function resolveConfluxTick({
         },
       },
       handler: async ({ domainId, id, text, kind }) => {
-        const working = getDomain(domainId);
+        const got = requireDomain(domainId);
+        if (!got.ok) return got;
+        const working = got.domain;
         const body = String(text || '').trim();
-        if (!body) return { ok: false, error: 'text required' };
+        if (!body) {
+          return toolFail(
+            'text_required',
+            'text пуст. Передай формулировку модификатора и вызови upsert_modifier снова.',
+          );
+        }
         const list = working.state.modifiers;
         let mod = id ? list.find((m) => m.id === id) : null;
         if (!mod) {
@@ -515,7 +600,9 @@ export async function resolveConfluxTick({
         },
       },
       handler: async ({ domainId, events }) => {
-        const working = getDomain(domainId);
+        const got = requireDomain(domainId);
+        if (!got.ok) return got;
+        const working = got.domain;
         working.state.events = (events || []).map((t) => ({
           id: newId('ev'),
           text: t,
@@ -536,7 +623,9 @@ export async function resolveConfluxTick({
         },
       },
       handler: async ({ domainId, population }) => {
-        const working = getDomain(domainId);
+        const got = requireDomain(domainId);
+        if (!got.ok) return got;
+        const working = got.domain;
         const from = working.population;
         working.population = clampPopulation(population, config);
         return { ok: true, from, population: working.population };
@@ -648,10 +737,6 @@ export async function resolveConfluxTick({
   }
 
   for (const id of ids) {
-    syncProcessesFromChronicle(domains[id], chronicleAddsByDomain[id], {
-      tick: world.tickIndex,
-      log,
-    });
     refreshChronicleDigest(domains[id], config);
   }
 

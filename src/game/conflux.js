@@ -1,6 +1,7 @@
 import { newId } from './ids.js';
 import { createLoreFact } from './models.js';
 import { getLogger } from '../log.js';
+import { toolFail } from '../agents/toolResult.js';
 
 /**
  * Текст явно про разлёт/уход островов в небе, а не только «мостик обвалился».
@@ -381,19 +382,23 @@ async function generateUndockChronicle({ runtime, conflux, domains, world, log }
       },
       handler: async ({ text }) => {
         const body = String(text || '').trim();
-        if (body.length < 40) return { ok: false, error: 'too short' };
+        if (body.length < 40) {
+          return toolFail(
+            'too_short',
+            'Текст слишком короткий (<40 символов). Напиши 2–4 предложения про разлёт островов с именами обоих городов.',
+          );
+        }
         if (!body.includes(nameA) || !body.includes(nameB)) {
-          return {
-            ok: false,
-            error: `Нужны оба названия: «${nameA}» и «${nameB}»`,
-          };
+          return toolFail(
+            'names_required',
+            `Нужны оба названия в тексте: «${nameA}» и «${nameB}». Перепиши submit_undock.`,
+          );
         }
         if (!looksLikeIslandsParted(body)) {
-          return {
-            ok: false,
-            error:
-              'Нужен разлёт ОСТРОВОВ в небе (не только обвал моста). Перепиши: острова разошлись, пути нет.',
-          };
+          return toolFail(
+            'islands_not_parted',
+            'Нужен разлёт ОСТРОВОВ в небе (не только обвал моста). Перепиши: острова разошлись, пути нет.',
+          );
         }
         draft.text = body;
         return { ok: true };
@@ -473,12 +478,17 @@ async function generateContact({ runtime, conflux, domains, world, log }) {
       },
       handler: async ({ kind, description }) => {
         const text = String(description || '').trim();
-        if (text.length < 40) return { ok: false, error: 'description too short' };
+        if (text.length < 40) {
+          return toolFail(
+            'too_short',
+            'description слишком короткий (<40 символов). Напиши 2–4 предложения с именами обоих городов.',
+          );
+        }
         if (!text.includes(nameA) || !text.includes(nameB)) {
-          return {
-            ok: false,
-            error: `В description должны быть названия обоих городов: «${nameA}» и «${nameB}»`,
-          };
+          return toolFail(
+            'names_required',
+            `В description должны быть названия обоих городов: «${nameA}» и «${nameB}». Перепиши submit_contact.`,
+          );
         }
         draft.contact = {
           kind: kind || 'other',

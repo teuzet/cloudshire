@@ -239,6 +239,17 @@ const PROCESS_STOP = new Set([
   'дело',
   'работы',
   'работа',
+  // Общие глаголы/заготовки — иначе «подготовить X» ≈ «подготовить Y»
+  'подготов',
+  'готов',
+  'устро',
+  'организ',
+  'начат',
+  'провед',
+  'устройств',
+  'собра',
+  'сдела',
+  'нужн',
 ]);
 
 function normProcessText(s) {
@@ -270,7 +281,15 @@ function processThemeKeys(text) {
   if (/посольств|договор|перегов|союз/.test(t)) keys.push('diplomacy');
   if (/ополчен|набор|рекрут|обучен.{0,12}(воин|страж)|войск/.test(t)) keys.push('levy');
   if (/снабж|провиант|амбар|зерн|голод|пайк/.test(t)) keys.push('supply');
+  if (/универс|академи|учебн|школ|семинар|курс/.test(t)) keys.push('education');
+  if (/праздн|фестив|гулян|ярмарк|торжеств|карнавал/.test(t)) keys.push('festival');
   return keys;
+}
+
+function themesOverlap(a, b) {
+  if (!a?.length || !b?.length) return false;
+  const set = new Set(a);
+  return b.some((k) => set.has(k));
 }
 
 /**
@@ -280,29 +299,32 @@ export function findDuplicateProcess(domain, summary, detail = '') {
   const needle = normProcessText(`${summary} ${detail}`);
   if (needle.length < 4) return null;
   const needleTokens = new Set(processTokens(needle));
-  const needleThemes = new Set(processThemeKeys(needle));
+  const needleThemes = processThemeKeys(needle);
   const summaryOnly = normProcessText(summary);
 
   return (domain.state?.pendingActions || []).find((a) => {
     if (a.status !== 'active') return false;
     const hay = normProcessText(`${a.summary} ${a.detail || ''}`);
     if (!hay) return false;
-    if (hay === summaryOnly || hay.includes(summaryOnly) || summaryOnly.includes(normProcessText(a.summary))) {
+    const haySummary = normProcessText(a.summary);
+    if (hay === summaryOnly || (summaryOnly.length >= 12 && (hay.includes(summaryOnly) || summaryOnly.includes(haySummary)))) {
       return true;
+    }
+    const hayThemes = processThemeKeys(hay);
+    // Разные явные темы (университет vs праздник) — не дубль
+    if (needleThemes.length && hayThemes.length && !themesOverlap(needleThemes, hayThemes)) {
+      return false;
     }
     const hayTokens = processTokens(hay);
     if (needleTokens.size && hayTokens.length) {
       const overlap = hayTokens.filter((t) => needleTokens.has(t));
-      const need = Math.min(2, Math.max(1, Math.ceil(needleTokens.size * 0.4)));
-      if (overlap.length >= need && overlap.length >= 2) return true;
+      const need = Math.min(3, Math.max(2, Math.ceil(needleTokens.size * 0.45)));
+      if (overlap.length >= need) return true;
     }
-    const hayThemes = processThemeKeys(hay);
-    if (needleThemes.size && hayThemes.some((k) => needleThemes.has(k))) {
-      // Одна тема + хоть одно общее значимое слово → дубль
+    if (needleThemes.length && themesOverlap(needleThemes, hayThemes)) {
       const shared = hayTokens.filter((t) => needleTokens.has(t));
       if (shared.length >= 1) return true;
-      // Чистая тема без слов: суд vs суд — дубль, если оба только про суд
-      if (needleThemes.size === 1 && hayThemes.length === 1 && [...needleThemes][0] === hayThemes[0]) {
+      if (needleThemes.length === 1 && hayThemes.length === 1 && needleThemes[0] === hayThemes[0]) {
         return true;
       }
     }
@@ -310,59 +332,61 @@ export function findDuplicateProcess(domain, summary, detail = '') {
   });
 }
 
-/** Хроника утверждает, что дело уже закончено / сорвано. */
-export function chronicleImpliesProcessFinished(text) {
-  const t = String(text || '').toLowerCase();
-  if (!t.trim()) return null;
-  if (
-    /сорван|провал|провалил|уничтож|разруш|отменен|отменён|бросили дело|дело похоронили|не удалось/.test(
-      t,
-    )
-  ) {
-    return 'failed';
+/**
+ * Найти активный процесс по id или по фрагменту summary/detail
+ * (модели часто выдумывают id вроде university_curriculum).
+ */
+export function resolveActiveProcess(domain, processId, config = null) {
+  const list = activeProcesses(domain, config);
+  const raw = String(processId || '').trim();
+  if (!raw) return { process: null, candidates: list };
+  const byId = list.find((a) => a.id === raw);
+  if (byId) return { process: byId, candidates: list };
+
+  const needle = normProcessText(raw.replace(/[_-]+/g, ' '));
+  if (needle.length < 3) return { process: null, candidates: list };
+
+  // Выдуманные латиницей id → темы (university_curriculum → education)
+  const inventedThemes = processThemeKeys(
+    needle
+      .replace(/\buniversity\b|\bacademy\b|\bcurriculum\b|\bschool\b|\beducation\b/g, ' университет учебный ')
+      .replace(/\bfestival\b|\bfeast\b|\bcelebration\b|\bholliday\b|\bholiday\b/g, ' праздник ')
+      .replace(/\btemple\b|\bshrine\b|\bcult\b/g, ' храм ')
+      .replace(/\bcourt\b|\btrial\b|\bjudgment\b/g, ' суд ')
+      .replace(/\barmy\b|\blevy\b|\brecruit\b|\bmilitia\b/g, ' ополчение войск ')
+      .replace(/\bscout\b|\bspy\b|\brecon\b/g, ' разведка ')
+      .replace(/\bdiplomacy\b|\benvoy\b|\btreaty\b/g, ' посольство ')
+      .replace(/\bbuild\b|\bfort\b|\bwall\b|\bbridge\b/g, ' строительство ')
+      .replace(/\barms\b|\bweapon\b|\bforge\b/g, ' оружие кузница ')
+      .replace(/\bsupply\b|\bgrain\b|\bfood\b/g, ' провиант зерно '),
+  );
+
+  const scored = list
+    .map((a) => {
+      const hay = normProcessText(`${a.summary} ${a.detail || ''}`);
+      let score = 0;
+      if (hay.includes(needle) || needle.includes(normProcessText(a.summary))) score += 5;
+      const nTok = processTokens(needle);
+      const hTok = new Set(processTokens(hay));
+      const overlap = nTok.filter((t) => hTok.has(t));
+      score += overlap.length * 2;
+      const hayThemes = processThemeKeys(hay);
+      if (inventedThemes.length && themesOverlap(inventedThemes, hayThemes)) score += 4;
+      const themes = processThemeKeys(needle);
+      if (themes.length && themesOverlap(themes, hayThemes)) score += 3;
+      return { a, score, overlap: overlap.length };
+    })
+    .filter((x) => x.score >= 3)
+    .sort((x, y) => y.score - x.score);
+
+  if (scored.length === 1 || (scored.length >= 2 && scored[0].score > scored[1].score + 1)) {
+    return { process: scored[0].a, candidates: list };
   }
-  if (
-    /завершен|завершён|окончен|закончен|готов[аоы](\s|$|,|\.)|сдано|сдан[ао](\s|$|,|\.)|открыт[ао] для|возвед[её]н|построен|достроен|воздвигнут/.test(
-      t,
-    ) ||
-    /суд.{0,40}(вынес|оконч|закрыл)|приговор.{0,20}(вынес|оглас)|дело.{0,25}(закрыт|оконч)/.test(t) ||
-    /работы.{0,25}(законч|заверш)|успешно.{0,20}(заверш|оконч)|дов[её]л.{0,20}до конца/.test(t)
-  ) {
-    return 'complete';
-  }
-  return null;
+  return { process: null, candidates: list };
 }
 
-/**
- * Если запись хроники по процессу говорит «готово/сорвано», а процесс ещё active —
- * синхронизировать статус в том же тике.
- */
-export function syncProcessesFromChronicle(domain, chronicleAdds, { tick = null, log = null } = {}) {
-  if (!domain?.state?.pendingActions?.length || !chronicleAdds?.length) return [];
-  const synced = [];
-  for (const fact of chronicleAdds) {
-    const pid = fact?.relatedPendingId;
-    if (!pid) continue;
-    const outcome = chronicleImpliesProcessFinished(fact.text);
-    if (!outcome) continue;
-    const action = domain.state.pendingActions.find((a) => a.id === pid && a.status === 'active');
-    if (!action) continue;
-    if (outcome === 'failed') {
-      action.status = 'cancelled';
-      action.cancelReason = action.cancelReason || 'по хронике месяца';
-      action.monthsLeft = 0;
-      action.updatedAt = new Date().toISOString();
-      if (tick != null) action.resolvedTick = tick;
-    } else {
-      applyProcessAdvance(action, 0, { complete: true, tick });
-    }
-    synced.push({ processId: pid, outcome, summary: action.summary });
-    log?.info?.('process.sync_from_chronicle', {
-      processId: pid,
-      outcome,
-      summary: action.summary,
-      factPreview: String(fact.text || '').slice(0, 160),
-    });
-  }
-  return synced;
+export function formatActiveProcessesForAgent(domain, config = null) {
+  const list = activeProcesses(domain, config);
+  if (!list.length) return '(нет активных дел)';
+  return list.map((a) => formatProcessLine(a, config)).join('\n');
 }

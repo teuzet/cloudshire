@@ -1,6 +1,21 @@
 import { getLogger, truncate } from '../log.js';
-import { createPlotline, normalizePlotlines, formatPlotlinesForPrompt } from './plotlines.js';
+import {
+  createPlotline,
+  normalizePlotlines,
+  formatPlotlinesForPrompt,
+  plotlinesConfig,
+  listClosureCandidates,
+  formatDirectorMetaForPrompt,
+  grantAttention,
+} from './plotlines.js';
 import { chronicleEntries } from './models.js';
+import { toolFail } from '../agents/toolResult.js';
+
+function sliceHook(s, max = 120) {
+  return String(s || '')
+    .trim()
+    .slice(0, max);
+}
 
 /**
  * Переписка покровитель↔правитель после последней сводки месяца (рамка текущего тика).
@@ -49,24 +64,21 @@ function pendingLines(domain) {
 
 const SOLO_GUIDANCE = [
   'Задача — интересный переплетающийся сюжет при короткой доске (мало нитей).',
-  'Новый плотлайн — только при явном крючке. Пустая доска ок, если крючков нет.',
-  'ОБЯЗАТЕЛЬНО: для КАЖДОЙ открытой нити, если месяц её затронул (хроника, процесс, переписка) —',
-  'upsert_plotline с НОВЫМ summary: текущее состояние + что сдвинулось в этом месяце + крючок дальше.',
-  'summary — rolling (перепиши целиком ≤400 символов), НЕ дописывай бесконечную летопись.',
-  'Где логично — переплетай нити (relatedPlotlineIds) и процессы (relatedPendingIds), без роялей.',
-  'Температура: heat уже начислен; после ★ПРОРЫВ T=0. bump только за интерес в ПЕРЕПИСКЕ ТИКА или явную связку (+5…20).',
-  'complete — когда нить закрыта или бессмысленна.',
+  'ОБЯЗАТЕЛЬНО: затронутые нити → upsert с новым summary + openHook + closeWhen (rolling).',
+  'T — котёл прорыва; A (attention) — право жить. bump даёт T и A. complete кандидатов с низким A.',
+  'Если мандат НОВОЙ КРОВИ — создай самостоятельную нить по посеву БЕЗ relatedPlotlineIds.',
+  'При открытых ≥ softMax — complete хотя бы одну слабую/дублирующую, если есть кандидаты.',
 ].join(' ');
 
 const PAIR_GUIDANCE = [
-  'Ты — общий режиссёр стыка двух городов. Обе доски равноправны.',
-  'Мало нитей, сильное переплетение между городами, где естественно.',
-  'ОБЯЗАТЕЛЬНО обновляй summary затронутых нитей (rolling, ≤400), relatedPendingIds / relatedPlotlineIds.',
-  'upsert/bump/complete всегда с domainId. Не плоди нити без крючка.',
+  'Общий режиссёр стыка. Обе доски равноправны. domainId на каждом tool.',
+  'upsert с summary + openHook + closeWhen; bump за интерес/связку; complete слабые по attention.',
+  'Мандат новой крови — самостоятельная нить по посеву без relatedPlotlineIds.',
 ].join(' ');
 
 /**
  * Режиссёр одного домена (обычный тик).
+ * @param {object} [directorMeta] — { spawn, closureCandidates }
  */
 export async function runDirector({
   config,
@@ -74,6 +86,7 @@ export async function runDirector({
   domain,
   world,
   chronicleAdds = [],
+  directorMeta = null,
   log: parentLog,
 }) {
   return runDirectorSession({
@@ -82,6 +95,7 @@ export async function runDirector({
     world,
     domains: [domain],
     chronicleByDomain: { [domain.id]: chronicleAdds },
+    directorMetaByDomain: directorMeta ? { [domain.id]: directorMeta } : {},
     mode: 'solo',
     log: parentLog,
   });
@@ -96,6 +110,7 @@ export async function runConfluxDirector({
   domains,
   world,
   chronicleByDomain = {},
+  directorMetaByDomain = {},
   conflux = null,
   log: parentLog,
 }) {
@@ -105,6 +120,7 @@ export async function runConfluxDirector({
     world,
     domains,
     chronicleByDomain,
+    directorMetaByDomain,
     mode: 'pair',
     conflux,
     log: parentLog,
@@ -117,11 +133,13 @@ async function runDirectorSession({
   world,
   domains,
   chronicleByDomain,
-  mode,
+  directorMetaByDomain = {},
+  mode = 'solo',
   conflux = null,
   log: parentLog,
 }) {
   const isPair = mode === 'pair' && domains.length >= 2;
+  const plotCfg = plotlinesConfig(config);
   const log = (parentLog || getLogger()).child({
     scope: isPair ? 'director.conflux' : 'director',
     domainIds: domains.map((d) => d.id),
@@ -131,77 +149,118 @@ async function runDirectorSession({
   for (const d of domains) normalizePlotlines(d);
 
   const byId = Object.fromEntries(domains.map((d) => [d.id, d]));
+  const session = {
+    createdIds: new Set(),
+    completedIds: new Set(),
+    spawnSatisfied: new Set(),
+  };
+
+  const metaFor = (domainId) => {
+    const d = byId[domainId];
+    const raw = directorMetaByDomain[domainId] || {};
+    const closureCandidates =
+      raw.closureCandidates || listClosureCandidates(d, world.tickIndex, plotCfg);
+    const spawn = raw.spawn || null;
+    const openCount = d.plotlines.length;
+    return {
+      spawn,
+      closureCandidates,
+      softMax: plotCfg.softMax,
+      maxOpen: plotCfg.maxOpen,
+      openCount,
+      boardMeta: formatDirectorMetaForPrompt({
+        spawn,
+        closureCandidates,
+        softMax: plotCfg.softMax,
+        maxOpen: plotCfg.maxOpen,
+        openCount,
+      }),
+    };
+  };
 
   const boardSnapshot = () =>
     domains
-      .map((d) => `=== «${d.name}» (${d.id}) ===\n${formatPlotlinesForPrompt(d)}`)
+      .map((d) => {
+        const m = metaFor(d.id);
+        return (
+          `=== «${d.name}» (${d.id}) ===\n${m.boardMeta}\n` +
+          `${formatPlotlinesForPrompt(d, world.tickIndex)}`
+        );
+      })
       .join('\n\n');
 
   const tools = [
     {
       name: 'read_plot_board',
       description: isPair
-        ? 'Доски плотлайнов обоих городов, хроника месяца, переписка тика'
-        : 'Плотлайны, хроника месяца, переписка тика с правителем',
+        ? 'Доски, мандаты движка, хроника месяца, переписка'
+        : 'Плотлайны, мандаты (новая кровь / кандидаты на закрытие), хроника, переписка',
       parameters: { type: 'object', properties: {} },
-      handler: async () => {
-        const payload = {
-          ok: true,
-          gameDate: world.gameDate,
-          mode: isPair ? 'conflux' : 'solo',
-          guidance: isPair ? PAIR_GUIDANCE : SOLO_GUIDANCE,
-          domains: domains.map((d) => ({
+      handler: async () => ({
+        ok: true,
+        gameDate: world.gameDate,
+        mode: isPair ? 'conflux' : 'solo',
+        guidance: isPair ? PAIR_GUIDANCE : SOLO_GUIDANCE,
+        domains: domains.map((d) => {
+          const m = metaFor(d.id);
+          return {
             domainId: d.id,
             name: d.name,
             plotlines: d.plotlines,
+            engine: {
+              spawnMandate: Boolean(m.spawn?.hit),
+              spawnChance: m.spawn?.chance ?? null,
+              seedTags: m.spawn?.seeds || [],
+              seedText: m.spawn?.seedText || null,
+              closureCandidates: m.closureCandidates,
+              softMax: m.softMax,
+              maxOpen: m.maxOpen,
+              openCount: m.openCount,
+            },
+            boardMeta: m.boardMeta,
             monthChronicle: monthChronicleText(chronicleByDomain[d.id], d),
             tickDialog: dialogSinceLastTick(d),
             activePending: pendingLines(d) || '(нет)',
-          })),
-        };
-        if (isPair && conflux) {
-          payload.conflux = {
-            id: conflux.id,
-            contact: conflux.contact,
-            monthsDocked: conflux.monthsDocked,
-            durationMonths: conflux.durationMonths,
           };
-        }
-        return payload;
-      },
+        }),
+        ...(isPair && conflux
+          ? {
+              conflux: {
+                id: conflux.id,
+                contact: conflux.contact,
+                monthsDocked: conflux.monthsDocked,
+                durationMonths: conflux.durationMonths,
+              },
+            }
+          : {}),
+      }),
     },
     {
       name: 'upsert_plotline',
       description:
-        'Создать или обновить плотлайн. Только при сюжетном крючке. temperature — через bump_temperature.',
+        'Создать/обновить нить. Нужны summary, openHook, closeWhen. T — через bump. ' +
+        'Новая кровь по мандату — без relatedPlotlineIds.',
       parameters: {
         type: 'object',
-        required: isPair ? ['domainId', 'title'] : ['title'],
+        required: isPair
+          ? ['domainId', 'title', 'summary', 'openHook', 'closeWhen']
+          : ['title', 'summary', 'openHook', 'closeWhen'],
         properties: {
-          domainId: {
-            type: 'string',
-            description: isPair ? 'Id города, чья доска' : 'Игнорируется в solo',
-          },
-          plotlineId: {
-            type: 'string',
-            description: 'Существующий id для обновления; без id — новый',
-          },
+          domainId: { type: 'string' },
+          plotlineId: { type: 'string' },
           title: { type: 'string' },
-          summary: {
+          summary: { type: 'string' },
+          openHook: {
             type: 'string',
-            description:
-              'Актуальное состояние нити целиком (rolling ≤400): что сейчас + сдвиг месяца + крючок дальше',
+            description: 'Крючок дальше (1 фраза)',
+          },
+          closeWhen: {
+            type: 'string',
+            description: 'Закрыть, если… (1 фраза)',
           },
           relatedPendingIds: { type: 'array', items: { type: 'string' } },
-          relatedPlotlineIds: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Id других плотлайнов, с которыми нить переплелась',
-          },
-          initialTemperature: {
-            type: 'number',
-            description: 'Только для НОВОГО: старт 15–35',
-          },
+          relatedPlotlineIds: { type: 'array', items: { type: 'string' } },
+          initialTemperature: { type: 'number' },
         },
       },
       handler: async ({
@@ -209,6 +268,8 @@ async function runDirectorSession({
         plotlineId,
         title,
         summary,
+        openHook,
+        closeWhen,
         relatedPendingIds,
         relatedPlotlineIds,
         initialTemperature,
@@ -217,50 +278,79 @@ async function runDirectorSession({
         if (!domain.ok) return domain;
         const d = domain.domain;
         normalizePlotlines(d);
+        const oh = sliceHook(openHook, plotCfg.hooksMaxLen);
+        const cw = sliceHook(closeWhen, plotCfg.hooksMaxLen);
+        if (oh.length < 3 || cw.length < 3) {
+          return toolFail(
+            'hooks_required',
+            'Нужны openHook и closeWhen (короткие фразы ≥3 символов).',
+          );
+        }
+        const m = metaFor(d.id);
+
         if (plotlineId) {
           const existing = d.plotlines.find((p) => p.id === plotlineId);
-          if (!existing) return { ok: false, error: 'plotline not found' };
+          if (!existing) {
+            const ids = d.plotlines.map((p) => `${p.id} «${p.title}»`).join('; ') || '(нет)';
+            return toolFail('plotline_not_found', `plotlineId=${plotlineId} не найден. Открытые: ${ids}.`);
+          }
           if (title) existing.title = String(title).slice(0, 120);
           if (summary != null) existing.summary = String(summary).slice(0, 400);
-          if (relatedPendingIds) {
-            existing.relatedPendingIds = relatedPendingIds.map(String);
-          }
-          if (relatedPlotlineIds) {
-            existing.relatedPlotlineIds = relatedPlotlineIds.map(String);
-          }
+          existing.openHook = oh;
+          existing.closeWhen = cw;
+          if (relatedPendingIds) existing.relatedPendingIds = relatedPendingIds.map(String);
+          if (relatedPlotlineIds) existing.relatedPlotlineIds = relatedPlotlineIds.map(String);
           existing.updatedTick = world.tickIndex;
           return { ok: true, domainId: d.id, plotline: existing, created: false };
         }
-        if (d.plotlines.length >= 6) {
-          return { ok: false, error: 'Слишком много плотлайнов (макс 6). Заверши или сшей старые.' };
+
+        if (d.plotlines.length >= plotCfg.maxOpen) {
+          return toolFail(
+            'too_many_plotlines',
+            `Слишком много плотлайнов (макс ${plotCfg.maxOpen}). complete или сшей старые.`,
+          );
+        }
+        const asNewBlood = Boolean(m.spawn?.hit) && !session.spawnSatisfied.has(d.id);
+        if (asNewBlood && relatedPlotlineIds?.length) {
+          return toolFail(
+            'spawn_must_be_independent',
+            'Мандат новой крови: создай нить БЕЗ relatedPlotlineIds.',
+          );
         }
         const plot = createPlotline({
           title,
           summary,
+          openHook: oh,
+          closeWhen: cw,
           temperature: initialTemperature ?? 25,
+          attention: plotCfg.attention.initial,
           tick: world.tickIndex,
-          relatedPendingIds,
-          relatedPlotlineIds,
+          relatedPendingIds: asNewBlood ? [] : relatedPendingIds,
+          relatedPlotlineIds: asNewBlood ? [] : relatedPlotlineIds,
+          seedTags: asNewBlood ? (m.spawn?.seeds || []).map((s) => `${s.groupId}:${s.tagId}`) : [],
         });
         d.plotlines.push(plot);
-        log.info('director.plot_created', { domainId: d.id, id: plot.id, title: plot.title });
-        return { ok: true, domainId: d.id, plotline: plot, created: true };
+        session.createdIds.add(plot.id);
+        if (asNewBlood) session.spawnSatisfied.add(d.id);
+        log.info('director.plot_created', {
+          domainId: d.id,
+          id: plot.id,
+          title: plot.title,
+          newBlood: asNewBlood,
+        });
+        return { ok: true, domainId: d.id, plotline: plot, created: true, newBlood: asNewBlood };
       },
     },
     {
       name: 'bump_temperature',
-      description:
-        'Дельта температуры. Копи за интерес в переписке тика или натуральную связку нитей.',
+      description: 'Дельта T (+attention). За интерес в переписке или связку (+5…20).',
       parameters: {
         type: 'object',
         required: isPair ? ['domainId', 'plotlineId', 'delta'] : ['plotlineId', 'delta'],
         properties: {
           domainId: { type: 'string' },
           plotlineId: { type: 'string' },
-          delta: {
-            type: 'number',
-            description: 'Обычно +5…+20; редко отрицательная',
-          },
+          delta: { type: 'number' },
           reason: { type: 'string' },
         },
       },
@@ -270,17 +360,26 @@ async function runDirectorSession({
         const d = domain.domain;
         normalizePlotlines(d);
         const p = d.plotlines.find((x) => x.id === plotlineId);
-        if (!p) return { ok: false, error: 'plotline not found' };
+        if (!p) {
+          const ids = d.plotlines.map((x) => `${x.id} «${x.title}»`).join('; ') || '(нет)';
+          return toolFail('plotline_not_found', `plotlineId=${plotlineId} не найден. Открытые: ${ids}.`);
+        }
         const n = Math.max(-30, Math.min(40, Math.round(Number(delta) || 0)));
-        if (n === 0) return { ok: false, error: 'delta=0' };
+        if (n === 0) {
+          return toolFail('delta_zero', 'delta=0. Передай заметный шаг (обычно +5…+20).');
+        }
         const from = p.temperature;
         p.temperature = Math.max(0, Math.min(100, from + n));
+        const attGain = grantAttention(p, Math.abs(n) * (plotCfg.attention.bumpFactor || 1));
+        p.updatedTick = world.tickIndex;
         log.info('director.temp_bump', {
           domainId: d.id,
           id: p.id,
           from,
           to: p.temperature,
           delta: n,
+          attentionDelta: attGain,
+          attention: p.attention,
           reason: truncate(reason, 120),
         });
         return {
@@ -289,13 +388,14 @@ async function runDirectorSession({
           plotlineId: p.id,
           from,
           to: p.temperature,
+          attention: p.attention,
           reason: reason || null,
         };
       },
     },
     {
       name: 'complete_plotline',
-      description: 'Сюжет закрыт — удалить с доски',
+      description: 'Сюжет закрыт или бессмыслен — снять с доски',
       parameters: {
         type: 'object',
         required: isPair ? ['domainId', 'plotlineId'] : ['plotlineId'],
@@ -311,8 +411,12 @@ async function runDirectorSession({
         const d = domain.domain;
         normalizePlotlines(d);
         const idx = d.plotlines.findIndex((x) => x.id === plotlineId);
-        if (idx < 0) return { ok: false, error: 'plotline not found' };
+        if (idx < 0) {
+          const ids = d.plotlines.map((x) => `${x.id} «${x.title}»`).join('; ') || '(нет)';
+          return toolFail('plotline_not_found', `plotlineId=${plotlineId} не найден. Открытые: ${ids}.`);
+        }
         const [removed] = d.plotlines.splice(idx, 1);
+        session.completedIds.add(removed.id);
         log.info('director.plot_completed', {
           domainId: d.id,
           id: removed.id,
@@ -324,17 +428,40 @@ async function runDirectorSession({
     },
     {
       name: 'submit_direction',
-      description: 'Завершить ход режиссёра (можно без изменений досок)',
+      description: 'Завершить ход режиссёра',
       parameters: {
         type: 'object',
-        properties: {
-          note: { type: 'string' },
-        },
+        properties: { note: { type: 'string' } },
       },
       handler: async ({ note }) => {
+        for (const d of domains) {
+          const m = metaFor(d.id);
+          if (m.spawn?.hit && !session.spawnSatisfied.has(d.id)) {
+            return toolFail(
+              'spawn_mandate_unmet',
+              `Мандат новой крови для «${d.name}» не выполнен: upsert_plotline по посеву (${m.spawn.seedText}) без relatedPlotlineIds, затем submit_direction.`,
+            );
+          }
+          const stillCandidates = m.closureCandidates.filter((c) =>
+            d.plotlines.some((p) => p.id === c.id),
+          );
+          if (
+            d.plotlines.length >= m.softMax &&
+            stillCandidates.length > 0 &&
+            session.completedIds.size === 0
+          ) {
+            return toolFail(
+              'closure_required',
+              `Открытых ≥${m.softMax} и есть кандидаты на закрытие. complete_plotline хотя бы одну: ` +
+                stillCandidates.map((c) => `${c.id} «${c.title}»`).join('; '),
+            );
+          }
+        }
         log.info('director.done', {
           note: truncate(note, 240),
           board: boardSnapshot(),
+          created: [...session.createdIds],
+          completed: [...session.completedIds],
         });
         return { ok: true };
       },
@@ -342,31 +469,23 @@ async function runDirectorSession({
   ];
 
   const names = domains.map((d) => `«${d.name}»`).join(' и ');
-  const userPrompt = isPair
-    ? [
-        `Общая режиссура стыка ${names} (${world.gameDate?.label || ''}).`,
-        'Сначала read_plot_board.',
-        'Затронутые нити → upsert с новым rolling summary; связка → relatedPlotlineIds / bump; закрыто → complete.',
-        'Не плоди нити. Переплетай города только натурально. Затем submit_direction.',
-        '',
-        boardSnapshot(),
-      ].join('\n')
-    : [
-        `Режиссура месяца ${names} (${world.gameDate?.label || ''}).`,
-        'Сначала read_plot_board.',
-        'Открытые нити, которых коснулся месяц → обязательно upsert (новый summary целиком).',
-        'Крючок → новый plotline; интерес в переписке / сплетение → bump + relatedPlotlineIds; закрыто → complete.',
-        'Мало нитей, сильное движение. Затем submit_direction.',
-        '',
-        boardSnapshot(),
-      ].join('\n');
+  const userPrompt = [
+    isPair
+      ? `Общая режиссура стыка ${names} (${world.gameDate?.label || ''}).`
+      : `Режиссура месяца ${names} (${world.gameDate?.label || ''}).`,
+    'Сначала read_plot_board (engine/boardMeta).',
+    'Затронутые → upsert (summary+openHook+closeWhen); интерес → bump; кандидаты → complete.',
+    'Мандат новой крови обязателен, если выпал. Затем submit_direction.',
+    '',
+    boardSnapshot(),
+  ].join('\n');
 
   try {
     await runtime.run({
       agentId: 'director',
       userMessages: [{ role: 'user', content: userPrompt }],
       tools,
-      maxTurns: isPair ? 14 : 10,
+      maxTurns: isPair ? 14 : 12,
       toolChoice: { type: 'function', function: { name: 'read_plot_board' } },
       log,
       scene: isPair ? 'director_conflux' : 'director',
@@ -395,7 +514,11 @@ async function runDirectorSession({
 function resolveDomain(byId, domainId, domains, isPair) {
   if (isPair) {
     if (!domainId || !byId[domainId]) {
-      return { ok: false, error: 'domainId required / unknown' };
+      const known = Object.keys(byId).join(', ');
+      return toolFail(
+        'unknown_domain',
+        `domainId обязателен и должен быть одним из: ${known}. Передай верный domainId.`,
+      );
     }
     return { ok: true, domain: byId[domainId] };
   }

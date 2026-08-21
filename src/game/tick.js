@@ -20,6 +20,9 @@ import {
   formatPlotlinesForPrompt,
   formatBreakthroughMandate,
   plotlinesConfig,
+  rollPlotSpawn,
+  listClosureCandidates,
+  grantAttentionToIds,
 } from './plotlines.js';
 import {
   normalizeDomainProcesses,
@@ -29,10 +32,11 @@ import {
   applyProcessAdvance,
   formatProcessLine,
   formatProcessRollsForPrompt,
-  syncProcessesFromChronicle,
+  formatActiveProcessesForAgent,
 } from './processes.js';
 import { runDirector, runConfluxDirector } from './director.js';
 import { getLogger } from '../log.js';
+import { toolFail } from '../agents/toolResult.js';
 
 function clampPopulation(n, config) {
   const min = 1000;
@@ -134,7 +138,7 @@ export async function resolveDomainTick({
           linkedStats: p.linkedStats,
         })),
         processRollsThisTick: processRolls,
-        plotlines: formatPlotlinesForPrompt(working),
+        plotlines: formatPlotlinesForPrompt(working, world.tickIndex),
         breakthroughsThisTick: breakthroughList.map((p) => ({
           id: p.id,
           title: p.title,
@@ -168,6 +172,12 @@ export async function resolveDomainTick({
             type: 'string',
             description: 'Id процесса',
           },
+          relatedPlotlineIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description:
+              'Опционально: id плотлайнов, которые это событие явно продолжает (не обязательно на каждую запись)',
+          },
           statDeltas: {
             type: 'object',
             additionalProperties: { type: 'number' },
@@ -175,7 +185,8 @@ export async function resolveDomainTick({
           },
         },
       },
-      handler: async ({ text, importance, relatedPendingId, statDeltas }) => {
+      handler: async ({ text, importance, relatedPendingId, relatedPlotlineIds, statDeltas }) => {
+        const plotCfg = plotlinesConfig(config);
         const statChanges = applyStatDeltas(working.stats, statDeltas);
         const fact = createLoreFact({
           id: newId('lore'),
@@ -186,14 +197,22 @@ export async function resolveDomainTick({
           author: 'resolver',
           importance: importance || 'minor',
           relatedPendingId: relatedPendingId || null,
+          relatedPlotlineIds: relatedPlotlineIds || null,
           statChanges: Object.keys(statChanges).length ? statChanges : null,
         });
         working.lore.push(fact);
         chronicleAdds.push(fact);
+        const att = grantAttentionToIds(
+          working,
+          fact.relatedPlotlineIds,
+          plotCfg.attention.chronicleLink,
+        );
         log.info('resolver.chronicle', {
           factId: fact.id,
           importance: fact.importance,
           relatedPendingId: fact.relatedPendingId || null,
+          relatedPlotlineIds: fact.relatedPlotlineIds || null,
+          attentionGranted: att,
           statChanges,
           textPreview: String(text).slice(0, 200),
         });
@@ -203,6 +222,7 @@ export async function resolveDomainTick({
           countThisTick: chronicleAdds.length,
           statChanges,
           stats: working.stats,
+          attentionGranted: att,
         };
       },
     },
@@ -251,7 +271,12 @@ export async function resolveDomainTick({
       },
       handler: async ({ id, text, kind }) => {
         const body = String(text || '').trim();
-        if (!body) return { ok: false, error: 'text required' };
+        if (!body) {
+          return toolFail(
+            'text_required',
+            'text пуст. Передай краткую формулировку постоянного условия и вызови upsert_modifier снова.',
+          );
+        }
         const list = working.state.modifiers;
         let mod = id ? list.find((m) => m.id === id) : null;
         if (!mod) {
@@ -290,7 +315,14 @@ export async function resolveDomainTick({
         working.state.modifiers = working.state.modifiers.filter((m) => m.id !== id);
         const removed = before !== working.state.modifiers.length;
         log.info('resolver.modifier.remove', { id, removed });
-        return { ok: removed, removed };
+        if (!removed) {
+          const ids = working.state.modifiers.map((m) => m.id).join(', ') || '(пусто)';
+          return toolFail(
+            'modifier_not_found',
+            `Модификатор id=${id} не найден. Существующие: ${ids}. Проверь id из read_context.`,
+          );
+        }
+        return { ok: true, removed: true };
       },
     },
     {
@@ -328,7 +360,13 @@ export async function resolveDomainTick({
       },
       handler: async ({ processId, advance, complete = false, failed = false }) => {
         const action = working.state.pendingActions.find((a) => a.id === processId && a.status === 'active');
-        if (!action) return { ok: false, error: 'process not found' };
+        if (!action) {
+          return toolFail(
+            'process_not_found',
+            `processId=${processId} не найден среди active. Возьми id из списка:\n` +
+              formatActiveProcessesForAgent(working, config),
+          );
+        }
         normalizeProcess(action, config);
         const rolled = processRollById[processId];
         const step =
@@ -380,7 +418,13 @@ export async function resolveDomainTick({
         const action = working.state.pendingActions.find(
           (a) => a.id === processId && a.status === 'active',
         );
-        if (!action) return { ok: false, error: 'process not found' };
+        if (!action) {
+          return toolFail(
+            'process_not_found',
+            `processId=${processId} не найден среди active. Возьми id из списка:\n` +
+              formatActiveProcessesForAgent(working, config),
+          );
+        }
         action.status = 'cancelled';
         action.cancelReason = String(reason || '').trim() || 'сорвано';
         action.updatedAt = new Date().toISOString();
@@ -493,8 +537,6 @@ export async function resolveDomainTick({
     }
   }
 
-  syncProcessesFromChronicle(working, chronicleAdds, { tick: world.tickIndex, log });
-
   refreshChronicleDigest(working, config);
 
   if (!chronicleAdds.length) {
@@ -549,20 +591,27 @@ export async function runWorldTick({ config, runtime, storage, app }) {
   for (const conflux of confluxPhase.dockedConfluxes || []) {
     const preludeAddsByDomain = {};
     const breakthroughsByDomain = {};
+    const spawnByDomain = {};
     for (const id of conflux.domainIds || []) {
       preludeAddsByDomain[id] = confluxPhase.chronicleAddsByDomain.get(id) || [];
       const d = await storage.getDomain(id);
       if (!d) continue;
       normalizeDomain(d);
       if (plotCfg.enabled) {
-        heatPlotlines(d, plotCfg.heatPerTick);
-        breakthroughsByDomain[id] = rollBreakthroughs(d);
+        heatPlotlines(d, plotCfg.heatPerTick, plotCfg);
+        breakthroughsByDomain[id] = rollBreakthroughs(d, Math.random, plotCfg);
+        spawnByDomain[id] = rollPlotSpawn(d, plotCfg, Math.random, config);
         getLogger().info('plotlines.roll', {
           domainId: id,
           name: d.name,
           heat: plotCfg.heatPerTick,
           breakthroughs: breakthroughsByDomain[id].map((p) => p.title),
-          board: formatPlotlinesForPrompt(d),
+          spawn: {
+            hit: spawnByDomain[id].hit,
+            chance: spawnByDomain[id].chance,
+            seeds: spawnByDomain[id].seedText,
+          },
+          board: formatPlotlinesForPrompt(d, world.tickIndex),
         });
       } else {
         breakthroughsByDomain[id] = [];
@@ -579,7 +628,7 @@ export async function runWorldTick({ config, runtime, storage, app }) {
       preludeAddsByDomain,
       breakthroughsByDomain,
     });
-    pairBatches.push({ conflux, resolved });
+    pairBatches.push({ conflux, resolved, spawnByDomain });
   }
 
   const advanced = await advanceDockedConfluxes(
@@ -588,7 +637,7 @@ export async function runWorldTick({ config, runtime, storage, app }) {
   );
   confluxNotes.push(...(advanced.notes || []));
 
-  for (const { conflux, resolved } of pairBatches) {
+  for (const { conflux, resolved, spawnByDomain } of pairBatches) {
     const chronicleByDomain = {};
     for (const domain of resolved.domains) {
       handled.add(domain.id);
@@ -596,12 +645,20 @@ export async function runWorldTick({ config, runtime, storage, app }) {
     }
 
     if (plotCfg.enabled) {
+      const directorMetaByDomain = {};
+      for (const domain of resolved.domains) {
+        directorMetaByDomain[domain.id] = {
+          spawn: spawnByDomain?.[domain.id] || null,
+          closureCandidates: listClosureCandidates(domain, world.tickIndex, plotCfg),
+        };
+      }
       await runConfluxDirector({
         config,
         runtime,
         domains: resolved.domains,
         world,
         chronicleByDomain,
+        directorMetaByDomain,
         conflux,
       });
     }
@@ -658,15 +715,22 @@ export async function runWorldTick({ config, runtime, storage, app }) {
 
     normalizeDomain(domain);
     let breakthroughs = [];
+    let directorMeta = null;
     if (plotCfg.enabled) {
-      heatPlotlines(domain, plotCfg.heatPerTick);
-      breakthroughs = rollBreakthroughs(domain);
+      heatPlotlines(domain, plotCfg.heatPerTick, plotCfg);
+      breakthroughs = rollBreakthroughs(domain, Math.random, plotCfg);
+      const spawn = rollPlotSpawn(domain, plotCfg, Math.random, config);
+      directorMeta = {
+        spawn,
+        closureCandidates: listClosureCandidates(domain, world.tickIndex, plotCfg),
+      };
       getLogger().info('plotlines.roll', {
         domainId: domain.id,
         name: domain.name,
         heat: plotCfg.heatPerTick,
         breakthroughs: breakthroughs.map((p) => p.title),
-        board: formatPlotlinesForPrompt(domain),
+        spawn: { hit: spawn.hit, chance: spawn.chance, seeds: spawn.seedText },
+        board: formatPlotlinesForPrompt(domain, world.tickIndex),
       });
     }
 
@@ -686,6 +750,14 @@ export async function runWorldTick({ config, runtime, storage, app }) {
         domain: resolved.domain,
         world,
         chronicleAdds: resolved.chronicleAdds,
+        directorMeta: {
+          spawn: directorMeta?.spawn || null,
+          closureCandidates: listClosureCandidates(
+            resolved.domain,
+            world.tickIndex,
+            plotCfg,
+          ),
+        },
       });
     }
     clearBreakthroughFlags(resolved.domain, world.tickIndex);

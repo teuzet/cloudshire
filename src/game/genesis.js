@@ -16,6 +16,7 @@ import {
 } from './models.js';
 import { formatPlayerBrief } from './onboarding.js';
 import { getLogger, truncate } from '../log.js';
+import { toolFail } from '../agents/toolResult.js';
 
 function aspectDefs(config) {
   return config.genesis.aspects || [];
@@ -170,7 +171,10 @@ async function generateCore({
 
         if (!fixed.domainName || isForbiddenDomainName(fixed.domainName)) {
           draft.lastError = 'Плохое имя';
-          return { ok: false, error: draft.lastError };
+          return toolFail(
+            'bad_domain_name',
+            'Имя города плохое или запрещённое. Придумай звучное фэнтезийное имя места (не общее «город», не маты, не «летающий остров»).',
+          );
         }
 
         let lore = Array.isArray(fixed.openingLore) ? fixed.openingLore.filter(Boolean) : [];
@@ -191,7 +195,10 @@ async function generateCore({
         ) {
           draft.lastError =
             'greeting: нужна речь слуги к божеству (имя/знак), не «добро пожаловать в город»';
-          return { ok: false, error: draft.lastError };
+          return toolFail(
+            'bad_greeting',
+            'greeting: нужна речь слуги к божеству (просить имя/знак), не туристическое «добро пожаловать в город». Перепиши greeting.',
+          );
         }
         if (!fixed.rulerName) fixed.rulerName = 'Кайрен';
         if (!fixed.rulerTitle) fixed.rulerTitle = 'Правитель';
@@ -355,11 +362,11 @@ async function generateAspectBatch({
         const norms = batch.map((d) => String(args[d.id] || '').replace(/\s+/g, ' ').slice(0, 120));
         const dupes = norms.filter((t, i) => t && norms.indexOf(t) !== i);
         if (weak.length || dupes.length) {
-          return {
-            ok: false,
-            error: 'Слишком коротко или разделы повторяют друг друга. Перепиши.',
-            weak,
-          };
+          return toolFail(
+            'aspects_weak',
+            'Слишком коротко или разделы повторяют друг друга. Перепиши слабые поля (см. weak[]) длиннее и без копипаста.',
+            { weak },
+          );
         }
         draft.texts = args;
         return { ok: true };

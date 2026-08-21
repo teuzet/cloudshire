@@ -207,7 +207,8 @@ export class AgentRuntime {
           } catch (parseErr) {
             const result = {
               ok: false,
-              error: `Невалидный JSON аргументов: ${parseErr.message}. Вызови tool снова.`,
+              error: 'invalid_json_args',
+              agentMessage: `Невалидный JSON аргументов: ${parseErr.message}. Исправь arguments и вызови tool снова.`,
             };
             toolTrace.push({ name, args: {}, result });
             tlog.warn('agent.tool.parse_error', {
@@ -228,12 +229,20 @@ export class AgentRuntime {
           const toolStarted = Date.now();
           try {
             if (!handler) {
-              result = { ok: false, error: `Unknown tool: ${name}` };
+              result = {
+                ok: false,
+                error: 'unknown_tool',
+                agentMessage: `Неизвестный tool «${name}». Вызови один из доступных tools агента.`,
+              };
             } else {
               result = await handler(args, { agentId, messages });
             }
           } catch (err) {
-            result = { ok: false, error: err.message || String(err) };
+            result = {
+              ok: false,
+              error: 'tool_exception',
+              agentMessage: `Сбой tool: ${err.message || String(err)}. Исправь аргументы и повтори, либо выбери другой tool.`,
+            };
           }
 
           toolTrace.push({ name, args, result });
