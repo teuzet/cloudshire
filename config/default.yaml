@@ -456,6 +456,14 @@ genesis:
         - { id: temperate, name: Умеренный }
         - { id: stormy, name: "Бурный, ветреный" }
         - { id: misty, name: Туманный }
+        - { id: rainy, name: Дождливый }
+        - { id: monsoon, name: Сезон муссонов / ливней }
+        - { id: ashfall, name: Пепельный / вулканическая пыль }
+        - { id: thin_air, name: Разреженный воздух высот }
+        - { id: perpetual_dusk, name: Вечные сумерки под облаками }
+        - { id: bright_glare, name: Ослепительно ясный }
+        - { id: salt_winds, name: Солёные ветры }
+        - { id: spring_mild, name: Мягкий, вечно-весенний }
     - id: terrain
       name: Рельеф острова
       tags:
@@ -465,6 +473,16 @@ genesis:
         - { id: terraces, name: Террасы и уступы }
         - { id: caves, name: Пещерная сеть }
         - { id: floating_shards, name: Рой малых островков вокруг }
+        - { id: canyons, name: Ущелья и трещины }
+        - { id: mesa, name: Столовая гора / меса }
+        - { id: wetlands, name: Болота и топи }
+        - { id: dunes, name: Песчаные дюны }
+        - { id: crystal_ridges, name: Кристаллические хребты }
+        - { id: forest_slopes, name: Лесистые склоны }
+        - { id: hanging_lakes, name: Висячие озёра }
+        - { id: basalt_steps, name: Базальтовые ступени }
+        - { id: hollow_core, name: Полый / пронизанный пустотами }
+        - { id: knife_edge, name: Узкий хребет-лезвие }
     - id: economy
       name: Опора хозяйства
       tags:
@@ -475,6 +493,17 @@ genesis:
         - { id: herding, name: Скотоводство }
         - { id: fishing_air, name: Охота и промысел в облаках }
         - { id: pilgrimage, name: "Храмовые сборы и местные обходы острова" }
+        - { id: wine_spirit, name: Вино / брага / дистиллят }
+        - { id: textiles, name: Ткани и красильни }
+        - { id: shipwright, name: Постройка небесных судов }
+        - { id: medicine, name: Лекарства и травы }
+        - { id: ink_books, name: Книги, чернила, перепись }
+        - { id: gem_cut, name: Огранка камней }
+        - { id: salvage, name: Сбор обломков с неба }
+        - { id: hire_guard, name: Найм стражи / сопровождение }
+        - { id: festival_fees, name: Сборы с праздников и ярмарок }
+        - { id: water_trade, name: Продажа / развоз воды }
+        - { id: alchemy, name: Алхимия и реактивы }
     - id: paradigm
       name: Уклад знаний
       tags:
@@ -482,6 +511,14 @@ genesis:
         - { id: technological, name: Технологический }
         - { id: traditional, name: Традиционный }
         - { id: syncretic, name: Смесь магии и механизмов }
+        - { id: oral, name: Устные предания сильнее книг }
+        - { id: bureaucratic, name: Канцелярия и реестры }
+        - { id: guild_secrets, name: Цеховые тайны }
+        - { id: prophetic, name: Знания через знамения }
+        - { id: experimental, name: Опыты и риск }
+        - { id: forbidden_archives, name: Запретные архивы }
+        - { id: craft_masters, name: Мастера-наставники }
+        - { id: sky_navigation, name: Навигация по ветрам и звёздам }
     - id: temper
       name: Нрав горожан
       tags:
@@ -491,6 +528,16 @@ genesis:
         - { id: martial, name: Воинственный }
         - { id: mercantile, name: Торговый, расчётливый }
         - { id: hospitable, name: Гостеприимный }
+        - { id: stoic, name: Стойкий, немногословный }
+        - { id: festive, name: Праздничный, шумный }
+        - { id: suspicious, name: Подозрительный к чужакам }
+        - { id: proud, name: Гордый честью }
+        - { id: thrifty, name: Бережливый до скупости }
+        - { id: curious, name: Любопытный }
+        - { id: fatalistic, name: Суеверно-фаталистичный }
+        - { id: egalitarian, name: Равный, не любит титулов }
+        - { id: hierarchical, name: Чтит ранги и дома }
+        - { id: melancholic, name: Меланхоличный }
     - id: architecture
       name: Облик города
       tags:
@@ -500,6 +547,46 @@ genesis:
         - { id: shipyards, name: Верфи небесных судов }
         - { id: walls, name: Крепостные кольца }
         - { id: bazaars, name: Лабиринты рынков }
+        - { id: bridges, name: Мосты и галереи над пропастью }
+        - { id: amphitheater, name: Амфитеатры и площади }
+        - { id: canal_cisterns, name: Каналы и цистерны }
+        - { id: timber_lifts, name: Деревянные подъёмники }
+        - { id: mosaic, name: Мозаики и росписи }
+        - { id: low_roofs, name: Низкие крыши от ветра }
+        - { id: cliff_steps, name: Лестницы по обрыву }
+        - { id: glass_houses, name: Стеклянные оранжереи }
+        - { id: bone_stone, name: Кость и камень в фасадах }
+        - { id: tent_quarters, name: Шатровые кварталы }
+    - id: society
+      name: Устройство общества
+      tags:
+        - { id: guild_rule, name: Власть гильдий }
+        - { id: temple_heavy, name: Сильная роль храма }
+        - { id: noble_houses, name: Дома знати }
+        - { id: council_elders, name: Совет старейшин }
+        - { id: merchant_princes, name: Купеческие князья }
+        - { id: craft_castes, name: Касты ремёсел }
+        - { id: militia_citizen, name: Гражданское ополчение }
+        - { id: scholar_elite, name: Учёная элита }
+        - { id: clan_kin, name: Кланы и родство }
+        - { id: loose_quarters, name: Свободные кварталы }
+        - { id: indenture, name: Долговая кабала }
+        - { id: patronage, name: Патронаж сильных домов }
+    - id: faith_shape
+      name: Облик веры
+      tags:
+        - { id: one_patron, name: Единый покровитель }
+        - { id: old_pantheon, name: Старый пантеон рядом с новым }
+        - { id: ancestor_cult, name: Культ предков }
+        - { id: omen_ridden, name: Жизнь по знамениям }
+        - { id: quiet_piety, name: Тихая повседневная набожность }
+        - { id: loud_rites, name: Громкие публичные обряды }
+        - { id: mystery_orders, name: Тайные ордена }
+        - { id: heresy_seeds, name: Тлеющие ереси }
+        - { id: relic_veneration, name: Почитание реликвий }
+        - { id: sky_worship, name: Почитание неба и ветра }
+        - { id: pragmatic_faith, name: Вера как договор о милости }
+        - { id: fearful_awe, name: Вера через ужас и благоговение }
     - id: pressure
       name: Тень / давление
       tags:
@@ -510,6 +597,17 @@ genesis:
         - { id: old_curse, name: Старое проклятие / табу }
         - { id: refugee_wave, name: Наплыв беженцев }
         - { id: none_quiet, name: Относительное затишье }
+        - { id: food_thin, name: Тонкие запасы зерна }
+        - { id: rim_erosion, name: Осыпающийся край }
+        - { id: wind_madness, name: Безумие от ветра }
+        - { id: plague_memory, name: Память о чуме }
+        - { id: mine_collapse, name: Риск обвалов в недрах }
+        - { id: elite_feud, name: Вражда домов }
+        - { id: smuggling, name: Теневая контрабанда }
+        - { id: omen_panic, name: Паника от знамений }
+        - { id: craft_shortage, name: Нехватка мастеров }
+        - { id: debt_spiral, name: Долговая спираль }
+        - { id: silent_dissent, name: Тихий ропот улиц }
 
 agentSafety: |
   КОНТРАКТ БЕЗОПАСНОСТИ (обязателен всегда):
