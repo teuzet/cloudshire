@@ -571,6 +571,15 @@ export async function resolveDomainTick({
 }
 
 export async function runWorldTick({ config, runtime, storage, app }) {
+  app?.beginWorldTick?.();
+  try {
+    return await runWorldTickInner({ config, runtime, storage, app });
+  } finally {
+    app?.endWorldTick?.();
+  }
+}
+
+async function runWorldTickInner({ config, runtime, storage, app }) {
   const world = await storage.getWorld();
   advanceGameDate(world);
   await storage.saveWorld(world);
@@ -589,52 +598,53 @@ export async function runWorldTick({ config, runtime, storage, app }) {
   const results = [];
   const handled = new Set();
   const confluxNotes = [...(matchmake.notes || []), ...(confluxPhase.notes || [])];
-
-  // Docked pairs: heat/roll → resolve → undock → director → narrate
-  const pairBatches = [];
   const plotCfg = plotlinesConfig(config);
-  for (const conflux of confluxPhase.dockedConfluxes || []) {
-    const preludeAddsByDomain = {};
-    const breakthroughsByDomain = {};
-    const spawnByDomain = {};
-    for (const id of conflux.domainIds || []) {
-      preludeAddsByDomain[id] = confluxPhase.chronicleAddsByDomain.get(id) || [];
-      const d = await storage.getDomain(id);
-      if (!d) continue;
-      normalizeDomain(d);
-      if (plotCfg.enabled) {
-        heatPlotlines(d, plotCfg.heatPerTick, plotCfg);
-        breakthroughsByDomain[id] = rollBreakthroughs(d, Math.random, plotCfg);
-        spawnByDomain[id] = rollPlotSpawn(d, plotCfg, Math.random, config);
-        getLogger().info('plotlines.roll', {
-          domainId: id,
-          name: d.name,
-          heat: plotCfg.heatPerTick,
-          breakthroughs: breakthroughsByDomain[id].map((p) => p.title),
-          spawn: {
-            hit: spawnByDomain[id].hit,
-            chance: spawnByDomain[id].chance,
-            seeds: spawnByDomain[id].seedText,
-          },
-          board: formatPlotlinesForPrompt(d, world.tickIndex),
-        });
-      } else {
-        breakthroughsByDomain[id] = [];
-      }
-      await storage.saveDomain(d);
-    }
 
-    const resolved = await resolveConfluxTick({
-      config,
-      runtime,
-      storage,
-      conflux,
-      world,
-      preludeAddsByDomain,
-      breakthroughsByDomain,
-    });
-    pairBatches.push({ conflux, resolved, spawnByDomain });
-  }
+  // Docked pairs — параллельно по разным conflux
+  const pairBatches = await Promise.all(
+    (confluxPhase.dockedConfluxes || []).map(async (conflux) => {
+      const preludeAddsByDomain = {};
+      const breakthroughsByDomain = {};
+      const spawnByDomain = {};
+      for (const id of conflux.domainIds || []) {
+        preludeAddsByDomain[id] = confluxPhase.chronicleAddsByDomain.get(id) || [];
+        const d = await storage.getDomain(id);
+        if (!d) continue;
+        normalizeDomain(d);
+        if (plotCfg.enabled) {
+          heatPlotlines(d, plotCfg.heatPerTick, plotCfg);
+          breakthroughsByDomain[id] = rollBreakthroughs(d, Math.random, plotCfg);
+          spawnByDomain[id] = rollPlotSpawn(d, plotCfg, Math.random, config);
+          getLogger().info('plotlines.roll', {
+            domainId: id,
+            name: d.name,
+            heat: plotCfg.heatPerTick,
+            breakthroughs: breakthroughsByDomain[id].map((p) => p.title),
+            spawn: {
+              hit: spawnByDomain[id].hit,
+              chance: spawnByDomain[id].chance,
+              seeds: spawnByDomain[id].seedText,
+            },
+            board: formatPlotlinesForPrompt(d, world.tickIndex),
+          });
+        } else {
+          breakthroughsByDomain[id] = [];
+        }
+        await storage.saveDomain(d);
+      }
+
+      const resolved = await resolveConfluxTick({
+        config,
+        runtime,
+        storage,
+        conflux,
+        world,
+        preludeAddsByDomain,
+        breakthroughsByDomain,
+      });
+      return { conflux, resolved, spawnByDomain };
+    }),
+  );
 
   const advanced = await advanceDockedConfluxes(
     { storage, runtime, world },
@@ -642,62 +652,162 @@ export async function runWorldTick({ config, runtime, storage, app }) {
   );
   confluxNotes.push(...(advanced.notes || []));
 
-  for (const { conflux, resolved, spawnByDomain } of pairBatches) {
-    const chronicleByDomain = {};
-    for (const domain of resolved.domains) {
-      handled.add(domain.id);
-      chronicleByDomain[domain.id] = resolved.newsChronicleByDomain[domain.id] || [];
-    }
-
-    if (plotCfg.enabled) {
-      const directorMetaByDomain = {};
+  const pairResults = await Promise.all(
+    pairBatches.map(async ({ conflux, resolved, spawnByDomain }) => {
+      const chronicleByDomain = {};
       for (const domain of resolved.domains) {
-        directorMetaByDomain[domain.id] = {
-          spawn: spawnByDomain?.[domain.id] || null,
+        handled.add(domain.id);
+        chronicleByDomain[domain.id] = resolved.newsChronicleByDomain[domain.id] || [];
+      }
+
+      if (plotCfg.enabled) {
+        const directorMetaByDomain = {};
+        for (const domain of resolved.domains) {
+          directorMetaByDomain[domain.id] = {
+            spawn: spawnByDomain?.[domain.id] || null,
+            closureCandidates: listClosureCandidates(domain, world.tickIndex, plotCfg),
+          };
+        }
+        await runConfluxDirector({
+          config,
+          runtime,
+          domains: resolved.domains,
+          world,
+          chronicleByDomain,
+          directorMetaByDomain,
+          conflux,
+        });
+      }
+
+      const batchResults = [];
+      for (const domain of resolved.domains) {
+        clearBreakthroughFlags(domain, world.tickIndex);
+        await storage.saveDomain(domain);
+
+        const newsBase = chronicleByDomain[domain.id] || [];
+        const undockAdds = advanced.undockAddsByDomain?.get(domain.id) || [];
+        const newsAdds = filterChronicleForDomain([...newsBase, ...undockAdds], domain.id);
+        const partnerId = (conflux.domainIds || []).find((id) => id !== domain.id);
+        const partnerName =
+          resolved.domains.find((d) => d.id === partnerId)?.name || null;
+        const news = await app.narrateTickNews(domain, newsAdds, world.gameDate, {
+          undock: undockAdds.length > 0,
+          partnerName,
+        });
+        await app.persistDialog(domain, 'assistant', news, { kind: 'tick_news' });
+        await app.emitOutbound(domain.ownerUserId, news, {
+          agent: 'ruler',
+          domainId: domain.id,
+          kind: 'tick_news',
+        });
+
+        batchResults.push({
+          domainId: domain.id,
+          name: domain.name,
+          chronicleCount: newsAdds.length,
+          status: domain.status,
+          inConfluxDocked: undockAdds.length === 0,
+          confluxEnded: undockAdds.length > 0,
+          confluxId: conflux.id,
+          plotlines: (domain.plotlines || []).map((p) => ({
+            id: p.id,
+            title: p.title,
+            temperature: p.temperature,
+          })),
+          news,
+          statChanges: newsAdds
+            .filter((c) => c.statChanges)
+            .map((c) => ({ id: c.id, changes: c.statChanges })),
+        });
+      }
+      return batchResults;
+    }),
+  );
+  for (const batch of pairResults) results.push(...batch);
+
+  // Solo — параллельно по доменам
+  const soloDomains = domains.filter(
+    (d) => !handled.has(d.id) && (!d.status || d.status === 'playing'),
+  );
+  for (const domain of domains) {
+    if (handled.has(domain.id)) continue;
+    if (domain.status && domain.status !== 'playing') {
+      results.push({ domainId: domain.id, skipped: true, reason: domain.status });
+    }
+  }
+
+  const soloResults = await Promise.all(
+    soloDomains.map(async (domain) => {
+      normalizeDomain(domain);
+      let breakthroughs = [];
+      let directorMeta = null;
+      if (plotCfg.enabled) {
+        heatPlotlines(domain, plotCfg.heatPerTick, plotCfg);
+        breakthroughs = rollBreakthroughs(domain, Math.random, plotCfg);
+        const spawn = rollPlotSpawn(domain, plotCfg, Math.random, config);
+        directorMeta = {
+          spawn,
           closureCandidates: listClosureCandidates(domain, world.tickIndex, plotCfg),
         };
+        getLogger().info('plotlines.roll', {
+          domainId: domain.id,
+          name: domain.name,
+          heat: plotCfg.heatPerTick,
+          breakthroughs: breakthroughs.map((p) => p.title),
+          spawn: { hit: spawn.hit, chance: spawn.chance, seeds: spawn.seedText },
+          board: formatPlotlinesForPrompt(domain, world.tickIndex),
+        });
       }
-      await runConfluxDirector({
+
+      const resolved = await resolveDomainTick({
         config,
         runtime,
-        domains: resolved.domains,
+        storage,
+        domain,
         world,
-        chronicleByDomain,
-        directorMetaByDomain,
-        conflux,
+        breakthroughs,
       });
-    }
 
-    for (const domain of resolved.domains) {
-      clearBreakthroughFlags(domain, world.tickIndex);
-      await storage.saveDomain(domain);
+      if (plotCfg.enabled) {
+        await runDirector({
+          config,
+          runtime,
+          domain: resolved.domain,
+          world,
+          chronicleAdds: resolved.chronicleAdds,
+          directorMeta: {
+            spawn: directorMeta?.spawn || null,
+            closureCandidates: listClosureCandidates(
+              resolved.domain,
+              world.tickIndex,
+              plotCfg,
+            ),
+          },
+        });
+      }
+      clearBreakthroughFlags(resolved.domain, world.tickIndex);
+      await storage.saveDomain(resolved.domain);
 
-      const newsBase = chronicleByDomain[domain.id] || [];
-      const undockAdds = advanced.undockAddsByDomain?.get(domain.id) || [];
-      const newsAdds = filterChronicleForDomain([...newsBase, ...undockAdds], domain.id);
-      const partnerId = (conflux.domainIds || []).find((id) => id !== domain.id);
-      const partnerName =
-        resolved.domains.find((d) => d.id === partnerId)?.name || null;
-      const news = await app.narrateTickNews(domain, newsAdds, world.gameDate, {
-        undock: undockAdds.length > 0,
-        partnerName,
-      });
-      await app.persistDialog(domain, 'assistant', news, { kind: 'tick_news' });
-      await app.emitOutbound(domain.ownerUserId, news, {
+      const prelude = confluxPhase.chronicleAddsByDomain.get(domain.id) || [];
+      const newsAdds = filterChronicleForDomain(
+        [...prelude, ...resolved.chronicleAdds],
+        domain.id,
+      );
+      const news = await app.narrateTickNews(resolved.domain, newsAdds, world.gameDate);
+      await app.persistDialog(resolved.domain, 'assistant', news, { kind: 'tick_news' });
+      await app.emitOutbound(resolved.domain.ownerUserId, news, {
         agent: 'ruler',
-        domainId: domain.id,
+        domainId: resolved.domain.id,
         kind: 'tick_news',
       });
 
-      results.push({
-        domainId: domain.id,
-        name: domain.name,
+      return {
+        domainId: resolved.domain.id,
+        name: resolved.domain.name,
         chronicleCount: newsAdds.length,
-        status: domain.status,
-        inConfluxDocked: undockAdds.length === 0,
-        confluxEnded: undockAdds.length > 0,
-        confluxId: conflux.id,
-        plotlines: (domain.plotlines || []).map((p) => ({
+        status: resolved.domain.status,
+        inConfluxDocked: false,
+        plotlines: (resolved.domain.plotlines || []).map((p) => ({
           id: p.id,
           title: p.title,
           temperature: p.temperature,
@@ -706,98 +816,10 @@ export async function runWorldTick({ config, runtime, storage, app }) {
         statChanges: newsAdds
           .filter((c) => c.statChanges)
           .map((c) => ({ id: c.id, changes: c.statChanges })),
-      });
-    }
-  }
-
-  // Solo: everyone not in an active docked pair (incl. approaching)
-  for (const domain of domains) {
-    if (handled.has(domain.id)) continue;
-    if (domain.status && domain.status !== 'playing') {
-      results.push({ domainId: domain.id, skipped: true, reason: domain.status });
-      continue;
-    }
-
-    normalizeDomain(domain);
-    let breakthroughs = [];
-    let directorMeta = null;
-    if (plotCfg.enabled) {
-      heatPlotlines(domain, plotCfg.heatPerTick, plotCfg);
-      breakthroughs = rollBreakthroughs(domain, Math.random, plotCfg);
-      const spawn = rollPlotSpawn(domain, plotCfg, Math.random, config);
-      directorMeta = {
-        spawn,
-        closureCandidates: listClosureCandidates(domain, world.tickIndex, plotCfg),
       };
-      getLogger().info('plotlines.roll', {
-        domainId: domain.id,
-        name: domain.name,
-        heat: plotCfg.heatPerTick,
-        breakthroughs: breakthroughs.map((p) => p.title),
-        spawn: { hit: spawn.hit, chance: spawn.chance, seeds: spawn.seedText },
-        board: formatPlotlinesForPrompt(domain, world.tickIndex),
-      });
-    }
-
-    const resolved = await resolveDomainTick({
-      config,
-      runtime,
-      storage,
-      domain,
-      world,
-      breakthroughs,
-    });
-
-    if (plotCfg.enabled) {
-      await runDirector({
-        config,
-        runtime,
-        domain: resolved.domain,
-        world,
-        chronicleAdds: resolved.chronicleAdds,
-        directorMeta: {
-          spawn: directorMeta?.spawn || null,
-          closureCandidates: listClosureCandidates(
-            resolved.domain,
-            world.tickIndex,
-            plotCfg,
-          ),
-        },
-      });
-    }
-    clearBreakthroughFlags(resolved.domain, world.tickIndex);
-    await storage.saveDomain(resolved.domain);
-
-    const prelude = confluxPhase.chronicleAddsByDomain.get(domain.id) || [];
-    const newsAdds = filterChronicleForDomain(
-      [...prelude, ...resolved.chronicleAdds],
-      domain.id,
-    );
-    const news = await app.narrateTickNews(resolved.domain, newsAdds, world.gameDate);
-    await app.persistDialog(resolved.domain, 'assistant', news, { kind: 'tick_news' });
-    await app.emitOutbound(resolved.domain.ownerUserId, news, {
-      agent: 'ruler',
-      domainId: resolved.domain.id,
-      kind: 'tick_news',
-    });
-
-    results.push({
-      domainId: resolved.domain.id,
-      name: resolved.domain.name,
-      chronicleCount: newsAdds.length,
-      status: resolved.domain.status,
-      inConfluxDocked: false,
-      plotlines: (resolved.domain.plotlines || []).map((p) => ({
-        id: p.id,
-        title: p.title,
-        temperature: p.temperature,
-      })),
-      news,
-      statChanges: newsAdds
-        .filter((c) => c.statChanges)
-        .map((c) => ({ id: c.id, changes: c.statChanges })),
-    });
-  }
+    }),
+  );
+  results.push(...soloResults);
 
   return {
     world: {

@@ -67,6 +67,13 @@ export function createWorldFromConfig(config) {
       tick: 0,
     },
     status: 'active',
+    /** Wall-clock расписание тиков (переживает рестарт процесса). */
+    scheduler: {
+      lastTickAt: null,
+      nextTickAt: null,
+      tickInProgress: false,
+      tickStartedAt: null,
+    },
     createdAt: now,
     updatedAt: now,
   };
@@ -83,6 +90,19 @@ export function normalizeWorld(world, config = null) {
       : String(world.id || config?.world?.id || 'season');
   }
   if (!world.status) world.status = 'active';
+  if (!world.scheduler || typeof world.scheduler !== 'object') {
+    world.scheduler = {
+      lastTickAt: null,
+      nextTickAt: null,
+      tickInProgress: false,
+      tickStartedAt: null,
+    };
+  } else {
+    if (!('lastTickAt' in world.scheduler)) world.scheduler.lastTickAt = null;
+    if (!('nextTickAt' in world.scheduler)) world.scheduler.nextTickAt = null;
+    if (!('tickInProgress' in world.scheduler)) world.scheduler.tickInProgress = false;
+    if (!('tickStartedAt' in world.scheduler)) world.scheduler.tickStartedAt = null;
+  }
   return world;
 }
 

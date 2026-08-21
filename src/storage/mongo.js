@@ -1,6 +1,7 @@
 import { MongoClient } from 'mongodb';
 import { createWorldFromConfig, normalizeDomain, normalizeWorld } from '../game/models.js';
 import { writeWorldArchive } from './worldArchive.js';
+import { getLogger } from '../log.js';
 
 /**
  * Mongo implementation of the same storage surface as YamlStorage.
@@ -22,6 +23,7 @@ export class MongoStorage {
     await this.db.collection('domains').createIndex({ ownerUserId: 1, worldId: 1 });
     await this.db.collection('users').createIndex({ userId: 1 }, { unique: true });
     await this.db.collection('world_archives').createIndex({ worldId: 1 }, { unique: true });
+    await this.db.collection('usage').createIndex({ worldId: 1, ts: -1 });
 
     const world = await this.getWorld();
     if (!world) {
@@ -122,6 +124,22 @@ export class MongoStorage {
     return docs.map(({ _id, ...rest }) => ({ id: _id, ...rest }));
   }
 
+  async appendUsage(row) {
+    if (!row || typeof row !== 'object') return;
+    await this.col('usage').insertOne({ ...row });
+  }
+
+  async listUsage({ worldId = null, limit = 5000 } = {}) {
+    const filter = {};
+    if (worldId) filter.worldId = String(worldId);
+    const docs = await this.col('usage')
+      .find(filter)
+      .sort({ ts: 1 })
+      .limit(Math.max(1, Math.min(50000, Number(limit) || 5000)))
+      .toArray();
+    return docs.map(({ _id, ...rest }) => rest);
+  }
+
   async wipeAll({ reason = 'wipe' } = {}) {
     const world = await this.getWorld();
     const domains = await this.listDomains();
@@ -132,16 +150,30 @@ export class MongoStorage {
     let archivedWorldId = world?.id || null;
 
     if (world) {
-      const archived = await writeWorldArchive({
-        config: this.config,
-        world,
-        domains,
-        users,
-        confluxes,
-        reason,
-      });
-      archiveDir = archived.archiveDir;
-      archivedWorldId = archived.worldId;
+      archivedWorldId = world.id;
+      const skipDisk = this.config.logging?.file === false || process.env.DYNO;
+      if (!skipDisk) {
+        try {
+          const archived = await writeWorldArchive({
+            config: this.config,
+            world,
+            domains,
+            users,
+            confluxes,
+            reason,
+          });
+          archiveDir = archived.archiveDir;
+        } catch (err) {
+          getLogger().warn('wipe.disk_archive_skipped', { error: err.message });
+        }
+      }
+
+      let usageRows = [];
+      try {
+        usageRows = await this.listUsage({ worldId: world.id, limit: 20000 });
+      } catch {
+        usageRows = [];
+      }
 
       await this.col('world_archives').replaceOne(
         { worldId: world.id },
@@ -155,6 +187,7 @@ export class MongoStorage {
           domains,
           users,
           confluxes,
+          usage: usageRows,
         },
         { upsert: true },
       );
@@ -164,6 +197,9 @@ export class MongoStorage {
     await this.col('users').deleteMany({});
     await this.col('confluxes').deleteMany({});
     await this.col('world').deleteMany({});
+    if (world?.id) {
+      await this.col('usage').deleteMany({ worldId: world.id });
+    }
 
     const next = createWorldFromConfig(this.config);
     await this.saveWorld(next);

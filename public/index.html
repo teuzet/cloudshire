@@ -3,77 +3,97 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Cloudshire — локальный чат</title>
+  <title>Cloudshire — админка</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <div class="layout">
+  <div class="layout admin">
     <aside class="side">
       <h1>Cloudshire</h1>
-      <p class="muted">Админка: все домены (web + telegram)</p>
+      <p class="muted">Админка · игроки только в Telegram</p>
 
-      <h2>Слоты городов</h2>
-      <select id="slotSelect"></select>
+      <pre id="status" class="panel"></pre>
+
       <div class="row">
-        <button type="button" id="btnNewSlot">Новый город</button>
         <button type="button" id="btnRefresh">Обновить</button>
-      </div>
-      <div class="row">
         <button type="button" id="btnTick" class="accent">Force tick</button>
       </div>
 
-      <h2>Conflux (dev)</h2>
+      <h2>Домены</h2>
+      <select id="domainSelect"></select>
+
+      <h2>Conflux</h2>
+      <label class="muted">Показать
+        <select id="confluxFilter">
+          <option value="active">активные</option>
+          <option value="all">все</option>
+        </select>
+      </label>
+      <div class="row">
+        <button type="button" id="btnConfluxRefresh">Обновить conflux</button>
+      </div>
+      <pre id="confluxPanel" class="panel"></pre>
+
+      <h2>Force conflux</h2>
       <label class="muted">Город A
         <select id="confluxA"></select>
       </label>
       <label class="muted">Город B
         <select id="confluxB"></select>
       </label>
-      <label class="muted">Стыковка через (месяцев)
+      <label class="muted">ETA (мес.)
         <input id="confluxEta" type="number" min="1" max="24" value="3" />
       </label>
-      <label class="muted">Длительность стыка (месяцев)
+      <label class="muted">Длительность (мес.)
         <input id="confluxDuration" type="number" min="1" max="12" value="3" />
       </label>
       <div class="row">
-        <button type="button" id="btnConflux">Создать conflux</button>
-        <button type="button" id="btnConfluxRefresh">Обновить</button>
+        <button type="button" id="btnConflux">Создать</button>
       </div>
-      <pre id="confluxPanel" class="panel"></pre>
-
-      <label class="muted">User ID
-        <input id="userId" value="local-user" />
-      </label>
-      <p class="muted danger-hint">Слоты подтягиваются с сервера (домены + телега). Можно вручную вписать telegram user id.</p>
-
-      <pre id="status" class="panel"></pre>
-      <h2>Домен</h2>
-      <pre id="domain" class="panel"></pre>
-      <h2>Майлстоуны</h2>
-      <pre id="milestones" class="panel"></pre>
-      <h2>Процессы</h2>
-      <pre id="pending" class="panel"></pre>
-      <h2>Плотлайны</h2>
-      <pre id="plotlines" class="panel"></pre>
-      <h2>Описание города</h2>
-      <pre id="genesis" class="panel tall"></pre>
-      <h2>Хроника</h2>
-      <pre id="chronicle" class="panel tall"></pre>
-      <h2>Факты</h2>
-      <pre id="facts" class="panel tall"></pre>
 
       <div class="danger-zone">
         <h2>Опасно</h2>
-        <p class="muted danger-hint">Стирает все домены, слоты и сбрасывает мир. Не рядом с обычными действиями.</p>
+        <p class="muted danger-hint">Стирает мир и домены (архив в Mongo/диске).</p>
         <button type="button" id="btnWipe" class="danger">Wipe all…</button>
       </div>
     </aside>
-    <main class="chat">
-      <div id="messages" class="messages"></div>
-      <form id="form" class="composer">
-        <input id="text" autocomplete="off" placeholder="Напиши правителю или проводнику…" />
-        <button type="submit">Отправить</button>
-      </form>
+
+    <main class="main">
+      <section class="feed-wrap">
+        <h2>Пуши владельца <span id="ownerLabel" class="muted"></span></h2>
+        <div id="messages" class="messages compact"></div>
+      </section>
+
+      <div class="grids">
+        <section>
+          <h2>Домен</h2>
+          <pre id="domain" class="panel tall"></pre>
+        </section>
+        <section>
+          <h2>Статы / правитель</h2>
+          <pre id="milestones" class="panel tall"></pre>
+        </section>
+        <section>
+          <h2>Процессы</h2>
+          <pre id="pending" class="panel tall"></pre>
+        </section>
+        <section>
+          <h2>Плотлайны</h2>
+          <pre id="plotlines" class="panel tall"></pre>
+        </section>
+        <section class="span2">
+          <h2>Описание</h2>
+          <pre id="genesis" class="panel tall"></pre>
+        </section>
+        <section class="span2">
+          <h2>Хроника</h2>
+          <pre id="chronicle" class="panel tall"></pre>
+        </section>
+        <section class="span2">
+          <h2>Факты</h2>
+          <pre id="facts" class="panel tall"></pre>
+        </section>
+      </div>
     </main>
   </div>
   <script src="/app.js"></script>

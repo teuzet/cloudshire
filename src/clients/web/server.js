@@ -1,7 +1,8 @@
 import express from 'express';
 import path from 'node:path';
-import { projectRoot } from '../../config.js';
+import { projectRoot, hasAdminCredentials } from '../../config.js';
 import { runWorldTick } from '../../game/tick.js';
+import { recordTickCompleted } from '../../scheduler/ticks.js';
 import { domainSummary } from '../../game/genesis.js';
 import {
   forceCreateConflux,
@@ -9,9 +10,54 @@ import {
 } from '../../game/conflux.js';
 import { getLogger, requestLogger, truncate } from '../../log.js';
 
+function adminBasicAuth(config) {
+  const user = config.admin?.user || '';
+  const password = config.admin?.password || '';
+  const required = hasAdminCredentials(config) || Boolean(process.env.DYNO);
+
+  return (req, res, next) => {
+    if (req.path === '/health') return next();
+
+    if (!user || !password) {
+      if (required) {
+        res.set('WWW-Authenticate', 'Basic realm="Cloudshire Admin"');
+        return res.status(401).send('Admin credentials required (ADMIN_USER / ADMIN_PASSWORD)');
+      }
+      return next();
+    }
+
+    const hdr = req.headers.authorization || '';
+    if (!hdr.startsWith('Basic ')) {
+      res.set('WWW-Authenticate', 'Basic realm="Cloudshire Admin"');
+      return res.status(401).send('Authentication required');
+    }
+    let decoded = '';
+    try {
+      decoded = Buffer.from(hdr.slice(6), 'base64').toString('utf8');
+    } catch {
+      res.set('WWW-Authenticate', 'Basic realm="Cloudshire Admin"');
+      return res.status(401).send('Invalid authorization');
+    }
+    const sep = decoded.indexOf(':');
+    const u = sep >= 0 ? decoded.slice(0, sep) : decoded;
+    const p = sep >= 0 ? decoded.slice(sep + 1) : '';
+    if (u !== user || p !== password) {
+      res.set('WWW-Authenticate', 'Basic realm="Cloudshire Admin"');
+      return res.status(401).send('Invalid credentials');
+    }
+    return next();
+  };
+}
+
 export function createWebServer({ config, app, runtime, storage }) {
   const server = express();
   server.use(express.json({ limit: '1mb' }));
+
+  server.get('/health', (_req, res) => {
+    res.json({ ok: true });
+  });
+
+  server.use(adminBasicAuth(config));
   server.use(express.static(path.join(projectRoot(), 'public')));
 
   server.use((req, res, next) => {
@@ -96,6 +142,7 @@ export function createWebServer({ config, app, runtime, storage }) {
       res.json({
         domain: domain || null,
         generating: app.isGenerating(userId),
+        ticking: app.isWorldTicking(),
       });
     } catch (err) {
       req.log?.error('http.error', { error: err.message });
@@ -123,7 +170,10 @@ export function createWebServer({ config, app, runtime, storage }) {
     try {
       const userId = `local-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000)}`;
       getLogger().info('dev.new_slot', { userId });
-      res.json({ userId, hint: 'Напиши проводнику, чтобы создать город для этого слота' });
+      res.json({
+        userId,
+        hint: 'Слот для отладки; игроки входят через Telegram.',
+      });
     } catch (err) {
       _req.log?.error('http.error', { error: err.message });
       res.status(500).json({ error: err.message });
@@ -142,38 +192,25 @@ export function createWebServer({ config, app, runtime, storage }) {
     }
   });
 
-  server.post('/api/chat', async (req, res) => {
-    try {
-      const userId = String(req.body.userId || 'local-user');
-      const text = String(req.body.text || '').trim();
-      const bootstrap = Boolean(req.body.bootstrap);
-      if (!text && !bootstrap) return res.status(400).json({ error: 'text required' });
-      req.log?.info('http.chat', {
-        userId,
-        bootstrap,
-        text: truncate(text, 300),
-      });
-      const result = await app.handleUserMessage(userId, text, {
-        channel: 'web',
-        bootstrap,
-      });
-      req.log?.info('http.chat.done', {
-        agent: result.agent,
-        generating: result.generating,
-        domainId: result.domainId,
-        replyPreview: truncate(result.reply, 300),
-      });
-      res.json(result);
-    } catch (err) {
-      req.log?.error('http.error', { error: err.message, stack: err.stack });
-      res.status(500).json({ error: err.message });
-    }
+  // Игровой чат через веб отключён (только Telegram). Оставляем 404.
+  server.post('/api/chat', (_req, res) => {
+    res.status(404).json({
+      error: 'web_chat_disabled',
+      message: 'Игровой чат только в Telegram. Админка — просмотр и force-tick.',
+    });
   });
 
   server.post('/api/tick', async (req, res) => {
     try {
       getLogger().info('http.tick');
-      const result = await runWorldTick({ config, runtime, storage, app });
+      const runTick = req.app.get('runTick');
+      let result;
+      if (typeof runTick === 'function') {
+        result = await runTick('manual');
+      } else {
+        result = await runWorldTick({ config, runtime, storage, app });
+        await recordTickCompleted(storage, config);
+      }
       res.json(result);
     } catch (err) {
       req.log?.error('http.error', { error: err.message, stack: err.stack });

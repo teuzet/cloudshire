@@ -1,6 +1,6 @@
 /**
  * Учёт токенов и оценка $ по конфигу llm.pricing.
- * Записи привязаны к worldId → logs/worlds/<worldId>/usage.jsonl
+ * Sink: Mongo collection `usage` (если storage с appendUsage) и/или logs/worlds/<worldId>/usage.jsonl.
  */
 
 import fs from 'node:fs';
@@ -138,6 +138,9 @@ export function measureRequestFootprint({ systemContent = '', tools = [], messag
 let usageFilePath = null;
 let usageEnabled = true;
 let currentWorldId = null;
+/** @type {null | { appendUsage?: Function }} */
+let usageStorage = null;
+let usageWriteFile = true;
 
 export function worldLogsDir(config, worldId) {
   const logsDir = path.resolve(projectRoot(), config.logging?.dir || 'logs');
@@ -150,11 +153,15 @@ export function getCurrentWorldId() {
 
 /**
  * Привязать запись usage к миру. Вызывать после getWorld / после wipe.
+ * @param {object} [storage] — если есть appendUsage, пишем в Mongo.
  */
-export function initUsageRecording(config = {}, worldId = null) {
+export function initUsageRecording(config = {}, worldId = null, storage = null) {
   const cfg = config.llm?.usage || {};
   usageEnabled = cfg.enabled !== false;
   currentWorldId = worldId ? String(worldId) : null;
+  usageStorage =
+    storage && typeof storage.appendUsage === 'function' ? storage : null;
+  usageWriteFile = config.logging?.file !== false && !process.env.DYNO;
 
   if (!usageEnabled) {
     usageFilePath = null;
@@ -162,15 +169,26 @@ export function initUsageRecording(config = {}, worldId = null) {
   }
   if (!currentWorldId) {
     usageFilePath = null;
-    getLogger().warn('usage.no_world', { hint: 'initUsageRecording без worldId — usage не пишется' });
+    getLogger().warn('usage.no_world', {
+      hint: 'initUsageRecording без worldId — usage не пишется',
+    });
     return null;
   }
 
-  const dir = worldLogsDir(config, currentWorldId);
-  fs.mkdirSync(dir, { recursive: true });
-  usageFilePath = path.join(dir, 'usage.jsonl');
+  usageFilePath = null;
+  if (usageWriteFile) {
+    try {
+      const dir = worldLogsDir(config, currentWorldId);
+      fs.mkdirSync(dir, { recursive: true });
+      usageFilePath = path.join(dir, 'usage.jsonl');
+    } catch (err) {
+      getLogger().warn('usage.file_unavailable', { error: err.message });
+    }
+  }
+
   getLogger().info('usage.recording', {
     filePath: usageFilePath,
+    mongo: Boolean(usageStorage),
     worldId: currentWorldId,
     enabled: true,
   });
@@ -182,11 +200,17 @@ export function getUsageFilePath() {
 }
 
 export function recordUsageEvent(event) {
-  if (!usageEnabled || !usageFilePath) return;
+  if (!usageEnabled) return;
   const row = {
     ...event,
     worldId: event.worldId || currentWorldId || null,
   };
+  if (usageStorage) {
+    void usageStorage.appendUsage(row).catch((err) => {
+      getLogger().warn('usage.mongo_write_failed', { error: err.message });
+    });
+  }
+  if (!usageFilePath) return;
   try {
     fs.appendFileSync(usageFilePath, `${JSON.stringify(row)}\n`, 'utf8');
   } catch (err) {

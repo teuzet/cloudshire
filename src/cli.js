@@ -64,6 +64,8 @@ program
   .action(async () => {
     await withApp(async (ctx) => {
       const result = await runWorldTick(ctx);
+      const { recordTickCompleted } = await import('./scheduler/ticks.js');
+      await recordTickCompleted(ctx.storage, ctx.config);
       console.log(JSON.stringify(result, null, 2));
     });
   });

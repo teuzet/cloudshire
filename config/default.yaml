@@ -8,12 +8,14 @@ storage:
 
 server:
   port: 3000
-  host: 127.0.0.1
+  # Локально можно 127.0.0.1; на Heroku — 0.0.0.0 (или SERVER_HOST / DYNO).
+  host: 0.0.0.0
 
-# session JSONL → logs/session-*.log
+# session JSONL → logs/session-*.log (на Heroku file: false → только stdout)
 logging:
   level: debug
   dir: ./logs
+  file: true
 
 telegram:
   # Авто: включится, если в .env есть TELEGRAM_BOT_TOKEN.

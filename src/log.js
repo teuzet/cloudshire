@@ -119,16 +119,28 @@ let rootLogger = null;
 
 export function initLogger(config = {}) {
   const level = process.env.LOG_LEVEL || config.logging?.level || 'debug';
-  const dir = path.resolve(
-    projectRoot(),
-    config.logging?.dir || process.env.LOG_DIR || 'logs',
-  );
-  fs.mkdirSync(dir, { recursive: true });
-  const session = new Date().toISOString().replace(/[:.]/g, '-');
-  const filePath = path.join(dir, `session-${session}.log`);
+  const wantFile = config.logging?.file !== false;
+  let filePath = null;
+  let session = new Date().toISOString().replace(/[:.]/g, '-');
+
+  if (wantFile) {
+    const dir = path.resolve(
+      projectRoot(),
+      config.logging?.dir || process.env.LOG_DIR || 'logs',
+    );
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      filePath = path.join(dir, `session-${session}.log`);
+    } catch (err) {
+      console.warn('[log] file sink disabled:', err.message);
+      filePath = null;
+    }
+  }
+
   rootLogger = new Logger({ level, filePath, context: { session } });
   rootLogger.info('session.start', {
-    filePath,
+    filePath: filePath || null,
+    logToFile: Boolean(filePath),
     logLevel: level,
     pid: process.pid,
     node: process.version,

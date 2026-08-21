@@ -616,6 +616,20 @@ export class GameApp {
     this.runtime = runtime;
     this.outboundHandlers = new Set();
     this.generatingUsers = new Set();
+    /** Пока идёт world tick — чат с доменом отвечает системно. */
+    this.worldTicking = false;
+  }
+
+  beginWorldTick() {
+    this.worldTicking = true;
+  }
+
+  endWorldTick() {
+    this.worldTicking = false;
+  }
+
+  isWorldTicking() {
+    return Boolean(this.worldTicking);
   }
 
   onOutbound(handler) {
@@ -641,9 +655,11 @@ export class GameApp {
         tickIndex: world.tickIndex,
         gameDate: world.gameDate,
         status: world.status || 'active',
+        scheduler: world.scheduler || null,
       },
       domainCount: domains.length,
       tickIntervalHours: this.config.tick.intervalHours,
+      worldTicking: this.isWorldTicking(),
       generatingCount: this.generatingUsers.size,
       telegram: {
         enabled: Boolean(this.config.telegram?.enabled),
@@ -666,7 +682,22 @@ export class GameApp {
       hasDomain: Boolean(domain),
       domainId: domain?.id || null,
       generating: this.isGenerating(userId),
+      worldTicking: this.isWorldTicking(),
     });
+
+    if (domain && this.isWorldTicking()) {
+      const label = world.gameDate?.label || 'новый месяц';
+      log.info('chat.busy_ticking');
+      return {
+        reply:
+          `Сейчас идёт шаг времени (${label}). Правитель занят делами острова — ` +
+          'напишет сам, когда месяц закроется. Твоё сообщение я увидел; повтори его после новостей, если нужно.',
+        agent: 'system',
+        generating: false,
+        ticking: true,
+        domainId: domain.id,
+      };
+    }
 
     if (!domain) {
       if (this.isGenerating(userId)) {
@@ -1627,7 +1658,7 @@ export class GameApp {
     const newWorldId = result.newWorldId || result.world?.id;
     if (newWorldId) {
       setLoggerWorldId(newWorldId);
-      initUsageRecording(this.config, newWorldId);
+      initUsageRecording(this.config, newWorldId, this.storage);
     }
     getLogger().info('world.rotated', {
       archivedWorldId: result.archivedWorldId || null,

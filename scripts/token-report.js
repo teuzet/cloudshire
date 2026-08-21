@@ -182,46 +182,13 @@ function printTable(title, rows, { limit = 20 } = {}) {
   if (rows.length > limit) console.log(`… ещё ${rows.length - limit}`);
 }
 
-function main() {
-  const args = parseArgs(process.argv.slice(2));
-  if (args.help) {
-    console.log(
-      `Usage: node scripts/token-report.js [--world id] [--archives] [--file path] [--json]`,
-    );
-    process.exit(0);
-  }
-
-  const config = loadConfig();
-  let files;
-  if (args.file) {
-    const fp = path.isAbsolute(args.file) ? args.file : path.join(projectRoot(), args.file);
-    files = [{ path: fp, worldId: null, source: 'file' }];
-  } else {
-    files = discoverUsageFiles(config, {
-      world: args.world,
-      includeArchives: args.archives || !args.world,
-    });
-    if (!args.archives && !args.world) {
-      // по умолчанию: live + archives, но можно сузить
-      files = discoverUsageFiles(config, { includeArchives: true });
-    }
-  }
-
-  const rows = [];
-  for (const f of files) {
-    for (const row of loadJsonl(f.path)) {
-      if (!row.worldId && f.worldId) row.worldId = f.worldId;
-      row._source = f.source;
-      rows.push(row);
-    }
-  }
-
+function mainSync(config, args, rows, sources) {
   const runs = rows.filter((r) => r.usage || r.costUsd != null);
   const totals = emptyBucket();
   for (const r of runs) addToBucket(totals, r);
 
   const report = {
-    files: files.map((f) => `${f.source}:${f.worldId || path.basename(f.path)}`),
+    files: sources,
     runs: totals.runs,
     usage: {
       prompt_tokens: totals.prompt_tokens,
@@ -240,7 +207,7 @@ function main() {
     return;
   }
 
-  console.log(`Files: ${report.files.slice(0, args.limit).join(', ') || '(none)'}`);
+  console.log(`Sources: ${report.files.slice(0, args.limit).join(', ') || '(none)'}`);
   console.log(
     `Runs: ${report.runs}  tokens: ${fmtInt(report.usage.total_tokens)} ` +
       `(prompt ${fmtInt(report.usage.prompt_tokens)} / completion ${fmtInt(report.usage.completion_tokens)})  ` +
@@ -253,9 +220,66 @@ function main() {
 
   if (!report.runs) {
     console.log(
-      '\nНет данных. Usage: logs/worlds/<worldId>/usage.jsonl; после wipe — data/archives/<worldId>/logs/.',
+      '\nНет данных. Mongo: collection usage; yaml: logs/worlds/<worldId>/usage.jsonl.',
     );
   }
 }
 
-main();
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.help) {
+    console.log(
+      `Usage: node scripts/token-report.js [--world id] [--archives] [--file path] [--json]`,
+    );
+    process.exit(0);
+  }
+
+  const config = loadConfig();
+  const rows = [];
+  const sources = [];
+
+  if (config.storage?.driver === 'mongo') {
+    const { createStorage } = await import('../src/storage/index.js');
+    const storage = await createStorage(config);
+    try {
+      const mongoRows = await storage.listUsage({
+        worldId: args.world || null,
+        limit: 50000,
+      });
+      for (const row of mongoRows) {
+        row._source = 'mongo';
+        rows.push(row);
+      }
+      sources.push(`mongo:${args.world || 'all'}:${mongoRows.length}`);
+    } finally {
+      await storage.close();
+    }
+  }
+
+  let files;
+  if (args.file) {
+    const fp = path.isAbsolute(args.file) ? args.file : path.join(projectRoot(), args.file);
+    files = [{ path: fp, worldId: null, source: 'file' }];
+  } else {
+    files = discoverUsageFiles(config, {
+      world: args.world,
+      includeArchives: args.archives || !args.world,
+    });
+  }
+
+  for (const f of files) {
+    for (const row of loadJsonl(f.path)) {
+      if (!row.worldId && f.worldId) row.worldId = f.worldId;
+      row._source = f.source;
+      rows.push(row);
+    }
+    sources.push(`${f.source}:${f.worldId || path.basename(f.path)}`);
+  }
+
+  mainSync(config, args, rows, sources);
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

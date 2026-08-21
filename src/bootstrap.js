@@ -29,15 +29,16 @@ export async function createAppContext(opts) {
   const world = await storage.getWorld();
   if (world?.id) {
     setLoggerWorldId(world.id);
-    initUsageRecording(config, world.id);
+    initUsageRecording(config, world.id, storage);
     log.info('world.active', {
       worldId: world.id,
       seasonKey: world.seasonKey || null,
       tickIndex: world.tickIndex,
       gameDate: world.gameDate?.label,
+      storage: storage.driver,
     });
   } else {
-    initUsageRecording(config, null);
+    initUsageRecording(config, null, storage);
   }
   const runtime = new AgentRuntime(config);
   const app = new GameApp({ config, storage, runtime });
