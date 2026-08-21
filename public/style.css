@@ -60,6 +60,14 @@ body {
   gap: 0.45rem;
 }
 
+.messages.dialog {
+  flex: none;
+  max-height: min(42vh, 420px);
+  padding: 0.35rem 0 0.75rem;
+  gap: 0.45rem;
+}
+
+.messages.dialog .bubble,
 .messages.compact .bubble {
   max-width: 100%;
   font-size: 0.85rem;

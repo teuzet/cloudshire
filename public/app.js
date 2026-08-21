@@ -114,27 +114,45 @@ async function refreshConfluxUi() {
     .join('\n\n');
 }
 
-async function loadPushes(ownerUserId) {
+async function renderDialog(domain) {
   $('messages').innerHTML = '';
-  $('ownerLabel').textContent = ownerUserId || '';
-  if (!ownerUserId) return;
-  const data = await api(`/api/users/${encodeURIComponent(ownerUserId)}/pushes`).catch(() => ({
-    messages: [],
-  }));
-  const list = (data.messages || []).slice(-30);
+  const ruler = domain?.characters?.[0];
+  const owner = domain?.ownerUserId || '';
+  const name = ruler?.name || 'правитель';
+  $('dialogMeta').textContent = domain
+    ? `· ${domain.name} · ${name}${owner ? ` · ${owner}` : ''}`
+    : '';
+
+  if (!domain) return;
+
+  const list = ruler?.dialogHistory || [];
   if (!list.length) {
     const el = document.createElement('div');
     el.className = 'bubble bot';
-    el.textContent = 'пушей пока нет (in-memory за эту сессию процесса)';
+    el.textContent = 'диалог пока пуст (greeting/переписка появятся после общения в Telegram)';
     $('messages').appendChild(el);
     return;
   }
-  for (const m of list) {
+
+  // Показываем хвост, чтобы не раздувать DOM на длинных историях
+  const slice = list.length > 80 ? list.slice(-80) : list;
+  if (list.length > slice.length) {
+    const note = document.createElement('div');
+    note.className = 'bubble bot';
+    note.textContent = `… показаны последние ${slice.length} из ${list.length} реплик`;
+    $('messages').appendChild(note);
+  }
+
+  for (const m of slice) {
     const el = document.createElement('div');
-    el.className = 'bubble bot';
+    const role = m.role === 'user' ? 'user' : 'bot';
+    el.className = `bubble ${role}`;
     const meta = document.createElement('span');
     meta.className = 'meta';
-    meta.textContent = `${m.kind || 'push'} · ${m.at || ''}`;
+    const who = m.role === 'user' ? 'покровитель' : name;
+    const kind = m.kind ? ` · ${m.kind}` : '';
+    const at = m.at ? ` · ${m.at}` : '';
+    meta.textContent = `${who}${kind}${at}`;
     el.appendChild(meta);
     el.appendChild(document.createTextNode(m.content || ''));
     $('messages').appendChild(el);
@@ -152,7 +170,7 @@ async function loadDomain(domainId) {
     $('genesis').textContent = '—';
     $('chronicle').textContent = '—';
     $('facts').textContent = '—';
-    await loadPushes(null);
+    await renderDialog(null);
     return;
   }
 
@@ -217,7 +235,7 @@ async function loadDomain(domainId) {
   $('chronicle').textContent = fmtLoreEntries(lore.entries);
   $('facts').textContent = fmtFacts(lore.facts);
 
-  await loadPushes(domain.ownerUserId);
+  await renderDialog(domain);
 }
 
 async function refresh() {
