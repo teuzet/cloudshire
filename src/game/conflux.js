@@ -412,6 +412,8 @@ async function generateUndockChronicle({ runtime, conflux, domains, world, log }
       maxTurns: 5,
       toolChoice: { type: 'function', function: { name: 'submit_undock' } },
       log,
+      scene: 'conflux_undock',
+      domainId: `${domains[0].id}+${domains[1].id}`,
       userMessages: [
         {
           role: 'user',
@@ -495,6 +497,8 @@ async function generateContact({ runtime, conflux, domains, world, log }) {
       maxTurns: 5,
       toolChoice: { type: 'function', function: { name: 'submit_contact' } },
       log,
+      scene: 'conflux_contact',
+      domainId: `${domains[0].id}+${domains[1].id}`,
       userMessages: [
         {
           role: 'user',

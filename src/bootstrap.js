@@ -3,7 +3,8 @@ import { loadConfig, projectRoot } from './config.js';
 import { createStorage } from './storage/index.js';
 import { AgentRuntime } from './agents/runtime.js';
 import { GameApp } from './game/app.js';
-import { initLogger } from './log.js';
+import { initLogger, setLoggerWorldId } from './log.js';
+import { initUsageRecording } from './llm/usage.js';
 
 /**
  * @param {string | { configPath?: string, dataDir?: string }} [opts]
@@ -25,7 +26,20 @@ export async function createAppContext(opts) {
 
   const log = initLogger(config);
   const storage = await createStorage(config);
+  const world = await storage.getWorld();
+  if (world?.id) {
+    setLoggerWorldId(world.id);
+    initUsageRecording(config, world.id);
+    log.info('world.active', {
+      worldId: world.id,
+      seasonKey: world.seasonKey || null,
+      tickIndex: world.tickIndex,
+      gameDate: world.gameDate?.label,
+    });
+  } else {
+    initUsageRecording(config, null);
+  }
   const runtime = new AgentRuntime(config);
   const app = new GameApp({ config, storage, runtime });
-  return { config, storage, runtime, app, log };
+  return { config, storage, runtime, app, log, world };
 }

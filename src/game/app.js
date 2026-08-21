@@ -38,7 +38,8 @@ import {
   canStartProcess,
   maxActiveProcesses,
 } from './processes.js';
-import { getLogger, truncate } from '../log.js';
+import { getLogger, truncate, setLoggerWorldId } from '../log.js';
+import { initUsageRecording } from '../llm/usage.js';
 
 /** Недавняя запись расстыковки из хроники домена (если есть). */
 function recentUndockFact(domain) {
@@ -570,9 +571,11 @@ export class GameApp {
       storage: this.storage.driver,
       world: {
         id: world.id,
+        seasonKey: world.seasonKey || null,
         name: world.name,
         tickIndex: world.tickIndex,
         gameDate: world.gameDate,
+        status: world.status || 'active',
       },
       domainCount: domains.length,
       tickIntervalHours: this.config.tick.intervalHours,
@@ -1085,6 +1088,7 @@ export class GameApp {
       tools,
       extraSystem,
       log,
+      scene: 'onboarding',
     });
 
     // Страховка: агент сказал «записал», но не вызвал tools — сохраняем freeform сами.
@@ -1268,6 +1272,8 @@ export class GameApp {
       }),
       extraSystem,
       log,
+      scene: 'ruler',
+      domainId: domain.id,
     });
 
     let reply = result.text || '';
@@ -1295,6 +1301,8 @@ export class GameApp {
         maxTurns: 1,
         extraSystem,
         log,
+        scene: 'ruler_retry',
+        domainId: domain.id,
       });
       reply = retry.text || '';
       if (looksLikeToolDump(reply) || !String(reply).trim()) {
@@ -1397,7 +1405,7 @@ export class GameApp {
 
     const runLetter = async (extraUserNote = '') => {
       const result = await this.runtime.run({
-        agentId: 'ruler',
+        agentId: 'tickNews',
         userMessages: [
           {
             role: 'user',
@@ -1434,6 +1442,8 @@ export class GameApp {
         ]
           .filter(Boolean)
           .join('\n'),
+        scene: opts.undock ? 'tick_news_undock' : 'tick_news',
+        domainId: domain.id,
       });
       return stripSpeakerPrefix(
         result.text || 'Покровитель, за месяц многое сдвинулось.',
@@ -1520,7 +1530,17 @@ export class GameApp {
   }
 
   async wipeAll() {
-    await this.storage.wipeAll();
-    return this.getStatus();
+    const result = await this.storage.wipeAll({ reason: 'wipe' });
+    const newWorldId = result.newWorldId || result.world?.id;
+    if (newWorldId) {
+      setLoggerWorldId(newWorldId);
+      initUsageRecording(this.config, newWorldId);
+    }
+    getLogger().info('world.rotated', {
+      archivedWorldId: result.archivedWorldId || null,
+      newWorldId: newWorldId || null,
+      archiveDir: result.archiveDir || null,
+    });
+    return result;
   }
 }

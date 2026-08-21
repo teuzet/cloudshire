@@ -1,5 +1,6 @@
 import { MongoClient } from 'mongodb';
-import { createWorldFromConfig, normalizeDomain } from '../game/models.js';
+import { createWorldFromConfig, normalizeDomain, normalizeWorld } from '../game/models.js';
+import { writeWorldArchive } from './worldArchive.js';
 
 /**
  * Mongo implementation of the same storage surface as YamlStorage.
@@ -20,6 +21,7 @@ export class MongoStorage {
 
     await this.db.collection('domains').createIndex({ ownerUserId: 1, worldId: 1 });
     await this.db.collection('users').createIndex({ userId: 1 }, { unique: true });
+    await this.db.collection('world_archives').createIndex({ worldId: 1 }, { unique: true });
 
     const world = await this.getWorld();
     if (!world) {
@@ -32,10 +34,14 @@ export class MongoStorage {
   }
 
   async getWorld() {
-    return this.col('world').findOne({ _id: 'current' });
+    const doc = await this.col('world').findOne({ _id: 'current' });
+    if (!doc) return null;
+    const { _id, ...rest } = doc;
+    return normalizeWorld(rest, this.config);
   }
 
   async saveWorld(world) {
+    normalizeWorld(world, this.config);
     world.updatedAt = new Date().toISOString();
     const doc = { ...world, _id: 'current' };
     await this.col('world').replaceOne({ _id: 'current' }, doc, { upsert: true });
@@ -116,13 +122,60 @@ export class MongoStorage {
     return docs.map(({ _id, ...rest }) => ({ id: _id, ...rest }));
   }
 
-  async wipeAll() {
+  async wipeAll({ reason = 'wipe' } = {}) {
+    const world = await this.getWorld();
+    const domains = await this.listDomains();
+    const users = await this.listUserBindings();
+    const confluxes = await this.listConfluxes();
+
+    let archiveDir = null;
+    let archivedWorldId = world?.id || null;
+
+    if (world) {
+      const archived = await writeWorldArchive({
+        config: this.config,
+        world,
+        domains,
+        users,
+        confluxes,
+        reason,
+      });
+      archiveDir = archived.archiveDir;
+      archivedWorldId = archived.worldId;
+
+      await this.col('world_archives').replaceOne(
+        { worldId: world.id },
+        {
+          worldId: world.id,
+          seasonKey: world.seasonKey || null,
+          archivedAt: new Date().toISOString(),
+          reason,
+          archiveDir,
+          world: { ...world, status: 'archived', endedAt: new Date().toISOString() },
+          domains,
+          users,
+          confluxes,
+        },
+        { upsert: true },
+      );
+    }
+
     await this.col('domains').deleteMany({});
     await this.col('users').deleteMany({});
     await this.col('confluxes').deleteMany({});
     await this.col('world').deleteMany({});
-    await this.saveWorld(createWorldFromConfig(this.config));
-    return { ok: true, driver: 'mongo' };
+
+    const next = createWorldFromConfig(this.config);
+    await this.saveWorld(next);
+
+    return {
+      ok: true,
+      driver: 'mongo',
+      archivedWorldId,
+      newWorldId: next.id,
+      archiveDir,
+      world: next,
+    };
   }
 
   async close() {

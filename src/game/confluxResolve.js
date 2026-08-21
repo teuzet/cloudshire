@@ -607,6 +607,8 @@ export async function resolveConfluxTick({
     maxTurns: 20,
     toolChoice: { type: 'function', function: { name: 'read_pair_context' } },
     log,
+    scene: 'conflux_resolve',
+    domainId: order.join('+'),
   });
 
   // Process fallbacks

@@ -136,6 +136,13 @@ export function initLogger(config = {}) {
   return rootLogger;
 }
 
+/** Привязать текущий worldId ко всем последующим лог-событиям. */
+export function setLoggerWorldId(worldId) {
+  if (!rootLogger) return;
+  if (worldId) rootLogger.context.worldId = String(worldId);
+  else delete rootLogger.context.worldId;
+}
+
 export function getLogger() {
   if (!rootLogger) {
     rootLogger = new Logger({ level: process.env.LOG_LEVEL || 'info' });

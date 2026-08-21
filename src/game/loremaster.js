@@ -213,6 +213,8 @@ export async function askLoremaster({
     maxTurns: 10,
     toolChoice: { type: 'function', function: { name: 'read_lore' } },
     log,
+    scene: 'loremaster',
+    domainId: working.id,
   });
 
   await storage.saveDomain(working);

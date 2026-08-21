@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import yaml from 'js-yaml';
-import { createWorldFromConfig, normalizeDomain } from '../game/models.js';
+import { createWorldFromConfig, normalizeDomain, normalizeWorld } from '../game/models.js';
+import { writeWorldArchive } from './worldArchive.js';
 
 async function ensureDir(dir) {
   await fs.mkdir(dir, { recursive: true });
@@ -36,6 +37,7 @@ export class YamlStorage {
     await ensureDir(path.join(this.root, 'domains'));
     await ensureDir(path.join(this.root, 'users'));
     await ensureDir(path.join(this.root, 'confluxes'));
+    await ensureDir(path.join(this.root, 'archives'));
 
     let world = await this.getWorld();
     if (!world) {
@@ -61,10 +63,12 @@ export class YamlStorage {
   }
 
   async getWorld() {
-    return readYaml(this.worldPath(), null);
+    const world = await readYaml(this.worldPath(), null);
+    return world ? normalizeWorld(world, this.config) : null;
   }
 
   async saveWorld(world) {
+    normalizeWorld(world, this.config);
     world.updatedAt = new Date().toISOString();
     await writeYaml(this.worldPath(), world);
     return world;
@@ -151,8 +155,32 @@ export class YamlStorage {
     return out;
   }
 
-  async wipeAll() {
+  /**
+   * Архив текущего мира + логи, затем новый уникальный мир.
+   * @returns {{ ok, driver, archivedWorldId, newWorldId, archiveDir }}
+   */
+  async wipeAll({ reason = 'wipe' } = {}) {
+    const world = await this.getWorld();
     const domains = await this.listDomains();
+    const users = await this.listUserBindings();
+    const confluxes = await this.listConfluxes();
+
+    let archiveDir = null;
+    let archivedWorldId = world?.id || null;
+
+    if (world) {
+      const archived = await writeWorldArchive({
+        config: this.config,
+        world,
+        domains,
+        users,
+        confluxes,
+        reason,
+      });
+      archiveDir = archived.archiveDir;
+      archivedWorldId = archived.worldId;
+    }
+
     for (const d of domains) {
       await fs.unlink(this.domainPath(d.id)).catch(() => {});
     }
@@ -171,9 +199,18 @@ export class YamlStorage {
       }
     }
     await fs.unlink(this.worldPath()).catch(() => {});
-    const world = createWorldFromConfig(this.config);
-    await this.saveWorld(world);
-    return { ok: true, driver: 'yaml' };
+
+    const next = createWorldFromConfig(this.config);
+    await this.saveWorld(next);
+
+    return {
+      ok: true,
+      driver: 'yaml',
+      archivedWorldId,
+      newWorldId: next.id,
+      archiveDir,
+      world: next,
+    };
   }
 
   async close() {}

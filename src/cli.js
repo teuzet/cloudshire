@@ -107,9 +107,12 @@ program
         ],
         tools: [],
         maxTurns: 1,
+        scene: 'cli_ping',
       });
       console.log(result.text);
-      console.log(`[model=${result.model} agent=${result.agentId}]`);
+      console.log(
+        `[model=${result.model} agent=${result.agentId} usage=${JSON.stringify(result.usage)} costUsd=${result.costUsd}]`,
+      );
     });
   });
 

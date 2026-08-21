@@ -1,5 +1,14 @@
 import { createLlmProvider } from '../llm/index.js';
 import { getLogger, truncate } from '../log.js';
+import {
+  emptyUsage,
+  normalizeUsage,
+  addUsage,
+  measureRequestFootprint,
+  buildRunUsageRecord,
+  recordUsageEvent,
+  getCurrentWorldId,
+} from '../llm/usage.js';
 
 export function toOpenAiTools(toolDefs = []) {
   return toolDefs.map((t) => ({
@@ -41,6 +50,8 @@ export class AgentRuntime {
     toolChoice,
     maxTokens,
     log: parentLog,
+    scene = null,
+    domainId = null,
   }) {
     const agent = this.getAgentConfig(agentId);
     const provider = this.getProvider(agent.provider);
@@ -48,9 +59,15 @@ export class AgentRuntime {
     const tokens = maxTokens ?? agent.maxTokens;
     let choice = toolChoice;
 
-    const log = (parentLog || getLogger()).child({ agentId, model });
+    const log = (parentLog || getLogger()).child({
+      agentId,
+      model,
+      scene: scene || undefined,
+      worldId: getCurrentWorldId() || undefined,
+    });
     const runId = Math.random().toString(36).slice(2, 8);
     const slog = log.child({ runId });
+    const runStarted = Date.now();
 
     const systemContent = [
       this.config.agentSafety || '',
@@ -69,8 +86,19 @@ export class AgentRuntime {
     const forcedTool =
       typeof choice === 'object' && choice?.function?.name ? choice.function.name : choice || null;
 
+    const footprint = measureRequestFootprint({
+      systemContent,
+      tools: openAiTools,
+      messages,
+    });
+
+    let usageTotal = emptyUsage();
+    const callUsages = [];
+
     slog.info('agent.run.start', {
       maxTurns,
+      scene: scene || null,
+      domainId: domainId || null,
       toolNames: tools.map((t) => t.name),
       forcedTool,
       userPreview: truncate(
@@ -78,6 +106,7 @@ export class AgentRuntime {
         300,
       ),
       extraSystemChars: extraSystem?.length || 0,
+      footprint,
     });
 
     try {
@@ -102,7 +131,9 @@ export class AgentRuntime {
             maxTokens: tokens,
           });
           message = resp.message;
-          usage = resp.usage;
+          usage = normalizeUsage(resp.usage);
+          usageTotal = addUsage(usageTotal, usage);
+          callUsages.push({ turn, ...usage, ms: Date.now() - started });
         } catch (err) {
           tlog.error('agent.llm.error', {
             error: err.message,
@@ -131,11 +162,28 @@ export class AgentRuntime {
             });
             continue;
           }
+          const record = this.#finishUsage({
+            slog,
+            agentId,
+            model,
+            scene,
+            domainId,
+            runId,
+            turns: turn + 1,
+            usageTotal,
+            footprint,
+            toolTrace,
+            truncated: false,
+            ms: Date.now() - runStarted,
+            callUsages,
+          });
           slog.info('agent.run.done', {
             turns: turn + 1,
             truncated: false,
             toolsUsed: toolTrace.map((t) => t.name),
             replyPreview: truncate(message.content || '', 300),
+            usage: record.usage,
+            costUsd: record.costUsd,
           });
           return {
             text: message.content || '',
@@ -143,6 +191,10 @@ export class AgentRuntime {
             toolTrace,
             model,
             agentId,
+            scene,
+            usage: record.usage,
+            costUsd: record.costUsd,
+            callUsages,
           };
         }
 
@@ -205,6 +257,22 @@ export class AgentRuntime {
         else tlog.debug('agent.keep_forcing', { tool: forcedTool });
       }
 
+      const record = this.#finishUsage({
+        slog,
+        agentId,
+        model,
+        scene,
+        domainId,
+        runId,
+        turns: maxTurns,
+        usageTotal,
+        footprint,
+        toolTrace,
+        truncated: true,
+        ms: Date.now() - runStarted,
+        callUsages,
+      });
+
       slog.warn('agent.run.truncated', {
         maxTurns,
         toolsUsed: toolTrace.map((t) => t.name),
@@ -213,6 +281,8 @@ export class AgentRuntime {
           ok: t.result?.ok !== false,
           error: t.result?.error,
         })),
+        usage: record.usage,
+        costUsd: record.costUsd,
       });
 
       return {
@@ -221,11 +291,79 @@ export class AgentRuntime {
         toolTrace,
         model,
         agentId,
+        scene,
         truncated: true,
+        usage: record.usage,
+        costUsd: record.costUsd,
+        callUsages,
       };
     } catch (err) {
+      if (usageTotal.total_tokens > 0) {
+        this.#finishUsage({
+          slog,
+          agentId,
+          model,
+          scene,
+          domainId,
+          runId,
+          turns: callUsages.length,
+          usageTotal,
+          footprint,
+          toolTrace,
+          truncated: false,
+          ms: Date.now() - runStarted,
+          callUsages,
+          failed: true,
+        });
+      }
       slog.error('agent.run.failed', { error: err.message });
       throw err;
     }
+  }
+
+  #finishUsage({
+    slog,
+    agentId,
+    model,
+    scene,
+    domainId,
+    runId,
+    turns,
+    usageTotal,
+    footprint,
+    toolTrace,
+    truncated,
+    ms,
+    callUsages,
+    failed = false,
+  }) {
+    const record = buildRunUsageRecord({
+      agentId,
+      model,
+      scene,
+      domainId,
+      runId,
+      turns,
+      usage: usageTotal,
+      config: this.config,
+      footprint,
+      toolsUsed: toolTrace.map((t) => t.name),
+      truncated,
+      ms,
+      worldId: getCurrentWorldId(),
+    });
+    if (failed) record.failed = true;
+    if (callUsages?.length) record.calls = callUsages.length;
+    slog.info('agent.run.usage', {
+      scene: record.scene,
+      usage: record.usage,
+      costUsd: record.costUsd,
+      unknownPricing: record.unknownPricing,
+      footprint: record.footprint?.estTokens || null,
+      turns: record.turns,
+      ms: record.ms,
+    });
+    recordUsageEvent(record);
+    return record;
   }
 }

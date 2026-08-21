@@ -8,7 +8,8 @@
     "start": "node src/index.js",
     "cli": "node src/cli.js",
     "web": "node src/index.js",
-    "playtest": "node src/cli.js playtest"
+    "playtest": "node src/cli.js playtest",
+    "tokens": "node scripts/token-report.js"
   },
   "engines": {
     "node": ">=20"

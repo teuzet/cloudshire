@@ -433,6 +433,8 @@ export async function resolveDomainTick({
     maxTurns: 16,
     toolChoice: { type: 'function', function: { name: 'read_context' } },
     log,
+    scene: 'tick_resolve',
+    domainId: working.id,
   });
 
   if (processList.length) {

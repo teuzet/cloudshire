@@ -408,6 +408,8 @@ async function decidePlayerAction({
     maxTurns: 6,
     toolChoice: { type: 'function', function: { name: 'talk_to_ruler' } },
     log,
+    scene: 'playtest_player',
+    domainId: domain.id,
     userMessages: [
       {
         role: 'user',

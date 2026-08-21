@@ -1,3 +1,5 @@
+import { newId } from './ids.js';
+
 export function emptyState() {
   return {
     // Временные процессы месяца/сезона (бунт, фестиваль, осада…)
@@ -37,13 +39,17 @@ export function normalizeDomain(domain) {
 }
 
 export function createWorldFromConfig(config) {
+  const now = new Date().toISOString();
   return {
-    id: config.world.id,
-    name: config.world.name,
-    description: config.world.description || '',
-    cosmology: config.world.cosmology || '',
+    // Уникальный id экземпляра (один запуск / жизнь мира до wipe).
+    id: newId('world'),
+    // Ключ сезона/шаблона из конфига (не уникален между запусками).
+    seasonKey: config.world?.id || 'season',
+    name: config.world?.name || 'Мир',
+    description: config.world?.description || '',
+    cosmology: config.world?.cosmology || '',
     lore: [],
-    milestonePool: structuredClone(config.world.milestonePool || []),
+    milestonePool: structuredClone(config.world?.milestonePool || []),
     globalEvents: [],
     tickIndex: 0,
     gameDate: {
@@ -52,9 +58,24 @@ export function createWorldFromConfig(config) {
       label: 'Год 1, месяц 1',
       tick: 0,
     },
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    status: 'active',
+    createdAt: now,
+    updatedAt: now,
   };
+}
+
+/** Подтянуть поля у старых world.yaml (до уникальных id). */
+export function normalizeWorld(world, config = null) {
+  if (!world || typeof world !== 'object') return world;
+  if (!world.seasonKey) {
+    // Старые миры: id был ключом сезона из конфига.
+    const looksUnique = /^world_[a-f0-9]+$/i.test(String(world.id || ''));
+    world.seasonKey = looksUnique
+      ? config?.world?.id || 'season'
+      : String(world.id || config?.world?.id || 'season');
+  }
+  if (!world.status) world.status = 'active';
+  return world;
 }
 
 export function createDomainRecord({

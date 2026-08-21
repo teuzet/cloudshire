@@ -355,6 +355,8 @@ async function runDirectorSession({
       maxTurns: isPair ? 14 : 10,
       toolChoice: { type: 'function', function: { name: 'read_plot_board' } },
       log,
+      scene: isPair ? 'director_conflux' : 'director',
+      domainId: domains.map((d) => d.id).join('+'),
     });
   } catch (err) {
     log.warn('director.failed', { error: err.message });

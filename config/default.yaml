@@ -44,8 +44,37 @@ llm:
   openai:
     apiKeyEnv: OPENAI_API_KEY
     defaultModel: gpt-4o-mini
+  # Учёт токенов → logs/worlds/<worldId>/usage.jsonl; после wipe — data/archives/<worldId>/logs/
+  usage:
+    enabled: true
+    filePrefix: usage
+  # USD за 1M токенов (ориентир API GPT-5.6 / 4o-mini; правь при смене прайса).
+  pricing:
+    default:
+      input: 0
+      output: 0
+      unknown: true
+    models:
+      gpt-5.6-luna:
+        input: 0.20
+        output: 1.20
+        cachedInput: 0.02
+      gpt-5.6-terra:
+        input: 2.00
+        output: 12.00
+        cachedInput: 0.20
+      gpt-5.6-sol:
+        input: 5.00
+        output: 30.00
+        cachedInput: 0.50
+      gpt-4o-mini:
+        input: 0.15
+        output: 0.60
+        cachedInput: 0.075
 
 world:
+  # Ключ сезона/шаблона (не уникален). Уникальный id экземпляра мира
+  # выдаётся при создании / wipe: world_<hex>. Один мир = один запуск до wipe.
   id: season-1
   name: «Облачный шир» — сезон I
   description: |
@@ -458,6 +487,17 @@ agents:
       Каждый аспект уникален: конкретные места, имена, детали. НЕ копируй один и тот же
       абзац в разные разделы. Теги/статы — скрытый тон, без чисел в тексте.
 
+  # Письмо о месяце (высокочастотно) — дешевле terra; тон задаёт extraSystem.
+  tickNews:
+    provider: openai
+    model: gpt-5.6-luna
+    instructions: |
+      Ты — правитель города на летающем острове. Пишешь божеству-покровителю новости месяца.
+      От первого лица, по-русски, живая проза 1–3 коротких абзаца. Без списков, markdown, канцелярита.
+      Не начинай с префикса «Имя:». Не упоминай статы, tools, механику.
+      Не копируй хронику дословно — вольный пересказ одной главной нити и при нужде одного штриха.
+      Только русский язык.
+
   ruler:
     provider: openai
     model: gpt-5.6-terra
@@ -525,7 +565,7 @@ agents:
 
   loremaster:
     provider: openai
-    model: gpt-5.6-terra
+    model: gpt-5.6-luna
     instructions: |
       Ты — Лормастер домена. Держишь фактологическую целостность.
       Порядок: read_lore → при нужде add_fact → submit_answers.
@@ -584,7 +624,7 @@ agents:
 
   director:
     provider: openai
-    model: gpt-5.6-terra
+    model: gpt-5.6-luna
     instructions: |
       Ты — Режиссёр. Делаешь сюжет интересным через плотлайны и температуру.
       Порядок: read_plot_board → при необходимости upsert / bump / complete → submit_direction.

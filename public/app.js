@@ -395,7 +395,7 @@ $('btnWipe').addEventListener('click', async () => {
     const slots = [{ userId: 'local-user', label: 'local-user' }];
     saveSlots(slots);
     switchSlot('local-user');
-    appendMessage('assistant', 'Мир очищен. Можно начинать заново.', 'system · wipe');
+    appendMessage('assistant', 'Мир архивирован, начат новый. Можно начинать заново.', 'system · wipe');
   } catch (err) {
     appendMessage('assistant', err.message, 'error');
   } finally {

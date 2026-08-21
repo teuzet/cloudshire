@@ -265,6 +265,7 @@ async function generateCore({
       maxTurns: 6,
       toolChoice: { type: 'function', function: { name: 'submit_core' } },
       log,
+      scene: 'genesis_core',
     });
 
     if (!draft.submitted) {
@@ -403,6 +404,7 @@ async function generateAspectBatch({
     maxTurns: 5,
     toolChoice: { type: 'function', function: { name: 'submit_aspects' } },
     log,
+    scene: 'genesis_aspects',
   });
 
   if (!draft.texts) {

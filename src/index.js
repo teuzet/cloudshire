@@ -6,7 +6,7 @@ import { runWorldTick } from './game/tick.js';
 import { getLogger } from './log.js';
 
 async function main() {
-  const { config, storage, runtime, app, log } = await createAppContext();
+  const { config, storage, runtime, app, log, world } = await createAppContext();
 
   const web = createWebServer({ config, app, runtime, storage });
   const host = config.server.host || '127.0.0.1';
@@ -16,7 +16,8 @@ async function main() {
     log.info('server.listen', {
       url: `http://${host}:${port}`,
       storage: storage.driver,
-      world: config.world.id,
+      worldId: world?.id || null,
+      seasonKey: world?.seasonKey || config.world.id,
       logFile: log.filePath,
     });
   });
