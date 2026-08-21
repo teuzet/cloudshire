@@ -19,7 +19,9 @@ export function analyzeTurn(turn, ctx = {}) {
     flags.push('list_like_ruler_reply');
   }
   if (ALREADY_BUILDING.test(reply)) {
-    const declared = (turn.toolTrace || []).some((t) => t.name === 'declare_action');
+    const declared = (turn.toolTrace || []).some(
+      (t) => t.name === 'declare_action' || t.name === 'declare_process',
+    );
     const hadPending = (ctx.pendingAfter || []).some((a) => a.status === 'active');
     if (!declared && !hadPending) {
       flags.push('claims_building_without_pending');

@@ -27,6 +27,17 @@ import {
   randomizeAllTags,
   formatTagChoicesForPlayer,
 } from './onboarding.js';
+import {
+  normalizeDomainProcesses,
+  normalizeProcess,
+  guessProcessDuration,
+  hasHardPatronDeadline,
+  findDuplicateProcess,
+  resolveLinkedStats,
+  activeProcesses,
+  canStartProcess,
+  maxActiveProcesses,
+} from './processes.js';
 import { getLogger, truncate } from '../log.js';
 
 /** Недавняя запись расстыковки из хроники домена (если есть). */
@@ -48,10 +59,10 @@ function looksLikeToolDump(text) {
   if (!t.trim()) return false;
   if (/tools\.\w+/i.test(t)) return true;
   if (/天天送json|комментary|commentary\s+json/i.test(t)) return true;
-  if (/declare_action|consult_loremaster|set_patron_name|read_domain_brief/i.test(t) && /\{/.test(t)) {
+  if (/declare_action|declare_process|consult_loremaster|set_patron_name|read_domain_brief/i.test(t) && /\{/.test(t)) {
     return true;
   }
-  if (/"summary"\s*:/.test(t) && /"durationMonths"\s*:/.test(t)) return true;
+  if (/"summary"\s*:/.test(t) && (/"durationMonths"\s*:/.test(t) || /"expectedMonths"\s*:/.test(t))) return true;
   return false;
 }
 
@@ -65,40 +76,20 @@ function claimsOnboardingAlreadyCreated(text) {
   return /успешно\s+создан|уже\s+создан|остров.{0,20}готов|был\s+создан/i.test(String(text || ''));
 }
 
-function normPendingSummary(s) {
-  return String(s || '')
-    .toLowerCase()
-    .replace(/[«»"'„“]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function findDuplicatePending(domain, summary) {
-  const n = normPendingSummary(summary);
-  if (n.length < 4) return null;
-  return (domain.state?.pendingActions || []).find((a) => {
-    if (a.status !== 'active') return false;
-    const s = normPendingSummary(a.summary);
-    if (!s) return false;
-    return s === n || s.includes(n) || n.includes(s);
-  });
-}
-
-/** Минимальная длительность pending по смыслу поручения. */
+/** Минимальная длительность процесса по смыслу поручения. */
 function clampPendingDuration(summary, detail, duration) {
-  const t = `${summary || ''} ${detail || ''}`.toLowerCase();
-  let min = 1;
-  if (/войн|штурм|ополчен|войск|взят.{0,20}ворот|поход|осад|арми|завосв|вторжен/.test(t)) {
-    min = Math.max(min, 3);
+  return guessProcessDuration(summary, detail, duration);
+}
+
+/** Убрать префикс «Имя:» / «Имя —» из речи правителя. */
+function stripSpeakerPrefix(text, characterName) {
+  let t = String(text || '').trim();
+  const name = String(characterName || '').trim();
+  if (name) {
+    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    t = t.replace(new RegExp(`^${esc}\\s*[:：—\\-]\\s*`, 'i'), '');
   }
-  if (/строит|винодел|храм|академи|библиотек|крепост|канал|дворец|мануфакт|верф/.test(t)) {
-    min = Math.max(min, 3);
-  }
-  if (/посольств|лазут|развед|шпион|наблюд/.test(t)) {
-    min = Math.max(min, 2);
-  }
-  const d = Math.max(1, Math.min(12, Math.round(Number(duration) || 1)));
-  return Math.max(min, d);
+  return t.trim();
 }
 
 /** Сколько подряд tick_news в конце истории без ответа игрока. */
@@ -115,12 +106,13 @@ function countTrailingUnansweredDigests(dialogHistory = []) {
 function characterTools(domain, storage, character, ctx) {
   const save = async () => storage.saveDomain(domain);
   normalizeRulerAttitudes(character);
+  normalizeDomainProcesses(domain, ctx.config);
 
   return [
     {
       name: 'read_domain_brief',
       description:
-        'Текущее состояние города: население, картина статов (эпитеты), pending, процессы. Вызови, когда спрашивают «как дела / богаты ли / сыты ли / спокойно ли».',
+        'Состояние города: население, статы (эпитеты), активные дела/процессы. Для вопросов «как дела / сыты ли».',
       parameters: { type: 'object', properties: {} },
       handler: async () => ({
         ok: true,
@@ -131,17 +123,17 @@ function characterTools(domain, storage, character, ctx) {
         conditionFeel: qualitativeStatsBrief(domain.stats || {}, ctx.config),
         attitudes: formatRulerAttitudes(character, ctx.config),
         guidance:
-          'Отвечай СТРОГО в духе conditionFeel (эпитеты в скобках — сила стата). Числа и id статов игроку не называй. Лояльность/ужас игроку не озвучивай цифрами.',
+          'Отвечай в духе conditionFeel. Числа/id статов и «процесс/pending» игроку не называй. О делах говори по-человечески: что делается и сколько примерно ждать.',
         stateEvents: domain.state.events,
         stateModifiers: domain.state.modifiers || [],
-        pendingActions: (domain.state.pendingActions || [])
-          .filter((a) => a.status === 'active')
-          .map((a) => ({
-            summary: a.summary,
-            detail: a.detail,
-            monthsDone: a.monthsDone ?? 0,
-            durationMonths: a.durationMonths ?? 1,
-          })),
+        processes: activeProcesses(domain, ctx.config).map((a) => ({
+          summary: a.summary,
+          detail: a.detail,
+          monthsLeft: a.monthsLeft,
+          expectedMonths: a.expectedMonths,
+          linkedStats: a.linkedStats,
+        })),
+        processSlots: canStartProcess(domain, ctx.config),
       }),
     },
     {
@@ -154,7 +146,7 @@ function characterTools(domain, storage, character, ctx) {
         properties: {
           name: {
             type: 'string',
-            description: 'Имя или культовый титул обращения (напр. «Красный Змей», «Тот-Кто-Смотрит»)',
+            description: 'Имя или культовый титул обращения к покровителю',
           },
         },
       },
@@ -258,48 +250,91 @@ function characterTools(domain, storage, character, ctx) {
       },
     },
     {
-      name: 'declare_action',
+      name: 'declare_process',
       description:
-        'Обязательно для строек/проектов до ответа. Укажи durationMonths (реалистично: мелочь 1; посольство/разведка ≥2; стройка/поход/штурм ≥3). Не дублируй уже active pending — update_action / revoke_action.',
+        `Длительное дело (лимит ${maxActiveProcesses(ctx.config)} сразу): стройка, суд, поход, снабжение. ` +
+        'Не для мгновенных постоянных приказов — declare_standing_order. Не дублируй нить — update/revoke.',
       parameters: {
         type: 'object',
-        required: ['summary', 'detail', 'durationMonths'],
+        required: ['summary', 'detail', 'expectedMonths', 'linkedStats'],
         properties: {
-          summary: { type: 'string', description: 'Кратко: «Винодельня»…' },
-          detail: { type: 'string', description: 'Что делать и зачем' },
-          durationMonths: {
-            type: 'number',
-            description: 'Оценка длительности в игровых месяцах (1–12)',
-          },
-          onBehalfOf: {
+          summary: { type: 'string' },
+          detail: {
             type: 'string',
-            description: 'ruler | patron | people | other',
-            default: 'patron',
+            description:
+              'Если покровитель задал жёсткий срок («в этом месяце») — отрази это в detail дословно по смыслу.',
           },
+          expectedMonths: {
+            type: 'number',
+            description:
+              'Срок в месяцах (1–12). При жёстком дедлайне покровителя — его срок, не раздувай «типичным».',
+          },
+          linkedStats: {
+            type: 'array',
+            items: { type: 'string' },
+            minItems: 1,
+            description: 'Статы прогресса: prosperity|faith|culture|stability|knowledge|might',
+          },
+          onBehalfOf: { type: 'string', default: 'patron' },
           characterNote: { type: 'string' },
         },
       },
-      handler: async ({ summary, detail, durationMonths, onBehalfOf = 'patron', characterNote }) => {
-        const dup = findDuplicatePending(domain, summary);
-        if (dup) {
+      handler: async ({
+        summary,
+        detail,
+        expectedMonths,
+        linkedStats,
+        onBehalfOf = 'patron',
+        characterNote,
+      }) => {
+        const slots = canStartProcess(domain, ctx.config);
+        if (!slots.ok) {
           return {
             ok: false,
-            error: `Похожее дело уже в работе: «${dup.summary}» (${dup.id}, ${dup.monthsDone}/${dup.durationMonths}). Уточни через update_action или revoke_action, не дублируй.`,
-            existingActionId: dup.id,
+            error: 'busy',
+            active: slots.active,
+            max: slots.max,
+            busyWith: slots.busy,
+            hint:
+              'В речи: люди и мастера уже заняты текущими делами; новое большое поручение сейчас не потянуть. ' +
+              'Предложи сначала дождаться/свернуть одно из текущих (назови их по смыслу). Без слова «лимит»/process.',
           };
         }
-        const asked = Math.max(1, Math.min(12, Math.round(Number(durationMonths) || 1)));
-        const duration = clampPendingDuration(summary, detail, asked);
+        const dup = findDuplicateProcess(domain, summary, detail);
+        if (dup) {
+          normalizeProcess(dup, ctx.config);
+          return {
+            ok: false,
+            error: `Похожее дело уже идёт: «${dup.summary}» (${dup.id}, ещё ~${dup.monthsLeft} мес.).`,
+            existingProcessId: dup.id,
+            hint:
+              'Не заводи вторую нить. В речи отчитайся о текущем деле или update_process / revoke_process.',
+          };
+        }
+        const asked = Math.max(1, Math.min(12, Math.round(Number(expectedMonths) || 1)));
+        const hard = hasHardPatronDeadline(summary, detail);
+        const duration = hard ? asked : clampPendingDuration(summary, detail, asked);
+        const linked = resolveLinkedStats(linkedStats, ctx.config);
+        if (!linked.length) {
+          return {
+            ok: false,
+            error: `linkedStats обязательны (из: ${(ctx.config.stats || []).map((s) => s.id).join(', ')})`,
+          };
+        }
         const action = {
           id: newId('act'),
           summary,
           detail,
+          expectedMonths: duration,
           durationMonths: duration,
+          monthsLeft: duration,
           monthsDone: 0,
+          linkedStats: linked,
           onBehalfOf,
           characterId: character.id,
           characterName: character.name,
           characterNote: characterNote || null,
+          hardDeadline: hard,
           status: 'active',
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -307,19 +342,173 @@ function characterTools(domain, storage, character, ctx) {
         domain.state.pendingActions.push(action);
         await save();
         const clamped =
-          duration > asked
-            ? ` Срок поднят до ${duration} мес. (по масштабу дела; было ${asked}).`
-            : '';
+          duration > asked ? ` Оценка срока ${duration} мес. (было ${asked}).` : '';
+        const deadlineHint = hard
+          ? ` Жёсткий срок покровителя соблюдён: ${duration} мес. Если считаешь нереалистичным — скажи честно в речи (риск срыва), но не раздувай срок.`
+          : '';
         return {
           ok: true,
-          action,
-          hint: `В речи: намерение на ~${duration} мес., ещё НЕ «уже строим». Только русский.${clamped}`,
+          process: action,
+          hint:
+            `В речи: принял дело, примерно ${duration} мес., ещё не сделано. ` +
+            `ЗАПРЕЩЕНО говорить «намерение объявлено», «процесс запущен», pending, declare.${clamped}${deadlineHint}`,
         };
       },
     },
     {
+      name: 'declare_standing_order',
+      description:
+        'Постоянный порядок / правило без многомесячной подготовки (запрет, осмотр, правило улиц). ' +
+        'Пишет в state.modifiers. Не для строек, судов, походов — те через declare_process.',
+      parameters: {
+        type: 'object',
+        required: ['text'],
+        properties: {
+          text: {
+            type: 'string',
+            description: 'Краткая формулировка постоянного порядка',
+          },
+          id: {
+            type: 'string',
+            description: 'Id существующего порядка при обновлении',
+          },
+        },
+      },
+      handler: async ({ text, id }) => {
+        const body = String(text || '').trim().slice(0, 400);
+        if (body.length < 3) return { ok: false, error: 'Слишком коротко' };
+        if (!domain.state) domain.state = { events: [], modifiers: [], pendingActions: [], patronName: null };
+        if (!Array.isArray(domain.state.modifiers)) domain.state.modifiers = [];
+        const list = domain.state.modifiers;
+        let mod = id ? list.find((m) => m.id === id) : null;
+        if (!mod) {
+          const dup = list.find(
+            (m) =>
+              String(m.text || '')
+                .toLowerCase()
+                .includes(body.toLowerCase().slice(0, 40)) ||
+              body.toLowerCase().includes(String(m.text || '').toLowerCase().slice(0, 40)),
+          );
+          if (dup) {
+            dup.text = body;
+            dup.kind = 'order';
+            dup.updatedAt = new Date().toISOString();
+            await save();
+            return {
+              ok: true,
+              created: false,
+              modifier: dup,
+              hint: 'Порядок обновлён. В речи: коротко подтверди, что так и будет соблюдаться. Без «процесс»/месяцев.',
+            };
+          }
+          mod = {
+            id: newId('mod'),
+            text: body,
+            kind: 'order',
+            since: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            by: character.name,
+          };
+          list.push(mod);
+          await save();
+          return {
+            ok: true,
+            created: true,
+            modifier: mod,
+            hint:
+              'В речи: принял как постоянный порядок, начнут соблюдать. Не объявляй многомесячный срок и не говори «процесс».',
+          };
+        }
+        mod.text = body;
+        mod.kind = 'order';
+        mod.updatedAt = new Date().toISOString();
+        await save();
+        return {
+          ok: true,
+          created: false,
+          modifier: mod,
+          hint: 'Порядок обновлён. Подтверди в речи коротко.',
+        };
+      },
+    },
+    {
+      name: 'update_process',
+      description: 'Уточнить активное длительное дело',
+      parameters: {
+        type: 'object',
+        required: ['processId'],
+        properties: {
+          processId: { type: 'string' },
+          summary: { type: 'string' },
+          detail: { type: 'string' },
+          linkedStats: { type: 'array', items: { type: 'string' } },
+          characterNote: { type: 'string' },
+        },
+      },
+      handler: async ({ processId, summary, detail, linkedStats, characterNote }) => {
+        const action = domain.state.pendingActions.find((a) => a.id === processId && a.status === 'active');
+        if (!action) return { ok: false, error: 'process not found' };
+        if (summary) action.summary = summary;
+        if (detail) action.detail = detail;
+        if (linkedStats) {
+          const linked = resolveLinkedStats(linkedStats, ctx.config);
+          if (linked.length) action.linkedStats = linked;
+        }
+        if (characterNote !== undefined) action.characterNote = characterNote;
+        action.updatedAt = new Date().toISOString();
+        normalizeProcess(action, ctx.config);
+        await save();
+        return { ok: true, process: action };
+      },
+    },
+    {
+      name: 'revoke_process',
+      description: 'Отозвать длительное дело',
+      parameters: {
+        type: 'object',
+        required: ['processId'],
+        properties: {
+          processId: { type: 'string' },
+          reason: { type: 'string' },
+        },
+      },
+      handler: async ({ processId, reason }) => {
+        const action = domain.state.pendingActions.find((a) => a.id === processId && a.status === 'active');
+        if (!action) return { ok: false, error: 'process not found' };
+        action.status = 'revoked';
+        action.revokeReason = reason || '';
+        action.updatedAt = new Date().toISOString();
+        await save();
+        return { ok: true };
+      },
+    },
+    {
+      name: 'declare_action',
+      description: 'Устарело — вызови declare_process (нужны linkedStats)',
+      parameters: {
+        type: 'object',
+        required: ['summary', 'detail', 'durationMonths'],
+        properties: {
+          summary: { type: 'string' },
+          detail: { type: 'string' },
+          durationMonths: { type: 'number' },
+          linkedStats: { type: 'array', items: { type: 'string' } },
+          onBehalfOf: { type: 'string' },
+          characterNote: { type: 'string' },
+        },
+      },
+      handler: async (args) => {
+        const declare = characterTools(domain, storage, character, ctx).find((t) => t.name === 'declare_process');
+        return declare.handler({
+          ...args,
+          expectedMonths: args.durationMonths,
+          linkedStats: args.linkedStats?.length ? args.linkedStats : ['stability'],
+        });
+      },
+    },
+    {
       name: 'update_action',
-      description: 'Уточнить pending-действие',
+      description: 'Устарело — update_process',
       parameters: {
         type: 'object',
         required: ['actionId'],
@@ -327,21 +516,17 @@ function characterTools(domain, storage, character, ctx) {
           actionId: { type: 'string' },
           summary: { type: 'string' },
           detail: { type: 'string' },
+          characterNote: { type: 'string' },
         },
       },
-      handler: async ({ actionId, summary, detail }) => {
-        const action = domain.state.pendingActions.find((a) => a.id === actionId && a.status === 'active');
-        if (!action) return { ok: false, error: 'Действие не найдено' };
-        if (summary) action.summary = summary;
-        if (detail) action.detail = detail;
-        action.updatedAt = new Date().toISOString();
-        await save();
-        return { ok: true, action };
+      handler: async ({ actionId, ...rest }) => {
+        const t = characterTools(domain, storage, character, ctx).find((x) => x.name === 'update_process');
+        return t.handler({ processId: actionId, ...rest });
       },
     },
     {
       name: 'revoke_action',
-      description: 'Отозвать pending-действие',
+      description: 'Устарело — revoke_process',
       parameters: {
         type: 'object',
         required: ['actionId'],
@@ -351,13 +536,8 @@ function characterTools(domain, storage, character, ctx) {
         },
       },
       handler: async ({ actionId, reason }) => {
-        const action = domain.state.pendingActions.find((a) => a.id === actionId && a.status === 'active');
-        if (!action) return { ok: false, error: 'Действие не найдено' };
-        action.status = 'revoked';
-        action.revokeReason = reason || '';
-        action.updatedAt = new Date().toISOString();
-        await save();
-        return { ok: true, action };
+        const t = characterTools(domain, storage, character, ctx).find((x) => x.name === 'revoke_process');
+        return t.handler({ processId: actionId, reason });
       },
     },
   ];
@@ -1063,11 +1243,16 @@ export class GameApp {
       'ОТНОШЕНИЕ К ПОКРОВИТЕЛЮ (внутренняя правда; цифры игроку не называй):',
       attitudes,
       'На вопросы о сытости, богатстве, вере, порядке, силе, знаниях опирайся на эпитеты обстоятельств.',
-      'Высокая лояльность или ужас → легче соглашайся и исполняй, особенно если тон покровителя уместен.',
-      'Низкие оба → больше сомнений, торгов, отговорок (пока нет жёсткого приказа).',
+      'Высокая лояльность или ужас → охотнее соглашайся и исполняй, особенно при должном тоне; меньше торгов и отговорок.',
+      'Низкие оба → больше сомнений и торгов (пока нет жёсткого приказа).',
       'По ходу разговора при заметном жесте — adjust_loyalty и/или adjust_terror.',
-      'Форма: 1–3 абзаца прозы. Без списков, markdown, английских слов, сервисных «чем помочь».',
-      'Стройки/проекты: сначала declare_action с durationMonths, потом: намерение на N месяцев — НЕ «уже строим».',
+      'Форма: 1–3 абзаца живой прозы. Без списков, markdown, канцелярита, английских слов, сервисных «чем помочь».',
+      `ЗАПРЕЩЕНО начинать ответ с «${character.name}:» или любого «Имя:» — пиши сразу речь.`,
+      'Постоянные приказы без стройки (запреты, осмотры, правила) → declare_standing_order, не declare_process.',
+      'Долгие дела: declare_process (срок + linkedStats). Если покровитель сказал «в этом месяце» — отрази в detail, expectedMonths=1; не раздувай срок. Если нереально — честно возрази ДО declare.',
+      'Не дублируй уже идущую смысловую нить (второй суд, вторая та же стройка) — update/revoke.',
+      'Если declare_process вернул busy — не обещай новое дело: люди заняты; предложи дождаться или свернуть текущее.',
+      'ЗАПРЕЩЕНО в речи: «намерение объявлено», «процесс запущен», pending, declare, JSON.',
       'Факты лормастера перескажи своими словами.',
       'Если покровитель просит сменить имя/обращение — set_patron_name, затем подтверди.',
     ]
@@ -1102,6 +1287,7 @@ export class GameApp {
             content:
               'Перепиши ответ обычной речью правителя по-русски, 1–3 абзаца. ' +
               'Без tools.*, JSON, declare_action и англоязычного мусора. ' +
+              `Не начинай с «${character.name}:». ` +
               'Если нужно действие — оно уже могло уйти через tools; в речи только намерение.',
           },
         ],
@@ -1117,6 +1303,7 @@ export class GameApp {
           'Повтори волю коротко, и я исполню без путаницы.';
       }
     }
+    reply = stripSpeakerPrefix(reply, character.name);
 
     const fresh = await this.storage.getDomain(domain.id);
     await this.persistDialog(fresh, 'user', text);
@@ -1149,7 +1336,7 @@ export class GameApp {
       return forNews.map((c) => c.text).join('\n');
     }
     if (!forNews.length) {
-      return `${character.name}: Покровитель, месяц прошёл тихо — рассказывать почти нечего.`;
+      return 'Покровитель, месяц прошёл тихо — рассказывать почти нечего.';
     }
 
     const facts = forNews
@@ -1216,11 +1403,12 @@ export class GameApp {
             role: 'user',
             content: [
               `Прошёл месяц (${gameDate.label}). Ниже сырая хроника для тебя (не факты лормастера).`,
-              'Напиши покровителю письмо о месяце — вольный пересказ, НЕ дайджест.',
+              'Напиши покровителю письмо о месяце — вольный пересказ, НЕ дайджест и НЕ отчёт.',
               undockHint
                 ? 'Сделай уход чужого острова в небо центральной нитью письма.'
-                : 'Выбери одну-две нити, что важнее всего; остальное можно опустить или мельком.',
-              'Связная проза от первого лица, 1–3 коротких абзаца. Без списков, markdown, нумерации.',
+                : 'Бюджет письма: одна главная нить (дело/прорыв) и при желании один побочный штрих. Остальное опусти.',
+              'Связная проза от первого лица, 1–3 коротких абзаца. Без списков, markdown, нумерации, канцелярита.',
+              `Не начинай с «${character.name}:» — сразу текст письма.`,
               'Не копируй формулировки хроники. Не упоминай статы и механики.',
               addressHint,
               presenceHint,
@@ -1242,11 +1430,15 @@ export class GameApp {
           addressHint,
           undockSystem,
           'Ты пишешь покровителю новости месяца живой речью, как человек, а не сводку событий.',
+          `Не начинай письмо с «${character.name}:».`,
         ]
           .filter(Boolean)
           .join('\n'),
       });
-      return result.text || 'Покровитель, за месяц многое сдвинулось.';
+      return stripSpeakerPrefix(
+        result.text || 'Покровитель, за месяц многое сдвинулось.',
+        character.name,
+      );
     };
 
     let letter = await runLetter();
@@ -1264,7 +1456,7 @@ export class GameApp {
       letter = `${letter.trim()} Чужой остров ушёл в небо — края разошлись, и пути между нами больше нет.`;
     }
 
-    return letter;
+    return stripSpeakerPrefix(letter, character.name);
   }
 
   async persistDialog(domain, role, content, { kind = null } = {}) {

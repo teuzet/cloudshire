@@ -96,24 +96,49 @@ export function formatPlotlinesForPrompt(domain) {
   return domain.plotlines
     .map((p) => {
       const bt = p.breakthroughThisTick ? ' ★ПРОРЫВ' : '';
+      const rel =
+        p.relatedPendingIds?.length > 0
+          ? ` | процессы: ${p.relatedPendingIds.join(', ')}`
+          : '';
       return (
         `- [${p.id}] «${p.title}» T=${p.temperature}${bt}` +
-        (p.summary ? ` — ${p.summary}` : '')
+        (p.summary ? ` — ${p.summary}` : '') +
+        rel
       );
     })
     .join('\n');
 }
 
-export function formatBreakthroughMandate(breakthroughs) {
+export function formatBreakthroughMandate(breakthroughs, domainOrDomains = null) {
   if (!breakthroughs?.length) return '';
+  const processIndex = new Map();
+  const domains = Array.isArray(domainOrDomains)
+    ? domainOrDomains
+    : domainOrDomains
+      ? [domainOrDomains]
+      : [];
+  for (const domain of domains) {
+    for (const a of domain?.state?.pendingActions || []) {
+      if (a?.id) processIndex.set(String(a.id), a);
+    }
+  }
   return [
     'ОБЯЗАТЕЛЬНЫЙ ПРИОРИТЕТ — ПРОРЫВЫ СЮЖЕТА (сделай ПЕРВЫМИ, до прочего):',
     'Для каждого: add_chronicle с явным сильным сдвигом (не «ничего не нашли / всё тихо»).',
+    'Если указаны связанные процессы — затронь их (chronicle + advance/cancel); не игнорируй.',
     'Можно не завершать сюжет целиком, но мир должен заметно измениться.',
-    ...breakthroughs.map(
-      (p) =>
-        `- ПРОРЫВ [${p.id}] «${p.title}»: ${p.summary || 'сдвинь эту линию вперёд'}`,
-    ),
+    ...breakthroughs.map((p) => {
+      const relIds = p.relatedPendingIds || [];
+      let rel = '';
+      if (relIds.length) {
+        const parts = relIds.map((id) => {
+          const a = processIndex.get(String(id));
+          return a ? `${id} «${a.summary}»` : String(id);
+        });
+        rel = ` | связанные процессы: ${parts.join('; ')}`;
+      }
+      return `- ПРОРЫВ [${p.id}] «${p.title}»: ${p.summary || 'сдвинь эту линию вперёд'}${rel}`;
+    }),
   ].join('\n');
 }
 

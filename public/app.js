@@ -267,9 +267,10 @@ async function refresh({ loadHistory = false } = {}) {
   $('pending').textContent = pending.length
     ? pending
         .map((a) => {
-          const dur = a.durationMonths ?? '?';
-          const done = a.monthsDone ?? 0;
-          return `• ${a.summary} [${done}/${dur} мес.]\n  ${a.detail || ''}`;
+          const left = a.monthsLeft ?? Math.max(0, (a.durationMonths ?? 0) - (a.monthsDone ?? 0));
+          const exp = a.expectedMonths ?? a.durationMonths ?? '?';
+          const stats = (a.linkedStats || []).join('+') || '—';
+          return `• ${a.summary}\n  ещё ~${left} мес. (оценка ${exp}) · статы: ${stats}\n  ${a.detail || ''}`;
         })
         .join('\n\n')
     : 'пусто';

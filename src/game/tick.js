@@ -22,6 +22,16 @@ import {
   formatBreakthroughMandate,
   plotlinesConfig,
 } from './plotlines.js';
+import {
+  normalizeDomainProcesses,
+  normalizeProcess,
+  activeProcesses,
+  rollAllProcessAdvances,
+  applyProcessAdvance,
+  formatProcessLine,
+  formatProcessRollsForPrompt,
+  syncProcessesFromChronicle,
+} from './processes.js';
 import { runDirector, runConfluxDirector } from './director.js';
 import { getLogger } from '../log.js';
 
@@ -32,25 +42,17 @@ function clampPopulation(n, config) {
 }
 
 function pickEventCount(config, rng = Math.random) {
-  const { min = 3, max = 6 } = config.tick?.chronicleEvents || {};
+  const { min = 2, max = 4 } = config.tick?.chronicleEvents || {};
   return min + Math.floor(rng() * (max - min + 1));
+}
+
+function sideEventsMax(config) {
+  const n = Number(config.tick?.sideEventsMax);
+  return Number.isFinite(n) && n >= 0 ? Math.min(4, Math.round(n)) : 2;
 }
 
 function typicalStatDelta(config) {
   return statDeltaLimits(config).typicalMax;
-}
-
-function normalizePending(action) {
-  if (action.durationMonths == null) {
-    const text = `${action.summary || ''} ${action.detail || ''}`.toLowerCase();
-    let guess = 1;
-    if (/винодел|строи|храм|крепос|акаде|канал|верф|дворец|мануфакт/.test(text)) guess = 4;
-    else if (/обучен|набор|кампан|жертв|праздн/.test(text)) guess = 2;
-    action.durationMonths = guess;
-  }
-  action.durationMonths = Math.max(1, Math.min(12, Math.round(Number(action.durationMonths) || 1)));
-  if (action.monthsDone == null) action.monthsDone = 0;
-  return action;
 }
 
 function descriptionBrief(domain, max = 2500) {
@@ -77,18 +79,30 @@ export async function resolveDomainTick({
   const working = structuredClone(domain);
   normalizeDomain(working);
   normalizePlotlines(working);
+  normalizeDomainProcesses(working, config);
   if (typeof working.population !== 'number') working.population = config.genesis.population.min;
   const chronicleAdds = [];
   const advancedIds = new Set();
   const eventTarget = pickEventCount(config);
-  const activePending = (working.state.pendingActions || [])
-    .filter((a) => a.status === 'active')
-    .map(normalizePending);
+  const processList = activeProcesses(working, config);
+  const processRolls = rollAllProcessAdvances(working, config);
+  const processRollById = Object.fromEntries(processRolls.map((r) => [r.processId, r]));
   const deltaTypical = typicalStatDelta(config);
   const breakthroughList =
     breakthroughs.length > 0
       ? breakthroughs
       : (working.plotlines || []).filter((p) => p.breakthroughThisTick);
+
+  log.info('processes.rolls', {
+    rolls: processRolls.map((r) => ({
+      id: r.processId,
+      summary: r.summary,
+      roll: r.roll,
+      avg: r.avg,
+      advance: r.advance,
+      kind: r.kind,
+    })),
+  });
 
   if (!working.state) working.state = { events: [], modifiers: [], pendingActions: [] };
   if (!Array.isArray(working.state.modifiers)) working.state.modifiers = [];
@@ -97,7 +111,7 @@ export async function resolveDomainTick({
   const tools = [
     {
       name: 'read_context',
-      description: 'Контекст домена: космология, описание, state, статы, pending, плотлайны, недавняя хроника',
+      description: 'Контекст домена: космология, описание, state, статы, процессы, плотлайны, хроника',
       parameters: { type: 'object', properties: {} },
       handler: async () => ({
         ok: true,
@@ -112,29 +126,39 @@ export async function resolveDomainTick({
         population: working.population,
         stateEvents: working.state.events,
         stateModifiers: working.state.modifiers,
-        pendingActionsPriority: activePending,
+        processes: processList.map((p) => ({
+          id: p.id,
+          summary: p.summary,
+          detail: p.detail,
+          monthsLeft: p.monthsLeft,
+          expectedMonths: p.expectedMonths,
+          linkedStats: p.linkedStats,
+        })),
+        processRollsThisTick: processRolls,
         plotlines: formatPlotlinesForPrompt(working),
         breakthroughsThisTick: breakthroughList.map((p) => ({
           id: p.id,
           title: p.title,
           summary: p.summary,
+          relatedPendingIds: p.relatedPendingIds || [],
         })),
         recentChronicle: recentChronicleText(working.lore, 14),
         fullLore: loreToPromptText(working.lore),
         rules: {
           typicalStatDelta: deltaTypical,
           note:
-            `Статы через statDeltas: обычно ±1…${deltaTypical}; при катастрофе/триумфе — любая величина ` +
-            '(напр. разорение → prosperity почти к 0). Итог клипится 0–100. ' +
-            'Pending: chronicle + advance_pending или cancel_pending. ' +
-            'ПРОРЫВЫ плотлайнов — сильный сдвиг ПЕРВЫМИ. Важные постоянные итоги → upsert_modifier. Будь смелым.',
+            `Статы через statDeltas: обычно ±1…${deltaTypical}; при катастрофе — любая величина (итог 0–100). ` +
+            'ПРОЦЕССЫ: add_chronicle(relatedPendingId) + advance_process(advance из processRollsThisTick). ' +
+            'Если хроника говорит «готово/сорвано» — complete/cancel в том же тике. ' +
+            'ЗАСТОЙ(0)/РЫВОК(2) обязательно обыграй. cancel_process если сорвано. ' +
+            'ПРОРЫВЫ плотлайнов — первыми; связанные процессы прорыва затронь. Постоянные итоги → upsert_modifier.',
         },
       }),
     },
     {
       name: 'add_chronicle',
       description:
-        `Запись хроники месяца. Опционально statDeltas (напр. {faith: 3} или {prosperity: -70} при разорении). Обычно ≤±${deltaTypical}. Сначала pending.`,
+        `Запись хроники. Сначала процессы (особенно застой/рывок). statDeltas обычно ≤±${deltaTypical}.`,
       parameters: {
         type: 'object',
         required: ['text', 'importance'],
@@ -143,12 +167,12 @@ export async function resolveDomainTick({
           importance: { type: 'string', enum: ['minor', 'major', 'critical'] },
           relatedPendingId: {
             type: 'string',
-            description: 'Если запись — исход конкретного pending',
+            description: 'Id процесса',
           },
           statDeltas: {
             type: 'object',
             additionalProperties: { type: 'number' },
-            description: `Дельты статов; типично ±${deltaTypical}, при катастрофе — сколько нужно (итог 0–100)`,
+            description: `Дельты статов; типично ±${deltaTypical}`,
           },
         },
       },
@@ -209,7 +233,7 @@ export async function resolveDomainTick({
       name: 'upsert_modifier',
       description:
         'Добавить/обновить ВАЖНЫЙ постоянный модификатор state.modifiers (институт, установленный порядок, хроническое условие). ' +
-        'Пример: ежемесячный осмотр амбаров; водоотводы на уступах приведены в порядок. Мелочи — только хроника.',
+        'Пример: установленный порядок или хроническое условие. Мелочи — только хроника.',
       parameters: {
         type: 'object',
         required: ['text'],
@@ -287,130 +311,117 @@ export async function resolveDomainTick({
       },
     },
     {
-      name: 'advance_pending',
+      name: 'advance_process',
       description:
-        'Продвинуть pending на месяцы (обычно 1). complete=true только при реальном завершении или исчерпании срока. Крупные стройки не закрывай за один тик без причины.',
+        'Продвинуть процесс по броску тика (advance из processRollsThisTick). complete=true только при реальном завершении.',
       parameters: {
         type: 'object',
-        required: ['actionId'],
+        required: ['processId'],
         properties: {
-          actionId: { type: 'string' },
-          monthsAdvance: {
+          processId: { type: 'string' },
+          advance: {
             type: 'number',
-            description: 'Сколько месяцев прогресса добавить (обычно 1)',
-            default: 1,
+            description: '0/1/2 из броска; если не указать — из processRollsThisTick',
           },
-          complete: {
-            type: 'boolean',
-            description: 'Принудительно завершить сейчас (успех/провал уже в хронике)',
-          },
-          failed: {
-            type: 'boolean',
-            description: 'Завершить как провал',
-          },
+          complete: { type: 'boolean', description: 'Принудительно завершить (успех уже в хронике)' },
+          failed: { type: 'boolean', description: 'Завершить как провал' },
         },
       },
-      handler: async ({ actionId, monthsAdvance = 1, complete = false, failed = false }) => {
-        const action = working.state.pendingActions.find((a) => a.id === actionId && a.status === 'active');
-        if (!action) return { ok: false, error: 'pending не найден' };
-        normalizePending(action);
-        const step = Math.max(0, Math.min(6, Math.round(Number(monthsAdvance) || 1)));
-        action.monthsDone = Math.min(
-          action.durationMonths,
-          (action.monthsDone || 0) + step,
-        );
-        action.updatedAt = new Date().toISOString();
-        const finished =
-          Boolean(failed) ||
-          Boolean(complete) ||
-          action.monthsDone >= action.durationMonths;
-        if (finished) {
-          action.status = failed ? 'failed' : 'resolved';
-          action.resolvedTick = world.tickIndex;
-        }
-        advancedIds.add(actionId);
-        log.info('resolver.advance_pending', {
-          actionId,
-          monthsDone: action.monthsDone,
-          durationMonths: action.durationMonths,
+      handler: async ({ processId, advance, complete = false, failed = false }) => {
+        const action = working.state.pendingActions.find((a) => a.id === processId && a.status === 'active');
+        if (!action) return { ok: false, error: 'process not found' };
+        normalizeProcess(action, config);
+        const rolled = processRollById[processId];
+        const step =
+          advance != null
+            ? Math.max(0, Math.min(6, Math.round(Number(advance))))
+            : rolled
+              ? rolled.advance
+              : 1;
+        const { finished, monthsLeft } = applyProcessAdvance(action, step, {
+          complete,
+          failed,
+          tick: world.tickIndex,
+        });
+        advancedIds.add(processId);
+        log.info('resolver.advance_process', {
+          processId,
+          step,
+          monthsLeft,
           status: action.status,
+          roll: rolled || null,
         });
         return {
           ok: true,
-          action: {
+          process: {
             id: action.id,
             summary: action.summary,
-            monthsDone: action.monthsDone,
-            durationMonths: action.durationMonths,
+            monthsLeft: action.monthsLeft,
+            expectedMonths: action.expectedMonths,
+            linkedStats: action.linkedStats,
             status: action.status,
-            remaining: Math.max(0, action.durationMonths - action.monthsDone),
           },
           finished,
+          roll: rolled || null,
         };
       },
     },
     {
-      name: 'cancel_pending',
-      description:
-        'Отменить active pending (сорвано, разрушено, потеряло смысл). Обычно вместе с add_chronicle о причине. Можно по воле резолвера, если мир логично ломает намерение.',
+      name: 'cancel_process',
+      description: 'Отменить процесс (сорвано/разрушено). Вместе с add_chronicle о причине.',
       parameters: {
         type: 'object',
-        required: ['actionId', 'reason'],
+        required: ['processId', 'reason'],
         properties: {
-          actionId: { type: 'string' },
-          reason: {
-            type: 'string',
-            description: 'Кратко: почему отменено (для лога; детали — в хронике)',
-          },
+          processId: { type: 'string' },
+          reason: { type: 'string' },
         },
       },
-      handler: async ({ actionId, reason }) => {
+      handler: async ({ processId, reason }) => {
         const action = working.state.pendingActions.find(
-          (a) => a.id === actionId && a.status === 'active',
+          (a) => a.id === processId && a.status === 'active',
         );
-        if (!action) return { ok: false, error: 'pending не найден' };
+        if (!action) return { ok: false, error: 'process not found' };
         action.status = 'cancelled';
         action.cancelReason = String(reason || '').trim() || 'сорвано';
         action.updatedAt = new Date().toISOString();
         action.resolvedTick = world.tickIndex;
-        advancedIds.add(actionId);
-        log.info('resolver.cancel_pending', {
-          actionId,
+        advancedIds.add(processId);
+        log.info('resolver.cancel_process', {
+          processId,
           reason: action.cancelReason,
           summary: action.summary,
         });
-        return { ok: true, action: { id: action.id, summary: action.summary, status: action.status } };
+        return { ok: true, process: { id: action.id, summary: action.summary, status: action.status } };
       },
     },
   ];
 
-  const pendingBlock = activePending.length
-    ? activePending
-        .map((a) => {
-          const rem = Math.max(0, (a.durationMonths || 1) - (a.monthsDone || 0));
-          return `- [${a.id}] ${a.summary}: ${a.detail} | срок ${a.monthsDone || 0}/${a.durationMonths} мес. (осталось ~${rem}) (от ${a.onBehalfOf || a.characterName})`;
-        })
-        .join('\n')
-    : '(нет активных pending)';
+  const processBlock = processList.length
+    ? processList.map((p) => formatProcessLine(p, config)).join('\n')
+    : '(нет активных процессов)';
 
-  const breakthroughBlock = formatBreakthroughMandate(breakthroughList);
+  const breakthroughBlock = formatBreakthroughMandate(breakthroughList, working);
 
+  const sideMax = sideEventsMax(config);
   const userPrompt = [
     `Резольв месяца для города «${working.name}» (${world.gameDate.label}).`,
-    'Сначала read_context. Учти описание, state, плотлайны и недавнюю хронику.',
+    'Сначала read_context. Учти описание, state, процессы, плотлайны и хронику.',
     '',
     breakthroughBlock,
     breakthroughBlock ? '' : null,
-    'ПРИОРИТЕТ — для КАЖДОГО active pending: add_chronicle (relatedPendingId) + advance_pending',
-    'ИЛИ cancel_pending, если дело сорвано/разрушено (с хроникой о причине).',
-    pendingBlock,
+    'ПРИОРИТЕТ — для КАЖДОГО active процесса: add_chronicle (relatedPendingId) + advance_process',
+    'ИЛИ cancel_process, если сорвано (с хроникой). Броски:',
+    formatProcessRollsForPrompt(processRolls),
     '',
-    `Затем другие события. Всего записей хроники около ${eventTarget} (включая прогресс pending).`,
-    `Статы — только statDeltas в add_chronicle: обычно ≤±${deltaTypical}; при катастрофе — обвал/взлёт без потолка (итог 0–100).`,
-    'State: временные процессы → set_state_events; важные постоянные итоги → upsert_modifier; мелочи — только хроника.',
-    'Будь смелым: избегай стагнации и «всё спокойно». Месяц должен сдвинуть город.',
-    'Не завершай многомесячную стройку за один тик без сильной причины.',
-    'Интересные исходы; не сглаживай жёсткие приказы. Текст: OK.',
+    'Процессы:',
+    processBlock,
+    '',
+    `Затем не больше ${sideMax} побочных событий (бюджет месяца ~${eventTarget} записей вместе с процессами).`,
+    'Если в хронике процесс «завершён/построен/окончен» — complete=true в том же тике.',
+    `Статы — только statDeltas: обычно ≤±${deltaTypical}; при катастрофе — без потолка.`,
+    'State: временное → set_state_events; постоянное важное → upsert_modifier.',
+    'Будь смелым. Не завершай многомесячный процесс без причины/броска. Текст: OK.',
   ]
     .filter((line) => line != null)
     .join('\n');
@@ -424,51 +435,64 @@ export async function resolveDomainTick({
     log,
   });
 
-  if (activePending.length) {
+  if (processList.length) {
     const covered = new Set(
       chronicleAdds.filter((c) => c.relatedPendingId).map((c) => c.relatedPendingId),
     );
-    for (const action of activePending) {
+    for (const action of processList) {
       const live = working.state.pendingActions.find((a) => a.id === action.id);
       if (!live || live.status !== 'active') continue;
-      normalizePending(live);
+      normalizeProcess(live, config);
+      const rolled = processRollById[action.id] || { advance: 1, kind: 'normal', unusual: false };
 
       if (!covered.has(action.id)) {
-        const rem = Math.max(0, live.durationMonths - (live.monthsDone || 0) - 1);
+        const leftAfter = Math.max(0, live.monthsLeft - rolled.advance);
+        let text;
+        if (rolled.kind === 'stall') {
+          text = `${world.gameDate.label}. По делу «${action.summary}»: месяц ушёл впустую — задержки и срывы, почти без сдвига.`;
+        } else if (rolled.kind === 'surge') {
+          text =
+            leftAfter > 0
+              ? `${world.gameDate.label}. По делу «${action.summary}»: неожиданный рывок, срок заметно сократился (ещё ~${leftAfter} мес.).`
+              : `${world.gameDate.label}. По делу «${action.summary}»: рывок довёл работу почти до конца.`;
+        } else {
+          text =
+            leftAfter > 0
+              ? `${world.gameDate.label}. По делу «${action.summary}»: обычный ход работ, до завершения ещё около ${leftAfter} мес.`
+              : `${world.gameDate.label}. По делу «${action.summary}»: работы близки к итогу.`;
+        }
         const fact = createLoreFact({
           id: newId('lore'),
-          text:
-            rem > 0
-              ? `${world.gameDate.label}. По намерению «${action.summary}»: работы сдвинулись, до завершения ещё около ${rem} мес.`
-              : `${world.gameDate.label}. По намерению «${action.summary}»: работы близки к итогу.`,
+          text,
           tags: ['chronicle'],
           gameDateLabel: world.gameDate.label,
           tick: world.tickIndex,
-          author: 'resolver-pending-fallback',
-          importance: 'major',
+          author: 'resolver-process-fallback',
+          importance: rolled.unusual ? 'major' : 'minor',
           relatedPendingId: action.id,
         });
         working.lore.push(fact);
         chronicleAdds.push(fact);
-        log.warn('resolver.pending_fallback', { actionId: action.id, summary: action.summary });
+        log.warn('resolver.process_fallback', {
+          processId: action.id,
+          summary: action.summary,
+          kind: rolled.kind,
+        });
       }
 
       if (!advancedIds.has(action.id)) {
-        live.monthsDone = Math.min(live.durationMonths, (live.monthsDone || 0) + 1);
-        live.updatedAt = new Date().toISOString();
-        if (live.monthsDone >= live.durationMonths) {
-          live.status = 'resolved';
-          live.resolvedTick = world.tickIndex;
-        }
-        advancedIds.add(action.id);
-        log.warn('resolver.advance_fallback', {
-          actionId: action.id,
-          monthsDone: live.monthsDone,
+        applyProcessAdvance(live, rolled.advance, { tick: world.tickIndex });
+        log.info('resolver.process_auto_advance', {
+          processId: action.id,
+          advance: rolled.advance,
+          monthsLeft: live.monthsLeft,
           status: live.status,
         });
       }
     }
   }
+
+  syncProcessesFromChronicle(working, chronicleAdds, { tick: world.tickIndex, log });
 
   if (!chronicleAdds.length) {
     const fallback = createLoreFact({

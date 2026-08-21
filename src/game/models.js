@@ -23,6 +23,7 @@ export function normalizeDomain(domain) {
   }
   if (!Array.isArray(domain.tags)) domain.tags = [];
   if (!Array.isArray(domain.plotlines)) domain.plotlines = [];
+  // pendingActions = длительные процессы; нормализация полей — в processes.normalizeDomainProcesses
   if (Array.isArray(domain.characters)) {
     for (const ch of domain.characters) {
       if (!ch || typeof ch !== 'object') continue;
