@@ -41,10 +41,11 @@ export function loadConfig(configPath = process.env.CLOUDSHIRE_CONFIG || 'config
 
   config.server = config.server || {};
   config.server.port = Number(process.env.PORT || config.server.port || 3000);
-  // Heroku / containers: bind all interfaces. Local override: SERVER_HOST=127.0.0.1
+  // Heroku / containers / Railway: bind all interfaces. Local override: SERVER_HOST=127.0.0.1
+  const onPaaS = Boolean(process.env.DYNO || process.env.RAILWAY_ENVIRONMENT);
   if (process.env.SERVER_HOST) {
     config.server.host = process.env.SERVER_HOST;
-  } else if (process.env.DYNO) {
+  } else if (onPaaS) {
     config.server.host = '0.0.0.0';
   } else {
     config.server.host = config.server.host || '127.0.0.1';
@@ -53,7 +54,7 @@ export function loadConfig(configPath = process.env.CLOUDSHIRE_CONFIG || 'config
   config.logging = config.logging || {};
   const fileFlag = truthyEnv('LOG_TO_FILE');
   if (fileFlag != null) config.logging.file = fileFlag;
-  else if (process.env.DYNO) config.logging.file = false;
+  else if (onPaaS) config.logging.file = false;
   else if (config.logging.file == null) config.logging.file = true;
 
   if (process.env.LOG_LEVEL) config.logging.level = process.env.LOG_LEVEL;

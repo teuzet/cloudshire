@@ -161,7 +161,7 @@ export function initUsageRecording(config = {}, worldId = null, storage = null) 
   currentWorldId = worldId ? String(worldId) : null;
   usageStorage =
     storage && typeof storage.appendUsage === 'function' ? storage : null;
-  usageWriteFile = config.logging?.file !== false && !process.env.DYNO;
+  usageWriteFile = config.logging?.file !== false && !process.env.DYNO && !process.env.RAILWAY_ENVIRONMENT;
 
   if (!usageEnabled) {
     usageFilePath = null;

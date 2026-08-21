@@ -151,7 +151,7 @@ export class MongoStorage {
 
     if (world) {
       archivedWorldId = world.id;
-      const skipDisk = this.config.logging?.file === false || process.env.DYNO;
+      const skipDisk = this.config.logging?.file === false || process.env.DYNO || process.env.RAILWAY_ENVIRONMENT;
       if (!skipDisk) {
         try {
           const archived = await writeWorldArchive({

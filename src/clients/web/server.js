@@ -13,7 +13,7 @@ import { getLogger, requestLogger, truncate } from '../../log.js';
 function adminBasicAuth(config) {
   const user = config.admin?.user || '';
   const password = config.admin?.password || '';
-  const required = hasAdminCredentials(config) || Boolean(process.env.DYNO);
+    const required = hasAdminCredentials(config) || Boolean(process.env.DYNO || process.env.RAILWAY_ENVIRONMENT);
 
   return (req, res, next) => {
     if (req.path === '/health') return next();
