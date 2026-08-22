@@ -132,6 +132,71 @@ export function applyProcessAdvance(process, advance, { complete = false, failed
   return { finished, step, monthsLeft: process.monthsLeft };
 }
 
+/**
+ * Прогресс дел — целиком за движком: агент его не выбирает, только рассказывает.
+ * Возвращает итоги месяца по каждому делу (что нужно обязательно описать).
+ */
+export function applyEngineProgress(domain, rolls, { tick = null, config = null } = {}) {
+  const byId = new Map((domain.state?.pendingActions || []).map((a) => [a.id, a]));
+  const outcomes = [];
+  for (const r of rolls || []) {
+    const process = byId.get(r.processId);
+    if (!process || process.status !== 'active') continue;
+    normalizeProcess(process, config);
+    const before = process.monthsLeft;
+    const { finished, monthsLeft } = applyProcessAdvance(process, r.advance, { tick });
+    // След для правителя: как дело шло в последний месяц.
+    process.lastAdvanceKind = r.kind;
+    process.lastAdvance = r.advance;
+    process.lastAdvanceTick = tick;
+    outcomes.push({
+      processId: r.processId,
+      summary: process.summary,
+      detail: process.detail || '',
+      linkedStats: [...(process.linkedStats || [])],
+      kind: r.kind,
+      advance: r.advance,
+      monthsLeftBefore: before,
+      monthsLeft,
+      finished,
+      // Обычный ход без завершения — фон, о нём отдельную запись не пишем.
+      mustNarrate: finished || r.kind !== 'normal',
+    });
+  }
+  return outcomes;
+}
+
+/** Что резолвер обязан описать по делам этого месяца, а что должен опустить. */
+export function formatProcessOutcomesForPrompt(outcomes) {
+  if (!outcomes?.length) return '(активных дел нет)';
+  return outcomes
+    .map((o) => {
+      if (o.finished) {
+        return (
+          `- [${o.processId}] «${o.summary}» — ЗАВЕРШЕНО в этом месяце. ` +
+          'ОБЯЗАТЕЛЬНА запись: чем именно кончилось дело и что теперь есть у города.'
+        );
+      }
+      if (o.kind === 'stall') {
+        return (
+          `- [${o.processId}] «${o.summary}» — ЗАСТОЙ: месяц прошёл без сдвига ` +
+          `(осталось ~${o.monthsLeft} мес.). ОБЯЗАТЕЛЬНА запись: что именно помешало.`
+        );
+      }
+      if (o.kind === 'surge') {
+        return (
+          `- [${o.processId}] «${o.summary}» — РЫВОК: сделано за два месяца вместо одного ` +
+          `(осталось ~${o.monthsLeft} мес.). ОБЯЗАТЕЛЬНА запись: что позволило успеть.`
+        );
+      }
+      return (
+        `- [${o.processId}] «${o.summary}» — шло по расписанию (осталось ~${o.monthsLeft} мес.). ` +
+        'Отдельную запись НЕ пиши.'
+      );
+    })
+    .join('\n');
+}
+
 export function formatProcessLine(process, config = null) {
   normalizeProcess(process, config);
   const stats =
@@ -171,6 +236,40 @@ export function resolveLinkedStats(raw, config) {
 export function maxActiveProcesses(config) {
   const n = Number(config?.tick?.maxActiveProcesses);
   return Number.isFinite(n) && n >= 1 ? Math.min(12, Math.round(n)) : 4;
+}
+
+/** Как дело шло в прошлом месяце — словами, для речи правителя. */
+export function processProgressFeel(process) {
+  const kind = process?.lastAdvanceKind;
+  if (kind === 'stall') return 'в прошлом месяце дело стояло';
+  if (kind === 'surge') return 'в прошлом месяце продвинулись быстрее обычного';
+  if (kind === 'normal') return 'идёт своим чередом, без задержек';
+  return 'ход пока не проверяли';
+}
+
+/** Недавно закрытые дела: правитель должен помнить итог, а не «не знаю». */
+export function recentlyClosedProcesses(domain, currentTick, { withinTicks = 2 } = {}) {
+  const tick = Number(currentTick);
+  return (domain.state?.pendingActions || [])
+    .filter((a) => a.status && a.status !== 'active')
+    .filter((a) => {
+      if (!Number.isFinite(tick)) return false;
+      const closed = Number(a.resolvedTick);
+      return Number.isFinite(closed) && tick - closed <= withinTicks;
+    })
+    .map((a) => ({
+      id: a.id,
+      summary: a.summary,
+      status: a.status,
+      outcome:
+        a.status === 'resolved'
+          ? 'доведено до конца'
+          : a.status === 'failed'
+            ? 'провалено'
+            : a.status === 'cancelled'
+              ? `свёрнуто (${a.cancelReason || 'без причины'})`
+              : a.status,
+    }));
 }
 
 export function canStartProcess(domain, config = null) {

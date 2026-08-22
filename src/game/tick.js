@@ -31,9 +31,9 @@ import {
   normalizeProcess,
   activeProcesses,
   rollAllProcessAdvances,
-  applyProcessAdvance,
+  applyEngineProgress,
   formatProcessLine,
-  formatProcessRollsForPrompt,
+  formatProcessOutcomesForPrompt,
   formatActiveProcessesForAgent,
 } from './processes.js';
 import { runDirector, runConfluxDirector } from './director.js';
@@ -109,11 +109,15 @@ export async function resolveDomainTick({
   normalizeDomainProcesses(working, config);
   if (typeof working.population !== 'number') working.population = config.genesis.population.min;
   const chronicleAdds = [];
-  const advancedIds = new Set();
   const eventTarget = pickEventCount(config);
   const processList = activeProcesses(working, config);
   const processRolls = rollAllProcessAdvances(working, config);
-  const processRollById = Object.fromEntries(processRolls.map((r) => [r.processId, r]));
+  // Прогресс дел — только движок. Агент про него рассказывает, но не решает.
+  const processOutcomes = applyEngineProgress(working, processRolls, {
+    tick: world.tickIndex,
+    config,
+  });
+  const mustNarrateProcesses = processOutcomes.filter((o) => o.mustNarrate);
   const deltaTypical = typicalStatDelta(config);
   const chronicleMaxChars = chronicleEntryMaxChars(config);
   const breakthroughList =
@@ -121,14 +125,15 @@ export async function resolveDomainTick({
       ? breakthroughs
       : (working.plotlines || []).filter((p) => p.breakthroughThisTick);
 
-  log.info('processes.rolls', {
-    rolls: processRolls.map((r) => ({
-      id: r.processId,
-      summary: r.summary,
-      roll: r.roll,
-      avg: r.avg,
-      advance: r.advance,
-      kind: r.kind,
+  log.info('processes.progress', {
+    outcomes: processOutcomes.map((o) => ({
+      id: o.processId,
+      summary: o.summary,
+      kind: o.kind,
+      advance: o.advance,
+      monthsLeft: o.monthsLeft,
+      finished: o.finished,
+      mustNarrate: o.mustNarrate,
     })),
   });
 
@@ -165,7 +170,7 @@ export async function resolveDomainTick({
         stateModifiers: working.state.modifiers,
         newEdictsThisMonth: newEdicts.map((m) => ({ id: m.id, text: m.text })),
         newActsThisMonth: newActs.map((e) => ({ id: e.id, text: e.text })),
-        processes: processList.map((p) => ({
+        processes: activeProcesses(working, config).map((p) => ({
           id: p.id,
           summary: p.summary,
           detail: p.detail,
@@ -173,7 +178,15 @@ export async function resolveDomainTick({
           expectedMonths: p.expectedMonths,
           linkedStats: p.linkedStats,
         })),
-        processRollsThisTick: processRolls,
+        // Движок уже сдвинул дела; агент только описывает необычное и завершённое.
+        processOutcomesThisMonth: processOutcomes.map((o) => ({
+          processId: o.processId,
+          summary: o.summary,
+          kind: o.kind,
+          monthsLeft: o.monthsLeft,
+          finished: o.finished,
+          narrate: o.mustNarrate,
+        })),
         plotlines: formatPlotlinesForPrompt(working, world.tickIndex),
         breakthroughsThisTick: breakthroughList.map((p) => ({
           id: p.id,
@@ -185,10 +198,11 @@ export async function resolveDomainTick({
         rules: {
           typicalStatDelta: deltaTypical,
           note:
-            'ПРОЦЕССЫ: add_chronicle(relatedPendingId) + advance_process(advance из processRollsThisTick). ' +
-            'Если хроника говорит «готово/сорвано» — complete/cancel в том же тике. ' +
-            'ЗАСТОЙ(0)/РЫВОК(2) обязательно обыграй. cancel_process если сорвано. ' +
-            'ПРОРЫВЫ плотлайнов — первыми; связанные процессы прорыва затронь. Постоянные итоги → upsert_modifier. ' +
+            'ДЕЛА: прогресс уже посчитан движком (processOutcomesThisMonth). Ты его не меняешь. ' +
+            'Пиши запись только там, где narrate=true: застой, рывок, завершение. ' +
+            'Дело, шедшее по расписанию, отдельной записи НЕ получает — не спамь об идущих работах. ' +
+            'cancel_process — только если дело реально сорвано событием месяца (саботаж, обвал, запрет). ' +
+            'ПРОРЫВЫ плотлайнов — первыми; связанные процессы затронь. Постоянные итоги → upsert_modifier. ' +
             'УКАЗЫ/ДЕЯНИЯ месяца (newEdictsThisMonth / newActsThisMonth) — воля покровителя уже исполнена: ' +
             'отыграй последствие хотя бы одного, со статами; конфликт с действующим порядком показывай как конфликт. ' +
             'Итог месяца может быть выигрышем, потерей или двойственным — не сваливай всё в ухудшение.',
@@ -389,70 +403,10 @@ export async function resolveDomainTick({
       },
     },
     {
-      name: 'advance_process',
-      description:
-        'Продвинуть процесс по броску тика (advance из processRollsThisTick). complete=true только при реальном завершении.',
-      parameters: {
-        type: 'object',
-        required: ['processId'],
-        properties: {
-          processId: { type: 'string' },
-          advance: {
-            type: 'number',
-            description: '0/1/2 из броска; если не указать — из processRollsThisTick',
-          },
-          complete: { type: 'boolean', description: 'Принудительно завершить (успех уже в хронике)' },
-          failed: { type: 'boolean', description: 'Завершить как провал' },
-        },
-      },
-      handler: async ({ processId, advance, complete = false, failed = false }) => {
-        const action = working.state.pendingActions.find((a) => a.id === processId && a.status === 'active');
-        if (!action) {
-          return toolFail(
-            'process_not_found',
-            `processId=${processId} не найден среди active. Возьми id из списка:\n` +
-              formatActiveProcessesForAgent(working, config),
-          );
-        }
-        normalizeProcess(action, config);
-        const rolled = processRollById[processId];
-        const step =
-          advance != null
-            ? Math.max(0, Math.min(6, Math.round(Number(advance))))
-            : rolled
-              ? rolled.advance
-              : 1;
-        const { finished, monthsLeft } = applyProcessAdvance(action, step, {
-          complete,
-          failed,
-          tick: world.tickIndex,
-        });
-        advancedIds.add(processId);
-        log.info('resolver.advance_process', {
-          processId,
-          step,
-          monthsLeft,
-          status: action.status,
-          roll: rolled || null,
-        });
-        return {
-          ok: true,
-          process: {
-            id: action.id,
-            summary: action.summary,
-            monthsLeft: action.monthsLeft,
-            expectedMonths: action.expectedMonths,
-            linkedStats: action.linkedStats,
-            status: action.status,
-          },
-          finished,
-          roll: rolled || null,
-        };
-      },
-    },
-    {
       name: 'cancel_process',
-      description: 'Отменить процесс (сорвано/разрушено). Вместе с add_chronicle о причине.',
+      description:
+        'Дело сорвано событием месяца (саботаж, обвал, запрет) — снять его. ' +
+        'Не для «идёт медленно»: темп считает движок. Вместе с add_chronicle о причине.',
       parameters: {
         type: 'object',
         required: ['processId', 'reason'],
@@ -476,7 +430,6 @@ export async function resolveDomainTick({
         action.cancelReason = String(reason || '').trim() || 'сорвано';
         action.updatedAt = new Date().toISOString();
         action.resolvedTick = world.tickIndex;
-        advancedIds.add(processId);
         log.info('resolver.cancel_process', {
           processId,
           reason: action.cancelReason,
@@ -500,11 +453,13 @@ export async function resolveDomainTick({
     '',
     breakthroughBlock,
     breakthroughBlock ? '' : null,
-    'ПРИОРИТЕТ — для КАЖДОГО active процесса: add_chronicle (relatedPendingId) + advance_process',
-    'ИЛИ cancel_process, если сорвано (с хроникой). Броски:',
-    formatProcessRollsForPrompt(processRolls),
+    'ДЕЛА ГОРОДА: движок уже посчитал их ход. Ты его не меняешь — только рассказываешь.',
+    formatProcessOutcomesForPrompt(processOutcomes),
+    mustNarrateProcesses.length
+      ? 'На каждую строку с ОБЯЗАТЕЛЬНА — add_chronicle с relatedPendingId и разъяснением причины.'
+      : 'Обязательных записей по делам этот месяц нет — про идущие работы молчи.',
     '',
-    'Процессы:',
+    'Дела (подробности):',
     processBlock,
     '',
     newEdicts.length || newActs.length
@@ -517,12 +472,11 @@ export async function resolveDomainTick({
           '',
         ].join('\n')
       : null,
-    `Затем не больше ${sideMax} побочных событий (бюджет месяца ~${eventTarget} записей вместе с процессами).`,
-    'Если в хронике процесс «завершён/построен/окончен» — complete=true в том же тике.',
+    `Затем не больше ${sideMax} побочных событий (бюджет месяца ~${eventTarget} записей вместе с делами).`,
     'State: временное → set_state_events; постоянное важное → upsert_modifier.',
     'Будь смелым, но не одноцветным: в месяце может быть и удача, и цена, и двойственный итог.',
     statRecoveryHint(working, config),
-    'Не завершай многомесячный процесс без причины/броска.',
+    'cancel_process — только если дело сорвано событием месяца, а не «идёт медленно».',
   ]
     .filter((line) => line != null)
     .join('\n');
@@ -538,60 +492,39 @@ export async function resolveDomainTick({
     domainId: working.id,
   });
 
-  if (processList.length) {
+  // Страховка только на обязательное: застой, рывок, завершение. Обычный ход молчит.
+  if (mustNarrateProcesses.length) {
     const covered = new Set(
       chronicleAdds.filter((c) => c.relatedPendingId).map((c) => c.relatedPendingId),
     );
-    for (const action of processList) {
-      const live = working.state.pendingActions.find((a) => a.id === action.id);
-      if (!live || live.status !== 'active') continue;
-      normalizeProcess(live, config);
-      const rolled = processRollById[action.id] || { advance: 1, kind: 'normal', unusual: false };
-
-      if (!covered.has(action.id)) {
-        const leftAfter = Math.max(0, live.monthsLeft - rolled.advance);
-        let text;
-        if (rolled.kind === 'stall') {
-          text = `${world.gameDate.label}. По делу «${action.summary}»: месяц ушёл впустую — задержки и срывы, почти без сдвига.`;
-        } else if (rolled.kind === 'surge') {
-          text =
-            leftAfter > 0
-              ? `${world.gameDate.label}. По делу «${action.summary}»: неожиданный рывок, срок заметно сократился (ещё ~${leftAfter} мес.).`
-              : `${world.gameDate.label}. По делу «${action.summary}»: рывок довёл работу почти до конца.`;
-        } else {
-          text =
-            leftAfter > 0
-              ? `${world.gameDate.label}. По делу «${action.summary}»: обычный ход работ, до завершения ещё около ${leftAfter} мес.`
-              : `${world.gameDate.label}. По делу «${action.summary}»: работы близки к итогу.`;
-        }
-        const fact = createLoreFact({
-          id: newId('lore'),
-          text,
-          tags: ['chronicle'],
-          gameDateLabel: world.gameDate.label,
-          tick: world.tickIndex,
-          author: 'resolver-process-fallback',
-          importance: rolled.unusual ? 'major' : 'minor',
-          relatedPendingId: action.id,
-        });
-        working.lore.push(fact);
-        chronicleAdds.push(fact);
-        log.warn('resolver.process_fallback', {
-          processId: action.id,
-          summary: action.summary,
-          kind: rolled.kind,
-        });
+    for (const outcome of mustNarrateProcesses) {
+      if (covered.has(outcome.processId)) continue;
+      let text;
+      if (outcome.finished) {
+        text = `Дело «${outcome.summary}» завершено.`;
+      } else if (outcome.kind === 'stall') {
+        text = `По делу «${outcome.summary}» месяц прошёл без сдвига; осталось около ${outcome.monthsLeft} мес.`;
+      } else {
+        text = `По делу «${outcome.summary}» сделали больше обычного; осталось около ${outcome.monthsLeft} мес.`;
       }
-
-      if (!advancedIds.has(action.id)) {
-        applyProcessAdvance(live, rolled.advance, { tick: world.tickIndex });
-        log.info('resolver.process_auto_advance', {
-          processId: action.id,
-          advance: rolled.advance,
-          monthsLeft: live.monthsLeft,
-          status: live.status,
-        });
-      }
+      const fact = createLoreFact({
+        id: newId('lore'),
+        text,
+        tags: ['chronicle'],
+        gameDateLabel: world.gameDate.label,
+        tick: world.tickIndex,
+        author: 'resolver-process-fallback',
+        importance: outcome.finished ? 'major' : 'minor',
+        relatedPendingId: outcome.processId,
+      });
+      working.lore.push(fact);
+      chronicleAdds.push(fact);
+      log.warn('resolver.process_fallback', {
+        processId: outcome.processId,
+        summary: outcome.summary,
+        kind: outcome.kind,
+        finished: outcome.finished,
+      });
     }
   }
 

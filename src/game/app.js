@@ -39,6 +39,8 @@ import {
   formatActiveProcessesForAgent,
   activeProcesses,
   canStartProcess,
+  processProgressFeel,
+  recentlyClosedProcesses,
 } from './processes.js';
 import { formatPlotBriefForSpeech } from './plotlines.js';
 import { dialogHistoryForPrompt } from './memory.js';
@@ -271,9 +273,14 @@ function characterTools(domain, storage, character, ctx) {
           monthsLeft: a.monthsLeft,
           expectedMonths: a.expectedMonths,
           linkedStats: a.linkedStats,
+          // Как шло в последний месяц — чтобы отвечать «идёт по плану» осознанно.
+          progress: processProgressFeel(a),
         })),
+        recentlyClosed: recentlyClosedProcesses(domain, world?.tickIndex),
         processSlots: canStartProcess(domain, ctx.config),
         guidanceProcesses:
+          'processes[].progress — как дело шло в прошлом месяце: так и отвечай, если спрашивают. ' +
+          'recentlyClosed — недавно законченные дела: про них не говори «не знаю». ' +
           'Для update_process / revoke_process бери id из processes[].id. ' +
           'Если id не помнишь — передай краткий смысл дела в processId (например «университет»), система найдёт.',
       }),

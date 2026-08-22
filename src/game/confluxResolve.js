@@ -18,9 +18,9 @@ import {
   normalizeProcess,
   activeProcesses,
   rollAllProcessAdvances,
-  applyProcessAdvance,
+  applyEngineProgress,
   formatProcessLine,
-  formatProcessRollsForPrompt,
+  formatProcessOutcomesForPrompt,
   formatActiveProcessesForAgent,
 } from './processes.js';
 import { getLogger } from '../log.js';
@@ -179,21 +179,22 @@ export async function resolveConfluxTick({
     [ids[0]]: [...(preludeAddsByDomain[ids[0]] || [])],
     [ids[1]]: [...(preludeAddsByDomain[ids[1]] || [])],
   };
-  const advancedIds = new Set(); // `${domainId}:${actionId}`
-
-  const processRollsByDomain = {};
+  // Прогресс дел — только движок, как и в соло-тике.
+  const outcomesByDomain = {};
   const allPending = [];
+  const mustNarrate = [];
   for (const id of order) {
     normalizeDomainProcesses(domains[id], config);
-    processRollsByDomain[id] = rollAllProcessAdvances(domains[id], config);
     for (const a of activeProcesses(domains[id], config)) {
       allPending.push({ domainId: id, action: a });
     }
-  }
-  const processRollByKey = {};
-  for (const id of order) {
-    for (const r of processRollsByDomain[id]) {
-      processRollByKey[`${id}:${r.processId}`] = r;
+    const rolls = rollAllProcessAdvances(domains[id], config);
+    outcomesByDomain[id] = applyEngineProgress(domains[id], rolls, {
+      tick: world.tickIndex,
+      config,
+    });
+    for (const o of outcomesByDomain[id]) {
+      if (o.mustNarrate) mustNarrate.push({ domainId: id, outcome: o });
     }
   }
 
@@ -282,7 +283,18 @@ export async function resolveConfluxTick({
         sharedLoreRecent: sharedLoreTail(conflux, 8),
         domainsInPromptOrder: order,
         briefs: order.map((id) => domainBriefBlock(domains[id], config)),
-        processRollsByDomain,
+        // Движок уже сдвинул дела обоих городов; агент описывает только необычное и завершённое.
+        processOutcomesThisMonth: order.flatMap((id) =>
+          outcomesByDomain[id].map((o) => ({
+            domainId: id,
+            processId: o.processId,
+            summary: o.summary,
+            kind: o.kind,
+            monthsLeft: o.monthsLeft,
+            finished: o.finished,
+            narrate: o.mustNarrate,
+          })),
+        ),
         pendingChecklist: allPending.map(({ domainId, action: a }) => {
           normalizeProcess(a, config);
           const stats = (a.linkedStats || []).join('+') || 'все';
@@ -508,64 +520,10 @@ export async function resolveConfluxTick({
       },
     },
     {
-      name: 'advance_process',
-      description: 'Продвинуть процесс домена по броску тика',
-      parameters: {
-        type: 'object',
-        required: ['domainId', 'processId'],
-        properties: {
-          domainId: { type: 'string' },
-          processId: { type: 'string' },
-          advance: { type: 'number' },
-          complete: { type: 'boolean' },
-          failed: { type: 'boolean' },
-        },
-      },
-      handler: async ({ domainId, processId, advance, complete = false, failed = false }) => {
-        const got = requireDomain(domainId);
-        if (!got.ok) return got;
-        const working = got.domain;
-        const action = working.state.pendingActions.find(
-          (a) => a.id === processId && a.status === 'active',
-        );
-        if (!action) {
-          return toolFail(
-            'process_not_found',
-            `В домене ${domainId} нет active processId=${processId}. Активные:\n` +
-              formatActiveProcessesForAgent(working, config),
-          );
-        }
-        normalizeProcess(action, config);
-        const rolled = processRollByKey[`${domainId}:${processId}`];
-        const step =
-          advance != null
-            ? Math.max(0, Math.min(6, Math.round(Number(advance))))
-            : rolled
-              ? rolled.advance
-              : 1;
-        const { finished } = applyProcessAdvance(action, step, {
-          complete,
-          failed,
-          tick: world.tickIndex,
-        });
-        advancedIds.add(`${domainId}:${processId}`);
-        return {
-          ok: true,
-          finished,
-          process: {
-            id: action.id,
-            summary: action.summary,
-            monthsLeft: action.monthsLeft,
-            status: action.status,
-          },
-          roll: rolled || null,
-        };
-      },
-    },
-    {
       name: 'cancel_process',
       description:
-        'Отменить pending домена (сорвано/разрушено/потеряло смысл). Вместе с chronicle о причине. Можно по воле резолвера — напр. чужая стройка уничтожена на стыке.',
+        'Дело домена сорвано событием стыка (разрушено, запрещено, потеряло смысл) — снять его. ' +
+        'Не для «идёт медленно»: темп считает движок. Вместе с chronicle о причине.',
       parameters: {
         type: 'object',
         required: ['domainId', 'processId', 'reason'],
@@ -593,7 +551,6 @@ export async function resolveConfluxTick({
         action.cancelReason = String(reason || '').trim() || 'сорвано';
         action.updatedAt = new Date().toISOString();
         action.resolvedTick = world.tickIndex;
-        advancedIds.add(`${domainId}:${processId}`);
         log.info('conflux.cancel_process', {
           domainId,
           processId,
@@ -720,8 +677,16 @@ export async function resolveConfluxTick({
     breakthroughMandate,
     breakthroughMandate ? '' : null,
     'ПРИОРИТЕТ — каждый процесс обоих: add_chronicle + advance_process(из броска) ИЛИ cancel_process.',
-    'Если хроника говорит «готово/сорвано» — complete/cancel в том же тике.',
-    order.map((id) => `броски «${domains[id].name}»:\n${formatProcessRollsForPrompt(processRollsByDomain[id])}`).join('\n'),
+    'ДЕЛА ОБОИХ ГОРОДОВ: движок уже посчитал их ход. Ты его не меняешь — только рассказываешь.',
+    order
+      .map(
+        (id) =>
+          `${domains[id].name} (${id}):\n${formatProcessOutcomesForPrompt(outcomesByDomain[id])}`,
+      )
+      .join('\n'),
+    mustNarrate.length
+      ? 'На каждую строку с ОБЯЗАТЕЛЬНА — add_chronicle с relatedPendingId и разъяснением причины.'
+      : 'Обязательных записей по делам этот месяц нет — про идущие работы молчи.',
     pendingBlock,
     '',
     instantBlock || null,
@@ -750,57 +715,47 @@ export async function resolveConfluxTick({
     domainId: order.join('+'),
   });
 
-  // Process fallbacks
-  for (const { domainId, action } of allPending) {
+  // Страховка только на обязательное: застой, рывок, завершение.
+  for (const { domainId, outcome } of mustNarrate) {
     const working = domains[domainId];
-    const live = working.state.pendingActions.find((a) => a.id === action.id);
-    if (!live || live.status !== 'active') continue;
-    normalizeProcess(live, config);
-    const key = `${domainId}:${action.id}`;
-    const rolled = processRollByKey[key] || { advance: 1, kind: 'normal', unusual: false };
-    const covered = chronicleAddsByDomain[domainId].some((c) => c.relatedPendingId === action.id);
-    if (!covered) {
-      const leftAfter = Math.max(0, live.monthsLeft - rolled.advance);
-      let body;
-      if (rolled.kind === 'stall') {
-        body = `По делу «${action.summary}» в «${working.name}»: месяц почти без сдвига.`;
-      } else if (rolled.kind === 'surge') {
-        body =
-          leftAfter > 0
-            ? `По делу «${action.summary}» в «${working.name}»: неожиданный рывок (ещё ~${leftAfter} мес.).`
-            : `По делу «${action.summary}» в «${working.name}»: рывок почти завершил работу.`;
-      } else {
-        body =
-          leftAfter > 0
-            ? `По делу «${action.summary}» в «${working.name}»: обычный ход, ещё ~${leftAfter} мес.`
-            : `По делу «${action.summary}» в «${working.name}»: близко к итогу.`;
-      }
-      const fact = createLoreFact({
-        id: newId('lore'),
-        text: `${world.gameDate.label}. ${body}`,
-        tags: ['chronicle', 'conflux', `conflux:${conflux.id}`, 'shared'],
-        gameDateLabel: world.gameDate.label,
-        tick: world.tickIndex,
-        author: 'conflux-process-fallback',
-        importance: rolled.unusual ? 'major' : 'minor',
-        relatedPendingId: action.id,
-        location: working.name,
-        concernsDomainIds: [domainId],
-        concernsDomainNames: [working.name],
-      });
-      working.lore.push(fact);
-      chronicleAddsByDomain[domainId].push(fact);
-      const copy = { ...fact, id: newId('lore') };
-      const otherId = ids.find((x) => x !== domainId);
-      domains[otherId].lore.push(copy);
-      chronicleAddsByDomain[otherId].push(copy);
-      conflux.sharedLore.push({ ...fact });
-      log.warn('conflux.process_fallback', { domainId, processId: action.id, kind: rolled.kind });
+    const covered = chronicleAddsByDomain[domainId].some(
+      (c) => c.relatedPendingId === outcome.processId,
+    );
+    if (covered) continue;
+    let body;
+    if (outcome.finished) {
+      body = `Дело «${outcome.summary}» в «${working.name}» завершено.`;
+    } else if (outcome.kind === 'stall') {
+      body = `По делу «${outcome.summary}» в «${working.name}» месяц прошёл без сдвига; осталось около ${outcome.monthsLeft} мес.`;
+    } else {
+      body = `По делу «${outcome.summary}» в «${working.name}» сделали больше обычного; осталось около ${outcome.monthsLeft} мес.`;
     }
-    if (!advancedIds.has(key)) {
-      applyProcessAdvance(live, rolled.advance, { tick: world.tickIndex });
-      advancedIds.add(key);
-    }
+    const fact = createLoreFact({
+      id: newId('lore'),
+      text: body,
+      tags: ['chronicle', 'conflux', `conflux:${conflux.id}`, 'shared'],
+      gameDateLabel: world.gameDate.label,
+      tick: world.tickIndex,
+      author: 'conflux-process-fallback',
+      importance: outcome.finished ? 'major' : 'minor',
+      relatedPendingId: outcome.processId,
+      location: working.name,
+      concernsDomainIds: [domainId],
+      concernsDomainNames: [working.name],
+    });
+    working.lore.push(fact);
+    chronicleAddsByDomain[domainId].push(fact);
+    const copy = { ...fact, id: newId('lore') };
+    const otherId = ids.find((x) => x !== domainId);
+    domains[otherId].lore.push(copy);
+    chronicleAddsByDomain[otherId].push(copy);
+    conflux.sharedLore.push({ ...fact });
+    log.warn('conflux.process_fallback', {
+      domainId,
+      processId: outcome.processId,
+      kind: outcome.kind,
+      finished: outcome.finished,
+    });
   }
 
   for (const id of ids) {
