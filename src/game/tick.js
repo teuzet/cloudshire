@@ -60,6 +60,11 @@ function typicalStatDelta(config) {
   return statDeltaLimits(config).typicalMax;
 }
 
+function chronicleEntryMaxChars(config) {
+  const n = Number(config.tick?.chronicleEntryMaxChars);
+  return Number.isFinite(n) && n >= 80 ? Math.round(n) : 260;
+}
+
 /**
  * Подсказка против спирали вниз: у просевших статов нужен путь наверх,
  * иначе резолвер месяц за месяцем добивает город.
@@ -110,6 +115,7 @@ export async function resolveDomainTick({
   const processRolls = rollAllProcessAdvances(working, config);
   const processRollById = Object.fromEntries(processRolls.map((r) => [r.processId, r]));
   const deltaTypical = typicalStatDelta(config);
+  const chronicleMaxChars = chronicleEntryMaxChars(config);
   const breakthroughList =
     breakthroughs.length > 0
       ? breakthroughs
@@ -192,14 +198,20 @@ export async function resolveDomainTick({
     {
       name: 'add_chronicle',
       description:
-        'Запись хроники. Сначала процессы (особенно застой/рывок). ' +
+        'Запись хроники: сухой факт месяца в 1–2 коротких предложения, без оценок и метафор. ' +
+        `Ориентир длины text — до ${chronicleMaxChars} символов. Сначала процессы (особенно застой/рывок). ` +
         `statDeltas: обычно ±1…${deltaTypical}, при катастрофе без потолка (итог 0–100). ` +
         'Положительные дельты — такой же нормальный исход, как отрицательные.',
       parameters: {
         type: 'object',
         required: ['text', 'importance'],
         properties: {
-          text: { type: 'string' },
+          text: {
+            type: 'string',
+            description:
+              `Что произошло: 1–2 предложения, до ~${chronicleMaxChars} символов. ` +
+              'Предметно (люди, вещи, места, исход), без оценок вроде «обернулось кризисом».',
+          },
           importance: { type: 'string', enum: ['minor', 'major', 'critical'] },
           relatedPendingId: {
             type: 'string',

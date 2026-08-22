@@ -173,6 +173,7 @@ export async function resolveConfluxTick({
 
   const order = Math.random() < 0.5 ? [ids[0], ids[1]] : [ids[1], ids[0]];
   const deltaTypical = typicalStatDelta(config);
+  const chronicleMaxChars = Number(config.tick?.chronicleEntryMaxChars) || 260;
   const eventTarget = pickEventCount(config);
   const chronicleAddsByDomain = {
     [ids[0]]: [...(preludeAddsByDomain[ids[0]] || [])],
@@ -217,6 +218,56 @@ export async function resolveConfluxTick({
       ].join('\n')
     : '';
 
+  // Мгновенные решения покровителей за этот месяц — как в соло-тике, но по каждому городу.
+  const sinceTick = Math.max(0, (world.tickIndex || 0) - 1);
+  const instantByDomain = {};
+  for (const id of order) {
+    const d = domains[id];
+    const edicts = (d.state?.modifiers || []).filter(
+      (m) => Number.isInteger(m.declaredTick) && m.declaredTick >= sinceTick,
+    );
+    const acts = (d.state?.events || []).filter(
+      (e) =>
+        e &&
+        e.kind === 'act' &&
+        Number.isInteger(e.declaredTick) &&
+        e.declaredTick >= sinceTick,
+    );
+    if (edicts.length || acts.length) {
+      instantByDomain[id] = { domainName: d.name, edicts, acts };
+    }
+  }
+  const instantBlock = Object.keys(instantByDomain).length
+    ? [
+        'МГНОВЕННЫЕ РЕШЕНИЯ ЭТОГО МЕСЯЦА (уже исполнены — нужны последствия, не пересказ):',
+        ...Object.entries(instantByDomain).flatMap(([id, v]) => [
+          ...v.edicts.map((m) => `- ${v.domainName} (${id}) указ: ${m.text}`),
+          ...v.acts.map((e) => `- ${v.domainName} (${id}) деяние: ${e.text}`),
+        ]),
+        'ОБЯЗАТЕЛЬНО: хотя бы одна запись со statDeltas про последствие одного из них.',
+        'Если решение бьёт по людям или спорит с действующим порядком — покажи конфликт.',
+      ].join('\n')
+    : '';
+
+  // Просевшие статы каждого города: не добивать без пути наверх.
+  const recoveryBlock = order
+    .map((id) => {
+      const low = (config.stats || [])
+        .map((s) => ({ name: s.name, value: Number(domains[id].stats?.[s.id]) }))
+        .filter((s) => Number.isFinite(s.value) && s.value <= 25);
+      if (!low.length) return null;
+      return `- ${domains[id].name}: ${low.map((s) => `${s.name} ${s.value}`).join(', ')}`;
+    })
+    .filter(Boolean);
+  const recoveryHint = recoveryBlock.length
+    ? [
+        'ПРОСЕВШИЕ СТОРОНЫ ГОРОДОВ:',
+        ...recoveryBlock,
+        'Дай им реальный шанс на восстановление (починка, договор, помощь общины, найденный запас) —',
+        'не обязательно в этом месяце, но добивать без выхода нельзя.',
+      ].join('\n')
+    : '';
+
   const tools = [
     {
       name: 'read_pair_context',
@@ -245,6 +296,12 @@ export async function resolveConfluxTick({
           domainName: p.domainName,
           relatedPendingIds: p.relatedPendingIds || [],
         })),
+        instantDecisionsThisMonth: Object.entries(instantByDomain).map(([id, v]) => ({
+          domainId: id,
+          domainName: v.domainName,
+          edicts: v.edicts.map((m) => m.text),
+          acts: v.acts.map((e) => e.text),
+        })),
         rules: {
           typicalStatDelta: deltaTypical,
           equalWeight:
@@ -256,6 +313,8 @@ export async function resolveConfluxTick({
           note:
             'Процессы: chronicle + advance/cancel. Если хроника «готово» — complete в том же тике. ' +
             'ПРОРЫВЫ — первыми; связанные процессы затронь. ' +
+            'УКАЗЫ/ДЕЯНИЯ месяца (instantDecisionsThisMonth) — воля покровителя уже исполнена: ' +
+            'отыграй последствие хотя бы одного, со статами. ' +
             'Смело, но не одноцветно: у месяца бывают выигрыш, цена и двойственный итог.',
         },
       }),
@@ -263,7 +322,8 @@ export async function resolveConfluxTick({
     {
       name: 'add_chronicle',
       description:
-        'Хроника стыка/месяца. location + concernsDomainIds обязательны. ' +
+        'Хроника стыка/месяца: сухой факт в 1–2 коротких предложения, без оценок и метафор. ' +
+        `Ориентир длины text — до ${chronicleMaxChars} символов. location + concernsDomainIds обязательны. ` +
         `statDeltas: обычно ±1…${deltaTypical}, при катастрофе без потолка (итог 0–100). ` +
         'Положительные дельты — такой же нормальный исход, как отрицательные.',
       parameters: {
@@ -273,7 +333,8 @@ export async function resolveConfluxTick({
           text: {
             type: 'string',
             description:
-              'Событие. Город/место должны быть ясны: не пиши так, будто чужой мастер — житель любого читающего города.',
+              `Что произошло: 1–2 предложения, до ~${chronicleMaxChars} символов, предметно и без оценок. ` +
+              'Город и место должны быть ясны: не пиши так, будто чужой мастер — житель любого читающего города.',
           },
           importance: { type: 'string', enum: ['minor', 'major', 'critical'] },
           location: {
@@ -663,6 +724,10 @@ export async function resolveConfluxTick({
     order.map((id) => `броски «${domains[id].name}»:\n${formatProcessRollsForPrompt(processRollsByDomain[id])}`).join('\n'),
     pendingBlock,
     '',
+    instantBlock || null,
+    instantBlock ? '' : null,
+    recoveryHint || null,
+    recoveryHint ? '' : null,
     `Бюджет: процессы/прорывы + не больше ${sideMax} побочных; всего около ${eventTarget} записей. Большинство — без secret.`,
     'secret только для явно тайных операций; secretForDomainId = id заказчика.',
     'Каждая add_chronicle: location (где) + concernsDomainIds (1–2 id городов пары).',

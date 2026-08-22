@@ -1713,29 +1713,34 @@ export class GameApp {
       return 'Покровитель, месяц прошёл тихо — рассказывать почти нечего.';
     }
 
-    const facts = forNews
-      .map((c) => {
-        const scope = formatChronicleScope(c);
-        const onlyOther =
-          Array.isArray(c.concernsDomainIds) &&
-          c.concernsDomainIds.length === 1 &&
-          String(c.concernsDomainIds[0]) !== String(domain.id);
-        const framing = onlyOther
-          ? ' [чужой город — перескажи как новость ОТТУДА, кратко кто/что; НЕ говори «я сделал»]'
-          : '';
-        return `- [${c.importance || 'event'}] ${scope}${c.text}${framing}`;
-      })
+    // Дела соседа — не новости города: их можно упомянуть слухом, но не отчитываться о них.
+    const isForeign = (c) => {
+      const ids = Array.isArray(c.concernsDomainIds) ? c.concernsDomainIds.map(String) : [];
+      return ids.length > 0 && !ids.includes(String(domain.id));
+    };
+    const mine = forNews.filter((c) => !isForeign(c));
+    const foreign = forNews.filter(isForeign);
+
+    const facts = (mine.length ? mine : forNews)
+      .map((c) => `- [${c.importance || 'event'}] ${formatChronicleScope(c)}${c.text}`)
       .join('\n');
+    const foreignBlock = foreign.length
+      ? [
+          'ЧУЖОЙ ГОРОД (это НЕ новости твоего города):',
+          ...foreign.map((c) => `- ${formatChronicleScope(c)}${c.text}`),
+        ].join('\n')
+      : '';
     const patronName = domain.state?.patronName || null;
     const addressHint = patronName
       ? `Обращайся к покровителю как «${patronName}». Не подменяй чужим именем бога.`
       : 'Имя покровителя неизвестно — обратись «покровитель», без выдуманных имён.';
 
-    const scopeHint = forNews.some((c) => c.location || c.concernsDomainNames?.length)
+    const scopeHint = foreign.length
       ? [
-          'У записей есть пометки «где» и «касается».',
-          'События только чужого города — новости с соседнего острова: назови город, коротко представь незнакомых людей.',
-          'Не присваивай чужие дела себе и своему городу.',
+          'О делах соседнего города НЕ отчитывайся покровителю: это чужое хозяйство, не твоя служба.',
+          'Упомянуть можно одной фразой — как слух с той стороны и только если это задевает нас',
+          '(проход, вода, торговля, чужие люди на нашем краю). Иначе просто опусти.',
+          'Не называй чужие тяготы «вестью» и не разбирай их подробно.',
         ].join(' ')
       : '';
 
@@ -1748,7 +1753,7 @@ export class GameApp {
       }
       return min;
     }, 0);
-    const hasCritical = forNews.some((c) => c.importance === 'critical');
+    const hasCritical = mine.some((c) => c.importance === 'critical');
     const loyalty = Number(character.loyalty ?? 50);
     const terror = Number(character.terror ?? 50);
     const moodHint = [
@@ -1825,10 +1830,11 @@ export class GameApp {
                 : confluxLead
                   ? 'Сделай чужой остров центральной нитью письма.'
                   : 'Бюджет письма: одна-две нити (дело, прорыв, беда) и при желании штрих. Мелочь опусти.',
-              'ОБЯЗАТЕЛЬНО упомяни каждую запись с пометкой [critical] — это события, которые город не может не заметить.',
+              'ОБЯЗАТЕЛЬНО упомяни каждую [critical] запись СВОЕГО города — такое не заметить нельзя.',
               'Связная проза от первого лица, 1–3 коротких абзаца. Без списков, markdown, нумерации, канцелярита.',
               `Не начинай с «${character.name}:» — сразу текст письма.`,
-              'Не копируй формулировки хроники. Не упоминай статы и механики.',
+              'Хроника нарочно сухая — это заметки, а не письмо. Оживи их своей речью, ' +
+                'но не додумывай событий и не копируй формулировки. Статы и механики не упоминай.',
               addressHint,
               moodHint,
               presenceHint,
@@ -1838,6 +1844,7 @@ export class GameApp {
               extraUserNote,
               '',
               facts,
+              foreignBlock,
             ]
               .filter(Boolean)
               .join('\n'),

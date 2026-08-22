@@ -77,9 +77,15 @@ export class AgentRuntime {
       .filter(Boolean)
       .join('\n\n');
 
+    const styles = (Array.isArray(agent.styles) ? agent.styles : [])
+      .map((key) => this.config.styles?.[key])
+      .filter(Boolean)
+      .join('\n\n');
+
     const systemContent = [
       agent.safety ? this.config.agentSafety || '' : '',
       canon,
+      styles,
       agent.instructions,
       extraSystem,
     ]
