@@ -1,15 +1,20 @@
 import { newId } from './ids.js';
 
 /**
- * Сюжетные линии: T → прорыв; attention → право жить; spawn → новая кровь.
+ * Сюжетные нити — ядро мира: событий вне нитей не бывает.
+ * Здесь только модель и формат; отбор битов, окраска и часы — в движке тика.
+ *
+ * Механика (см. docs/PIVOT_PLOTLINES.md):
+ *   temperature — интерес к нити (растёт от внимания игрока, падает со временем)
+ *   importance  — судьбоносность для города, задаёт масштаб последствий
+ *   maxAgeMonths / ageMonths — сколько месяцев ждём интереса и сколько уже прошло
+ *   relatedStats — какие стороны города сейчас в игре (по ним кидается окраска бита)
  */
 
-function clampTemp(n) {
-  return Math.max(0, Math.min(100, Math.round(Number(n) || 0)));
-}
-
-function clampAtt(n) {
-  return Math.max(0, Math.min(100, Math.round(Number(n) || 0)));
+function clamp100(n, fallback = 0) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return fallback;
+  return Math.max(0, Math.min(100, Math.round(v)));
 }
 
 /** Обрезка по границе слова: обрубки в середине слова копятся из тика в тик. */
@@ -23,242 +28,260 @@ function clipText(s, max) {
 }
 
 export const PLOT_SUMMARY_MAX = 400;
+export const PLOT_HOOK_MAX = 120;
+export const PLOT_TITLE_MAX = 120;
 export { clipText as clipPlotText };
 
-function sliceHook(s, max = 120) {
-  return clipText(s, max);
-}
+export const PLOT_KINDS = ['story', 'errand'];
 
-export function plotlinesConfig(config) {
-  const p = config.tick?.plotlines || {};
-  const att = p.attention || {};
-  const surv = p.survival || {};
-  const spawn = p.spawn || {};
+export function plotConfig(config) {
+  const p = config?.tick?.plot || {};
+  const board = p.board || {};
+  const beats = p.beats || {};
+  const roll = p.roll || {};
+  const stats = p.stats || {};
+  const log = p.log || {};
   return {
     enabled: p.enabled !== false,
-    heatPerTick: p.heatPerTick ?? 10,
-    maxOpen: Math.max(2, Math.min(8, Number(p.maxOpen) || 6)),
-    softMax: Math.max(1, Math.min(6, Number(p.softMax) || 4)),
-    hooksMaxLen: Math.max(40, Math.min(200, Number(p.hooksMaxLen) || 120)),
-    attention: {
-      initial: att.initial ?? 20,
-      bumpFactor: att.bumpFactor ?? 1,
-      chronicleLink: att.chronicleLink ?? 12,
-      breakthroughBonus: att.breakthroughBonus ?? 8,
-      decayPerTick: att.decayPerTick ?? 3,
+    board: {
+      maxOpen: Math.max(2, Math.min(10, Number(board.maxOpen) || 5)),
+      maxErrands: Math.max(0, Math.min(6, Number(board.maxErrands) ?? 2)),
     },
-    survival: {
-      minAgeTicks: surv.minAgeTicks ?? 3,
-      keepBarBase: surv.keepBarBase ?? 8,
-      keepBarPerAge: surv.keepBarPerAge ?? 4,
+    beats: {
+      maxPerTick: Math.max(1, Math.min(6, Number(beats.maxPerTick) || 3)),
+      baseChance: Number(beats.baseChance ?? 0.15),
+      temperatureWeight: Number(beats.temperatureWeight ?? 0.5),
+      importanceWeight: Number(beats.importanceWeight ?? 0.2),
+      agePressure: Number(beats.agePressure ?? 0.15),
+      minChance: Number(beats.minChance ?? 0.05),
+      maxChance: Number(beats.maxChance ?? 0.8),
     },
-    spawn: {
-      baseChance: spawn.baseChance ?? 0.1,
-      emptyBoardBonus: spawn.emptyBoardBonus ?? 0.25,
-      perPlotPenalty: spawn.perPlotPenalty ?? 0.03,
-      perTempSumPenalty: spawn.perTempSumPenalty ?? 0.0004,
-      softMaxFactor: spawn.softMaxFactor ?? 0.45,
-      minChance: spawn.minChance ?? 0.02,
-      maxChance: spawn.maxChance ?? 0.45,
+    temperature: {
+      initial: clamp100(p.temperature?.initial ?? 30),
+      decayPerTick: Math.max(0, Number(p.temperature?.decayPerTick ?? 8)),
+      perTouch: Math.max(0, Number(p.temperature?.perTouch ?? 12)),
+      afterBeat: clamp100(p.temperature?.afterBeat ?? 20),
     },
-    seedTagGroups: Array.isArray(p.seedTagGroups) ? p.seedTagGroups : [],
+    roll: {
+      // Сжатая шкала: слабость чувствуется, но не приговаривает.
+      minChance: Number(roll.minChance ?? 0.25),
+      maxChance: Number(roll.maxChance ?? 0.75),
+      primaryWeight: Number(roll.primaryWeight ?? 2),
+      dualBand: Number(roll.dualBand ?? 0.2),
+    },
+    stats: {
+      playerBudget: Math.max(1, Number(stats.playerBudget ?? 6)),
+      worldBudget: Math.max(1, Number(stats.worldBudget ?? 8)),
+      importanceScale: Number(stats.importanceScale ?? 0.08),
+      finaleFactor: Number(stats.finaleFactor ?? 2),
+      catastropheCooldown: Math.max(0, Number(stats.catastropheCooldown ?? 6)),
+    },
+    log: {
+      influenceChance: Number(log.influenceChance ?? 0.35),
+    },
+    tagGroups: Array.isArray(p.tagGroups) ? p.tagGroups : [],
   };
 }
 
-export function normalizePlotlines(domain) {
+function normalizeStatIds(raw, config = null) {
+  const allowed = new Set((config?.stats || []).map((s) => s.id));
+  const ids = Array.isArray(raw) ? raw.map(String) : [];
+  const uniq = [...new Set(ids)];
+  return allowed.size ? uniq.filter((id) => allowed.has(id)) : uniq;
+}
+
+export function normalizePlotlines(domain, config = null) {
   if (!domain || typeof domain !== 'object') return domain;
   if (!Array.isArray(domain.plotlines)) domain.plotlines = [];
   domain.plotlines = domain.plotlines
-    .filter((p) => p && p.status !== 'completed')
+    .filter((p) => p && typeof p === 'object' && p.status !== 'closed')
     .map((p) => ({
-      id: String(p.id),
-      title: String(p.title || 'Без названия').slice(0, 120),
-      summary: clipText(p.summary, PLOT_SUMMARY_MAX),
-      openHook: sliceHook(p.openHook),
-      closeWhen: sliceHook(p.closeWhen),
-      temperature: clampTemp(p.temperature ?? 0),
-      attention: clampAtt(p.attention ?? 20),
-      status: 'open',
-      breakthroughThisTick: Boolean(p.breakthroughThisTick),
-      lastBreakthroughTick:
-        p.lastBreakthroughTick == null ? null : Number(p.lastBreakthroughTick),
-      createdTick: p.createdTick == null ? null : Number(p.createdTick),
-      updatedTick: p.updatedTick == null ? null : Number(p.updatedTick),
-      relatedPendingIds: Array.isArray(p.relatedPendingIds)
-        ? p.relatedPendingIds.map(String)
+      id: p.id || newId('plot'),
+      title: clipText(p.title || 'Сюжет', PLOT_TITLE_MAX),
+      synopsis: clipText(p.synopsis ?? p.summary ?? '', PLOT_SUMMARY_MAX),
+      closeWhen: clipText(p.closeWhen, PLOT_HOOK_MAX),
+      kind: PLOT_KINDS.includes(p.kind) ? p.kind : 'story',
+      tags: Array.isArray(p.tags) ? p.tags : [],
+      relatedStats: normalizeStatIds(p.relatedStats, config),
+      chronicleIds: Array.isArray(p.chronicleIds) ? p.chronicleIds.map(String) : [],
+      relatedProcessIds: Array.isArray(p.relatedProcessIds)
+        ? p.relatedProcessIds.map(String)
         : [],
       relatedPlotlineIds: Array.isArray(p.relatedPlotlineIds)
         ? p.relatedPlotlineIds.map(String)
         : [],
-      seedTags: Array.isArray(p.seedTags) ? p.seedTags.map(String) : [],
+      importance: clamp100(p.importance, 40),
+      maxAgeMonths: Math.max(1, Math.min(36, Math.round(Number(p.maxAgeMonths) || 6))),
+      ageMonths: Math.max(0, Math.round(Number(p.ageMonths) || 0)),
+      temperature: clamp100(p.temperature, 30),
+      mirrorOf: p.mirrorOf ? String(p.mirrorOf) : null,
+      confluxId: p.confluxId ? String(p.confluxId) : null,
+      partnerGone: Boolean(p.partnerGone),
+      status: 'open',
+      createdTick: p.createdTick == null ? null : Number(p.createdTick),
+      lastBeatTick: p.lastBeatTick == null ? null : Number(p.lastBeatTick),
+      beatCount: Math.max(0, Math.round(Number(p.beatCount) || 0)),
     }));
   return domain;
 }
 
 export function createPlotline({
   title,
-  summary = '',
-  openHook = '',
+  synopsis = '',
+  summary = '', // legacy-алиас, уйдёт вместе со старым режиссёром
   closeWhen = '',
-  temperature = 20,
-  attention = 20,
+  kind = 'story',
+  tags = [],
+  relatedStats = [],
+  importance = 40,
+  maxAgeMonths = 6,
+  temperature = 30,
   tick = null,
-  relatedPendingIds = [],
+  relatedProcessIds = [],
   relatedPlotlineIds = [],
-  seedTags = [],
+  mirrorOf = null,
+  confluxId = null,
+  config = null,
 }) {
   return {
     id: newId('plot'),
-    title: clipText(title || 'Сюжет', 120),
-    summary: clipText(summary, PLOT_SUMMARY_MAX),
-    openHook: sliceHook(openHook),
-    closeWhen: sliceHook(closeWhen),
-    temperature: clampTemp(temperature),
-    attention: clampAtt(attention),
-    status: 'open',
-    breakthroughThisTick: false,
-    lastBreakthroughTick: null,
-    createdTick: tick,
-    updatedTick: tick,
-    relatedPendingIds: (relatedPendingIds || []).map(String),
+    title: clipText(title || 'Сюжет', PLOT_TITLE_MAX),
+    synopsis: clipText(synopsis || summary, PLOT_SUMMARY_MAX),
+    closeWhen: clipText(closeWhen, PLOT_HOOK_MAX),
+    kind: PLOT_KINDS.includes(kind) ? kind : 'story',
+    tags: Array.isArray(tags) ? tags : [],
+    relatedStats: normalizeStatIds(relatedStats, config),
+    chronicleIds: [],
+    relatedProcessIds: (relatedProcessIds || []).map(String),
     relatedPlotlineIds: (relatedPlotlineIds || []).map(String),
-    seedTags: (seedTags || []).map(String),
+    importance: clamp100(importance, 40),
+    maxAgeMonths: Math.max(1, Math.min(36, Math.round(Number(maxAgeMonths) || 6))),
+    ageMonths: 0,
+    temperature: clamp100(temperature, 30),
+    mirrorOf: mirrorOf ? String(mirrorOf) : null,
+    confluxId: confluxId ? String(confluxId) : null,
+    partnerGone: false,
+    status: 'open',
+    createdTick: tick,
+    lastBeatTick: null,
+    beatCount: 0,
   };
 }
 
-export function plotlineAge(plotline, tickIndex) {
-  const created = plotline?.createdTick;
-  if (created == null || tickIndex == null) return 0;
-  return Math.max(0, Math.round(Number(tickIndex) - Number(created)));
+/** Нить-заглушка для дела: у каждого процесса есть своя нить. */
+export function createErrandPlotline(process, { tick = null, config = null } = {}) {
+  const months = Math.max(1, Math.round(Number(process?.expectedMonths) || 1));
+  return createPlotline({
+    title: clipText(process?.summary || 'Городское дело', PLOT_TITLE_MAX),
+    synopsis: clipText(process?.detail || process?.summary || '', PLOT_SUMMARY_MAX),
+    closeWhen: 'Дело доведено до конца или свёрнуто.',
+    kind: 'errand',
+    relatedStats: process?.linkedStats || [],
+    importance: 25,
+    maxAgeMonths: months + 2,
+    temperature: 25,
+    tick,
+    relatedProcessIds: process?.id ? [process.id] : [],
+    config,
+  });
 }
 
-export function keepBarForAge(ageTicks, cfg) {
-  const surv = cfg?.survival || plotlinesConfig({}).survival;
-  const age = Math.max(0, Math.round(Number(ageTicks) || 0));
-  return Math.round(surv.keepBarBase + age * surv.keepBarPerAge);
+export function plotlineAge(plotline) {
+  return Math.max(0, Math.round(Number(plotline?.ageMonths) || 0));
 }
 
-/** +heatPerTick к T; decay attention; сброс флага прорыва перед броском. */
-export function heatPlotlines(domain, heatPerTick = 10, cfg = null) {
+export function isOverdue(plotline) {
+  return plotlineAge(plotline) >= Math.max(1, Number(plotline?.maxAgeMonths) || 6);
+}
+
+export function countOpen(domain) {
+  const list = domain?.plotlines || [];
+  return {
+    total: list.length,
+    stories: list.filter((p) => p.kind !== 'errand').length,
+    errands: list.filter((p) => p.kind === 'errand').length,
+  };
+}
+
+export function boardHasRoom(domain, cfg) {
+  const { total, errands } = countOpen(domain);
+  return {
+    story: total < cfg.board.maxOpen,
+    errand: total < cfg.board.maxOpen && errands < cfg.board.maxErrands,
+  };
+}
+
+export function findPlotline(domain, plotlineId) {
+  return (domain?.plotlines || []).find((p) => p.id === plotlineId) || null;
+}
+
+/** Внимание игрока → температура. Числом, не формулировкой. */
+export function warmPlotlines(domain, plotlineIds, cfg) {
   normalizePlotlines(domain);
-  const conf = cfg || plotlinesConfig({});
-  const heat = Math.max(0, Math.round(Number(heatPerTick) || 0));
-  const decay = Math.max(0, Math.round(Number(conf.attention?.decayPerTick) || 0));
+  const amount = cfg?.temperature?.perTouch ?? 12;
+  const touched = [];
+  for (const id of [...new Set((plotlineIds || []).map(String))]) {
+    const p = findPlotline(domain, id);
+    if (!p) continue;
+    const before = p.temperature;
+    p.temperature = clamp100(before + amount);
+    touched.push({ id, from: before, to: p.temperature });
+  }
+  return touched;
+}
+
+/** Месячные часы: возраст растёт, интерес остывает. */
+export function advancePlotClocks(domain, cfg) {
+  normalizePlotlines(domain);
+  const decay = cfg?.temperature?.decayPerTick ?? 8;
   for (const p of domain.plotlines) {
-    p.temperature = clampTemp(p.temperature + heat);
-    if (decay) p.attention = clampAtt(p.attention - decay);
-    p.breakthroughThisTick = false;
+    p.ageMonths += 1;
+    p.temperature = clamp100(p.temperature - decay);
   }
   return domain.plotlines;
 }
 
-export function grantAttention(plotline, amount) {
-  if (!plotline) return 0;
-  const n = Math.round(Number(amount) || 0);
-  if (!n) return 0;
-  const from = plotline.attention ?? 0;
-  plotline.attention = clampAtt(from + n);
-  return plotline.attention - from;
-}
-
-export function grantAttentionToIds(domain, plotlineIds, amount) {
-  normalizePlotlines(domain);
-  const ids = [...new Set((plotlineIds || []).map(String).filter(Boolean))];
-  const granted = [];
-  for (const id of ids) {
-    const p = domain.plotlines.find((x) => x.id === id);
+export function attachChronicleToPlotlines(domain, factId, plotlineIds) {
+  if (!factId) return;
+  for (const id of [...new Set((plotlineIds || []).map(String))]) {
+    const p = findPlotline(domain, id);
     if (!p) continue;
-    const delta = grantAttention(p, amount);
-    if (delta) granted.push({ id, delta, attention: p.attention });
-  }
-  return granted;
-}
-
-/**
- * Бросок прорыва: P = temperature/100.
- * При успехе: breakthroughThisTick=true, temperature=0, +attention bonus.
- */
-export function rollBreakthroughs(domain, rng = Math.random, cfg = null) {
-  normalizePlotlines(domain);
-  const bonus = cfg?.attention?.breakthroughBonus ?? 8;
-  const hits = [];
-  for (const p of domain.plotlines) {
-    const chance = clampTemp(p.temperature) / 100;
-    if (rng() < chance) {
-      p.breakthroughThisTick = true;
-      p.temperature = 0;
-      grantAttention(p, bonus);
-      hits.push(p);
-    }
-  }
-  return hits;
-}
-
-export function clearBreakthroughFlags(domain, tick = null) {
-  normalizePlotlines(domain);
-  for (const p of domain.plotlines) {
-    if (p.breakthroughThisTick) {
-      p.lastBreakthroughTick = tick;
-      p.breakthroughThisTick = false;
-    }
+    if (!p.chronicleIds.includes(String(factId))) p.chronicleIds.push(String(factId));
   }
 }
 
-export function listClosureCandidates(domain, tickIndex, cfg = null) {
-  normalizePlotlines(domain);
-  const conf = cfg || plotlinesConfig({});
-  const minAge = conf.survival.minAgeTicks;
-  const out = [];
-  for (const p of domain.plotlines) {
-    const age = plotlineAge(p, tickIndex);
-    if (age < minAge) continue;
-    const bar = keepBarForAge(age, conf);
-    if ((p.attention ?? 0) < bar) {
-      out.push({
-        id: p.id,
-        title: p.title,
-        ageTicks: age,
-        attention: p.attention,
-        keepBar: bar,
-        openHook: p.openHook || '',
-        closeWhen: p.closeWhen || '',
-        reason: `attention ${p.attention} < keepBar ${bar} (возраст ${age} тиков)`,
-      });
-    }
+export function closePlotline(domain, plotlineId, { tick = null, reason = '' } = {}) {
+  const list = domain?.plotlines || [];
+  const idx = list.findIndex((p) => p.id === plotlineId);
+  if (idx < 0) return null;
+  const [plot] = list.splice(idx, 1);
+  plot.status = 'closed';
+  plot.closedTick = tick;
+  plot.closeReason = reason || '';
+  domain.closedPlotlines = Array.isArray(domain.closedPlotlines) ? domain.closedPlotlines : [];
+  domain.closedPlotlines.push({
+    id: plot.id,
+    title: plot.title,
+    closedTick: tick,
+    reason: plot.closeReason,
+    beatCount: plot.beatCount,
+  });
+  if (domain.closedPlotlines.length > 40) {
+    domain.closedPlotlines = domain.closedPlotlines.slice(-40);
   }
-  return out;
+  return plot;
 }
 
-/** Вероятность мандата «новая самостоятельная нить». */
-export function spawnChance(domain, cfg = null) {
-  normalizePlotlines(domain);
-  const conf = cfg || plotlinesConfig({});
-  const s = conf.spawn;
-  const n = domain.plotlines.length;
-  if (n >= conf.maxOpen) return 0;
-  const tempSum = domain.plotlines.reduce((a, p) => a + (p.temperature || 0), 0);
-  let p =
-    s.baseChance +
-    (n === 0 ? s.emptyBoardBonus : 0) -
-    n * s.perPlotPenalty -
-    tempSum * s.perTempSumPenalty;
-  if (n >= conf.softMax) p *= s.softMaxFactor;
-  return Math.max(s.minChance, Math.min(s.maxChance, p));
-}
-
-export function pickSeedTags(configOrCfg, rng = Math.random) {
-  const groups =
-    configOrCfg?.seedTagGroups ||
-    configOrCfg?.tick?.plotlines?.seedTagGroups ||
-    [];
+/** Жребий тегов новой нити — движок, не агент. */
+export function pickPlotTags(cfg, rng = Math.random) {
+  const groups = cfg?.tagGroups || [];
+  const core = ['tone', 'start_event', 'spark_source', 'stake'];
+  const extra = ['phenomenon', 'stakeholders', 'scale', 'urgency'];
   const picked = [];
-  const coreIds = ['spark_source', 'phenomenon', 'stakeholders', 'stake', 'tone'];
-  const extraIds = ['scale', 'urgency'];
-  for (const gid of [...coreIds, ...extraIds]) {
+  for (const gid of [...core, ...extra]) {
     const g = groups.find((x) => x.id === gid);
     if (!g?.tags?.length) continue;
-    // core — всегда; extra — ~70%
-    if (extraIds.includes(gid) && rng() > 0.7) continue;
+    if (extra.includes(gid) && rng() > 0.6) continue;
     const tag = g.tags[Math.floor(rng() * g.tags.length)];
     if (!tag) continue;
     picked.push({
@@ -271,140 +294,152 @@ export function pickSeedTags(configOrCfg, rng = Math.random) {
   return picked;
 }
 
-export function formatSeedTagsForPrompt(seeds) {
-  if (!seeds?.length) return '(нет посева)';
-  return seeds.map((s) => `${s.groupName}: «${s.tagName}»`).join(' · ');
+export function formatPlotTagsForPrompt(tags) {
+  if (!tags?.length) return '(без посева)';
+  return tags.map((t) => `${t.groupName}: «${t.tagName}»`).join(' · ');
 }
 
-/**
- * Бросок мандата новой крови. Не создаёт плотлайн — только указание режиссёру.
- */
-export function rollPlotSpawn(domain, cfg = null, rng = Math.random, config = null) {
-  const conf = cfg || plotlinesConfig(config || {});
-  const chance = spawnChance(domain, conf);
-  const roll = rng();
-  const hit = roll < chance;
-  const seeds = hit ? pickSeedTags(conf.seedTagGroups?.length ? conf : config, rng) : [];
-  return {
-    hit,
-    chance,
-    roll,
-    openCount: domain.plotlines?.length || 0,
-    softMax: conf.softMax,
-    maxOpen: conf.maxOpen,
-    seeds,
-    seedText: formatSeedTagsForPrompt(seeds),
-  };
-}
-
-export function formatPlotlinesForPrompt(domain, tickIndex = null) {
+/** Служебный вид доски — для движка и логов, не для речи. */
+export function formatBoardForPrompt(domain) {
   normalizePlotlines(domain);
-  if (!domain.plotlines.length) return '(плотлайнов пока нет)';
+  if (!domain.plotlines.length) return '(нитей нет)';
   return domain.plotlines
     .map((p) => {
-      const bt = p.breakthroughThisTick ? ' ★ПРОРЫВ' : '';
-      const age = tickIndex != null ? plotlineAge(p, tickIndex) : null;
-      const ageBit = age != null ? ` age=${age}` : '';
-      const hooks =
-        (p.openHook ? ` | дальше: ${p.openHook}` : '') +
-        (p.closeWhen ? ` | закрыть если: ${p.closeWhen}` : '');
-      const relP =
-        p.relatedPendingIds?.length > 0
-          ? ` | процессы: ${p.relatedPendingIds.join(', ')}`
-          : '';
-      const relL =
-        p.relatedPlotlineIds?.length > 0
-          ? ` | нити: ${p.relatedPlotlineIds.join(', ')}`
-          : '';
+      const stats = p.relatedStats.length ? ` | в игре: ${p.relatedStats.join('+')}` : '';
+      const proc = p.relatedProcessIds.length ? ` | дела: ${p.relatedProcessIds.join(', ')}` : '';
       return (
-        `- [${p.id}] «${p.title}» T=${p.temperature} A=${p.attention}${ageBit}${bt}` +
-        (p.summary ? ` — ${p.summary}` : '') +
-        hooks +
-        relP +
-        relL
+        `- [${p.id}] «${p.title}» ${p.kind === 'errand' ? '(дело)' : ''} ` +
+        `T=${p.temperature} важность=${p.importance} возраст=${p.ageMonths}/${p.maxAgeMonths}` +
+        stats +
+        proc +
+        (p.synopsis ? `\n  ${p.synopsis}` : '')
       );
     })
     .join('\n');
 }
 
-/** Короткий бриф для речи правителя / письма месяца — без id и температур. */
-export function formatPlotBriefForSpeech(domain, { max = 4 } = {}) {
+/**
+ * Компактная доска для речи: без id, температур и прочей механики.
+ * @param {(ids: string[]) => string} statsFeel — качественное описание статов
+ */
+export function formatBoardForSpeech(domain, { statsFeel = null, max = 5 } = {}) {
   normalizePlotlines(domain);
   const list = (domain.plotlines || []).slice(0, max);
   if (!list.length) return '';
   return list
     .map((p) => {
-      const s = String(p.summary || '').trim();
-      return s ? `«${p.title}»: ${s}` : `«${p.title}»`;
+      const feel =
+        statsFeel && p.relatedStats.length ? ` В игре: ${statsFeel(p.relatedStats)}.` : '';
+      const proc = p.relatedProcessIds.length ? ' По ней идёт дело.' : '';
+      return `«${p.title}» [${p.id}]: ${p.synopsis || 'только началось'}${feel}${proc}`;
     })
     .join('\n');
 }
 
-export function formatBreakthroughMandate(breakthroughs, domainOrDomains = null) {
-  if (!breakthroughs?.length) return '';
-  const processIndex = new Map();
-  const domains = Array.isArray(domainOrDomains)
-    ? domainOrDomains
-    : domainOrDomains
-      ? [domainOrDomains]
-      : [];
-  for (const domain of domains) {
-    for (const a of domain?.state?.pendingActions || []) {
-      if (a?.id) processIndex.set(String(a.id), a);
-    }
-  }
-  return [
-    'ОБЯЗАТЕЛЬНЫЙ ПРИОРИТЕТ — ПРОРЫВЫ СЮЖЕТА (сделай ПЕРВЫМИ, до прочего):',
-    'Для каждого: add_chronicle с явным сильным сдвигом (не «ничего не нашли / всё тихо»).',
-    'Если указаны связанные процессы — затронь их (chronicle + advance/cancel); не игнорируй.',
-    'Можно не завершать сюжет целиком, но мир должен заметно измениться.',
-    'Если событие явно продолжает нить — можно relatedPlotlineIds (необязательно).',
-    ...breakthroughs.map((p) => {
-      const relIds = p.relatedPendingIds || [];
-      let rel = '';
-      if (relIds.length) {
-        const parts = relIds.map((id) => {
-          const a = processIndex.get(String(id));
-          return a ? `${id} «${a.summary}»` : String(id);
-        });
-        rel = ` | связанные процессы: ${parts.join('; ')}`;
-      }
-      return `- ПРОРЫВ [${p.id}] «${p.title}»: ${p.summary || 'сдвинь эту линию вперёд'}${rel}`;
-    }),
-  ].join('\n');
+/* ------------------------------------------------------------------ *
+ * ВРЕМЕННЫЙ СЛОЙ СОВМЕСТИМОСТИ (фазы 0–2).
+ * Старые резолвер и режиссёр ещё зовут этот API; удаляется в фазе 3
+ * вместе с ними. Новый код пользуется функциями выше.
+ * ------------------------------------------------------------------ */
+
+export function plotlinesConfig(config) {
+  const cfg = plotConfig(config);
+  return {
+    ...cfg,
+    enabled: cfg.enabled,
+    heatPerTick: 0,
+    maxOpen: cfg.board.maxOpen,
+    softMax: Math.max(1, cfg.board.maxOpen - 1),
+    hooksMaxLen: PLOT_HOOK_MAX,
+    attention: { bumpFactor: 1, chronicleLink: cfg.temperature.perTouch },
+    survival: { minAgeTicks: 1 },
+    spawn: { baseChance: cfg.beats.baseChance },
+    seedTagGroups: cfg.tagGroups,
+  };
 }
 
-export function formatDirectorMetaForPrompt({ spawn, closureCandidates, softMax, maxOpen, openCount }) {
-  const lines = [];
-  lines.push(
-    `ДОСКА: открытых ${openCount}/${maxOpen} (комфорт ≤${softMax}). ` +
-      'T — котёл к прорыву; A (attention) — право жить (растёт от bump и добровольных relatedPlotlineIds в хронике).',
-  );
+export function heatPlotlines(domain, _heat, cfg) {
+  return advancePlotClocks(domain, cfg?.temperature ? cfg : plotConfig({}));
+}
+
+/** Прорывов больше нет: их место занял бит нити (движок тика). */
+export function rollBreakthroughs() {
+  return [];
+}
+
+export function clearBreakthroughFlags() {}
+
+export function formatBreakthroughMandate() {
+  return '';
+}
+
+export function grantAttention(plotline, amount) {
+  if (!plotline) return 0;
+  const before = plotline.temperature ?? 0;
+  plotline.temperature = clamp100(before + Number(amount || 0));
+  return plotline.temperature - before;
+}
+
+export function grantAttentionToIds(domain, plotlineIds, amount) {
+  normalizePlotlines(domain);
+  const granted = [];
+  for (const id of [...new Set((plotlineIds || []).map(String))]) {
+    const p = findPlotline(domain, id);
+    if (!p) continue;
+    const delta = grantAttention(p, amount);
+    if (delta) granted.push({ id, delta, temperature: p.temperature });
+  }
+  return granted;
+}
+
+export function listClosureCandidates(domain) {
+  normalizePlotlines(domain);
+  return domain.plotlines
+    .filter((p) => isOverdue(p))
+    .map((p) => ({
+      id: p.id,
+      title: p.title,
+      ageTicks: p.ageMonths,
+      closeWhen: p.closeWhen || '',
+      reason: `возраст ${p.ageMonths} ≥ предела ${p.maxAgeMonths}`,
+    }));
+}
+
+export function rollPlotSpawn(domain, cfg = null, rng = Math.random, config = null) {
+  const conf = cfg?.board ? cfg : plotConfig(config || {});
+  const room = boardHasRoom(domain, conf);
+  const chance = room.story ? conf.beats.baseChance : 0;
+  const roll = rng();
+  const hit = roll < chance;
+  const tags = hit ? pickPlotTags(conf, rng) : [];
+  return {
+    hit,
+    chance,
+    roll,
+    openCount: countOpen(domain).total,
+    softMax: conf.board.maxOpen - 1,
+    maxOpen: conf.board.maxOpen,
+    seeds: tags,
+    seedText: formatPlotTagsForPrompt(tags),
+  };
+}
+
+export function formatPlotlinesForPrompt(domain) {
+  return formatBoardForPrompt(domain);
+}
+
+export function formatPlotBriefForSpeech(domain, opts = {}) {
+  return formatBoardForSpeech(domain, opts);
+}
+
+export function formatDirectorMetaForPrompt({ closureCandidates, spawn, openCount, maxOpen }) {
+  const lines = [`ДОСКА: открытых ${openCount ?? '?'}/${maxOpen ?? '?'}.`];
   if (closureCandidates?.length) {
-    lines.push('КАНДИДАТЫ НА ЗАКРЫТИЕ (attention ниже планки возраста — complete или сильно оправдай upsert+bump):');
-    for (const c of closureCandidates) {
-      lines.push(
-        `- [${c.id}] «${c.title}»: ${c.reason}` +
-          (c.closeWhen ? ` | closeWhen: ${c.closeWhen}` : ''),
-      );
-    }
-  } else {
-    lines.push('Кандидатов на закрытие по attention нет.');
+    lines.push('ПЕРЕЖИВШИЕ СВОЙ СРОК (закрыть или явно оживить):');
+    for (const c of closureCandidates) lines.push(`- [${c.id}] «${c.title}»: ${c.reason}`);
   }
   if (spawn?.hit) {
-    lines.push(
-      'МАНДАТ НОВОЙ КРОВИ (движок): создай ОДНУ новую самостоятельную нить через upsert_plotline БЕЗ relatedPlotlineIds. ' +
-        `Посев: ${spawn.seedText}. Придумай культ/артефакт/аномалию и т.п. — не цепляй к текущим нитям.`,
-    );
-  } else if (spawn) {
-    lines.push(
-      `Мандат новой крови в этом тике не выпал (P≈${(spawn.chance * 100).toFixed(0)}%, roll=${spawn.roll?.toFixed?.(2) ?? '?'}).`,
-    );
-  }
-  if (openCount >= softMax) {
-    lines.push(
-      `Открытых ≥${softMax}: перед submit_direction закрой (complete) хотя бы одну слабую/дублирующую нить, если есть кандидаты или бессмысленные.`,
-    );
+    lines.push(`МАНДАТ НОВОЙ НИТИ. Посев: ${spawn.seedText}.`);
   }
   return lines.join('\n');
 }

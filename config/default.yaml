@@ -61,32 +61,63 @@ tick:
       gap_jump: 1
       causeway: 1
       landmass: 0.9
-  plotlines:
+  # Сюжетные нити — ядро мира (docs/PIVOT_PLOTLINES.md).
+  # События вне нитей не бывает: дело, указ, находка — всё это биты.
+  plot:
     enabled: true
-    heatPerTick: 10
-    maxOpen: 6
-    softMax: 4
-    hooksMaxLen: 120
-    attention:
-      initial: 20
-      bumpFactor: 1
-      chronicleLink: 12
-      breakthroughBonus: 8
-      decayPerTick: 3
-    survival:
-      minAgeTicks: 3
-      keepBarBase: 8
-      keepBarPerAge: 4
-    spawn:
-      baseChance: 0.10
-      emptyBoardBonus: 0.25
-      perPlotPenalty: 0.03
-      perTempSumPenalty: 0.0004
-      softMaxFactor: 0.45
-      minChance: 0.02
-      maxChance: 0.45
-    # Посев для мандата «новой крови» (режиссёр, не генезис города).
-    seedTagGroups:
+    board:
+      # Сколько нитей висит одновременно; errand — проходные нити дел.
+      maxOpen: 5
+      maxErrands: 2
+    beats:
+      # Обязательные биты (дело завершилось/сорвалось, нить дожила до предела)
+      # идут первыми и потолок пробивают.
+      maxPerTick: 3
+      baseChance: 0.15
+      temperatureWeight: 0.5
+      importanceWeight: 0.2
+      agePressure: 0.15
+      minChance: 0.05
+      maxChance: 0.8
+    temperature:
+      initial: 30
+      decayPerTick: 8
+      # Прирост за то, что покровитель задел нить в разговоре (touchedPlotIds).
+      perTouch: 12
+      afterBeat: 20
+    roll:
+      # Сжатая шкала: слабость чувствуется, но не приговаривает.
+      minChance: 0.25
+      maxChance: 0.75
+      # Перевес главного стата нити при выборе, по чему кидать.
+      primaryWeight: 2
+      # Полоса «двойственного» исхода вокруг порога.
+      dualBand: 0.2
+    stats:
+      # Раздельные месячные бюджеты: решения игрока и события мира.
+      playerBudget: 6
+      worldBudget: 8
+      importanceScale: 0.08
+      finaleFactor: 2
+      catastropheCooldown: 6
+    log:
+      # Ворота журнала месяца: с какой вероятностью бит вообще увидит,
+      # что игрок делал в разговорах. Регулируется числом, не формулировкой.
+      influenceChance: 0.35
+    tagGroups:
+      - id: start_event
+        name: Стартовое событие
+        tags:
+          - { id: find, name: Неожиданная находка }
+          - { id: plot, name: Заговор }
+          - { id: loss, name: Пропажа }
+          - { id: guest, name: Незваный гость }
+          - { id: omen, name: Знамение }
+          - { id: quarrel, name: "Ссора, что вышла из берегов" }
+          - { id: breakdown, name: Поломка в неудачный час }
+          - { id: refusal, name: Отказ подчиниться }
+          - { id: illness, name: Хворь }
+          - { id: inheritance, name: Наследство без хозяина }
       - id: spark_source
         name: Источник искры
         tags:

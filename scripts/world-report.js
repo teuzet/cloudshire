@@ -12,7 +12,7 @@
 
 import { loadConfig } from '../src/config.js';
 import { createStorage } from '../src/storage/index.js';
-import { plotlinesConfig, plotlineAge } from '../src/game/plotlines.js';
+import { plotConfig, plotlineAge, isOverdue } from '../src/game/plotlines.js';
 import { activeProcesses } from '../src/game/processes.js';
 
 const GOOD = 'OK  ';
@@ -121,7 +121,7 @@ function statDrift(lore = []) {
 function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
   const flags = [];
   const tick = world.tickIndex || 0;
-  const plotCfg = plotlinesConfig(config);
+  const plotCfg = plotConfig(config);
   const ruler = domain.characters?.[0] || null;
   const history = ruler?.dialogHistory || [];
   const userMsgs = history.filter((m) => m.role === 'user');
@@ -143,17 +143,10 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
 
   const plots = domain.plotlines || [];
   const hotPlots = plots.filter((p) => Number(p.temperature) >= 70);
-  const stalePlots = plots.filter((p) => {
-    const age = plotlineAge(p, tick) ?? 0;
-    if (age < (plotCfg.survival?.minAgeTicks ?? 3)) return false;
-    const bar =
-      (plotCfg.survival?.keepBarBase ?? 8) + age * (plotCfg.survival?.keepBarPerAge ?? 4);
-    return Number(p.attention || 0) < bar;
-  });
-  // attention упёрлось в потолок → линия не может стать кандидатом на закрытие
-  const immortalPlots = plots.filter(
-    (p) => (plotlineAge(p, tick) ?? 0) >= 5 && Number(p.attention || 0) >= 95,
-  );
+  // Нить пережила отпущенный ей срок — движок обязан её закрыть битом-финалом.
+  const stalePlots = plots.filter((p) => isOverdue(p));
+  const errands = plots.filter((p) => p.kind === 'errand');
+  const boardOverflow = plots.length > (plotCfg.board?.maxOpen ?? 5);
 
   const myConfluxes = confluxes.filter((c) => (c.domainIds || []).includes(domain.id));
   const active = myConfluxes.find((c) => c.status === 'approaching' || c.status === 'docked');
@@ -251,22 +244,17 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
   if (!plots.length && ageMonths >= 3) {
     flags.push([WARN, 'нет открытых плотлайнов — нет сюжетного напряжения']);
   }
-  if (plots.length > (plotCfg.maxOpen ?? 6)) {
-    flags.push([BAD, `плотлайнов ${plots.length} > maxOpen ${plotCfg.maxOpen}`]);
+  if (boardOverflow) {
+    flags.push([BAD, `нитей ${plots.length} > доски ${plotCfg.board?.maxOpen}`]);
+  }
+  if (errands.length > (plotCfg.board?.maxErrands ?? 2)) {
+    flags.push([WARN, `проходных нитей ${errands.length} — доска забита делами`]);
   }
   if (stalePlots.length) {
     flags.push([
       WARN,
-      `плотлайны без внимания (кандидаты на закрытие): ${stalePlots
-        .map((p) => `«${p.title}» A=${p.attention}`)
-        .join('; ')}`,
-    ]);
-  }
-  if (immortalPlots.length) {
-    flags.push([
-      BAD,
-      `линии не могут закрыться — attention в потолке 100: ${immortalPlots
-        .map((p) => `«${p.title}» age=${plotlineAge(p, tick)}`)
+      `нити пережили свой срок (нужен финальный бит): ${stalePlots
+        .map((p) => `«${p.title}» ${p.ageMonths}/${p.maxAgeMonths}`)
         .join('; ')}`,
     ]);
   }
@@ -346,8 +334,10 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
     plotlines: plots.map((p) => ({
       title: p.title,
       temperature: p.temperature,
-      attention: p.attention,
-      age: plotlineAge(p, tick),
+      importance: p.importance,
+      kind: p.kind,
+      age: plotlineAge(p),
+      maxAge: p.maxAgeMonths,
     })),
     chronicle: { count: chron.length, perMonth: Number(chronPerMonth.toFixed(2)), duplicates: dupes.length },
     conflux: {
@@ -427,7 +417,10 @@ function printDomain(rep, { dialogTail = 0, dialog = [] } = {}) {
   if (rep.plotlines.length) {
     console.log('плотлайны:');
     for (const p of rep.plotlines) {
-      console.log(`  • «${p.title}» T=${p.temperature} A=${p.attention} age=${p.age ?? '?'}`);
+      console.log(
+        `  • «${p.title}»${p.kind === 'errand' ? ' (дело)' : ''} T=${p.temperature} ` +
+          `важность=${p.importance} возраст=${p.age ?? '?'}/${p.maxAge ?? '?'}`,
+      );
     }
   } else {
     console.log('плотлайны: нет');

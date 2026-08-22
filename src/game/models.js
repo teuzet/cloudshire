@@ -7,6 +7,9 @@ export function emptyState() {
     // Важные постоянные модификаторы (институты, установленный порядок, хронические условия)
     modifiers: [],
     pendingActions: [],
+    // Короткие пометки о том, что случилось в разговорах этого месяца (dayNote).
+    // Доносит день до тика и очищается после него.
+    monthLog: [],
     // Как обращаться к божеству-покровителю; null = ещё не названо
     patronName: null,
   };
@@ -21,6 +24,7 @@ export function normalizeDomain(domain) {
     if (!Array.isArray(domain.state.events)) domain.state.events = [];
     if (!Array.isArray(domain.state.modifiers)) domain.state.modifiers = [];
     if (!Array.isArray(domain.state.pendingActions)) domain.state.pendingActions = [];
+    if (!Array.isArray(domain.state.monthLog)) domain.state.monthLog = [];
     if (!('patronName' in domain.state)) domain.state.patronName = null;
   }
   if (!Array.isArray(domain.tags)) domain.tags = [];
@@ -173,6 +177,62 @@ export function createCharacter({ id, name, description, role = 'ruler', title =
     /** Священный ужас / благоговение перед покровителем 0–100 */
     terror: 50,
   };
+}
+
+/**
+ * Персонаж города — третий тип записи в lore рядом с chronicle и fact.
+ * Заводится при первом упоминании: рассказчиком на бите или лормастером в ответе.
+ */
+export function createCharacterRecord({
+  id,
+  name,
+  role = '',
+  about = '',
+  tick = null,
+  gameDateLabel = null,
+  author = 'system',
+  relatedPlotlineIds = [],
+}) {
+  return {
+    id,
+    tags: ['character'],
+    name: String(name || '').trim().slice(0, 80),
+    role: String(role || '').trim().slice(0, 120),
+    about: String(about || '').trim().slice(0, 400),
+    text: [String(name || '').trim(), role, about].filter(Boolean).join(' — ').slice(0, 500),
+    status: 'alive',
+    firstSeenTick: tick,
+    gameDateLabel,
+    author,
+    relatedPlotlineIds: (relatedPlotlineIds || []).map(String),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+export function castRecords(lore = []) {
+  return (lore || []).filter((f) => (f.tags || []).includes('character') && !f.retiredAt);
+}
+
+/** Живой каст города для промптов: коротко, кто есть кто. */
+export function formatCastForPrompt(lore = [], { limit = 20 } = {}) {
+  const cast = castRecords(lore).slice(-limit);
+  if (!cast.length) return '(названных людей пока нет)';
+  return cast
+    .map((c) => {
+      const state = c.status && c.status !== 'alive' ? ` [${c.status}]` : '';
+      const role = c.role ? `, ${c.role}` : '';
+      return `- ${c.name}${role}${state}${c.about ? `: ${c.about}` : ''}`;
+    })
+    .join('\n');
+}
+
+/** Найти персонажа по имени (без учёта регистра) — чтобы не плодить дубли. */
+export function findCharacterByName(lore = [], name) {
+  const needle = String(name || '').trim().toLowerCase();
+  if (!needle) return null;
+  return (
+    castRecords(lore).find((c) => String(c.name || '').trim().toLowerCase() === needle) || null
+  );
 }
 
 export function createLoreFact({
