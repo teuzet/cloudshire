@@ -190,6 +190,24 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
   }
   const retiredFacts = (domain.lore || []).filter((f) => f.retiredAt).length;
 
+  // Новые рельсы: кто пишет хронику и как живут нити.
+  const byAuthor = {};
+  for (const f of chron) {
+    const a = String(f.author || '?').replace(/^storyteller:/, '');
+    byAuthor[a] = (byAuthor[a] || 0) + 1;
+  }
+  const castSize = (domain.lore || []).filter(
+    (f) => (f.tags || []).includes('character') && !f.retiredAt,
+  ).length;
+  const closed = domain.closedPlotlines || [];
+  const beatsTotal = plots.reduce((sum, p) => sum + (p.beatCount || 0), 0);
+  if (byAuthor['month-fallback']) {
+    flags.push([WARN, `движок дописывал за рассказчика ${byAuthor['month-fallback']} раз`]);
+  }
+  if (chron.length && (byAuthor.quiet || 0) / chron.length > 0.6 && ageMonths >= 4) {
+    flags.push([WARN, 'больше половины записей — тихие месяцы: сюжет не заводится']);
+  }
+
   // --- Вовлечённость
   if (!userMsgs.length) {
     flags.push([BAD, 'игрок не написал ни одного сообщения — город живёт без покровителя']);
@@ -315,6 +333,15 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
       lastUserAt: lastUser?.at || null,
       lastAnyAt: lastAny?.at || null,
     },
+    story: {
+      plots: plots.length,
+      errands: errands.length,
+      beatsTotal,
+      closed: closed.length,
+      closeReasons: closed.slice(-6).map((c) => `${c.title}: ${c.reason}`),
+      castSize,
+      byAuthor,
+    },
     turnMeta: {
       turns: turns.length,
       orders,
@@ -391,6 +418,18 @@ function printDomain(rep, { dialogTail = 0, dialog = [] } = {}) {
       (rep.chronicle.duplicates ? ` · похожих ${rep.chronicle.duplicates}` : '') +
       (rep.retiredFacts ? ` · снятых фактов ${rep.retiredFacts}` : ''),
   );
+
+  if (rep.story) {
+    const authors = Object.entries(rep.story.byAuthor)
+      .map(([k, v]) => `${k} ${v}`)
+      .join(', ');
+    console.log(
+      `сюжет: нитей ${rep.story.plots} (проходных ${rep.story.errands}) · битов всего ${rep.story.beatsTotal} · ` +
+        `закрыто ${rep.story.closed} · каст ${rep.story.castSize}` +
+        (authors ? ` · записи: ${authors}` : ''),
+    );
+    for (const r of rep.story.closeReasons) console.log(`    закрыта — ${r}`);
+  }
 
   if (rep.turnMeta.turns) {
     const parts = Object.entries(rep.turnMeta.commitments)
