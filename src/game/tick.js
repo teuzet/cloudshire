@@ -22,10 +22,17 @@ import {
   formatPlotlinesForPrompt,
   formatBreakthroughMandate,
   plotlinesConfig,
+  plotConfig,
   rollPlotSpawn,
   listClosureCandidates,
   grantAttentionToIds,
 } from './plotlines.js';
+import {
+  advancePlotMonth,
+  planBeats,
+  clearMonthLog,
+  formatBeatPlanForLog,
+} from './plotEngine.js';
 import {
   normalizeDomainProcesses,
   normalizeProcess,
@@ -732,13 +739,30 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
     }
   }
 
+  const plotEngineCfg = plotConfig(config);
   const soloResults = await Promise.all(
     soloDomains.map(async (domain) => {
       normalizeDomain(domain);
       let breakthroughs = [];
       let directorMeta = null;
       if (plotCfg.enabled) {
-        heatPlotlines(domain, plotCfg.heatPerTick, plotCfg);
+        // Часы доски и план битов считает движок; агенты подключатся в фазе 2.
+        advancePlotMonth(domain, plotEngineCfg);
+        const beatPlan = planBeats({ domain, config, processOutcomes: [] });
+        getLogger().info('plot.beats_planned', {
+          domainId: domain.id,
+          name: domain.name,
+          beats: beatPlan.map((b) => ({
+            plotId: b.plotId,
+            title: b.title,
+            reason: b.reason,
+            mandatory: b.mandatory,
+            tint: b.tint,
+            statId: b.statId,
+            finale: b.finale,
+          })),
+          plan: formatBeatPlanForLog(beatPlan),
+        });
         breakthroughs = rollBreakthroughs(domain, Math.random, plotCfg);
         const spawn = rollPlotSpawn(domain, plotCfg, Math.random, config);
         directorMeta = {
@@ -816,6 +840,13 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
     }),
   );
   results.push(...soloResults);
+
+  // Журнал месяца донёс разговоры до тика — дальше всё важное уже в хронике и касте.
+  for (const domain of domains) {
+    if (!domain?.state?.monthLog?.length) continue;
+    clearMonthLog(domain);
+    await storage.saveDomain(domain);
+  }
 
   return {
     world: {

@@ -198,8 +198,28 @@ export function formatStatsForPrompt(stats, config) {
 /**
  * Качественная картина для правителя: без чисел, эпитет + about + ориентир.
  */
-export function qualitativeStatsBrief(stats, config) {
+/** Короткая форма для доски нитей: «Вера (скудно), Знание (заметно)». */
+export function statEpithetsShort(stats, config, ids = []) {
+  const defs = config.stats || [];
+  return (ids || [])
+    .map((id) => defs.find((d) => d.id === id))
+    .filter(Boolean)
+    .map((def) => {
+      const value = Number(stats?.[def.id]);
+      const v = Number.isFinite(value) ? value : 50;
+      return `${def.name} (${statEpithet(v, config)})`;
+    })
+    .join(', ');
+}
+
+/**
+ * Качественная сводка по статам. `only` — сузить до нужных id
+ * (например, до тех, что сейчас в игре у сюжетной нити).
+ */
+export function qualitativeStatsBrief(stats, config, { only = null } = {}) {
+  const wanted = Array.isArray(only) && only.length ? new Set(only.map(String)) : null;
   return (config.stats || [])
+    .filter((def) => !wanted || wanted.has(def.id))
     .map((def) => {
       const value = Number(stats?.[def.id]);
       const v = Number.isFinite(value) ? value : 50;

@@ -329,7 +329,7 @@ export function formatBoardForSpeech(domain, { statsFeel = null, max = 5 } = {})
   return list
     .map((p) => {
       const feel =
-        statsFeel && p.relatedStats.length ? ` В игре: ${statsFeel(p.relatedStats)}.` : '';
+        statsFeel && p.relatedStats.length ? ` Упирается в: ${statsFeel(p.relatedStats)}.` : '';
       const proc = p.relatedProcessIds.length ? ' По ней идёт дело.' : '';
       return `«${p.title}» [${p.id}]: ${p.synopsis || 'только началось'}${feel}${proc}`;
     })

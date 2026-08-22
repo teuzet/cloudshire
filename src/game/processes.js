@@ -70,33 +70,10 @@ export function processStatAverage(domain, process, config = null) {
   return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
 }
 
-/**
- * Бросок 0–100 vs среднее статов:
- * roll > avg+40 → 0 (застой)
- * roll < avg-40 → 2 (рывок)
- * иначе → 1
- */
-export function rollProcessAdvance(avgStat, rng = Math.random) {
-  const avg = Math.max(0, Math.min(100, Math.round(Number(avgStat) || 50)));
-  const roll = Math.floor(rng() * 101); // 0..100
-  let advance = 1;
-  let kind = 'normal';
-  if (roll > avg + 40) {
-    advance = 0;
-    kind = 'stall';
-  } else if (roll < avg - 40) {
-    advance = 2;
-    kind = 'surge';
-  }
-  return {
-    roll,
-    avg,
-    advance,
-    kind,
-    unusual: kind !== 'normal',
-    thresholds: { stallAbove: avg + 40, surgeBelow: avg - 40 },
-  };
-}
+// Бросок хода дела живёт в едином модуле бросков.
+import { rollProcessAdvance } from './rolls.js';
+
+export { rollProcessAdvance };
 
 /** Броски для всех active процессов домена (до резолва). */
 export function rollAllProcessAdvances(domain, config = null, rng = Math.random) {

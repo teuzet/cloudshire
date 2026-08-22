@@ -10,6 +10,7 @@ import {
 import {
   qualitativePopulation,
   qualitativeStatsBrief,
+  statEpithetsShort,
   formatRulerAttitudes,
   adjustAttitude,
   normalizeRulerAttitudes,
@@ -42,7 +43,8 @@ import {
   processProgressFeel,
   recentlyClosedProcesses,
 } from './processes.js';
-import { formatPlotBriefForSpeech } from './plotlines.js';
+import { formatBoardForSpeech, warmPlotlines, plotConfig } from './plotlines.js';
+import { ensureErrandForProcess, linkProcessToPlotline } from './plotEngine.js';
 import { dialogHistoryForPrompt } from './memory.js';
 import { getLogger, truncate, setLoggerWorldId } from '../log.js';
 import { initUsageRecording } from '../llm/usage.js';
@@ -135,6 +137,19 @@ function submitReplyTool(turn, character) {
             '(отправить тебя за край или в пустоту, воскресить мёртвых, стереть память, космос, перенос); ' +
             'question — спросил; smalltalk — беседа; other — прочее.',
         },
+        touchedPlotIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Id живых нитей, которых покровитель коснулся в этом разговоре (расспрашивал, велел, тревожился). ' +
+            'Пусто, если разговор был не о них.',
+        },
+        dayNote: {
+          type: 'string',
+          description:
+            'Одна короткая фраза: что произошло сегодня в мире — появился человек, отдан приказ, ' +
+            'кто-то отказался, куда-то сходили. Пусто, если был только разговор.',
+        },
         commitment: {
           type: 'string',
           enum: ['none', 'process', 'standing_order', 'act', 'revoked', 'refused'],
@@ -145,7 +160,7 @@ function submitReplyTool(turn, character) {
         },
       },
     },
-    handler: async ({ text, requestKind, commitment }) => {
+    handler: async ({ text, requestKind, commitment, touchedPlotIds, dayNote }) => {
       const body = String(text || '').trim();
       if (body.length < 2) {
         return toolFail('too_short', 'Речь пустая. Напиши ответ покровителю в text.');
@@ -200,7 +215,12 @@ function submitReplyTool(turn, character) {
         );
       }
       turn.reply = body;
-      turn.meta = { requestKind, commitment };
+      turn.meta = {
+        requestKind,
+        commitment,
+        touchedPlotIds: Array.isArray(touchedPlotIds) ? touchedPlotIds.map(String) : [],
+        dayNote: String(dayNote || '').trim().slice(0, 160) || null,
+      };
       return { ok: true };
     },
   };
@@ -439,6 +459,12 @@ function characterTools(domain, storage, character, ctx) {
           },
           onBehalfOf: { type: 'string', default: 'patron' },
           characterNote: { type: 'string' },
+          plotId: {
+            type: 'string',
+            description:
+              'Если дело продолжает живую историю — её id из доски нитей. Иначе оставь пустым, ' +
+              'дело заведёт свою нить само.',
+          },
         },
       },
       handler: async ({
@@ -448,6 +474,7 @@ function characterTools(domain, storage, character, ctx) {
         linkedStats,
         onBehalfOf = 'patron',
         characterNote,
+        plotId,
       }) => {
         const slots = canStartProcess(domain, ctx.config);
         if (!slots.ok) {
@@ -516,6 +543,15 @@ function characterTools(domain, storage, character, ctx) {
           updatedAt: new Date().toISOString(),
         };
         domain.state.pendingActions.push(action);
+        // У каждого дела есть нить: либо та, что назвал правитель, либо проходная.
+        let plot = plotId ? linkProcessToPlotline(domain, action.id, String(plotId)) : null;
+        if (!plot) {
+          plot = ensureErrandForProcess(domain, action, {
+            tick: world?.tickIndex ?? null,
+            config: ctx.config,
+          }).plot;
+        }
+        action.plotlineId = plot?.id || null;
         await save();
         const clamped =
           duration > asked ? ` Оценка срока ${duration} мес. (было ${asked}).` : '';
@@ -1595,7 +1631,9 @@ export class GameApp {
         ].join('\n')
       : '';
     const confluxCanon = await this.buildConfluxCanon(domain, world);
-    const plotBrief = formatPlotBriefForSpeech(domain);
+    const plotBrief = formatBoardForSpeech(domain, {
+      statsFeel: (ids) => statEpithetsShort(domain.stats || {}, this.config, ids),
+    });
 
     // Здесь только данные хода. Правила поведения живут в instructions агента.
     const extraSystem = [
@@ -1684,11 +1722,28 @@ export class GameApp {
     reply = stripSpeakerPrefix(reply, character.name);
 
     const fresh = await this.storage.getDomain(domain.id);
+    // Внимание игрока → температура нитей числом; сцена дня → журнал месяца.
+    const plotCfg = plotConfig(this.config);
+    const warmed = warmPlotlines(fresh, turn.meta?.touchedPlotIds || [], plotCfg);
+    if (turn.meta?.dayNote) {
+      fresh.state.monthLog = Array.isArray(fresh.state.monthLog) ? fresh.state.monthLog : [];
+      fresh.state.monthLog.push({
+        tick: world?.tickIndex ?? null,
+        at: new Date().toISOString(),
+        text: turn.meta.dayNote,
+        plotIds: turn.meta.touchedPlotIds || [],
+      });
+      if (fresh.state.monthLog.length > 12) {
+        fresh.state.monthLog = fresh.state.monthLog.slice(-12);
+      }
+    }
     await this.persistDialog(fresh, 'user', text);
     await this.persistDialog(fresh, 'assistant', reply, { meta: turn.meta });
 
     log.info('ruler.reply', {
       replyPreview: truncate(reply, 400),
+      touchedPlots: warmed.map((w) => `${w.id}:${w.from}→${w.to}`),
+      dayNote: turn.meta?.dayNote || null,
       requestKind: turn.meta?.requestKind || null,
       commitment: turn.meta?.commitment || null,
       tools: (result.toolTrace || []).map((t) => ({
@@ -1866,9 +1921,12 @@ export class GameApp {
           undockSystem,
           'Ты пишешь покровителю новости месяца живой речью, как человек, а не сводку событий.',
           `Не начинай письмо с «${character.name}:».`,
-          formatPlotBriefForSpeech(domain)
-            ? `Если уместно, вплети живые нити (не списком):\n${formatPlotBriefForSpeech(domain)}`
-            : '',
+          (() => {
+            const board = formatBoardForSpeech(domain, {
+              statsFeel: (ids) => statEpithetsShort(domain.stats || {}, this.config, ids),
+            });
+            return board ? `Живые нити города (для памяти, не пересказывай списком):\n${board}` : '';
+          })(),
         ]
           .filter(Boolean)
           .join('\n'),
