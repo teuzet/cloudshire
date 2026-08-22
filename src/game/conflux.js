@@ -178,7 +178,8 @@ function pushPublicChronicle(domain, world, text, conflux, extraTags = []) {
     gameDateLabel: world.gameDate.label,
     tick: world.tickIndex,
     author: 'conflux',
-    importance: 'major',
+    // Сближение чужого острова — важнейшее событие для города, не фон.
+    importance: 'critical',
   });
   domain.lore = domain.lore || [];
   domain.lore.push(fact);
@@ -674,6 +675,12 @@ export async function advanceDockedConfluxes({ storage, runtime, world }, docked
 /** Active docked conflux containing this domain, or null. */
 export async function findDockedConfluxForDomain(storage, domainId) {
   const list = await storage.listConfluxes({ status: ['docked'] });
+  return list.find((c) => (c.domainIds || []).includes(domainId)) || null;
+}
+
+/** Approaching или docked conflux домена — оба являются каноном для агентов. */
+export async function findActiveConfluxForDomain(storage, domainId) {
+  const list = await storage.listConfluxes({ status: ['approaching', 'docked'] });
   return list.find((c) => (c.domainIds || []).includes(domainId)) || null;
 }
 

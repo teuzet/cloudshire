@@ -5,6 +5,7 @@ import {
   filterChronicleForDomain,
   formatChronicleScope,
   normalizeDomain,
+  createLoreFact,
 } from './models.js';
 import {
   qualitativePopulation,
@@ -15,7 +16,7 @@ import {
 } from './stats.js';
 import { askLoremaster } from './loremaster.js';
 import { newId } from './ids.js';
-import { assertsIslandsParted } from './conflux.js';
+import { assertsIslandsParted, monthsUntilDock } from './conflux.js';
 import {
   emptyOnboardingDraft,
   validateCityName,
@@ -97,6 +98,94 @@ function stripSpeakerPrefix(text, characterName) {
   return t.trim();
 }
 
+/**
+ * Речь правителя уходит через submit_reply, поэтому обещание дела проверяется
+ * структурно: заявленный commitment сверяется с успешными вызовами хода.
+ */
+function submitReplyTool(turn, character) {
+  const succeeded = (...names) => names.some((n) => turn.okTools.has(n));
+  return {
+    name: 'submit_reply',
+    description:
+      'ЕДИНСТВЕННЫЙ способ ответить покровителю. Вызывай последним, когда все нужные действия уже сделаны. ' +
+      'text — сама речь; requestKind — чего просил покровитель; commitment — что ты реально сделал этим ходом.',
+    parameters: {
+      type: 'object',
+      required: ['text', 'requestKind', 'commitment'],
+      properties: {
+        text: {
+          type: 'string',
+          description: `Речь правителя, 1–3 абзаца, без префикса «${character.name}:», без механики и JSON.`,
+        },
+        requestKind: {
+          type: 'string',
+          enum: ['order_long', 'order_instant', 'question', 'smalltalk', 'other'],
+          description:
+            'order_long — велел долгое дело (стройка, суд, поход); order_instant — велел решение сейчас ' +
+            '(закон, казнь, обряд, назначение); question — спросил; smalltalk — беседа; other — прочее.',
+        },
+        commitment: {
+          type: 'string',
+          enum: ['none', 'process', 'standing_order', 'act', 'revoked', 'refused'],
+          description:
+            'Что сделано этим ходом: process (declare_process/update_process), standing_order, act, ' +
+            'revoked (отменил указ или свернул дело), refused (честно отказал или отговорил), ' +
+            'none (действий не требовалось).',
+        },
+      },
+    },
+    handler: async ({ text, requestKind, commitment }) => {
+      const body = String(text || '').trim();
+      if (body.length < 2) {
+        return toolFail('too_short', 'Речь пустая. Напиши ответ покровителю в text.');
+      }
+      if (commitment === 'process' && !succeeded('declare_process', 'update_process')) {
+        return toolFail(
+          'process_missing',
+          'Ты заявил commitment=process, но дело не создано: declare_process/update_process не выполнен успешно. ' +
+            'Либо вызови declare_process сейчас, либо смени commitment (refused — если отговариваешь, none — если дела не нужно) ' +
+            'и убери из речи обещание долгого дела.',
+        );
+      }
+      if (commitment === 'standing_order' && !succeeded('declare_standing_order')) {
+        return toolFail(
+          'order_missing',
+          'commitment=standing_order, но declare_standing_order не выполнен. Объяви порядок через tool или смени commitment.',
+        );
+      }
+      if (commitment === 'act' && !succeeded('declare_act')) {
+        return toolFail(
+          'act_missing',
+          'commitment=act, но declare_act не выполнен. Соверши деяние через tool или смени commitment.',
+        );
+      }
+      if (commitment === 'revoked' && !succeeded('revoke_order', 'revoke_process')) {
+        return toolFail(
+          'revoke_missing',
+          'commitment=revoked, но отмена не выполнена. Вызови revoke_order (указ) или revoke_process (дело), либо смени commitment.',
+        );
+      }
+      if (requestKind === 'order_long' && commitment === 'none') {
+        return toolFail(
+          'order_ignored',
+          'Покровитель отдал долгий приказ, а ты ничего не предпринял. Либо declare_process (и commitment=process), ' +
+            'либо честно откажи/отговори в речи и поставь commitment=refused.',
+        );
+      }
+      if (requestKind === 'order_instant' && commitment === 'none') {
+        return toolFail(
+          'instant_ignored',
+          'Покровитель велел решение сейчас. Используй declare_act или declare_standing_order (commitment соответственно), ' +
+            'либо откажи в речи с commitment=refused.',
+        );
+      }
+      turn.reply = body;
+      turn.meta = { requestKind, commitment };
+      return { ok: true };
+    },
+  };
+}
+
 /** Сколько подряд tick_news в конце истории без ответа игрока. */
 function countTrailingUnansweredDigests(dialogHistory = []) {
   let n = 0;
@@ -112,6 +201,22 @@ function characterTools(domain, storage, character, ctx) {
   const save = async () => storage.saveDomain(domain);
   normalizeRulerAttitudes(character);
   normalizeDomainProcesses(domain, ctx.config);
+
+  const world = ctx.world || null;
+  /** Мгновенные решения оставляют след в лоре — иначе мир их не замечает. */
+  const pushOrderFact = (text, kind) => {
+    domain.lore = domain.lore || [];
+    const fact = createLoreFact({
+      id: newId('lore'),
+      text,
+      tags: ['fact', kind],
+      gameDateLabel: world?.gameDate?.label || null,
+      tick: world?.tickIndex ?? null,
+      author: `ruler:${character.name}`,
+    });
+    domain.lore.push(fact);
+    return fact;
+  };
 
   return [
     {
@@ -130,7 +235,16 @@ function characterTools(domain, storage, character, ctx) {
         guidance:
           'Отвечай в духе conditionFeel. Числа/id статов и «процесс/pending» игроку не называй. О делах говори по-человечески: что делается и сколько примерно ждать.',
         stateEvents: domain.state.events,
-        stateModifiers: domain.state.modifiers || [],
+        standingOrders: (domain.state.modifiers || []).map((m) => ({
+          id: m.id,
+          text: m.text,
+          kind: m.kind || null,
+          since: m.since || null,
+        })),
+        guidanceOrders:
+          'standingOrders — действующие указы/порядки. Для отмены — revoke_order с этим id ' +
+          'или кратким смыслом. Не объявляй новый указ, если он противоречит действующему: ' +
+          'сначала отмени старый или обнови его.',
         processes: activeProcesses(domain, ctx.config).map((a) => ({
           id: a.id,
           summary: a.summary,
@@ -439,17 +553,20 @@ function characterTools(domain, storage, character, ctx) {
             text: body,
             kind: 'order',
             since: new Date().toISOString(),
+            declaredTick: world?.tickIndex ?? null,
             updatedAt: new Date().toISOString(),
             by: character.name,
           };
           list.push(mod);
+          pushOrderFact(`Действующий указ города: ${body}`, 'edict');
           await save();
           return {
             ok: true,
             created: true,
             modifier: mod,
             hint:
-              'В речи: принял как постоянный порядок, начнут соблюдать. Не объявляй многомесячный срок и не говори «процесс».',
+              'В речи: принял как постоянный порядок, начнут соблюдать. Не объявляй многомесячный срок и не говори «процесс». ' +
+              'Последствия указа город увидит к концу месяца.',
           };
         }
         mod.text = body;
@@ -461,6 +578,101 @@ function characterTools(domain, storage, character, ctx) {
           created: false,
           modifier: mod,
           hint: 'Порядок обновлён. Подтверди в речи коротко.',
+        };
+      },
+    },
+    {
+      name: 'declare_act',
+      description:
+        'Одноразовое деяние СЕЙЧАС (казнь, обряд, вскрыть склады, назначить человека, освободить, объявить праздник). ' +
+        'Не постоянное правило (declare_standing_order) и не многомесячное дело (declare_process). ' +
+        'Пишет событие месяца в state.events; последствия отыграет мир к концу месяца.',
+      parameters: {
+        type: 'object',
+        required: ['text'],
+        properties: {
+          text: {
+            type: 'string',
+            description: 'Что именно сделано сейчас, одной-двумя фразами. Конкретно, без пафоса.',
+          },
+        },
+      },
+      handler: async ({ text }) => {
+        const body = String(text || '').trim().slice(0, 400);
+        if (body.length < 3) {
+          return toolFail(
+            'too_short',
+            'Опиши деяние конкретнее (≥3 символа) и вызови declare_act снова.',
+          );
+        }
+        if (!domain.state) {
+          domain.state = { events: [], modifiers: [], pendingActions: [], patronName: null };
+        }
+        if (!Array.isArray(domain.state.events)) domain.state.events = [];
+        const event = {
+          id: newId('act'),
+          text: body,
+          kind: 'act',
+          by: character.name,
+          declaredTick: world?.tickIndex ?? null,
+          at: new Date().toISOString(),
+        };
+        domain.state.events.push(event);
+        pushOrderFact(`Деяние правителя: ${body}`, 'act');
+        await save();
+        return {
+          ok: true,
+          act: event,
+          hint:
+            'В речи: это сделано сейчас, без месяцев ожидания. Не говори «процесс», «событие», «зафиксировал». ' +
+            'Последствия придут с новостями месяца.',
+        };
+      },
+    },
+    {
+      name: 'revoke_order',
+      description:
+        'Отменить действующий указ / постоянный порядок. orderId — id из read_domain_brief.standingOrders или краткий смысл указа.',
+      parameters: {
+        type: 'object',
+        required: ['orderId'],
+        properties: {
+          orderId: { type: 'string', description: 'Id (mod_…) или ключевые слова указа' },
+          reason: { type: 'string' },
+        },
+      },
+      handler: async ({ orderId, reason }) => {
+        const list = Array.isArray(domain.state?.modifiers) ? domain.state.modifiers : [];
+        const key = String(orderId || '').trim().toLowerCase();
+        if (!key) {
+          return toolFail('order_required', 'Передай orderId указа из read_domain_brief.standingOrders.');
+        }
+        let mod = list.find((m) => String(m.id).toLowerCase() === key);
+        if (!mod) {
+          mod = list.find((m) => String(m.text || '').toLowerCase().includes(key.slice(0, 40)));
+        }
+        if (!mod) {
+          return {
+            ok: false,
+            error: 'order_not_found',
+            standingOrders: list.map((m) => ({ id: m.id, text: m.text })),
+            agentMessage:
+              'Указ не найден. Возьми id из списка ниже и вызови revoke_order снова. ' +
+              'Не говори покровителю, что такого порядка нет, если список не пуст.\n' +
+              (list.map((m) => `- ${m.id}: ${m.text}`).join('\n') || '(указов нет)'),
+          };
+        }
+        domain.state.modifiers = list.filter((m) => m.id !== mod.id);
+        pushOrderFact(
+          `Указ отменён: ${mod.text}${reason ? ` (причина: ${reason})` : ''}`,
+          'edict',
+        );
+        await save();
+        return {
+          ok: true,
+          revokedId: mod.id,
+          text: mod.text,
+          hint: 'В речи: порядок отменён по воле покровителя. Коротко, без механики.',
         };
       },
     },
@@ -713,7 +925,7 @@ export class GameApp {
       return this.runOnboarding(userId, text, { channel, bootstrap, log });
     }
 
-    return this.runRuler(domain, text, { channel, log });
+    return this.runRuler(domain, text, { channel, log, world });
   }
 
   startDomainGeneration(userId, { channel, forcedName, forcedTagChoices, playerBrief }) {
@@ -1323,12 +1535,66 @@ export class GameApp {
     };
   }
 
-  async runRuler(domain, text, { channel, log: parentLog }) {
+  /**
+   * Канон текущей стыковки для речи правителя: сосед реальный, его имя можно называть.
+   * Без этого блока safety-контракт заставляет правителя отмалчиваться про чужой остров.
+   */
+  async buildConfluxCanon(domain, world) {
+    let list = [];
+    try {
+      list = await this.storage.listConfluxes({ status: ['approaching', 'docked'] });
+    } catch {
+      return '';
+    }
+    const conflux = list.find((c) => (c.domainIds || []).includes(domain.id));
+    if (!conflux) return '';
+
+    const partnerId = (conflux.domainIds || []).find((id) => id !== domain.id);
+    let partnerName = 'чужой остров';
+    if (partnerId) {
+      const partner = await this.storage.getDomain(partnerId).catch(() => null);
+      if (partner?.name) partnerName = `«${partner.name}»`;
+    }
+
+    if (conflux.status === 'approaching') {
+      const left = monthsUntilDock(conflux, world);
+      return [
+        'КАНОН СТЫКОВКИ (реальность, не слух — говори об этом открыто и по имени):',
+        `К острову приближается чужой летающий остров — город ${partnerName}.`,
+        `До стыковки примерно ${left} мес. Событие неизбежно, это крупнейшая новость города.`,
+        conflux.rematch
+          ? 'Это ПОВТОРНАЯ стыковка: острова уже сходились раньше, город это помнит.'
+          : 'Такого сближения город прежде не знал (с этим соседом).',
+        'Если покровитель спрашивает про чужой остров — отвечай прямо: имя, срок, что это значит.',
+        'ЗАПРЕЩЕНО говорить «не готов называть имя», «лишь слухи», «не знаю о чужих островах».',
+        'Этот канон СИЛЬНЕЕ ответов лормастера: если он скажет «не подтверждено» — верь канону.',
+      ]
+        .filter(Boolean)
+        .join('\n');
+    }
+
+    const contact = conflux.contact?.description
+      ? `Характер стыка: ${conflux.contact.description}`
+      : '';
+    return [
+      'КАНОН СТЫКОВКИ (идёт СЕЙЧАС — говори открыто и по имени):',
+      `Остров состыкован с чужим островом — городом ${partnerName}.`,
+      contact,
+      `Стык длится ${conflux.monthsDocked || 0} мес. из ожидаемых ${conflux.durationMonths || '?'}.`,
+      conflux.rematch ? 'Это повторная стыковка с этим соседом.' : '',
+      'ЗАПРЕЩЕНО отрицать существование соседа или отказываться называть его имя.',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  async runRuler(domain, text, { channel, log: parentLog, world: worldArg = null }) {
     const log = (parentLog || getLogger()).child({
       scope: 'ruler',
       domainId: domain.id,
       domainName: domain.name,
     });
+    const world = worldArg || (await this.storage.getWorld());
     log.info('ruler.turn', { text: truncate(text, 400) });
     normalizeDomain(domain);
     const character = domain.characters[0];
@@ -1349,12 +1615,19 @@ export class GameApp {
           'Суть: чужой ЛЕТАЮЩИЙ ОСТРОВ ушёл в небо. Мост/переход кончился потому, что края островов разъехались — не «просто мостик обвалился».',
         ].join('\n')
       : '';
+    const confluxCanon = await this.buildConfluxCanon(domain, world);
     const plotBrief = formatPlotBriefForSpeech(domain);
+    const dateLine = world?.gameDate?.label
+      ? `СЕЙЧАС: ${world.gameDate.label}. Месяц сменяется только ходом мира. ` +
+        'Если покровитель говорит, что прошло больше времени, чем есть — почтительно поправь по этой дате.'
+      : '';
     const extraSystem = [
       `Ты ${character.name}, ${character.title || 'правитель'} города «${domain.name}».`,
       character.description,
       this.config.world.cosmology || '',
+      dateLine,
       patronLine,
+      confluxCanon,
       undockCanon,
       'ОБСТОЯТЕЛЬСТВА ГОРОДА СЕЙЧАС (внутренняя правда; числа игроку не называй):',
       `Население: ${qualitativePopulation(domain.population || 0)}`,
@@ -1373,73 +1646,89 @@ export class GameApp {
       'По ходу разговора при заметном жесте — adjust_loyalty и/или adjust_terror.',
       'Форма: 1–3 абзаца живой прозы. Без списков, markdown, канцелярита, английских слов, сервисных «чем помочь».',
       `ЗАПРЕЩЕНО начинать ответ с «${character.name}:» или любого «Имя:» — пиши сразу речь.`,
-      'Постоянные приказы без стройки (запреты, осмотры, правила) → declare_standing_order, не declare_process.',
+      'Мгновенные решения: постоянное правило → declare_standing_order; одноразовое деяние сейчас → declare_act.',
       'Долгие дела: declare_process (срок + linkedStats). Если покровитель сказал «в этом месяце» — отрази в detail, expectedMonths=1; не раздувай срок. Если нереально — честно возрази ДО declare.',
       'Не дублируй уже идущую смысловую нить (второй суд, вторая та же стройка) — update/revoke.',
       'Если declare_process вернул отказ (слишком много дел) — придумай отмазку; новое дело не обещай.',
       'ЗАПРЕЩЕНО в речи: «намерение объявлено», «процесс запущен», pending, declare, JSON.',
       'Факты лормастера перескажи своими словами.',
       'Если покровитель просит сменить имя/обращение — set_patron_name, затем подтверди.',
+      'ОТВЕТ ТОЛЬКО через submit_reply — последним вызовом, после всех нужных действий.',
     ]
       .filter(Boolean)
       .join('\n');
 
+    const turn = { okTools: new Set(), reply: null, meta: null };
+    const baseTools = characterTools(domain, this.storage, character, {
+      config: this.config,
+      runtime: this.runtime,
+      world,
+    });
+    const tools = [
+      ...baseTools.map((tool) => ({
+        ...tool,
+        handler: async (...args) => {
+          const res = await tool.handler(...args);
+          if (res && res.ok !== false) turn.okTools.add(tool.name);
+          return res;
+        },
+      })),
+      submitReplyTool(turn, character),
+    ];
+
     const result = await this.runtime.run({
       agentId: 'ruler',
       userMessages: [...history, { role: 'user', content: text }],
-      tools: characterTools(domain, this.storage, character, {
-        config: this.config,
-        runtime: this.runtime,
-      }),
+      tools,
       extraSystem,
+      maxTurns: 10,
       log,
       scene: 'ruler',
       domainId: domain.id,
     });
 
-    let reply = result.text || '';
-    if (looksLikeToolDump(reply)) {
-      log.warn('ruler.tool_dump_sanitized', { preview: truncate(reply, 200) });
-      const retry = await this.runtime.run({
+    if (!turn.reply) {
+      log.warn('ruler.no_submit_reply', { preview: truncate(result.text, 200) });
+      await this.runtime.run({
         agentId: 'ruler',
         userMessages: [
           ...history,
           { role: 'user', content: text },
           {
-            role: 'assistant',
-            content: '(черновик отклонён: похож на вызов инструмента, не на речь)',
-          },
-          {
             role: 'user',
             content:
-              'Перепиши ответ обычной речью правителя по-русски, 1–3 абзаца. ' +
-              'Без tools.*, JSON, declare_action и англоязычного мусора. ' +
-              `Не начинай с «${character.name}:». ` +
-              'Если нужно действие — оно уже могло уйти через tools; в речи только намерение.',
+              'Ответ не принят: речь передаётся только через submit_reply. Вызови его сейчас. ' +
+              'Если дела ты не заводил — commitment=none (или refused, если отговариваешь), ' +
+              'и в речи не обещай долгих работ.',
           },
         ],
-        tools: [],
-        maxTurns: 1,
+        tools,
+        maxTurns: 4,
+        toolChoice: { type: 'function', function: { name: 'submit_reply' } },
         extraSystem,
         log,
-        scene: 'ruler_retry',
+        scene: 'ruler_submit_retry',
         domainId: domain.id,
       });
-      reply = retry.text || '';
-      if (looksLikeToolDump(reply) || !String(reply).trim()) {
-        reply =
-          `${patronName || 'Покровитель'}, прости — мысль сбилась. ` +
-          'Повтори волю коротко, и я исполню без путаницы.';
-      }
+    }
+
+    let reply = turn.reply || result.text || '';
+    if (!String(reply).trim() || looksLikeToolDump(reply)) {
+      log.warn('ruler.reply_unusable', { preview: truncate(reply, 200) });
+      reply =
+        `${patronName || 'Покровитель'}, прости — мысль сбилась. ` +
+        'Повтори волю коротко, и я исполню без путаницы.';
     }
     reply = stripSpeakerPrefix(reply, character.name);
 
     const fresh = await this.storage.getDomain(domain.id);
     await this.persistDialog(fresh, 'user', text);
-    await this.persistDialog(fresh, 'assistant', reply);
+    await this.persistDialog(fresh, 'assistant', reply, { meta: turn.meta });
 
     log.info('ruler.reply', {
       replyPreview: truncate(reply, 400),
+      requestKind: turn.meta?.requestKind || null,
+      commitment: turn.meta?.commitment || null,
       tools: (result.toolTrace || []).map((t) => ({
         name: t.name,
         ok: t.result?.ok !== false,
@@ -1450,6 +1739,7 @@ export class GameApp {
       reply,
       domainId: fresh.id,
       agent: 'ruler',
+      turnMeta: turn.meta,
       toolTrace: result.toolTrace,
       channel,
     };
@@ -1494,6 +1784,37 @@ export class GameApp {
         ].join(' ')
       : '';
 
+    // Эмоциональный регистр письма: тяжесть месяца + отношение к покровителю.
+    const worstDrop = forNews.reduce((min, c) => {
+      if (!c.statChanges) return min;
+      for (const v of Object.values(c.statChanges)) {
+        const delta = Number(v?.to) - Number(v?.from);
+        if (Number.isFinite(delta) && delta < min) min = delta;
+      }
+      return min;
+    }, 0);
+    const hasCritical = forNews.some((c) => c.importance === 'critical');
+    const loyalty = Number(character.loyalty ?? 50);
+    const terror = Number(character.terror ?? 50);
+    const moodHint = [
+      hasCritical || worstDrop <= -6
+        ? 'Месяц тяжёлый: пиши тяжело, без утешительных формул и сглаживания.'
+        : 'Месяц без катастроф: тон спокойнее, но не безразличный.',
+      loyalty >= 70
+        ? 'Ты преданно любишь покровителя — пиши теплее и откровеннее, можно личное признание.'
+        : loyalty <= 30
+          ? 'Ты разочарован в покровителе — суше, с горечью, без лести.'
+          : '',
+      terror >= 70
+        ? 'Ты боишься его гнева — осторожность, оглядка, страх сказать лишнее.'
+        : terror <= 25
+          ? 'Ты почти не трепещешь — говоришь прямее, местами устало.'
+          : '',
+      'Смени зачин: не начинай так же, как в прошлых письмах.',
+    ]
+      .filter(Boolean)
+      .join(' ');
+
     const unanswered = countTrailingUnansweredDigests(character.dialogHistory || []);
     const askPresence = unanswered >= 2;
     const presenceHint = askPresence
@@ -1501,6 +1822,17 @@ export class GameApp {
           'ВАЖНО: покровитель молчит уже несколько месяцев подряд (не отвечал после прошлых писем о месяце).',
           'В конце письма коротко, по-человечески спроси: слышит ли он тебя ещё, не оставил ли город без знака.',
           'Без истерики и без сервисного тона — тревога слуги, 1–2 предложения.',
+        ].join(' ')
+      : '';
+
+    // Записи про стыковку (сближение/стык) — главная нить письма, если они есть.
+    const confluxAdds = forNews.filter((c) => (c.tags || []).includes('conflux'));
+    const confluxLead = confluxAdds.length && !opts.undock
+      ? [
+          'ГЛАВНОЕ СОБЫТИЕ МЕСЯЦА — чужой летающий остров (сближение или стык).',
+          'Начни письмо с него и говори прямо: назови город соседа, срок или характер стыка.',
+          'Это не примета и не слух — покровитель должен понять масштаб.',
+          'Прочие дела — коротко, после.',
         ].join(' ')
       : '';
 
@@ -1535,13 +1867,18 @@ export class GameApp {
               'Напиши покровителю письмо о месяце — вольный пересказ, НЕ дайджест и НЕ отчёт.',
               undockHint
                 ? 'Сделай уход чужого острова в небо центральной нитью письма.'
-                : 'Бюджет письма: одна главная нить (дело/прорыв) и при желании один побочный штрих. Остальное опусти.',
+                : confluxLead
+                  ? 'Сделай чужой остров центральной нитью письма.'
+                  : 'Бюджет письма: одна-две нити (дело, прорыв, беда) и при желании штрих. Мелочь опусти.',
+              'ОБЯЗАТЕЛЬНО упомяни каждую запись с пометкой [critical] — это события, которые город не может не заметить.',
               'Связная проза от первого лица, 1–3 коротких абзаца. Без списков, markdown, нумерации, канцелярита.',
               `Не начинай с «${character.name}:» — сразу текст письма.`,
               'Не копируй формулировки хроники. Не упоминай статы и механики.',
               addressHint,
+              moodHint,
               presenceHint,
               scopeHint,
+              confluxLead,
               undockHint,
               extraUserNote,
               '',
@@ -1593,7 +1930,7 @@ export class GameApp {
     return stripSpeakerPrefix(letter, character.name);
   }
 
-  async persistDialog(domain, role, content, { kind = null } = {}) {
+  async persistDialog(domain, role, content, { kind = null, meta = null } = {}) {
     const character = domain.characters[0];
     if (!character) return;
     character.dialogHistory = character.dialogHistory || [];
@@ -1603,6 +1940,7 @@ export class GameApp {
       at: new Date().toISOString(),
     };
     if (kind) entry.kind = kind;
+    if (meta) entry.meta = meta;
     character.dialogHistory.push(entry);
     if (character.dialogHistory.length > 200) {
       character.dialogHistory = character.dialogHistory.slice(-150);

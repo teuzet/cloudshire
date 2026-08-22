@@ -69,10 +69,11 @@ export function formatChroniclePromptBlock(domain, config = null) {
   return parts.join('\n\n');
 }
 
-/** Только устойчивые fact-записи (не chronicle) — для лормастера. */
+/** Только устойчивые fact-записи (не chronicle, не снятые) — для лормастера. */
 export function formatFactsForPrompt(lore = [], { limit = 40 } = {}) {
   const facts = (lore || []).filter((f) => {
     const tags = f.tags || [];
+    if (f.retiredAt) return false;
     return tags.includes('fact') && !tags.includes('chronicle');
   });
   const slice = facts.slice(-limit);

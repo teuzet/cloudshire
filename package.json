@@ -9,7 +9,8 @@
     "cli": "node src/cli.js",
     "web": "node src/index.js",
     "playtest": "node src/cli.js playtest",
-    "tokens": "node scripts/token-report.js"
+    "tokens": "node scripts/token-report.js",
+    "report": "node scripts/world-report.js"
   },
   "engines": {
     "node": ">=20"

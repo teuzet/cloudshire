@@ -1,7 +1,7 @@
 import { newId } from './ids.js';
 import { createLoreFact } from './models.js';
 import { formatChroniclePromptBlock, formatFactsForPrompt } from './memory.js';
-import { findDockedConfluxForDomain } from './conflux.js';
+import { findActiveConfluxForDomain, monthsUntilDock } from './conflux.js';
 import { getLogger, truncate } from '../log.js';
 
 function visibleLoreForDomain(lore, domainId) {
@@ -54,7 +54,9 @@ export async function askLoremaster({
   const addedFacts = [];
   let answers = null;
 
-  const conflux = await findDockedConfluxForDomain(storage, working.id);
+  // approaching тоже канон: сближение чужого острова — подтверждённый факт мира.
+  const conflux = await findActiveConfluxForDomain(storage, working.id);
+  const docked = conflux?.status === 'docked';
   let partner = null;
   if (conflux) {
     const otherId = (conflux.domainIds || []).find((id) => id !== working.id);
@@ -80,29 +82,57 @@ export async function askLoremaster({
         const payload = {
           ok: true,
           cosmology: config.world.cosmology,
+          gameDate: world.gameDate,
           domainName: working.name,
           ruler: working.characters?.[0]?.name,
           description,
           chronicle: formatChroniclePromptBlock({ ...working, lore: visible }, config),
           facts: formatFactsForPrompt(visible, { limit: 36 }),
+          // Без состояния лормастер противоречит сам себе («переписи нет», пока процесс идёт).
+          standingOrders: (working.state?.modifiers || []).map((m) => m.text),
+          currentEvents: (working.state?.events || []).map((e) =>
+            typeof e === 'string' ? e : e?.text,
+          ),
+          activeProcesses: (working.state?.pendingActions || [])
+            .filter((a) => a.status === 'active')
+            .map((a) => ({
+              summary: a.summary,
+              monthsLeft: a.monthsLeft,
+              expectedMonths: a.expectedMonths,
+            })),
           reminder:
-            'Если хроника упоминает явление без деталей — add_fact с конкретными именами/деталями. «Неизвестно» при уже упомянутом явлении запрещено. Полный архив хроники не приложен — digest+recent.',
+            'Если хроника упоминает явление без деталей — add_fact с конкретными именами/деталями. ' +
+            '«Неизвестно» при уже упомянутом явлении запрещено. Полный архив хроники не приложен — digest+recent. ' +
+            'Факт, противоречащий хронике или текущему состоянию, — устарел: update_fact или retire_fact.',
         };
 
         if (conflux) {
           payload.conflux = {
             id: conflux.id,
             status: conflux.status,
-            contact: conflux.contact,
-            sharedLoreRecent: (conflux.sharedLore || []).slice(-8).map((f) => ({
+            partnerName: partner?.name || null,
+            rematch: Boolean(conflux.rematch),
+          };
+          if (docked) {
+            payload.conflux.contact = conflux.contact;
+            payload.conflux.monthsDocked = conflux.monthsDocked || 0;
+            payload.conflux.durationMonths = conflux.durationMonths || null;
+            payload.conflux.sharedLoreRecent = (conflux.sharedLore || []).slice(-8).map((f) => ({
               date: f.gameDateLabel,
               text: f.text,
-            })),
-          };
-          if (partner) {
-            payload.partner = partnerBrief(partner, working.id);
+            }));
+            if (partner) {
+              payload.partner = partnerBrief(partner, working.id);
+              payload.reminder +=
+                ' Соседний остров на стыке — реальный; чужие secret тебе не видны. Не выдумывай третий остров.';
+            }
+          } else {
+            payload.conflux.monthsUntilDock = monthsUntilDock(conflux, world);
             payload.reminder +=
-              ' Соседний остров на стыке — реальный; чужие secret тебе не видны. Не выдумывай третий остров.';
+              ` СБЛИЖЕНИЕ ПОДТВЕРЖДЕНО: чужой остров${partner?.name ? ` «${partner.name}»` : ''}` +
+              ` реально приближается, стыковка примерно через ${monthsUntilDock(conflux, world)} мес.` +
+              ' Это факт мира, а не слух. Отвечать «не подтверждено» ЗАПРЕЩЕНО.' +
+              ' Про внутреннюю жизнь соседа сведений пока нет — только сам факт и срок.';
           }
         }
 
@@ -136,6 +166,81 @@ export async function askLoremaster({
         addedFacts.push(fact);
         log.info('loremaster.add_fact', { factId: fact.id, text: truncate(text, 300) });
         return { ok: true, factId: fact.id };
+      },
+    },
+    {
+      name: 'update_fact',
+      description:
+        'Переписать устаревший факт (например, событие уже произошло или условие изменилось). factId — id из facts.',
+      parameters: {
+        type: 'object',
+        required: ['factId', 'text'],
+        properties: {
+          factId: { type: 'string', description: 'Id факта (lore_…)' },
+          text: { type: 'string', description: 'Новая формулировка: сухо, 1–2 фразы' },
+          reason: { type: 'string', description: 'Чем прежний факт противоречит хронике/состоянию' },
+        },
+      },
+      handler: async ({ factId, text, reason }) => {
+        const body = String(text || '').trim();
+        const fact = (working.lore || []).find((f) => f.id === factId);
+        if (!fact) {
+          return {
+            ok: false,
+            error: 'fact_not_found',
+            agentMessage:
+              'Факт с таким id не найден. Возьми id из facts в read_lore или создай новый через add_fact.',
+          };
+        }
+        if (body.length < 3) {
+          return {
+            ok: false,
+            error: 'too_short',
+            agentMessage: 'Новая формулировка слишком короткая. Напиши сухой факт в 1–2 фразы.',
+          };
+        }
+        fact.previousText = fact.text;
+        fact.text = body;
+        fact.updatedTick = world.tickIndex;
+        fact.updatedAt = new Date().toISOString();
+        if (reason) fact.updateReason = String(reason).slice(0, 300);
+        log.info('loremaster.update_fact', { factId, text: truncate(body, 200) });
+        return { ok: true, factId };
+      },
+    },
+    {
+      name: 'retire_fact',
+      description:
+        'Снять факт, который больше не верен (событие отменено, условие исчезло). Факт не удаляется, а помечается устаревшим.',
+      parameters: {
+        type: 'object',
+        required: ['factId'],
+        properties: {
+          factId: { type: 'string', description: 'Id факта (lore_…)' },
+          reason: { type: 'string' },
+          supersededByFactId: {
+            type: 'string',
+            description: 'Id нового факта, если он уже создан через add_fact',
+          },
+        },
+      },
+      handler: async ({ factId, reason, supersededByFactId }) => {
+        const fact = (working.lore || []).find((f) => f.id === factId);
+        if (!fact) {
+          return {
+            ok: false,
+            error: 'fact_not_found',
+            agentMessage: 'Факт с таким id не найден. Возьми id из facts в read_lore.',
+          };
+        }
+        fact.retiredAt = new Date().toISOString();
+        fact.retiredTick = world.tickIndex;
+        if (reason) fact.retireReason = String(reason).slice(0, 300);
+        if (supersededByFactId) fact.supersededBy = supersededByFactId;
+        if (!Array.isArray(fact.tags)) fact.tags = [];
+        if (!fact.tags.includes('retired')) fact.tags.push('retired');
+        log.info('loremaster.retire_fact', { factId, reason: truncate(reason, 200) });
+        return { ok: true, factId };
       },
     },
     {
@@ -175,14 +280,22 @@ export async function askLoremaster({
     confluxId: conflux?.id || null,
   });
 
-  const dockHint = conflux
-    ? [
-        '',
-        `Сейчас стык (conflux ${conflux.id}) с соседом` +
-          (partner ? ` «${partner.name}»` : '') +
-          '. В read_lore есть contact и краткий partner brief без чужих тайн.',
-      ].join('\n')
-    : '';
+  const dockHint = !conflux
+    ? ''
+    : docked
+      ? [
+          '',
+          `Сейчас стык (conflux ${conflux.id}) с соседом` +
+            (partner ? ` «${partner.name}»` : '') +
+            '. В read_lore есть contact и краткий partner brief без чужих тайн.',
+        ].join('\n')
+      : [
+          '',
+          `К острову ПОДТВЕРЖДЁННО приближается чужой остров${partner ? ` «${partner.name}»` : ''}; ` +
+            `стыковка примерно через ${monthsUntilDock(conflux, world)} мес. Это факт мира.`,
+          'Отвечать «сближение не подтверждено» или «таких сведений нет» ЗАПРЕЩЕНО.',
+          'О внутренней жизни соседа сведений пока нет — только факт сближения и срок.',
+        ].join('\n');
 
   await runtime.run({
     agentId: 'loremaster',
@@ -198,7 +311,8 @@ export async function askLoremaster({
           'Вопросы:',
           qText || '(нет вопросов)',
           '',
-          'Порядок: read_lore → при пробелах add_fact (СУХО, без пафоса) → submit_answers.',
+          'Порядок: read_lore → при пробелах add_fact (СУХО, без пафоса), при противоречиях update_fact / retire_fact → submit_answers.',
+          'Перед ответом сверь факты с хроникой и состоянием: устаревшие обнови или сними, не пересказывай их как правду.',
           'Факты как справочник, не проза. Пример: «Местный продукт — виноград; сладкий, тонкая кожица.»',
         ]
           .filter((line) => line !== undefined)

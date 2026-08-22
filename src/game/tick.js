@@ -113,6 +113,15 @@ export async function resolveDomainTick({
   if (!Array.isArray(working.state.modifiers)) working.state.modifiers = [];
   if (!Array.isArray(working.state.events)) working.state.events = [];
 
+  // Мгновенные решения правителя за этот месяц: мир обязан на них отреагировать.
+  const declaredSinceTick = Math.max(0, (world.tickIndex || 0) - 1);
+  const newEdicts = working.state.modifiers.filter(
+    (m) => Number.isInteger(m.declaredTick) && m.declaredTick >= declaredSinceTick,
+  );
+  const newActs = working.state.events.filter(
+    (e) => e && e.kind === 'act' && Number.isInteger(e.declaredTick) && e.declaredTick >= declaredSinceTick,
+  );
+
   const tools = [
     {
       name: 'read_context',
@@ -131,6 +140,8 @@ export async function resolveDomainTick({
         population: working.population,
         stateEvents: working.state.events,
         stateModifiers: working.state.modifiers,
+        newEdictsThisMonth: newEdicts.map((m) => ({ id: m.id, text: m.text })),
+        newActsThisMonth: newActs.map((e) => ({ id: e.id, text: e.text })),
         processes: processList.map((p) => ({
           id: p.id,
           summary: p.summary,
@@ -156,6 +167,8 @@ export async function resolveDomainTick({
             'Если хроника говорит «готово/сорвано» — complete/cancel в том же тике. ' +
             'ЗАСТОЙ(0)/РЫВОК(2) обязательно обыграй. cancel_process если сорвано. ' +
             'ПРОРЫВЫ плотлайнов — первыми; связанные процессы прорыва затронь. Постоянные итоги → upsert_modifier. ' +
+            'УКАЗЫ/ДЕЯНИЯ месяца (newEdictsThisMonth / newActsThisMonth) — воля покровителя уже исполнена: ' +
+            'отыграй последствие хотя бы одного, со статами; конфликт с действующим порядком показывай как конфликт. ' +
             'Полный лор не приложен — опирайся на chronicle (digest+recent), описание и state.',
         },
       }),
@@ -462,6 +475,16 @@ export async function resolveDomainTick({
     'Процессы:',
     processBlock,
     '',
+    newEdicts.length || newActs.length
+      ? [
+          'МГНОВЕННЫЕ РЕШЕНИЯ ЭТОГО МЕСЯЦА (уже исполнены — нужны последствия, не пересказ):',
+          ...newEdicts.map((m) => `- указ: ${m.text}`),
+          ...newActs.map((e) => `- деяние: ${e.text}`),
+          'ОБЯЗАТЕЛЬНО: хотя бы одна запись хроники со statDeltas про последствие одного из них.',
+          'Если решение противоречит действующему порядку или бьёт по людям — покажи конфликт, а не одобрение.',
+          '',
+        ].join('\n')
+      : null,
     `Затем не больше ${sideMax} побочных событий (бюджет месяца ~${eventTarget} записей вместе с процессами).`,
     'Если в хронике процесс «завершён/построен/окончен» — complete=true в том же тике.',
     `Статы — только statDeltas: обычно ≤±${deltaTypical}; при катастрофе — без потолка.`,
@@ -568,6 +591,13 @@ export async function resolveDomainTick({
     domain: working,
     chronicleAdds,
   };
+}
+
+/** Игровая дата шапкой у письма месяца (только в отправке, не в dialogHistory). */
+function withDateHeader(text, world) {
+  const label = world?.gameDate?.label;
+  if (!label) return text;
+  return `— ${label} —\n\n${text}`;
 }
 
 export async function runWorldTick({ config, runtime, storage, app }) {
@@ -695,7 +725,7 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
           partnerName,
         });
         await app.persistDialog(domain, 'assistant', news, { kind: 'tick_news' });
-        await app.emitOutbound(domain.ownerUserId, news, {
+        await app.emitOutbound(domain.ownerUserId, withDateHeader(news, world), {
           agent: 'ruler',
           domainId: domain.id,
           kind: 'tick_news',
@@ -795,7 +825,7 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
       );
       const news = await app.narrateTickNews(resolved.domain, newsAdds, world.gameDate);
       await app.persistDialog(resolved.domain, 'assistant', news, { kind: 'tick_news' });
-      await app.emitOutbound(resolved.domain.ownerUserId, news, {
+      await app.emitOutbound(resolved.domain.ownerUserId, withDateHeader(news, world), {
         agent: 'ruler',
         domainId: resolved.domain.id,
         kind: 'tick_news',

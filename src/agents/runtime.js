@@ -69,8 +69,10 @@ export class AgentRuntime {
     const slog = log.child({ runId });
     const runStarted = Date.now();
 
+    // Контракт безопасности нужен только агентам, говорящим с игроком.
+    // Системные агенты (resolver/director/genesis/loremaster) общаются с движком.
     const systemContent = [
-      this.config.agentSafety || '',
+      agent.safety ? this.config.agentSafety || '' : '',
       agent.instructions,
       extraSystem,
     ]
