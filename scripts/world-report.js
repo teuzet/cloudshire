@@ -172,6 +172,8 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
   const commitments = {};
   let orders = 0;
   let ordersHonored = 0;
+  let impossible = 0;
+  let impossibleHeld = 0;
   for (const m of turns) {
     const c = m.meta.commitment;
     commitments[c] = (commitments[c] || 0) + 1;
@@ -179,9 +181,19 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
       orders += 1;
       if (c !== 'none') ordersHonored += 1;
     }
+    if (m.meta.requestKind === 'order_impossible') {
+      impossible += 1;
+      if (c === 'refused') impossibleHeld += 1;
+    }
   }
   if (orders && ordersHonored < orders) {
     flags.push([WARN, `приказов ${orders}, из них без действия ${orders - ordersHonored}`]);
+  }
+  if (impossible) {
+    flags.push([
+      impossibleHeld === impossible ? GOOD : BAD,
+      `приказов вне законов мира ${impossible}, канон устоял ${impossibleHeld}`,
+    ]);
   }
   const retiredFacts = (domain.lore || []).filter((f) => f.retiredAt).length;
 
@@ -315,7 +327,14 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
       lastUserAt: lastUser?.at || null,
       lastAnyAt: lastAny?.at || null,
     },
-    turnMeta: { turns: turns.length, orders, ordersHonored, commitments },
+    turnMeta: {
+      turns: turns.length,
+      orders,
+      ordersHonored,
+      impossible,
+      impossibleHeld,
+      commitments,
+    },
     retiredFacts,
     processes: processes.map((p) => ({
       title: procName(p),
@@ -389,7 +408,10 @@ function printDomain(rep, { dialogTail = 0, dialog = [] } = {}) {
       .join(', ');
     console.log(
       `ходы правителя: ${rep.turnMeta.turns} (${parts}) · приказов ${rep.turnMeta.orders}, ` +
-        `с действием ${rep.turnMeta.ordersHonored}`,
+        `с действием ${rep.turnMeta.ordersHonored}` +
+        (rep.turnMeta.impossible
+          ? ` · невозможных ${rep.turnMeta.impossible}, отбито ${rep.turnMeta.impossibleHeld}`
+          : ''),
     );
   }
 

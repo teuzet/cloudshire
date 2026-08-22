@@ -1,6 +1,6 @@
 import { newId } from './ids.js';
 import { createLoreFact } from './models.js';
-import { formatChroniclePromptBlock, formatFactsForPrompt } from './memory.js';
+import { formatFullChronicleForPrompt, formatFactsForPrompt } from './memory.js';
 import { findActiveConfluxForDomain, monthsUntilDock } from './conflux.js';
 import { getLogger, truncate } from '../log.js';
 
@@ -86,8 +86,9 @@ export async function askLoremaster({
           domainName: working.name,
           ruler: working.characters?.[0]?.name,
           description,
-          chronicle: formatChroniclePromptBlock({ ...working, lore: visible }, config),
-          facts: formatFactsForPrompt(visible, { limit: 36 }),
+          // Лормастеру нужна вся история: часть фактов выводится только из неё.
+          chronicle: formatFullChronicleForPrompt({ ...working, lore: visible }),
+          facts: formatFactsForPrompt(visible, { limit: 60 }),
           // Без состояния лормастер противоречит сам себе («переписи нет», пока процесс идёт).
           standingOrders: (working.state?.modifiers || []).map((m) => m.text),
           currentEvents: (working.state?.events || []).map((e) =>
@@ -101,8 +102,10 @@ export async function askLoremaster({
               expectedMonths: a.expectedMonths,
             })),
           reminder:
+            'Хроника приложена целиком — это твой главный источник. Ты её только читаешь: ' +
+            'писать и менять записи хроники нельзя, твой инструмент — факты. ' +
             'Если хроника упоминает явление без деталей — add_fact с конкретными именами/деталями. ' +
-            '«Неизвестно» при уже упомянутом явлении запрещено. Полный архив хроники не приложен — digest+recent. ' +
+            '«Неизвестно» при уже упомянутом явлении запрещено. ' +
             'Факт, противоречащий хронике или текущему состоянию, — устарел: update_fact или retire_fact.',
         };
 
@@ -305,7 +308,6 @@ export async function askLoremaster({
         content: [
           `Спрашивает: ${asker}`,
           `Город: ${working.name}`,
-          config.world.cosmology || '',
           dockHint,
           '',
           'Вопросы:',

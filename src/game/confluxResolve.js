@@ -254,16 +254,18 @@ export async function resolveConfluxTick({
           scope:
             'У каждой записи обязательны location (где) и concernsDomainIds (кого касается). Внутренний сюжет одного города — не secret, но location+concerns указывают его город.',
           note:
-            `Статы через statDeltas + domainId: обычно ±1…${deltaTypical}; при катастрофе — любая величина (разорение → prosperity ≈0). Итог 0–100. ` +
-            'Pending: chronicle + advance/cancel. Если хроника «готово» — complete в том же тике. ' +
-            'ПРОРЫВЫ — первыми; связанные процессы затронь. Смело, не статус-кво.',
+            'Процессы: chronicle + advance/cancel. Если хроника «готово» — complete в том же тике. ' +
+            'ПРОРЫВЫ — первыми; связанные процессы затронь. ' +
+            'Смело, но не одноцветно: у месяца бывают выигрыш, цена и двойственный итог.',
         },
       }),
     },
     {
       name: 'add_chronicle',
       description:
-        `Хроника стыка/месяца. location + concernsDomainIds обязательны. statDeltas обычно ≤±${deltaTypical}; при катастрофе — без потолка.`,
+        'Хроника стыка/месяца. location + concernsDomainIds обязательны. ' +
+        `statDeltas: обычно ±1…${deltaTypical}, при катастрофе без потолка (итог 0–100). ` +
+        'Положительные дельты — такой же нормальный исход, как отрицательные.',
       parameters: {
         type: 'object',
         required: ['text', 'importance', 'location', 'concernsDomainIds'],
@@ -665,9 +667,9 @@ export async function resolveConfluxTick({
     'secret только для явно тайных операций; secretForDomainId = id заказчика.',
     'Каждая add_chronicle: location (где) + concernsDomainIds (1–2 id городов пары).',
     'Локальный сюжет одного города — публично ок, но concerns = только его id и location в его городе.',
-    'Учитывай contact. Будь смелым: стык должен жить, не статус-кво. Можно ломать чужие pending.',
-    `Статы: обычно ≤±${deltaTypical}; при катастрофе — обвал/взлёт без потолка (итог 0–100).`,
-    'Не выдумывай третьи острова. Текст: OK.',
+    'Учитывай contact. Будь смелым: стык должен жить, не статус-кво. Можно ломать чужие процессы.',
+    'Смело — не значит «всем хуже»: сделка, находка и договор двигают месяц не меньше беды.',
+    'Не выдумывай третьи острова.',
   ]
     .filter((line) => line != null)
     .join('\n');

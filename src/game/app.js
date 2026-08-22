@@ -119,10 +119,19 @@ function submitReplyTool(turn, character) {
         },
         requestKind: {
           type: 'string',
-          enum: ['order_long', 'order_instant', 'question', 'smalltalk', 'other'],
+          enum: [
+            'order_long',
+            'order_instant',
+            'order_impossible',
+            'question',
+            'smalltalk',
+            'other',
+          ],
           description:
             'order_long — велел долгое дело (стройка, суд, поход); order_instant — велел решение сейчас ' +
-            '(закон, казнь, обряд, назначение); question — спросил; smalltalk — беседа; other — прочее.',
+            '(закон, казнь, обряд, назначение); order_impossible — велел то, чего в этом мире не бывает ' +
+            '(отправить тебя за край или в пустоту, воскресить мёртвых, стереть память, космос, перенос); ' +
+            'question — спросил; smalltalk — беседа; other — прочее.',
         },
         commitment: {
           type: 'string',
@@ -179,6 +188,15 @@ function submitReplyTool(turn, character) {
             'либо откажи в речи с commitment=refused.',
         );
       }
+      if (requestKind === 'order_impossible' && commitment !== 'refused') {
+        return toolFail(
+          'impossible_not_refused',
+          'Такой приказ смертному не исполнить. Поставь commitment=refused. ' +
+            'В речи — не объяснение устройства мира, а твоё простое «не умею», «не понимаю этих слов», ' +
+            '«там ветер и бездна»; предложи то, что можешь: послать людей, объявить обряд, начать дело. ' +
+            'Сцену, будто это происходит, не отыгрывай.',
+        );
+      }
       turn.reply = body;
       turn.meta = { requestKind, commitment };
       return { ok: true };
@@ -233,7 +251,8 @@ function characterTools(domain, storage, character, ctx) {
         conditionFeel: qualitativeStatsBrief(domain.stats || {}, ctx.config),
         attitudes: formatRulerAttitudes(character, ctx.config),
         guidance:
-          'Отвечай в духе conditionFeel. Числа/id статов и «процесс/pending» игроку не называй. О делах говори по-человечески: что делается и сколько примерно ждать.',
+          'Отвечай в духе conditionFeel: качественно, без чисел и без имён статов. ' +
+          'О делах — по-человечески: что делается и сколько примерно ждать.',
         stateEvents: domain.state.events,
         standingOrders: (domain.state.modifiers || []).map((m) => ({
           id: m.id,
@@ -292,7 +311,9 @@ function characterTools(domain, storage, character, ctx) {
           ok: true,
           patronName: cleaned,
           previous: prev,
-          hint: `Дальше обращайся так: «${cleaned}». Не путай с чужими богами.`,
+          hint:
+            `Дальше обращайся только так: «${cleaned}». ` +
+            'Имена богов из хроник соседей и чужих храмов не используй.',
         };
       },
     },
@@ -373,7 +394,8 @@ function characterTools(domain, storage, character, ctx) {
           newFactsCount: result.addedFacts.length,
           newFactTexts: result.addedFacts.map((f) => f.text),
           hint:
-            'Перескажи СУТЬ своими словами и тоном правителя. Не копируй текст фактов/answers дословно. Не говори «неизвестно», если answers заполнены.',
+            'Перескажи суть своими словами и своим тоном, не цитируя карточки фактов. ' +
+            'Если answers заполнены, «неизвестно» покровителю не говори.',
         };
       },
     },
@@ -395,13 +417,18 @@ function characterTools(domain, storage, character, ctx) {
           expectedMonths: {
             type: 'number',
             description:
-              'Срок в месяцах (1–12). При жёстком дедлайне покровителя — его срок, не раздувай «типичным».',
+              'Честная оценка срока в месяцах (1–12) для этого города и дела. ' +
+              'Мелкое поручение — 1; крупная стройка или поход — больше. ' +
+              'Срок, названный покровителем, важнее твоей оценки: ставь его. ' +
+              'Не завышай «на всякий случай» — движок сам поднимет срок, если дело заведомо долгое.',
           },
           linkedStats: {
             type: 'array',
             items: { type: 'string' },
             minItems: 1,
-            description: 'Статы прогресса: prosperity|faith|culture|stability|knowledge|might',
+            description: `Статы, от которых зависит ход дела (1+ из: ${(ctx.config.stats || [])
+              .map((s) => s.id)
+              .join(', ')})`,
           },
           onBehalfOf: { type: 'string', default: 'patron' },
           characterNote: { type: 'string' },
@@ -492,8 +519,9 @@ function characterTools(domain, storage, character, ctx) {
           ok: true,
           process: action,
           hint:
-            `В речи: принял дело, примерно ${duration} мес., ещё не сделано. ` +
-            `ЗАПРЕЩЕНО говорить «намерение объявлено», «процесс запущен», pending, declare.${clamped}${deadlineHint}`,
+            `В речи: принял повеление, работа займёт около ${duration} мес., пока ничего не сделано. ` +
+            'Не говори «уже строим» и не рапортуй механику; итог придёт с новостями месяца, ' +
+            `а не в этой переписке.${clamped}${deadlineHint}`,
         };
       },
     },
@@ -679,7 +707,8 @@ function characterTools(domain, storage, character, ctx) {
     {
       name: 'update_process',
       description:
-        'Уточнить активное длительное дело. processId — id из read_domain_brief или краткий смысл («университет»).',
+        'Уточнить активное длительное дело. processId — id из read_domain_brief.processes[].id ' +
+        'или несколько слов из его summary по-русски («университет», «водосбор»); латинские ключи не выдумывай.',
       parameters: {
         type: 'object',
         required: ['processId'],
@@ -723,7 +752,8 @@ function characterTools(domain, storage, character, ctx) {
     {
       name: 'revoke_process',
       description:
-        'Отозвать / свернуть длительное дело. processId — id из brief или смысл («университет», «учебная программа»).',
+        'Отозвать / свернуть длительное дело. processId — id из brief или несколько слов из summary ' +
+        'по-русски («университет», «учебная программа»); латинские ключи не выдумывай.',
       parameters: {
         type: 'object',
         required: ['processId'],
@@ -758,64 +788,6 @@ function characterTools(domain, storage, character, ctx) {
           summary: action.summary,
           hint: 'В речи: дело свёрнуто/отложено по воле покровителя. Без id/process.',
         };
-      },
-    },
-    {
-      name: 'declare_action',
-      description: 'Устарело — вызови declare_process (нужны linkedStats)',
-      parameters: {
-        type: 'object',
-        required: ['summary', 'detail', 'durationMonths'],
-        properties: {
-          summary: { type: 'string' },
-          detail: { type: 'string' },
-          durationMonths: { type: 'number' },
-          linkedStats: { type: 'array', items: { type: 'string' } },
-          onBehalfOf: { type: 'string' },
-          characterNote: { type: 'string' },
-        },
-      },
-      handler: async (args) => {
-        const declare = characterTools(domain, storage, character, ctx).find((t) => t.name === 'declare_process');
-        return declare.handler({
-          ...args,
-          expectedMonths: args.durationMonths,
-          linkedStats: args.linkedStats?.length ? args.linkedStats : ['stability'],
-        });
-      },
-    },
-    {
-      name: 'update_action',
-      description: 'Устарело — update_process',
-      parameters: {
-        type: 'object',
-        required: ['actionId'],
-        properties: {
-          actionId: { type: 'string' },
-          summary: { type: 'string' },
-          detail: { type: 'string' },
-          characterNote: { type: 'string' },
-        },
-      },
-      handler: async ({ actionId, ...rest }) => {
-        const t = characterTools(domain, storage, character, ctx).find((x) => x.name === 'update_process');
-        return t.handler({ processId: actionId, ...rest });
-      },
-    },
-    {
-      name: 'revoke_action',
-      description: 'Устарело — revoke_process',
-      parameters: {
-        type: 'object',
-        required: ['actionId'],
-        properties: {
-          actionId: { type: 'string' },
-          reason: { type: 'string' },
-        },
-      },
-      handler: async ({ actionId, reason }) => {
-        const t = characterTools(domain, storage, character, ctx).find((x) => x.name === 'revoke_process');
-        return t.handler({ processId: actionId, reason });
       },
     },
   ];
@@ -1605,55 +1577,38 @@ export class GameApp {
     const attitudes = formatRulerAttitudes(character, this.config);
     const patronName = domain.state?.patronName || null;
     const patronLine = patronName
-      ? `Имя покровителя (обращение): «${patronName}». Обращайся так. Чужих богов и имён с других островов НЕ используй.`
-      : 'Имя покровителя ещё НЕ названо — коротко спроси, как к нему обращаться; когда скажет — сразу set_patron_name.';
+      ? `Имя покровителя: «${patronName}» — обращайся так.`
+      : 'Имя покровителя ещё не названо.';
     const undock = recentUndockFact(domain);
     const undockCanon = undock
       ? [
-          'КАНОН НЕДАВНЕЙ РАССТЫКОВКИ (если спрашивают про мост/соседа/конец стыка — опирайся на это):',
+          'КАНОН НЕДАВНЕЙ РАССТЫКОВКИ:',
           undock.text,
-          'Суть: чужой ЛЕТАЮЩИЙ ОСТРОВ ушёл в небо. Мост/переход кончился потому, что края островов разъехались — не «просто мостик обвалился».',
+          'Чужой остров ушёл в небо; перехода нет, потому что края разъехались.',
         ].join('\n')
       : '';
     const confluxCanon = await this.buildConfluxCanon(domain, world);
     const plotBrief = formatPlotBriefForSpeech(domain);
-    const dateLine = world?.gameDate?.label
-      ? `СЕЙЧАС: ${world.gameDate.label}. Месяц сменяется только ходом мира. ` +
-        'Если покровитель говорит, что прошло больше времени, чем есть — почтительно поправь по этой дате.'
-      : '';
+
+    // Здесь только данные хода. Правила поведения живут в instructions агента.
     const extraSystem = [
       `Ты ${character.name}, ${character.title || 'правитель'} города «${domain.name}».`,
       character.description,
-      this.config.world.cosmology || '',
-      dateLine,
+      world?.gameDate?.label ? `ДАТА СЕЙЧАС: ${world.gameDate.label}.` : '',
       patronLine,
       confluxCanon,
       undockCanon,
-      'ОБСТОЯТЕЛЬСТВА ГОРОДА СЕЙЧАС (внутренняя правда; числа игроку не называй):',
+      'ОБСТОЯТЕЛЬСТВА ГОРОДА (внутренняя правда):',
       `Население: ${qualitativePopulation(domain.population || 0)}`,
       conditionFeel,
-      'ОТНОШЕНИЕ К ПОКРОВИТЕЛЮ (внутренняя правда; цифры игроку не называй):',
+      'ОТНОШЕНИЕ К ПОКРОВИТЕЛЮ (внутренняя правда):',
       attitudes,
       plotBrief
         ? [
-            'ЖИВЫЕ НИТИ СЮЖЕТА (внутренняя правда; не рапортуй списком — вплетай в речь, если уместно):',
+            'ЖИВЫЕ НИТИ СЮЖЕТА (внутренняя правда; вплетай в речь, не рапортуй списком):',
             plotBrief,
           ].join('\n')
         : '',
-      'На вопросы о сытости, богатстве, вере, порядке, силе, знаниях опирайся на эпитеты обстоятельств.',
-      'Высокая лояльность или ужас → охотнее соглашайся и исполняй, особенно при должном тоне; меньше торгов и отговорок.',
-      'Низкие оба → больше сомнений и торгов (пока нет жёсткого приказа).',
-      'По ходу разговора при заметном жесте — adjust_loyalty и/или adjust_terror.',
-      'Форма: 1–3 абзаца живой прозы. Без списков, markdown, канцелярита, английских слов, сервисных «чем помочь».',
-      `ЗАПРЕЩЕНО начинать ответ с «${character.name}:» или любого «Имя:» — пиши сразу речь.`,
-      'Мгновенные решения: постоянное правило → declare_standing_order; одноразовое деяние сейчас → declare_act.',
-      'Долгие дела: declare_process (срок + linkedStats). Если покровитель сказал «в этом месяце» — отрази в detail, expectedMonths=1; не раздувай срок. Если нереально — честно возрази ДО declare.',
-      'Не дублируй уже идущую смысловую нить (второй суд, вторая та же стройка) — update/revoke.',
-      'Если declare_process вернул отказ (слишком много дел) — придумай отмазку; новое дело не обещай.',
-      'ЗАПРЕЩЕНО в речи: «намерение объявлено», «процесс запущен», pending, declare, JSON.',
-      'Факты лормастера перескажи своими словами.',
-      'Если покровитель просит сменить имя/обращение — set_patron_name, затем подтверди.',
-      'ОТВЕТ ТОЛЬКО через submit_reply — последним вызовом, после всех нужных действий.',
     ]
       .filter(Boolean)
       .join('\n');

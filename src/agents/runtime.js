@@ -71,8 +71,15 @@ export class AgentRuntime {
 
     // Контракт безопасности нужен только агентам, говорящим с игроком.
     // Системные агенты (resolver/director/genesis/loremaster) общаются с движком.
+    // Канон мира раздаётся блоками из config.canon по списку agent.canon.
+    const canon = (Array.isArray(agent.canon) ? agent.canon : [])
+      .map((key) => this.config.canon?.[key])
+      .filter(Boolean)
+      .join('\n\n');
+
     const systemContent = [
       agent.safety ? this.config.agentSafety || '' : '',
+      canon,
       agent.instructions,
       extraSystem,
     ]

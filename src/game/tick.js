@@ -60,6 +60,23 @@ function typicalStatDelta(config) {
   return statDeltaLimits(config).typicalMax;
 }
 
+/**
+ * Подсказка против спирали вниз: у просевших статов нужен путь наверх,
+ * иначе резолвер месяц за месяцем добивает город.
+ */
+function statRecoveryHint(domain, config) {
+  const defs = config.stats || [];
+  const low = defs
+    .map((d) => ({ name: d.name, value: Number(domain.stats?.[d.id]) }))
+    .filter((s) => Number.isFinite(s.value) && s.value <= 25);
+  if (!low.length) return null;
+  return (
+    `Просевшие стороны города: ${low.map((s) => `${s.name} ${s.value}`).join(', ')}. ` +
+    'Дай им реальный шанс на восстановление (починка, договор, помощь общины, найденный запас) — ' +
+    'не обязательно в этом месяце, но добивать их без выхода нельзя.'
+  );
+}
+
 function descriptionBrief(domain, max = 2500) {
   const text = String(domain.description || '').trim();
   if (!text) {
@@ -162,21 +179,22 @@ export async function resolveDomainTick({
         rules: {
           typicalStatDelta: deltaTypical,
           note:
-            `Статы через statDeltas: обычно ±1…${deltaTypical}; при катастрофе — любая величина (итог 0–100). ` +
             'ПРОЦЕССЫ: add_chronicle(relatedPendingId) + advance_process(advance из processRollsThisTick). ' +
             'Если хроника говорит «готово/сорвано» — complete/cancel в том же тике. ' +
             'ЗАСТОЙ(0)/РЫВОК(2) обязательно обыграй. cancel_process если сорвано. ' +
             'ПРОРЫВЫ плотлайнов — первыми; связанные процессы прорыва затронь. Постоянные итоги → upsert_modifier. ' +
             'УКАЗЫ/ДЕЯНИЯ месяца (newEdictsThisMonth / newActsThisMonth) — воля покровителя уже исполнена: ' +
             'отыграй последствие хотя бы одного, со статами; конфликт с действующим порядком показывай как конфликт. ' +
-            'Полный лор не приложен — опирайся на chronicle (digest+recent), описание и state.',
+            'Итог месяца может быть выигрышем, потерей или двойственным — не сваливай всё в ухудшение.',
         },
       }),
     },
     {
       name: 'add_chronicle',
       description:
-        `Запись хроники. Сначала процессы (особенно застой/рывок). statDeltas обычно ≤±${deltaTypical}.`,
+        'Запись хроники. Сначала процессы (особенно застой/рывок). ' +
+        `statDeltas: обычно ±1…${deltaTypical}, при катастрофе без потолка (итог 0–100). ` +
+        'Положительные дельты — такой же нормальный исход, как отрицательные.',
       parameters: {
         type: 'object',
         required: ['text', 'importance'],
@@ -196,7 +214,9 @@ export async function resolveDomainTick({
           statDeltas: {
             type: 'object',
             additionalProperties: { type: 'number' },
-            description: `Дельты статов; типично ±${deltaTypical}`,
+            description:
+              `Дельты статов, типично ±1…${deltaTypical}. Ставь и плюсы, и минусы: ` +
+              'наладили снабжение или договорились — это плюс, а не «отсутствие беды».',
           },
         },
       },
@@ -487,9 +507,10 @@ export async function resolveDomainTick({
       : null,
     `Затем не больше ${sideMax} побочных событий (бюджет месяца ~${eventTarget} записей вместе с процессами).`,
     'Если в хронике процесс «завершён/построен/окончен» — complete=true в том же тике.',
-    `Статы — только statDeltas: обычно ≤±${deltaTypical}; при катастрофе — без потолка.`,
     'State: временное → set_state_events; постоянное важное → upsert_modifier.',
-    'Будь смелым. Не завершай многомесячный процесс без причины/броска. Текст: OK.',
+    'Будь смелым, но не одноцветным: в месяце может быть и удача, и цена, и двойственный итог.',
+    statRecoveryHint(working, config),
+    'Не завершай многомесячный процесс без причины/броска.',
   ]
     .filter((line) => line != null)
     .join('\n');

@@ -69,6 +69,61 @@ export function formatChroniclePromptBlock(domain, config = null) {
   return parts.join('\n\n');
 }
 
+/**
+ * Хроника для лормастера: часть фактов выводится только из истории событий,
+ * поэтому дайджеста мало. Отдаём всё, что влезает в бюджет символов:
+ * свежие записи подробно, старые сжато, важные (critical/major) не выбрасываем.
+ */
+export function formatFullChronicleForPrompt(
+  domain,
+  { maxChars = 14000, recentFull = 25, perEntryFull = 220, perEntryOld = 110 } = {},
+) {
+  const chron = chronicleEntries(domain.lore || []);
+  if (!chron.length) return '(хроника пуста)';
+
+  const line = (e, max) => {
+    const label = e.gameDateLabel || `тик ${e.tick ?? '?'}`;
+    const imp = e.importance && e.importance !== 'minor' ? ` {${e.importance}}` : '';
+    return `${label}${imp}: ${oneLine(e.text, max)}`;
+  };
+
+  const recent = chron.slice(-recentFull);
+  const older = chron.slice(0, Math.max(0, chron.length - recentFull));
+  const recentLines = recent.map((e) => line(e, perEntryFull));
+  let budget = maxChars - recentLines.reduce((a, s) => a + s.length + 1, 0);
+
+  // Сначала важное (оно держит канон), потом мелочи — и то и другое от новых к старым.
+  const kept = new Map();
+  const take = (entries, max) => {
+    for (let i = entries.length - 1; i >= 0; i -= 1) {
+      const e = entries[i];
+      const idx = older.indexOf(e);
+      if (kept.has(idx)) continue;
+      const text = line(e, max);
+      if (text.length + 1 > budget) continue;
+      kept.set(idx, text);
+      budget -= text.length + 1;
+    }
+  };
+
+  const important = older.filter(
+    (e) => e.importance === 'critical' || e.importance === 'major',
+  );
+  take(important, perEntryOld + 60);
+  take(older, perEntryOld);
+
+  const olderLines = [...kept.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, text]) => text);
+  const dropped = older.length - olderLines.length;
+
+  const head =
+    `ХРОНИКА (${chron.length} записей` +
+    (dropped ? `, ${dropped} мелких старых опущено` : ' — целиком') +
+    ', от старых к новым):';
+  return [head, ...olderLines, ...recentLines].join('\n');
+}
+
 /** Только устойчивые fact-записи (не chronicle, не снятые) — для лормастера. */
 export function formatFactsForPrompt(lore = [], { limit = 40 } = {}) {
   const facts = (lore || []).filter((f) => {

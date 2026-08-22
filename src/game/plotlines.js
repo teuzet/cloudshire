@@ -12,10 +12,21 @@ function clampAtt(n) {
   return Math.max(0, Math.min(100, Math.round(Number(n) || 0)));
 }
 
+/** Обрезка по границе слова: обрубки в середине слова копятся из тика в тик. */
+function clipText(s, max) {
+  const t = String(s || '').trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const lastSpace = cut.lastIndexOf(' ');
+  const body = lastSpace > max * 0.6 ? cut.slice(0, lastSpace) : cut;
+  return `${body.replace(/[\s,;:—-]+$/, '')}…`;
+}
+
+export const PLOT_SUMMARY_MAX = 400;
+export { clipText as clipPlotText };
+
 function sliceHook(s, max = 120) {
-  return String(s || '')
-    .trim()
-    .slice(0, max);
+  return clipText(s, max);
 }
 
 export function plotlinesConfig(config) {
@@ -62,7 +73,7 @@ export function normalizePlotlines(domain) {
     .map((p) => ({
       id: String(p.id),
       title: String(p.title || 'Без названия').slice(0, 120),
-      summary: String(p.summary || '').slice(0, 400),
+      summary: clipText(p.summary, PLOT_SUMMARY_MAX),
       openHook: sliceHook(p.openHook),
       closeWhen: sliceHook(p.closeWhen),
       temperature: clampTemp(p.temperature ?? 0),
@@ -98,8 +109,8 @@ export function createPlotline({
 }) {
   return {
     id: newId('plot'),
-    title: String(title || 'Сюжет').slice(0, 120),
-    summary: String(summary || '').slice(0, 400),
+    title: clipText(title || 'Сюжет', 120),
+    summary: clipText(summary, PLOT_SUMMARY_MAX),
     openHook: sliceHook(openHook),
     closeWhen: sliceHook(closeWhen),
     temperature: clampTemp(temperature),

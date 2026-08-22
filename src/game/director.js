@@ -7,6 +7,8 @@ import {
   listClosureCandidates,
   formatDirectorMetaForPrompt,
   grantAttention,
+  clipPlotText,
+  PLOT_SUMMARY_MAX,
 } from './plotlines.js';
 import { chronicleEntries } from './models.js';
 import { toolFail } from '../agents/toolResult.js';
@@ -239,7 +241,9 @@ async function runDirectorSession({
       name: 'upsert_plotline',
       description:
         'Создать/обновить нить. Нужны summary, openHook, closeWhen. T — через bump. ' +
-        'Новая кровь по мандату — без relatedPlotlineIds.',
+        'Новая кровь по мандату — без relatedPlotlineIds. ' +
+        `Тексты режутся жёстко: summary до ${PLOT_SUMMARY_MAX}, крючки до ${plotCfg.hooksMaxLen} символов — ` +
+        'укладывайся в бюджет и заканчивай фразу, иначе хвост потеряется.',
       parameters: {
         type: 'object',
         required: isPair
@@ -249,14 +253,19 @@ async function runDirectorSession({
           domainId: { type: 'string' },
           plotlineId: { type: 'string' },
           title: { type: 'string' },
-          summary: { type: 'string' },
+          summary: {
+            type: 'string',
+            description:
+              `Состояние нити целиком, не летопись. Уложись в ${PLOT_SUMMARY_MAX} символов ` +
+              'и закончи законченной фразой — обрезанный хвост попадёт в следующий месяц как мусор.',
+          },
           openHook: {
             type: 'string',
-            description: 'Крючок дальше (1 фраза)',
+            description: `Крючок дальше, одна законченная фраза до ${plotCfg.hooksMaxLen} символов.`,
           },
           closeWhen: {
             type: 'string',
-            description: 'Закрыть, если… (1 фраза)',
+            description: `Условие снятия нити, одна законченная фраза до ${plotCfg.hooksMaxLen} символов.`,
           },
           relatedPendingIds: { type: 'array', items: { type: 'string' } },
           relatedPlotlineIds: { type: 'array', items: { type: 'string' } },
@@ -294,8 +303,8 @@ async function runDirectorSession({
             const ids = d.plotlines.map((p) => `${p.id} «${p.title}»`).join('; ') || '(нет)';
             return toolFail('plotline_not_found', `plotlineId=${plotlineId} не найден. Открытые: ${ids}.`);
           }
-          if (title) existing.title = String(title).slice(0, 120);
-          if (summary != null) existing.summary = String(summary).slice(0, 400);
+          if (title) existing.title = clipPlotText(title, 120);
+          if (summary != null) existing.summary = clipPlotText(summary, PLOT_SUMMARY_MAX);
           existing.openHook = oh;
           existing.closeWhen = cw;
           if (relatedPendingIds) existing.relatedPendingIds = relatedPendingIds.map(String);
