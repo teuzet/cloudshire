@@ -6,7 +6,11 @@ import {
   plotCanFade,
   plotConfig,
   plotHasActiveProcess,
+  pickPlotTags,
+  pickSequelSeed,
   plotSeedChance,
+  liveStoryImportance,
+  judgePlotSeed,
   reopenClosedPlotline,
 } from '../src/game/plotlines.js';
 import { ensureErrandForProcess, planBeats } from '../src/game/plotEngine.js';
@@ -193,10 +197,105 @@ test('пустая доска всегда сеет историю, пауза �
   assert.equal(plotSeedChance({ plotlines: [{ kind: 'errand', createdTick: 10 }] }, cfg, 10), 1);
 });
 
-test('пока на доске есть история, свежая завязка держит паузу', () => {
-  const cfg = plotConfig({ tick: { plot: { board: { seedCooldownMonths: 2 } } } });
+const SEED_PAD = 'Дальше история должна жить своей жизнью и не обрываться на полуслове. '.repeat(4);
+
+test('близнец завязки только при семи общих словах', () => {
+  const domain = {
+    plotlines: [
+      {
+        title: 'Мутная чаша',
+        synopsis:
+          'Под настилом центральной чаши нашли каменный колодец с колоколом. Водосбор очистили, серая плёнка осталась в баках.',
+      },
+    ],
+  };
   assert.equal(
-    plotSeedChance({ plotlines: [{ kind: 'story', createdTick: 9 }] }, cfg, 10),
+    judgePlotSeed(domain, {
+      title: 'Сухой гром',
+      entry: 'Над островом прошёл гром.',
+      synopsis: `${SEED_PAD} После грома на настиле у чаши выступил иней.`,
+    }),
+    null,
+  );
+  assert.equal(
+    judgePlotSeed(domain, {
+      title: 'Мутная чаша',
+      entry: 'Под настилом снова ударил колокол.',
+      synopsis: `${SEED_PAD} Под настилом центральной чаши нашли каменный колодец с колоколом. Водосбор очистили.`,
+    }),
+    'twin',
+  );
+});
+
+test('три мелкие истории не глушат посев, полный вес глушит', () => {
+  const cfg = plotConfig({
+    tick: { plot: { board: { targetImportance: 100, seedCooldownMonths: 2, seedMaxChance: 0.5 } } },
+  });
+  const small = [
+    { kind: 'story', importance: 25, createdTick: 10 },
+    { kind: 'story', importance: 20, createdTick: 9 },
+    { kind: 'story', importance: 22, createdTick: 8 },
+  ];
+  assert.equal(liveStoryImportance({ plotlines: small }), 67);
+  assert.ok(plotSeedChance({ plotlines: small }, cfg, 10) > 0);
+  assert.equal(
+    plotSeedChance({ plotlines: [{ kind: 'story', importance: 70 }, { kind: 'story', importance: 40 }] }, cfg, 10),
     0,
+  );
+});
+
+test('закрытая нить помнит крючок на продолжение', () => {
+  const domain = { plotlines: [plot('plot_iara')], closedPlotlines: [] };
+  closePlotline(domain, 'plot_iara', {
+    tick: 6,
+    reason: 'Нашли живой.',
+    sequelHook: 'Осталась угроза, из‑за которой человек бежал.',
+  });
+  const archived = findClosedPlotline(domain, 'plot_iara');
+  assert.match(archived.sequelHook, /угроза/);
+});
+
+test('каталог завязки: характер, сфера-статы, источник, масштаб', async () => {
+  const { loadConfig } = await import('../src/config.js');
+  const config = loadConfig();
+  const cfg = plotConfig(config);
+  const byId = Object.fromEntries(cfg.tagGroups.map((g) => [g.id, g]));
+  assert.ok(byId.character && byId.sphere && byId.source && byId.scale);
+  assert.equal(byId.spark, undefined);
+  assert.ok(byId.sphere.tags.length >= 6);
+  const any = byId.source.tags.find((t) => t.id === 'any');
+  assert.ok(any && Number(any.weight) > 1);
+});
+
+test('жребий масштаба уважает вес: город чаще квартала', () => {
+  const cfg = plotConfig({
+    tick: {
+      plot: {
+        tagGroups: [
+          {
+            id: 'scale',
+            name: 'Масштаб',
+            tags: [
+              { id: 'quarter', name: 'Квартал', weight: 1 },
+              { id: 'city', name: 'Город', weight: 3 },
+            ],
+          },
+        ],
+      },
+    },
+  });
+  const picks = [0.1, 0.4, 0.7, 0.9].map((r) => pickPlotTags(cfg, () => r)[0].tagId);
+  assert.deepEqual(picks, ['quarter', 'city', 'city', 'city']);
+});
+
+test('продолжение сеется только с крючком, пустой доской и по шансу', () => {
+  const cfg = plotConfig({ tick: { plot: { board: { sequelChance: 0.55 } } } });
+  const offer = { id: 'plot_old', hook: 'Осталась неназванная угроза.' };
+  assert.equal(pickSequelSeed({ plotlines: [] }, [offer], cfg, () => 0), offer);
+  assert.equal(pickSequelSeed({ plotlines: [] }, [offer], cfg, () => 0.9), null);
+  assert.equal(pickSequelSeed({ plotlines: [] }, [{ id: 'plot_old', hook: '' }], cfg, () => 0), null);
+  assert.equal(
+    pickSequelSeed({ plotlines: [{ kind: 'story' }] }, [offer], cfg, () => 0),
+    null,
   );
 });

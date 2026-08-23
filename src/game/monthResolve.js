@@ -19,6 +19,7 @@ import {
   normalizePlotlines,
   plotConfig,
   plotSeedChance,
+  pickSequelSeed,
   findPlotline,
   closePlotline,
   plotHasActiveProcess,
@@ -75,7 +76,8 @@ export async function resolveDomainMonth({
   const mirrorAdds = [];
   const budget = createStatBudget(config);
 
-  // 0. Покровитель молчит — правитель может сам отдать один приказ (дело или указ).
+  // 0. С четвёртого тихого месяца стюард заводит дело до хода месяца.
+  // Письмо пишет tickNews по хронике, не стюард.
   const steward = await runSteward({
     config,
     runtime,
@@ -83,6 +85,7 @@ export async function resolveDomainMonth({
     world,
     log,
   });
+  if (steward?.chronicleAdds?.length) chronicleAdds.push(...steward.chronicleAdds);
   // Пик месяца: то, с чего правитель начнёт письмо. Без него развязка тонет
   // в ряду обычных записей и большое дело проходит незамеченным.
   let highlight = null;
@@ -122,6 +125,7 @@ export async function resolveDomainMonth({
   });
 
   // 4. Биты.
+  const sequelOffers = [];
   for (const beat of beats) {
     const plot = findPlotline(working, beat.plotId);
     if (!plot) continue;
@@ -153,6 +157,17 @@ export async function resolveDomainMonth({
           text: result.fact.text,
           note: `история «${plot.title}» кончилась`,
         });
+        if (result.sequelHook) {
+          sequelOffers.push({
+            id: plot.id,
+            title: plot.title,
+            synopsis: plot.synopsis,
+            closeWhen: plot.closeWhen,
+            reason: result.closeReason || '',
+            hook: result.sequelHook,
+            lastEntry: result.fact.text,
+          });
+        }
       }
     } else {
       // Рассказчик не справился — движок пишет сухой минимум, чтобы месяц не пропал.
@@ -187,11 +202,19 @@ export async function resolveDomainMonth({
     }
   }
 
-  // 5. Завязка новой нити: пустая доска — всегда, иначе чем пустее, тем охотнее.
-  const seedChance = plotSeedChance(working, cfg, world.tickIndex);
-  const wantSeed = Math.random() < seedChance;
+  // 5. Завязка: пустая доска после крючка — иногда продолжение, иначе обычный посев.
+  const sequel = pickSequelSeed(working, sequelOffers, cfg);
+  const seedChance = sequel ? 1 : plotSeedChance(working, cfg, world.tickIndex);
+  const wantSeed = Boolean(sequel) || Math.random() < seedChance;
   if (wantSeed) {
-    const seeded = await seedPlot({ config, runtime, domain: working, world, log });
+    const seeded = await seedPlot({
+      config,
+      runtime,
+      domain: working,
+      world,
+      fromClosed: sequel,
+      log,
+    });
     if (seeded?.fact) chronicleAdds.push(seeded.fact);
   }
 
@@ -256,6 +279,7 @@ export async function resolveDomainMonth({
     plots: working.plotlines.length,
     seedChance: Number(seedChance.toFixed(2)),
     seeded: wantSeed,
+    sequelOf: sequel?.id || null,
     kept: kept ? { updated: kept.updated, surfaced: kept.surfaced } : null,
     statsScored: scored?.scored ?? 0,
     steward: steward?.act || null,

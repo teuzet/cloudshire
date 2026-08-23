@@ -49,10 +49,10 @@ export function plotConfig(config) {
     board: {
       maxOpen: Math.max(2, Math.min(10, Number(board.maxOpen) || 5)),
       maxErrands: Math.max(0, Math.min(6, Number(board.maxErrands) ?? 2)),
-      targetStories: Math.max(0, Math.min(8, Number(board.targetStories) ?? 2)),
-      seedPerMissing: Number(board.seedPerMissing ?? 0.2),
+      targetImportance: Math.max(0, Math.min(400, Number(board.targetImportance ?? 100))),
       seedMaxChance: Number(board.seedMaxChance ?? 0.5),
       seedCooldownMonths: Math.max(0, Math.min(12, Number(board.seedCooldownMonths) ?? 2)),
+      sequelChance: Math.max(0, Math.min(1, Number(board.sequelChance ?? 0.55))),
     },
     beats: {
       maxPerTick: Math.max(1, Math.min(6, Number(beats.maxPerTick) || 3)),
@@ -257,8 +257,9 @@ export function plotHasActiveProcess(domain, plot) {
   );
 }
 
-function archiveClosedPlot(plot, { tick = null, reason = '' } = {}) {
+function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } = {}) {
   const closeReason = reason || plot.closeReason || '';
+  const hook = clipText(sequelHook || plot.sequelHook, PLOT_HOOK_MAX);
   return {
     id: plot.id,
     title: plot.title,
@@ -284,6 +285,7 @@ function archiveClosedPlot(plot, { tick = null, reason = '' } = {}) {
     closedTick: tick,
     reason: closeReason,
     closeReason,
+    sequelHook: hook,
   };
 }
 
@@ -367,7 +369,7 @@ export function attachChronicleToPlotlines(domain, factId, plotlineIds) {
   }
 }
 
-export function closePlotline(domain, plotlineId, { tick = null, reason = '' } = {}) {
+export function closePlotline(domain, plotlineId, { tick = null, reason = '', sequelHook = '' } = {}) {
   const list = domain?.plotlines || [];
   const idx = list.findIndex((p) => p.id === plotlineId);
   if (idx < 0) return null;
@@ -375,24 +377,42 @@ export function closePlotline(domain, plotlineId, { tick = null, reason = '' } =
   plot.status = 'closed';
   plot.closedTick = tick;
   plot.closeReason = reason || '';
+  plot.sequelHook = clipText(sequelHook, PLOT_HOOK_MAX);
   domain.closedPlotlines = Array.isArray(domain.closedPlotlines) ? domain.closedPlotlines : [];
-  domain.closedPlotlines.push(archiveClosedPlot(plot, { tick, reason: plot.closeReason }));
+  domain.closedPlotlines.push(
+    archiveClosedPlot(plot, { tick, reason: plot.closeReason, sequelHook: plot.sequelHook }),
+  );
   if (domain.closedPlotlines.length > 40) {
     domain.closedPlotlines = domain.closedPlotlines.slice(-40);
   }
   return plot;
 }
 
+function pickWeightedTag(tags, rng) {
+  const weights = tags.map((t) => {
+    const w = Number(t?.weight);
+    return Number.isFinite(w) && w > 0 ? w : 1;
+  });
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = rng() * total;
+  for (let i = 0; i < tags.length; i += 1) {
+    r -= weights[i];
+    if (r <= 0) return tags[i];
+  }
+  return tags[tags.length - 1];
+}
+
 /**
  * Жребий завязки: по одному тегу из каждой группы, все обязательны.
- * Группы сами по себе узкие и абстрактные — тон, искра, масштаб.
+ * Группы сами по себе узкие и абстрактные — тон, сфера, источник, масштаб.
+ * У тега может быть weight: больше — чаще выпадает.
  */
 export function pickPlotTags(cfg, rng = Math.random) {
   const groups = cfg?.tagGroups || [];
   return groups
     .map((g) => {
       if (!g?.tags?.length) return null;
-      const tag = g.tags[Math.floor(rng() * g.tags.length)];
+      const tag = pickWeightedTag(g.tags, rng);
       if (!tag) return null;
       return { groupId: g.id, groupName: g.name || g.id, tagId: tag.id, tagName: tag.name };
     })
@@ -412,35 +432,61 @@ export function judgePlotSeed(domain, draft) {
   if (!title || !entry || !synopsis) return 'empty';
   if (synopsis.length < SEED_HOOK_MIN) return 'thin_hook';
   const twin = (domain.plotlines || []).find((p) =>
-    textsLookSame(`${p.title} ${p.synopsis}`, `${title} ${synopsis}`),
+    textsLookSame(`${p.title} ${p.synopsis}`, `${title} ${synopsis}`, { minShared: 7 }),
   );
   if (twin) return 'twin';
   return null;
 }
 
+/** Сумма важности живых историй. Дела не считаются. */
+export function liveStoryImportance(domain) {
+  return (domain?.plotlines || [])
+    .filter((p) => p && p.kind !== 'errand')
+    .reduce((sum, p) => sum + clamp100(p.importance, 0), 0);
+}
+
 /**
- * Шанс завязки: чем меньше живых историй, тем охотнее сеем.
- * Пустая доска (нет ни одной настоящей истории) — завязка обязательна:
- * иначе город месяцами живёт без сюжета.
- * Проходные нити дел за истории не считаются — иначе одна стройка глушит весь год.
- * После свежей завязки держим паузу: иначе доска набивается клонами одного события.
+ * Шанс завязки: чем меньше суммарная важность живых историй, тем охотнее сеем.
+ * Три мелких не глушат доску; одна громкая и одна средняя — уже полная.
+ * Пустая доска — завязка обязательна. Дела в вес не входят.
+ * Пауза после свежей завязки действует, только если вес уже набран.
  */
 export function plotSeedChance(domain, cfg, tick = null) {
   const { total, stories } = countOpen(domain);
   if (total >= cfg.board.maxOpen) return 0;
   if (stories === 0) return 1;
 
-  const cooldown = cfg.board.seedCooldownMonths;
-  if (cooldown > 0 && Number.isFinite(Number(tick))) {
-    const youngest = (domain.plotlines || [])
-      .filter((p) => p.kind !== 'errand' && Number.isFinite(Number(p.createdTick)))
-      .reduce((max, p) => Math.max(max, Number(p.createdTick)), -Infinity);
-    if (Number.isFinite(youngest) && Number(tick) - youngest < cooldown) return 0;
+  const target = Math.max(1, Number(cfg.board.targetImportance) || 100);
+  const sum = liveStoryImportance(domain);
+  if (sum >= target) {
+    const cooldown = cfg.board.seedCooldownMonths;
+    if (cooldown > 0 && Number.isFinite(Number(tick))) {
+      const youngest = (domain.plotlines || [])
+        .filter((p) => p.kind !== 'errand' && Number.isFinite(Number(p.createdTick)))
+        .reduce((max, p) => Math.max(max, Number(p.createdTick)), -Infinity);
+      if (Number.isFinite(youngest) && Number(tick) - youngest < cooldown) return 0;
+    }
+    return 0;
   }
 
-  const missing = Math.max(0, cfg.board.targetStories - stories);
-  const chance = cfg.beats.baseChance + missing * cfg.board.seedPerMissing;
-  return Math.max(0, Math.min(cfg.board.seedMaxChance, chance));
+  const missing = (target - sum) / target;
+  const floor = Number(cfg.beats.baseChance ?? 0);
+  const ceil = Number(cfg.board.seedMaxChance ?? 0.5);
+  const chance = floor + missing * Math.max(0, ceil - floor);
+  return Math.max(0, Math.min(ceil, chance));
+}
+
+/**
+ * Продолжение сразу после развязки: только если живых историй не осталось
+ * и закрытие оставило крючок. Шанс — sequelChance; иначе обычный посев.
+ */
+export function pickSequelSeed(domain, offers, cfg, rng = Math.random) {
+  const { stories, total } = countOpen(domain);
+  if (stories > 0 || total >= cfg.board.maxOpen) return null;
+  const viable = (offers || []).filter((o) => o && String(o.hook || '').trim());
+  if (!viable.length) return null;
+  if (rng() >= Number(cfg.board.sequelChance ?? 0)) return null;
+  return viable[viable.length - 1];
 }
 
 export function formatPlotTagsForPrompt(tags) {

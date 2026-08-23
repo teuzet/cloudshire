@@ -65,6 +65,10 @@ export class MongoStorage {
     return domain;
   }
 
+  async deleteDomain(domainId) {
+    await this.col('domains').deleteOne({ _id: domainId });
+  }
+
   async listDomains() {
     const docs = await this.col('domains').find({}).toArray();
     return docs.map(({ _id, ...rest }) => normalizeDomain({ id: _id, ...rest }));

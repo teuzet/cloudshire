@@ -495,18 +495,25 @@ function sameWorkKind(a, b) {
  * Подстрочного совпадения мало: «Открыть донабор в стражу» и «Продолжать донабор
  * в стражу» не пересекаются началами, но это одно и то же распоряжение.
  */
-export function textsLookSame(a, b) {
+export function textsLookSame(a, b, { minShared = null } = {}) {
   const na = normProcessText(a);
   const nb = normProcessText(b);
   if (!na || !nb) return false;
   if (na === nb) return true;
-  if (Math.min(na.length, nb.length) >= 12 && (na.includes(nb) || nb.includes(na))) return true;
+  // Для дел короткое вхождение ещё дубль. Для историй порог выше — подстроку не берём:
+  // длинный синопсис всегда содержит кусок другого.
+  if (minShared == null && Math.min(na.length, nb.length) >= 12 && (na.includes(nb) || nb.includes(na))) {
+    return true;
+  }
 
   const ta = new Set(processTokens(na));
   const tb = new Set(processTokens(nb));
   if (!ta.size || !tb.size) return false;
   const shared = [...tb].filter((t) => ta.has(t));
-  const need = Math.min(3, Math.max(2, Math.ceil(Math.min(ta.size, tb.size) * 0.5)));
+  const need =
+    minShared != null
+      ? Math.max(1, Number(minShared) || 1)
+      : Math.min(3, Math.max(2, Math.ceil(Math.min(ta.size, tb.size) * 0.5)));
   return shared.length >= need;
 }
 

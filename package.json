@@ -11,6 +11,7 @@
     "playtest": "node src/cli.js playtest",
     "tokens": "node scripts/token-report.js",
     "report": "node scripts/world-report.js",
+    "seed-sample": "node scripts/sample-plot-seeds.mjs",
     "test": "node --test tests"
   },
   "engines": {

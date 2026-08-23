@@ -31,10 +31,9 @@ export function countTrailingUnansweredNews(dialogHistory = []) {
 
 export function stewardConfig(config) {
   const s = config?.tick?.steward || {};
-  const after = Math.max(1, Math.round(Number(s.afterSilentMonths) || 2));
   return {
-    afterSilentMonths: after,
-    every: Math.max(1, Math.round(Number(s.every) || after)),
+    loseAfterLetters: Math.max(1, Math.round(Number(s.loseAfterLetters) ?? 2)),
+    afterSilentMonths: Math.max(1, Math.round(Number(s.afterSilentMonths) ?? 3)),
   };
 }
 
@@ -42,26 +41,44 @@ export function shouldRunSteward(domain, config) {
   const cfg = stewardConfig(config);
   const character = domain?.characters?.[0];
   const silent = countTrailingUnansweredNews(character?.dialogHistory || []);
-  if (silent < cfg.afterSilentMonths) return { ok: false, silent };
-  if (silent % cfg.every !== 0) return { ok: false, silent };
+  return { ok: silent >= cfg.afterSilentMonths, silent };
+}
+
+/** Одно письмо на полосу молчания: «куда ты делся», даже если окно в три месяца уже проскочили. */
+export function shouldAskPatronPresence(domain, config) {
+  const cfg = stewardConfig(config);
+  const character = domain?.characters?.[0];
+  const silent = countTrailingUnansweredNews(character?.dialogHistory || []);
+  if (silent < cfg.loseAfterLetters) return { ok: false, silent };
+  if (domain?.state?.patronPresenceAsked) return { ok: false, silent };
   return { ok: true, silent };
 }
 
-function rememberFact(domain, { text, world, character }) {
+export function markPatronPresenceAsked(domain) {
+  if (!domain.state || typeof domain.state !== 'object') domain.state = {};
+  domain.state.patronPresenceAsked = true;
+}
+
+export function clearPatronPresenceAsked(domain) {
+  if (domain?.state) domain.state.patronPresenceAsked = false;
+}
+
+function rememberFact(domain, { text, world, character, chronicleAdds }) {
   domain.lore = domain.lore || [];
   const fact = createLoreFact({
     id: newId('lore'),
     text,
-    tags: ['fact', 'steward'],
+    tags: ['chronicle', 'fact', 'steward'],
     gameDateLabel: world?.gameDate?.label || null,
     tick: world?.tickIndex ?? null,
     author: `steward:${character?.name || 'ruler'}`,
   });
   domain.lore.push(fact);
+  if (chronicleAdds) chronicleAdds.push(fact);
   return fact;
 }
 
-async function applyProcess(domain, args, { config, runtime, world, character, log }) {
+async function applyProcess(domain, args, { config, runtime, world, character, log, chronicleAdds }) {
   const slots = canStartProcess(domain, config);
   if (!slots.ok) {
     return { error: 'too_many_processes', message: `Уже ${slots.active}/${slots.max} дел.` };
@@ -119,12 +136,13 @@ async function applyProcess(domain, args, { config, runtime, world, character, l
   rememberFact(domain, {
     world,
     character,
+    chronicleAdds,
     text: `Правитель ${character?.name || ''} сам, без воли покровителя, поручил: ${summary}.`,
   });
   return { action, plot };
 }
 
-function applyOrder(domain, text, { world, character }) {
+function applyOrder(domain, text, { world, character, chronicleAdds }) {
   const body = String(text || '').trim().slice(0, 400);
   if (body.length < 3) return { error: 'too_short', message: 'Слишком короткое правило.' };
   if (!domain.state.modifiers) domain.state.modifiers = [];
@@ -142,6 +160,7 @@ function applyOrder(domain, text, { world, character }) {
   rememberFact(domain, {
     world,
     character,
+    chronicleAdds,
     text: `Действующий указ города (сам правитель, без воли покровителя): ${body}`,
   });
   return { modifier: mod };
@@ -149,14 +168,15 @@ function applyOrder(domain, text, { world, character }) {
 
 /**
  * Один ход наместника в начале месяца, если покровитель молчит.
- * @returns {{ silent: number, act: object|null }}
+ * @returns {{ silent: number, act: object|null, chronicleAdds: object[] }}
  */
 export async function runSteward({ config, runtime, domain, world, log: parentLog }) {
   const gate = shouldRunSteward(domain, config);
-  if (!gate.ok) return { silent: gate.silent, act: null };
+  if (!gate.ok) return { silent: gate.silent, act: null, chronicleAdds: [] };
 
   const character = domain.characters?.[0];
-  if (!character) return { silent: gate.silent, act: null };
+  if (!character) return { silent: gate.silent, act: null, chronicleAdds: [] };
+  const chronicleAdds = [];
 
   const log = (parentLog || getLogger()).child({ scope: 'steward', domainId: domain.id });
   const statIds = (config.stats || []).map((s) => s.id).join(', ');
@@ -195,13 +215,20 @@ export async function runSteward({ config, runtime, domain, world, log: parentLo
           return { ok: true };
         }
         if (kind === 'process') {
-          const applied = await applyProcess(domain, args, { config, runtime, world, character, log });
+          const applied = await applyProcess(domain, args, {
+            config,
+            runtime,
+            world,
+            character,
+            log,
+            chronicleAdds,
+          });
           if (applied.error) return toolFail(applied.error, applied.message);
           draft.data = { kind: 'process', summary: applied.action.summary, id: applied.action.id };
           return { ok: true };
         }
         if (kind === 'standing_order') {
-          const applied = applyOrder(domain, args.text, { world, character });
+          const applied = applyOrder(domain, args.text, { world, character, chronicleAdds });
           if (applied.error) return toolFail(applied.error, applied.message);
           draft.data = { kind: 'standing_order', text: applied.modifier.text, id: applied.modifier.id };
           return { ok: true };
@@ -236,8 +263,8 @@ export async function runSteward({ config, runtime, domain, world, log: parentLo
       {
         role: 'user',
         content: [
-          `Покровитель молчит уже ${gate.silent} месяца. Один ход: заведи дело, объяви порядок — или ничего.`,
-          'Это ТВОЁ решение, не воля бога. Не приписывай приказ покровителю.',
+          `Покровитель молчит уже ${gate.silent} месяца. Письмо ему пишет другой — ты только одно поручение.`,
+          'По сводке ниже заведи дело, объяви порядок — или ничего. Это ТВОЁ решение, не воля бога.',
           'Одно действие. Если город и так занят и ничего не горит — action=none.',
           openStories.length
             ? `Истории без поручения (если действовать — plotId одной из них):\n${openStories
@@ -276,5 +303,5 @@ export async function runSteward({ config, runtime, domain, world, log: parentLo
     act: draft.data ? `${draft.data.kind}:${draft.data.summary || draft.data.text || 'none'}` : 'no_tool',
     preview: truncate(draft.data?.summary || draft.data?.text || '', 120),
   });
-  return { silent: gate.silent, act: draft.data };
+  return { silent: gate.silent, act: draft.data, chronicleAdds };
 }

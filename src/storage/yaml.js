@@ -86,6 +86,10 @@ export class YamlStorage {
     return domain;
   }
 
+  async deleteDomain(domainId) {
+    await fs.unlink(this.domainPath(domainId)).catch(() => {});
+  }
+
   async listDomains() {
     const dir = path.join(this.root, 'domains');
     const files = await fs.readdir(dir).catch(() => []);

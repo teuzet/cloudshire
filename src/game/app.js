@@ -18,7 +18,7 @@ import {
 } from './stats.js';
 import { askLoremaster } from './loremaster.js';
 import { newId } from './ids.js';
-import { assertsIslandsParted, monthsUntilDock } from './conflux.js';
+import { assertsIslandsParted, monthsUntilDock, findActiveConfluxForDomain } from './conflux.js';
 import {
   emptyOnboardingDraft,
   validateCityName,
@@ -49,9 +49,15 @@ import {
   processPaceRatio,
 } from './processes.js';
 import { formatBoardForSpeech, warmPlotlines, plotConfig, findPlotline, clipPlotText, PLOT_TITLE_MAX, PLOT_SUMMARY_MAX } from './plotlines.js';
+import { islandDeleteCheck } from '../clients/telegram/access.js';
 import { estimateProcessDuration } from './durationJudge.js';
 import { ensureErrandForProcess, linkProcessToPlotline } from './plotEngine.js';
 import { dialogHistoryForPrompt } from './memory.js';
+import {
+  shouldAskPatronPresence,
+  markPatronPresenceAsked,
+  clearPatronPresenceAsked,
+} from './steward.js';
 import { getLogger, truncate, setLoggerWorldId } from '../log.js';
 import { initUsageRecording } from '../llm/usage.js';
 import { toolFail } from '../agents/toolResult.js';
@@ -257,17 +263,6 @@ function submitReplyTool(turn, character) {
       return { ok: true };
     },
   };
-}
-
-/** Сколько подряд tick_news в конце истории без ответа игрока. */
-function countTrailingUnansweredDigests(dialogHistory = []) {
-  let n = 0;
-  for (let i = dialogHistory.length - 1; i >= 0; i -= 1) {
-    const m = dialogHistory[i];
-    if (m.role === 'user') break;
-    if (m.role === 'assistant' && m.kind === 'tick_news') n += 1;
-  }
-  return n;
 }
 
 function characterTools(domain, storage, character, ctx) {
@@ -1896,22 +1891,22 @@ export class GameApp {
       .filter(Boolean)
       .join(' ');
 
-    // Про молчание бога — не каждый месяц и не одними словами: иначе письма
-    // кончаются одной и той же формулой и перестают читаться.
-    const unanswered = countTrailingUnansweredDigests(character.dialogHistory || []);
+    // С третьего тихого письма — один раз спросить, куда делся покровитель.
+    const presence = shouldAskPatronPresence(domain, this.config);
+    const unanswered = presence.silent;
+    const askPresence = presence.ok;
     const stewardActs = (opts.stewardActs || []).filter((a) => a && a.kind && a.kind !== 'none');
     const stewardHint = stewardActs.length
       ? [
-          'В этом месяце ТЫ САМ, без воли покровителя, распорядился — это правда, так и скажи:',
+          'В этом месяце ТЫ САМ отдал приказ — совета покровителя не дождался. Это правда, так и скажи.',
           ...stewardActs.map((a) =>
             a.kind === 'standing_order'
               ? `- постоянный порядок: ${a.text}`
               : `- дело: ${a.summary}`,
           ),
-          'Не прячь это. Коротко признайся, что решал сам, пока не слышал его голоса.',
+          'Коротко признайся: решил сам, потому что от него совета не дождался. Не прячь это за «город сам».',
         ].join('\n')
       : '';
-    const askPresence = !stewardHint && unanswered >= 2 && unanswered % 2 === 0;
     const silenceAngles = [
       'спроси, слышит ли он тебя ещё',
       'скажи, что люди спрашивают, не отвернулся ли покровитель, и ты не знаешь, что отвечать',
@@ -1921,11 +1916,11 @@ export class GameApp {
     ];
     const presenceHint = askPresence
       ? [
-          `ВАЖНО: покровитель молчит ${unanswered} месяца подряд.`,
-          `В конце письма, коротко и по-человечески: ${
+          `ОБЯЗАТЕЛЬНО: покровитель молчит ${unanswered} месяца подряд. Ты его теряешь.`,
+          `В конце письма отдельной фразой-вопросом: ${
             silenceAngles[Math.floor(Math.random() * silenceAngles.length)]
           }.`,
-          'Своими словами, не повторяя прошлых писем. Без истерики и сервисного тона, 1–2 предложения.',
+          'Нужен именно вопрос к нему (со знаком вопроса), своими словами. Без истерики, 1–2 предложения.',
         ].join(' ')
       : '';
 
@@ -2052,6 +2047,15 @@ export class GameApp {
     };
 
     let letter = await runLetter();
+    if (askPresence && !/[?]/.test(letter)) {
+      letter = await runLetter(
+        'ПЕРЕПИСИ: в черновике не было вопроса покровителю. Добавь в конец прямой вопрос: слышит ли он ещё, куда делся.',
+      );
+    }
+    if (askPresence && !/[?]/.test(letter)) {
+      letter = `${letter.trim()} Слышишь ли ты меня ещё? Город ждёт твоего слова.`;
+    }
+    if (askPresence) markPatronPresenceAsked(domain);
     if (opts.undock && !assertsIslandsParted(letter)) {
       letter = await runLetter(
         'ПЕРЕПИСИ: в прошлом черновике событие звучало как обвал моста. ' +
@@ -2072,6 +2076,7 @@ export class GameApp {
   async persistDialog(domain, role, content, { kind = null, meta = null } = {}) {
     const character = domain.characters[0];
     if (!character) return;
+    if (role === 'user') clearPatronPresenceAsked(domain);
     character.dialogHistory = character.dialogHistory || [];
     const entry = {
       role,
@@ -2117,6 +2122,35 @@ export class GameApp {
 
   async listDomains() {
     return this.storage.listDomains();
+  }
+
+  async getOwnDomain(userId) {
+    const world = await this.storage.getWorld();
+    return this.storage.getDomainForUser(userId, world.id);
+  }
+
+  async deleteOwnDomain(userId, confirmName) {
+    const uid = String(userId);
+    const domain = await this.getOwnDomain(uid);
+    const conflux = domain ? await findActiveConfluxForDomain(this.storage, domain.id) : null;
+    const check = islandDeleteCheck({
+      domain,
+      conflux,
+      confirmName,
+    });
+    if (!check.ok) return check;
+    if (this.generatingUsers?.has(uid)) {
+      return { ok: false, reason: 'generating', name: domain.name };
+    }
+    await this.storage.deleteDomain(domain.id);
+    const binding = await this.storage.getUserBinding(uid);
+    if (binding) {
+      binding.domainId = null;
+      binding.onboarding = emptyOnboardingDraft();
+      await this.storage.saveUserBinding(binding);
+    }
+    getLogger().info('island.deleted', { userId: uid, domainId: domain.id, name: domain.name });
+    return { ok: true, name: domain.name };
   }
 
   async getChronicle(domainId) {

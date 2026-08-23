@@ -93,6 +93,11 @@ export function loadConfig(configPath = process.env.CLOUDSHIRE_CONFIG || 'config
 
   config.telegram = config.telegram || {};
   config.telegram.enabled = resolveTelegramEnabled(config.telegram);
+  config.telegram.allowIds = parseTelegramAllowIds(config.telegram.allowIds);
+  if (!config.telegram.closedTestReply) {
+    config.telegram.closedTestReply =
+      'Сейчас идёт закрытый тест. Если тебя ждали — напиши тому, кто пригласил.';
+  }
 
   return config;
 }
@@ -109,6 +114,14 @@ function resolveTelegramEnabled(telegram) {
   const tokenEnv = telegram.tokenEnv || 'TELEGRAM_BOT_TOKEN';
   if (process.env[tokenEnv]) return true;
   return Boolean(telegram.enabled);
+}
+
+function parseTelegramAllowIds(raw) {
+  const fromEnv = process.env.TELEGRAM_ALLOW_IDS;
+  const source = fromEnv != null && String(fromEnv).trim() !== '' ? fromEnv : raw;
+  if (source == null || source === '') return [];
+  const list = Array.isArray(source) ? source : String(source).split(/[,\s]+/);
+  return [...new Set(list.map((x) => String(x).trim()).filter(Boolean))];
 }
 
 export function projectRoot() {

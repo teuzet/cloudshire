@@ -174,7 +174,7 @@ function pushChronicle(domain, { text, importance, world, plotIds = [], processI
 }
 
 /** Завязка новой нити по жребию тегов. */
-export async function seedPlot({ config, runtime, domain, world, tags = null, log: parentLog }) {
+export async function seedPlot({ config, runtime, domain, world, tags = null, fromClosed = null, log: parentLog }) {
   const log = (parentLog || getLogger()).child({ scope: 'storyteller.seed', domainId: domain.id });
   const cfg = plotConfig(config);
   const maxChars = chronicleMaxChars(config);
@@ -192,6 +192,7 @@ export async function seedPlot({ config, runtime, domain, world, tags = null, lo
       maxChars,
       statIds,
       draft,
+      fromClosed,
     });
     if (!asked) {
       log.warn('storyteller.seed_failed', { attempt });
@@ -219,6 +220,7 @@ export async function seedPlot({ config, runtime, domain, world, tags = null, lo
       temperature: cfg.temperature.initial,
       tags: roll,
       tick: world.tickIndex,
+      relatedPlotlineIds: fromClosed?.id ? [fromClosed.id] : [],
       config,
     });
     domain.plotlines.push(plot);
@@ -236,6 +238,7 @@ export async function seedPlot({ config, runtime, domain, world, tags = null, lo
       plotId: plot.id,
       title: plot.title,
       attempt,
+      sequelOf: fromClosed?.id || null,
       importance: plot.importance,
       maxAgeMonths: plot.maxAgeMonths,
       relatedStats: plot.relatedStats,
@@ -248,7 +251,7 @@ export async function seedPlot({ config, runtime, domain, world, tags = null, lo
   return null;
 }
 
-async function askPlotSeed({ runtime, domain, world, tags, log, maxChars, statIds, draft }) {
+async function askPlotSeed({ runtime, domain, world, tags, log, maxChars, statIds, draft, fromClosed = null }) {
   const tools = [
     {
       name: 'submit_plot_seed',
@@ -272,7 +275,8 @@ async function askPlotSeed({ runtime, domain, world, tags, log, maxChars, statId
           },
           importance: {
             type: 'number',
-            description: '0–100. 10 — двое на дворе, 50 — говорит весь город, 90 — судьба города.',
+            description:
+              '0–100. Держись масштаба жребия: город ≈ 55, остров ≈ 75.',
           },
           maxAgeMonths: {
             type: 'number',
@@ -324,9 +328,20 @@ async function askPlotSeed({ runtime, domain, world, tags, log, maxChars, statId
         role: 'user',
         content: [
           `Придумай новую историю города (${world.gameDate.label}).`,
-          'Завязка должна быть оригинальной и интересной — конкретной и такой, чтобы захотелось узнать, что будет дальше.',
+          fromClosed
+            ? [
+                `Только что закрылась история «${fromClosed.title}».`,
+                fromClosed.synopsis ? `Как она шла: ${fromClosed.synopsis}` : null,
+                fromClosed.lastEntry ? `Чем кончилась в этом месяце: ${fromClosed.lastEntry}` : null,
+                fromClosed.reason ? `Развязка: ${fromClosed.reason}` : null,
+                `Что осталось нерешённым: ${fromClosed.hook}`,
+                'Новая история растёт из этого остатка: свой предмет и своя развязка, не повтор уже закрытого.',
+              ]
+                .filter(Boolean)
+                .join('\n')
+            : 'Завязка должна быть оригинальной и интересной — такой, чтобы захотелось узнать, что будет дальше.',
           '',
-          `Направление (это тон, не готовая сцена): ${formatPlotTagsForPrompt(tags)}`,
+          `Направление: ${formatPlotTagsForPrompt(tags)}`,
           '',
           'Последние записи хроники:',
           city.recent,
@@ -449,6 +464,12 @@ export async function beatPlot({
               'Срок нити сам по себе не повод. Не выдумывай развязку, потому что «пора кончать».',
           },
           closeReason: { type: 'string' },
+          sequelHook: {
+            type: 'string',
+            description:
+              'Только при closes=true: если развязка сама оставила новый нерешённый узел — одна фраза, что осталось. ' +
+              'Нет узла — оставь пустым. Это не пересказ конца и не готовая следующая история.',
+          },
           touchesNeighbor: {
             type: 'boolean',
             description:
@@ -526,7 +547,7 @@ export async function beatPlot({
             ? 'Проходное дело закончилось: покажи итог. closes=true.'
             : outcome?.finished
               ? 'Дело закончилось. Напиши его итог, не отменяя уже записанную хронику: если человека нашли — не пиши, что его всё ещё ищут. closes=true, только если этим исполнилось условие закрытия самой истории.'
-              : 'Сдвинь историю по исходу броска. closes=true — только если в этом месяце случилось условие закрытия, даже если до срока ещё далеко. Не закрывай и не выдумывай развязку просто потому что нить старая.',
+              : 'Сдвинь историю по исходу броска. closes=true — только если в этом месяце случилось условие закрытия, даже если до срока ещё далеко. Не закрывай и не выдумывай развязку просто потому что нить старая. Если закрываешь и после развязки остался новый нерешённый узел — sequelHook одной фразой, иначе пусто.',
           partner
             ? `Города сейчас состыкованы с «${partner.name}». Если поворот реально задел соседа — ` +
               'touchesNeighbor=true и одна фраза в neighborNote. Внутренние дела соседа не касаются.'
@@ -570,10 +591,14 @@ export async function beatPlot({
 
   const wantClose = Boolean(d.closes || beat.finale);
   const closed = wantClose && !plotHasActiveProcess(domain, plot);
+  const closeReason = d.closeReason || (beat.finale ? 'дело закончилось' : 'условие закрытия исполнилось');
+  const sequelHook =
+    closed && plot.kind !== 'errand' ? clipPlotText(String(d.sequelHook || '').trim(), PLOT_HOOK_MAX) : '';
   if (closed) {
     closePlotline(domain, plot.id, {
       tick: world.tickIndex,
-      reason: d.closeReason || (beat.finale ? 'дело закончилось' : 'условие закрытия исполнилось'),
+      reason: closeReason,
+      sequelHook,
     });
   } else if (wantClose) {
     log.info('storyteller.beat_close_held', { plotId: plot.id, reason: 'active_process' });
@@ -600,12 +625,13 @@ export async function beatPlot({
     tint: beat.tint,
     finale: Boolean(beat.finale),
     closed,
+    sequelHook: sequelHook || null,
     cast: cast.map((c) => c.name),
     mirrored: mirror?.plot?.id || null,
     textPreview: truncate(d.entry, 160),
   });
 
-  return { fact, plot, closed, mirror };
+  return { fact, plot, closed, closeReason, sequelHook, mirror };
 }
 
 /** Забытую нить закрываем без развязки: игроку она была не нужна. */
@@ -777,7 +803,7 @@ export async function echoDecisions({
     const synopsis = d.threadSynopsis || d.entry;
     // Приказ по уже идущей истории её и продолжает, а не заводит вторую такую же.
     const twin = (domain.plotlines || []).find((p) =>
-      textsLookSame(`${p.title} ${p.synopsis}`, `${title} ${synopsis}`),
+      textsLookSame(`${p.title} ${p.synopsis}`, `${title} ${synopsis}`, { minShared: 7 }),
     );
     if (twin) {
       attachChronicleToPlotlines(domain, fact.id, [twin.id]);
