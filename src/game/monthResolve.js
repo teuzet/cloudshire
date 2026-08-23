@@ -174,6 +174,7 @@ export async function resolveDomainMonth({
         importance: beat.finale || outcome?.finished ? 'major' : 'minor',
         relatedPlotlineIds: [beat.plotId],
         relatedPendingId: outcome?.processId || null,
+        processFinish: outcome?.finished ? outcome.finish || null : null,
       });
       working.lore.push(fact);
       attachChronicleToPlotlines(working, fact.id, [beat.plotId]);

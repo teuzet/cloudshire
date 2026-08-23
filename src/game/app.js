@@ -33,7 +33,6 @@ import {
 import {
   normalizeDomainProcesses,
   normalizeProcess,
-  guessProcessDuration,
   hasHardPatronDeadline,
   findDuplicateProcess,
   resolveLinkedStats,
@@ -44,8 +43,13 @@ import {
   processProgressFeel,
   recentlyClosedProcesses,
   textsLookSame,
+  reviseProcess,
+  applyObjectiveSchedule,
+  processIsFresh,
+  processPaceRatio,
 } from './processes.js';
-import { formatBoardForSpeech, warmPlotlines, plotConfig } from './plotlines.js';
+import { formatBoardForSpeech, warmPlotlines, plotConfig, findPlotline, clipPlotText, PLOT_TITLE_MAX, PLOT_SUMMARY_MAX } from './plotlines.js';
+import { estimateProcessDuration } from './durationJudge.js';
 import { ensureErrandForProcess, linkProcessToPlotline } from './plotEngine.js';
 import { dialogHistoryForPrompt } from './memory.js';
 import { getLogger, truncate, setLoggerWorldId } from '../log.js';
@@ -88,9 +92,38 @@ function claimsOnboardingAlreadyCreated(text) {
   return /успешно\s+создан|уже\s+создан|остров.{0,20}готов|был\s+создан/i.test(String(text || ''));
 }
 
-/** Минимальная длительность процесса по смыслу поручения. */
-function clampPendingDuration(summary, detail, duration) {
-  return guessProcessDuration(summary, detail, duration);
+function processPaceFeel(process) {
+  const ratio = processPaceRatio(process);
+  if (ratio < 0.95) return 'hurried';
+  if (ratio > 1.05) return 'careful';
+  return 'steady';
+}
+
+function paceHint(action) {
+  const obj = action.objectiveMonths || action.expectedMonths;
+  const left = action.monthsLeft;
+  const ratio = processPaceRatio(action);
+  if (ratio < 0.95) {
+    return (
+      `Честная оценка ${obj} мес., назначено ${action.expectedMonths} (осталось ${left}). ` +
+      'В речи ПРИМИ срок покровителя и ПРЕДУПРЕДИ: спешка повышает риск тяжёлого исхода. ' +
+      'Если настаивает — согласись, не торгуйся дальше.'
+    );
+  }
+  if (ratio > 1.05) {
+    return (
+      `Честная оценка ${obj} мес., отвели ${action.expectedMonths}. ` +
+      'Не спорь: будут делать обстоятельнее, риск провала ниже.'
+    );
+  }
+  return `Работа займёт около ${obj} мес., пока ничего не сделано.`;
+}
+
+function syncErrandFromProcess(domain, action) {
+  const plot = findPlotline(domain, action.plotlineId);
+  if (!plot || plot.kind !== 'errand') return;
+  if (action.summary) plot.title = clipPlotText(action.summary, PLOT_TITLE_MAX);
+  if (action.detail) plot.synopsis = clipPlotText(action.detail, PLOT_SUMMARY_MAX);
 }
 
 /** Убрать префикс «Имя:» / «Имя —» из речи правителя. */
@@ -190,8 +223,8 @@ function submitReplyTool(turn, character) {
       if (requestKind === 'order_long' && commitment === 'none') {
         return toolFail(
           'order_ignored',
-          'Покровитель отдал долгий приказ, а ты ничего не предпринял. Либо declare_process (и commitment=process), ' +
-            'либо честно откажи/отговори в речи и поставь commitment=refused.',
+          'Покровитель отдал долгий приказ, а ты ничего не предпринял. Либо declare_process / update_process (и commitment=process), ' +
+          'либо честно откажи/отговори в речи и поставь commitment=refused.',
         );
       }
       if (requestKind === 'order_instant' && commitment === 'none') {
@@ -299,8 +332,11 @@ function characterTools(domain, storage, character, ctx) {
           detail: a.detail,
           monthsLeft: a.monthsLeft,
           expectedMonths: a.expectedMonths,
+          objectiveMonths: a.objectiveMonths || a.expectedMonths,
+          pace: processPaceFeel(a),
           linkedStats: a.linkedStats,
           initiative: a.initiative || 'patron',
+          fresh: processIsFresh(a),
           progress: processProgressFeel(a),
         })),
         recentlyClosed: recentlyClosedProcesses(domain, world?.tickIndex),
@@ -313,11 +349,15 @@ function characterTools(domain, storage, character, ctx) {
         })),
         guidanceProcesses:
           'processes[].progress — как дело шло в прошлом месяце: так и отвечай, если спрашивают. ' +
+          'objectiveMonths — честная оценка срока, monthsLeft — сколько ещё ждут. ' +
+          'pace=hurried — покровитель торопит, предупреди о риске; pace=careful — не спорь. ' +
+          'fresh=true — дело ещё не сдвинулось: update_process может переписать его целиком. ' +
+          'fresh=false — только дополни поручение и при нужде поменяй оставшийся срок (не меньше 1 мес.). ' +
           'recentlyClosed — недавно законченные дела: про них не говори «не знаю». ' +
           'Для update_process / revoke_process бери id из processes[].id. ' +
           'Если id не помнишь — передай краткий смысл дела в processId (например «университет»), система найдёт. ' +
-          'Новый приказ покровителя — новое дело, если это не правка уже идущей той же работы. ' +
-          'Общий храм, общий двор или общие имена — не дубль и не повод для update_process. ' +
+          'Покровитель уточняет уже идущую ту же работу (новый вопрос к тому же дознанию, другой темп) — update_process, commitment=process. Не отказывай и не заводи второе. ' +
+          'Общий храм, общий двор или общие имена — не дубль и не повод слить РАЗНЫЕ работы. ' +
           'initiative=ruler — это дело ты завёл сам, пока покровитель молчал; на вопрос «что ты решал» называй их.',
         guidancePlots:
           'plots[] — живые нити. kind=errand уже привязана к делу; kind=story может быть без поручения. ' +
@@ -450,10 +490,11 @@ function characterTools(domain, storage, character, ctx) {
       name: 'declare_process',
       description:
         'Длительное дело: стройка, суд, поход, снабжение. Не для мгновенных постоянных приказов — declare_standing_order. ' +
+        'Срок сам не оценивай: его посчитает отдельный оценщик. ' +
         'Отказы: too_many_processes (лимит слотов) vs duplicate_process (та же нить) — разные отговорки в речи.',
       parameters: {
         type: 'object',
-        required: ['summary', 'detail', 'expectedMonths', 'linkedStats'],
+        required: ['summary', 'detail', 'linkedStats'],
         properties: {
           summary: { type: 'string' },
           detail: {
@@ -461,13 +502,16 @@ function characterTools(domain, storage, character, ctx) {
             description:
               'Если покровитель задал жёсткий срок («в этом месяце») — отрази это в detail дословно по смыслу.',
           },
+          remainingMonths: {
+            type: 'number',
+            description:
+              'Только если покровитель велел торопиться или не спешить: сколько месяцев ОСТАЛОСЬ ждать (не меньше 1). ' +
+              'Сам срок не оценивай.',
+          },
           expectedMonths: {
             type: 'number',
             description:
-              'Честная оценка срока в месяцах (1–12) для этого города и дела. ' +
-              'Мелкое поручение — 1; крупная стройка или поход — больше. ' +
-              'Срок, названный покровителем, важнее твоей оценки: ставь его. ' +
-              'Не завышай «на всякий случай» — движок сам поднимет срок, если дело заведомо долгое.',
+              'Устарело: то же, что remainingMonths — только воля покровителя к темпу, не твоя оценка.',
           },
           linkedStats: {
             type: 'array',
@@ -492,6 +536,7 @@ function characterTools(domain, storage, character, ctx) {
       handler: async ({
         summary,
         detail,
+        remainingMonths,
         expectedMonths,
         linkedStats,
         onBehalfOf = 'patron',
@@ -531,13 +576,12 @@ function characterTools(domain, storage, character, ctx) {
               dup.summary +
               `» (id ${dup.id}, ещё ~${dup.monthsLeft} мес.). ` +
               'Это НЕ нехватка слотов и НЕ общая занятость города. ' +
-              'В речи: отчитайся об уже идущем деле; при нужде update_process или revoke_process. ' +
+              'Покровитель, скорее всего, уточняет его: вызови update_process с этим id, ' +
+              'допиши новый вопрос (addDetail) и при нужде remainingMonths. commitment=process. ' +
               'Не выдумывай отговорку про «слишком много дел» и не обещай вторую такую же нить.',
           };
         }
-        const asked = Math.max(1, Math.min(12, Math.round(Number(expectedMonths) || 1)));
         const hard = hasHardPatronDeadline(summary, detail);
-        const duration = hard ? asked : clampPendingDuration(summary, detail, asked);
         const linked = resolveLinkedStats(linkedStats, ctx.config);
         if (!linked.length) {
           return toolFail(
@@ -546,13 +590,21 @@ function characterTools(domain, storage, character, ctx) {
               'Повтори declare_process с валидными linkedStats.',
           );
         }
+        const askedRemaining =
+          remainingMonths != null
+            ? remainingMonths
+            : expectedMonths != null
+              ? expectedMonths
+              : hard
+                ? 1
+                : null;
         const action = {
           id: newId('act'),
           summary,
           detail,
-          expectedMonths: duration,
-          durationMonths: duration,
-          monthsLeft: duration,
+          expectedMonths: 1,
+          durationMonths: 1,
+          monthsLeft: 1,
           monthsDone: 0,
           linkedStats: linked,
           onBehalfOf,
@@ -566,6 +618,15 @@ function characterTools(domain, storage, character, ctx) {
           updatedAt: new Date().toISOString(),
         };
         domain.state.pendingActions.push(action);
+        const estimated = await estimateProcessDuration({
+          config: ctx.config,
+          runtime: ctx.runtime,
+          domain,
+          summary,
+          detail,
+          log: ctx.log,
+        });
+        applyObjectiveSchedule(action, estimated.months, askedRemaining);
         // У каждого дела есть нить: либо та, что назвал правитель, либо проходная.
         let plot = plotId ? linkProcessToPlotline(domain, action.id, String(plotId)) : null;
         if (!plot) {
@@ -576,18 +637,13 @@ function characterTools(domain, storage, character, ctx) {
         }
         action.plotlineId = plot?.id || null;
         await save();
-        const clamped =
-          duration > asked ? ` Оценка срока ${duration} мес. (было ${asked}).` : '';
-        const deadlineHint = hard
-          ? ` Жёсткий срок покровителя соблюдён: ${duration} мес. Если считаешь нереалистичным — скажи честно в речи (риск срыва), но не раздувай срок.`
-          : '';
         return {
           ok: true,
           process: action,
           hint:
-            `В речи: принял повеление, работа займёт около ${duration} мес., пока ничего не сделано. ` +
+            `В речи: принял повеление. ${paceHint(action)} ` +
             'Не говори «уже строим» и не рапортуй механику; итог придёт с новостями месяца, ' +
-            `а не в этой переписке.${clamped}${deadlineHint}`,
+            'а не в этой переписке.',
         };
       },
     },
@@ -720,8 +776,8 @@ function characterTools(domain, storage, character, ctx) {
     {
       name: 'update_process',
       description:
-        'Уточнить активное длительное дело. processId — id из read_domain_brief.processes[].id ' +
-        'или несколько слов из его summary по-русски («университет», «водосбор»); латинские ключи не выдумывай.',
+        'Уточнить активное длительное дело. На нулевом месяце можно переписать целиком; ' +
+        'если дело уже шло — только дополни поручение. processId — id или несколько слов из summary.',
       parameters: {
         type: 'object',
         required: ['processId'],
@@ -730,13 +786,30 @@ function characterTools(domain, storage, character, ctx) {
             type: 'string',
             description: 'Id процесса (act_…) или ключевые слова из summary',
           },
-          summary: { type: 'string' },
-          detail: { type: 'string' },
+          summary: { type: 'string', description: 'На нулевом месяце заменяет название; иначе дописывается.' },
+          detail: { type: 'string', description: 'На нулевом месяце заменяет поручение; иначе дописывается.' },
+          addDetail: {
+            type: 'string',
+            description: 'Дополнить поручение новой оговоркой или вопросом, не затирая старое.',
+          },
+          remainingMonths: {
+            type: 'number',
+            description:
+              'Сколько месяцев ещё ждать. Не меньше 1. Ставь, если покровитель велел торопиться или не спешить.',
+          },
           linkedStats: { type: 'array', items: { type: 'string' } },
           characterNote: { type: 'string' },
         },
       },
-      handler: async ({ processId, summary, detail, linkedStats, characterNote }) => {
+      handler: async ({
+        processId,
+        summary,
+        detail,
+        addDetail,
+        remainingMonths,
+        linkedStats,
+        characterNote,
+      }) => {
         const { process: action, candidates } = resolveActiveProcess(domain, processId, ctx.config);
         if (!action) {
           return {
@@ -749,17 +822,31 @@ function characterTools(domain, storage, character, ctx) {
               formatActiveProcessesForAgent(domain, ctx.config),
           };
         }
-        if (summary) action.summary = summary;
-        if (detail) action.detail = detail;
-        if (linkedStats) {
-          const linked = resolveLinkedStats(linkedStats, ctx.config);
-          if (linked.length) action.linkedStats = linked;
+        const revised = reviseProcess(
+          action,
+          { summary, detail, addDetail, remainingMonths, linkedStats, characterNote },
+          ctx.config,
+        );
+        if (revised.rewritten) {
+          const estimated = await estimateProcessDuration({
+            config: ctx.config,
+            runtime: ctx.runtime,
+            domain,
+            summary: action.summary,
+            detail: action.detail,
+          });
+          applyObjectiveSchedule(action, estimated.months, remainingMonths);
         }
-        if (characterNote !== undefined) action.characterNote = characterNote;
-        action.updatedAt = new Date().toISOString();
-        normalizeProcess(action, ctx.config);
+        syncErrandFromProcess(domain, action);
         await save();
-        return { ok: true, process: action };
+        const mode = revised.fresh ? 'дело ещё не сдвинулось, можно было переписать' : 'дело уже шло, текст только дополнен';
+        return {
+          ok: true,
+          process: action,
+          hint:
+            `${mode}. ${paceHint(action)} ` +
+            'В речи не обещай, что уже сделано; итог придёт с новостями месяца.',
+        };
       },
     },
     {

@@ -41,7 +41,102 @@ export function normalizeProcess(action, config = null) {
 
   if (!action.status) action.status = 'active';
   if (!action.initiative) action.initiative = 'patron';
+  if (action.objectiveMonths == null) {
+    action.objectiveMonths = action.expectedMonths;
+  } else {
+    action.objectiveMonths = Math.max(1, Math.min(12, Math.round(Number(action.objectiveMonths) || 1)));
+  }
   return action;
+}
+
+function clampMonths(n, fallback = 1) {
+  const v = Math.round(Number(n));
+  if (!Number.isFinite(v)) return fallback;
+  return Math.max(1, Math.min(12, v));
+}
+
+function appendText(old, extra) {
+  const a = String(old || '').trim();
+  const b = String(extra || '').trim();
+  if (!b) return a;
+  if (!a) return b;
+  if (a.includes(b)) return a;
+  return `${a} ${b}`;
+}
+
+export function processIsFresh(action) {
+  return Math.max(0, Number(action?.monthsDone) || 0) === 0;
+}
+
+/** Назначенный срок к честной оценке: <1 спешка, >1 обстоятельность. */
+export function processPaceRatio(process) {
+  const objective = Math.max(1, Number(process?.objectiveMonths || process?.expectedMonths || 1));
+  const scheduled = Math.max(1, Number(process?.expectedMonths || objective));
+  return scheduled / objective;
+}
+
+export function setRemainingMonths(action, remainingMonths) {
+  const remaining = clampMonths(remainingMonths, 1);
+  const done = Math.max(0, action.monthsDone || 0);
+  action.monthsLeft = remaining;
+  action.expectedMonths = done + remaining;
+  action.durationMonths = action.expectedMonths;
+  action.updatedAt = new Date().toISOString();
+  return action;
+}
+
+export function applyObjectiveSchedule(action, objectiveMonths, remainingMonths = null) {
+  action.objectiveMonths = clampMonths(objectiveMonths, 2);
+  if (remainingMonths != null && Number.isFinite(Number(remainingMonths))) {
+    setRemainingMonths(action, remainingMonths);
+  } else if (processIsFresh(action)) {
+    action.monthsLeft = action.objectiveMonths;
+    action.expectedMonths = action.objectiveMonths;
+    action.durationMonths = action.objectiveMonths;
+  }
+  action.updatedAt = new Date().toISOString();
+  return action;
+}
+
+/**
+ * Уточнить уже идущее дело.
+ * Нулевой месяц — можно переписать целиком. Дальше только дополнить текст;
+ * оставшийся срок менять можно, но не меньше одного месяца.
+ */
+export function reviseProcess(
+  action,
+  { summary, detail, addDetail, remainingMonths, linkedStats, characterNote } = {},
+  config = null,
+) {
+  normalizeProcess(action, config);
+  const fresh = processIsFresh(action);
+  if (fresh) {
+    if (summary) action.summary = String(summary).trim();
+    if (detail) action.detail = String(detail).trim();
+    else if (addDetail) action.detail = appendText(action.detail, addDetail);
+    if (characterNote !== undefined) action.characterNote = characterNote || null;
+    if (linkedStats) {
+      const linked = resolveLinkedStats(linkedStats, config);
+      if (linked.length) action.linkedStats = linked;
+    }
+  } else {
+    if (summary) action.summary = appendText(action.summary, summary);
+    const extra = addDetail || detail;
+    if (extra) action.detail = appendText(action.detail, extra);
+    if (characterNote) action.characterNote = appendText(action.characterNote, characterNote);
+    if (linkedStats) {
+      const linked = resolveLinkedStats(linkedStats, config);
+      if (linked.length) {
+        action.linkedStats = [...new Set([...(action.linkedStats || []), ...linked])];
+      }
+    }
+  }
+  if (remainingMonths != null && Number.isFinite(Number(remainingMonths))) {
+    setRemainingMonths(action, remainingMonths);
+  }
+  action.updatedAt = new Date().toISOString();
+  normalizeProcess(action, config);
+  return { action, fresh, rewritten: Boolean(fresh && (summary || detail)) };
 }
 
 export function normalizeDomainProcesses(domain, config = null) {
@@ -72,9 +167,9 @@ export function processStatAverage(domain, process, config = null) {
 }
 
 // Бросок хода дела живёт в едином модуле бросков.
-import { rollProcessAdvance } from './rolls.js';
+import { rollProcessAdvance, rollProcessFinish, FINISH_LABELS } from './rolls.js';
 
-export { rollProcessAdvance };
+export { rollProcessAdvance, rollProcessFinish, FINISH_LABELS };
 
 /** Броски для всех active процессов домена (до резолва). */
 export function rollAllProcessAdvances(domain, config = null, rng = Math.random) {
@@ -114,7 +209,7 @@ export function applyProcessAdvance(process, advance, { complete = false, failed
  * Прогресс дел — целиком за движком: агент его не выбирает, только рассказывает.
  * Возвращает итоги месяца по каждому делу (что нужно обязательно описать).
  */
-export function applyEngineProgress(domain, rolls, { tick = null, config = null } = {}) {
+export function applyEngineProgress(domain, rolls, { tick = null, config = null, rng = Math.random } = {}) {
   const byId = new Map((domain.state?.pendingActions || []).map((a) => [a.id, a]));
   const outcomes = [];
   for (const r of rolls || []) {
@@ -127,6 +222,17 @@ export function applyEngineProgress(domain, rolls, { tick = null, config = null 
     process.lastAdvanceKind = r.kind;
     process.lastAdvance = r.advance;
     process.lastAdvanceTick = tick;
+    let finish = null;
+    let finishLabel = null;
+    if (finished) {
+      const avg = processStatAverage(domain, process, config);
+      const rolled = rollProcessFinish(avg, processPaceRatio(process), rng);
+      finish = rolled.finish;
+      finishLabel = FINISH_LABELS[finish];
+      process.finishKind = finish;
+      process.finishRoll = rolled.roll;
+      process.finishWeights = rolled.weights;
+    }
     outcomes.push({
       processId: r.processId,
       summary: process.summary,
@@ -137,6 +243,8 @@ export function applyEngineProgress(domain, rolls, { tick = null, config = null 
       monthsLeftBefore: before,
       monthsLeft,
       finished,
+      finish,
+      finishLabel,
       // Обычный ход без завершения — фон, о нём отдельную запись не пишем.
       mustNarrate: finished || r.kind !== 'normal',
     });
@@ -152,7 +260,8 @@ export function formatProcessOutcomesForPrompt(outcomes) {
       if (o.finished) {
         return (
           `- [${o.processId}] «${o.summary}» — ЗАВЕРШЕНО в этом месяце. ` +
-          'ОБЯЗАТЕЛЬНА запись: чем именно кончилось дело и что теперь есть у города.'
+          `Исход броска: ${o.finishLabel || o.finish || 'нейтральный успех'}. ` +
+          'Цель поручения не отменяй из-за провала — провал чаще про цену и побочный вред.'
         );
       }
       if (o.kind === 'stall') {

@@ -154,7 +154,7 @@ function registerCharacters(domain, list, { world, plotId = null, author = 'stor
   return added;
 }
 
-function pushChronicle(domain, { text, importance, world, plotIds = [], processId = null, author }) {
+function pushChronicle(domain, { text, importance, world, plotIds = [], processId = null, processFinish = null, author }) {
   const fact = createLoreFact({
     id: newId('lore'),
     text: String(text || '').trim(),
@@ -165,6 +165,7 @@ function pushChronicle(domain, { text, importance, world, plotIds = [], processI
     importance: importance || 'minor',
     relatedPlotlineIds: plotIds.length ? plotIds : null,
     relatedPendingId: processId || null,
+    processFinish,
   });
   domain.lore = domain.lore || [];
   domain.lore.push(fact);
@@ -472,7 +473,9 @@ export async function beatPlot({
   const processLine = outcome
     ? outcome.finished
       ? [
-          `Связанное дело «${outcome.summary}» ЗАВЕРШЕНО в этом месяце — расскажи итог с учётом уже записанной хроники этой истории.`,
+          `Связанное дело «${outcome.summary}» ЗАВЕРШЕНО в этом месяце.`,
+          `Исход броска (не спорь): ${outcome.finishLabel || outcome.finish || 'нейтральный успех'}.`,
+          'Провал не значит, что цель не достигнута — чаще это тяжёлая цена или побочный вред при исполненном поручении.',
           outcome.detail ? `Поручение было: ${outcome.detail}` : null,
         ]
           .filter(Boolean)
@@ -551,6 +554,7 @@ export async function beatPlot({
     world,
     plotIds: [plot.id],
     processId: outcome?.processId || null,
+    processFinish: outcome?.finished ? outcome.finish || null : null,
     author: 'storyteller:beat',
   });
 

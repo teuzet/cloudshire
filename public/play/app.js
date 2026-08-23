@@ -309,13 +309,30 @@ function renderOrdersBlocks(d) {
 
 function processCard(p) {
   const total = p.expectedMonths ?? p.durationMonths ?? '?';
+  const objective = p.objectiveMonths;
   const left = p.monthsLeft;
   const active = !p.status || p.status === 'active';
   const clock = active
     ? `осталось ${left ?? '?'} из ${total} мес.`
-    : `${p.status}${p.resolvedTick != null ? ` · тик ${p.resolvedTick}` : ''} · оценка была ${total} мес.`;
+    : `${p.status}${p.resolvedTick != null ? ` · тик ${p.resolvedTick}` : ''} · шло ${total} мес.`;
+  const pace =
+    objective && Number(objective) !== Number(total)
+      ? `оценка ${objective} мес.`
+      : objective
+        ? `оценка ${objective} мес.`
+        : null;
+  const finish =
+    p.finishKind === 'fail'
+      ? 'исход: провал'
+      : p.finishKind === 'crit'
+        ? 'исход: критический успех'
+        : p.finishKind === 'ok'
+          ? 'исход: нейтральный успех'
+          : null;
   const meta = [
     clock,
+    pace,
+    finish,
     p.linkedStats?.length ? `статы: ${p.linkedStats.join(', ')}` : null,
     p.initiative === 'ruler' ? 'сам правитель' : null,
     p.lastAdvanceKind ? `последний ход: ${p.lastAdvanceKind}${p.lastAdvance != null ? ` (${p.lastAdvance})` : ''}` : null,
@@ -362,6 +379,7 @@ function renderChronicleTab(d) {
             ? `нить: ${e.relatedPlots.map((p) => p.title).join(', ')}`
             : null,
           e.relatedProcess ? `дело: ${e.relatedProcess.title}` : null,
+          e.processFinishLabel ? `исход: ${e.processFinishLabel}` : null,
         ].filter(Boolean);
         const meta = [e.gameDateLabel, e.importance, e.author, stats, ...links]
           .filter(Boolean)

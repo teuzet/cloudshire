@@ -9,9 +9,10 @@ import {
   activeProcesses,
   canStartProcess,
   findDuplicateProcess,
-  guessProcessDuration,
   resolveLinkedStats,
+  applyObjectiveSchedule,
 } from './processes.js';
+import { estimateProcessDuration } from './durationJudge.js';
 import { formatBoardForPrompt } from './plotlines.js';
 import { ensureErrandForProcess, linkProcessToPlotline } from './plotEngine.js';
 import { qualitativeStatsBrief, qualitativePopulation } from './stats.js';
@@ -60,7 +61,7 @@ function rememberFact(domain, { text, world, character }) {
   return fact;
 }
 
-function applyProcess(domain, args, { config, world, character }) {
+async function applyProcess(domain, args, { config, runtime, world, character, log }) {
   const slots = canStartProcess(domain, config);
   if (!slots.ok) {
     return { error: 'too_many_processes', message: `Уже ${slots.active}/${slots.max} дел.` };
@@ -78,15 +79,13 @@ function applyProcess(domain, args, { config, world, character }) {
   if (!linked.length) {
     return { error: 'linked_stats_required', message: 'Нужен хотя бы один стат.' };
   }
-  const asked = Math.max(1, Math.min(12, Math.round(Number(args.expectedMonths) || 1)));
-  const duration = guessProcessDuration(summary, detail, asked);
   const action = {
     id: newId('act'),
     summary,
     detail,
-    expectedMonths: duration,
-    durationMonths: duration,
-    monthsLeft: duration,
+    expectedMonths: 1,
+    durationMonths: 1,
+    monthsLeft: 1,
     monthsDone: 0,
     linkedStats: linked,
     onBehalfOf: character?.name || 'правитель',
@@ -100,6 +99,15 @@ function applyProcess(domain, args, { config, world, character }) {
     updatedAt: new Date().toISOString(),
   };
   domain.state.pendingActions.push(action);
+  const estimated = await estimateProcessDuration({
+    config,
+    runtime,
+    domain,
+    summary,
+    detail,
+    log,
+  });
+  applyObjectiveSchedule(action, estimated.months);
   let plot = args.plotId ? linkProcessToPlotline(domain, action.id, String(args.plotId)) : null;
   if (!plot) {
     plot = ensureErrandForProcess(domain, action, {
@@ -166,7 +174,6 @@ export async function runSteward({ config, runtime, domain, world, log: parentLo
           action: { type: 'string', enum: ['none', 'process', 'standing_order'] },
           summary: { type: 'string', description: 'Название дела, 1–8 слов' },
           detail: { type: 'string', description: 'Что именно поручено и кому' },
-          expectedMonths: { type: 'number', description: 'Срок 1–12' },
           linkedStats: {
             type: 'array',
             items: { type: 'string' },
@@ -188,7 +195,7 @@ export async function runSteward({ config, runtime, domain, world, log: parentLo
           return { ok: true };
         }
         if (kind === 'process') {
-          const applied = applyProcess(domain, args, { config, world, character });
+          const applied = await applyProcess(domain, args, { config, runtime, world, character, log });
           if (applied.error) return toolFail(applied.error, applied.message);
           draft.data = { kind: 'process', summary: applied.action.summary, id: applied.action.id };
           return { ok: true };

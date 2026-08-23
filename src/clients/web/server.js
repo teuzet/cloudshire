@@ -12,6 +12,7 @@ import {
 import { getLogger, requestLogger, truncate } from '../../log.js';
 import { statEpithet } from '../../game/stats.js';
 import { chronicleEntries, castRecords } from '../../game/models.js';
+import { FINISH_SHORT } from '../../game/rolls.js';
 
 /** Заголовки нитей и дел для карточек хроники в тестовом клиенте. */
 function chronicleRelations(entry, domain) {
@@ -21,18 +22,22 @@ function chronicleRelations(entry, domain) {
   }
   const processesById = new Map();
   for (const p of domain.state?.pendingActions || []) {
-    if (p?.id) processesById.set(String(p.id), p.summary || p.title || p.id);
+    if (p?.id) processesById.set(String(p.id), p);
   }
   const relatedPlots = [...new Set((entry.relatedPlotlineIds || []).map(String))].map((id) => ({
     id,
     title: plotsById.get(id) || id,
   }));
   const processId = entry.relatedPendingId ? String(entry.relatedPendingId) : null;
+  const process = processId ? processesById.get(processId) : null;
+  const finish = entry.processFinish || process?.finishKind || null;
   return {
     relatedPlots,
     relatedProcess: processId
-      ? { id: processId, title: processesById.get(processId) || processId }
+      ? { id: processId, title: process?.summary || process?.title || processId }
       : null,
+    processFinish: finish,
+    processFinishLabel: finish ? FINISH_SHORT[finish] || finish : null,
   };
 }
 

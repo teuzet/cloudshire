@@ -77,10 +77,70 @@ export function rollTint(statValue, rng = Math.random, cfg = {}) {
   return { roll: Math.round(roll * 100), chance: Math.round(chance * 100), tint };
 }
 
+/**
+ * Исход завершения дела: провал / нейтральный успех / критический успех.
+ * Провал не отменяет поручение — чаще тяжёлая цена при достигнутой цели.
+ * paceRatio = назначенный срок / объективная оценка: <1 спешка, >1 обстоятельность.
+ */
+export function rollProcessFinish(avgStat, paceRatio = 1, rng = Math.random, cfg = {}) {
+  const chance = compressedChance(avgStat, cfg);
+  const critShare = Math.max(0.05, Math.min(0.45, Number(cfg.finishCritShare ?? 0.25)));
+  let pCrit = chance * critShare;
+  let pOk = chance * (1 - critShare);
+  let pFail = 1 - chance;
+  const ratio = Number(paceRatio);
+  if (Number.isFinite(ratio) && ratio > 0 && ratio < 1) {
+    pCrit *= ratio;
+    pOk *= ratio;
+    pFail = 1 - pCrit - pOk;
+  } else if (Number.isFinite(ratio) && ratio > 1) {
+    pFail *= 1 / ratio;
+    const leftover = 1 - pFail;
+    const success = pCrit + pOk;
+    if (success > 0) {
+      const k = leftover / success;
+      pCrit *= k;
+      pOk *= k;
+    } else {
+      pOk = leftover;
+    }
+  }
+  const roll = rng();
+  let finish = 'ok';
+  if (roll < pFail) finish = 'fail';
+  else if (roll >= pFail + pOk) finish = 'crit';
+  return {
+    finish,
+    roll: Math.round(roll * 100),
+    paceRatio: Number.isFinite(ratio) && ratio > 0 ? ratio : 1,
+    weights: {
+      fail: Math.round(pFail * 100),
+      ok: Math.round(pOk * 100),
+      crit: Math.round(pCrit * 100),
+    },
+  };
+}
+
+export const FINISH_SHORT = {
+  fail: 'провал',
+  ok: 'нейтральный успех',
+  crit: 'критический успех',
+};
+
+export const FINISH_LABELS = {
+  fail: 'провал: поручение могло исполниться, но с неприятной ценой или побочным вредом',
+  ok: 'нейтральный успех: сделали то, что велели, без особого блеска и без большой беды',
+  crit: 'критический успех: вышло лучше обычного, с явной удачей или лишней пользой',
+};
+
 /** Окраска бита, вызванного делом: темп дела уже брошен, второй раз не кидаем. */
 export function tintFromProcessOutcome(outcome) {
   if (!outcome) return 'dual';
-  if (outcome.finished) return outcome.failed ? 'bad' : 'good';
+  if (outcome.finished) {
+    if (outcome.finish === 'fail' || outcome.failed) return 'bad';
+    if (outcome.finish === 'crit') return 'good';
+    return 'dual';
+  }
   if (outcome.kind === 'stall') return 'bad';
   if (outcome.kind === 'surge') return 'good';
   return 'dual';
