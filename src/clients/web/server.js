@@ -13,6 +13,29 @@ import { getLogger, requestLogger, truncate } from '../../log.js';
 import { statEpithet } from '../../game/stats.js';
 import { chronicleEntries, castRecords } from '../../game/models.js';
 
+/** Заголовки нитей и дел для карточек хроники в тестовом клиенте. */
+function chronicleRelations(entry, domain) {
+  const plotsById = new Map();
+  for (const p of [...(domain.plotlines || []), ...(domain.closedPlotlines || [])]) {
+    if (p?.id) plotsById.set(String(p.id), p.title || p.id);
+  }
+  const processesById = new Map();
+  for (const p of domain.state?.pendingActions || []) {
+    if (p?.id) processesById.set(String(p.id), p.summary || p.title || p.id);
+  }
+  const relatedPlots = [...new Set((entry.relatedPlotlineIds || []).map(String))].map((id) => ({
+    id,
+    title: plotsById.get(id) || id,
+  }));
+  const processId = entry.relatedPendingId ? String(entry.relatedPendingId) : null;
+  return {
+    relatedPlots,
+    relatedProcess: processId
+      ? { id: processId, title: processesById.get(processId) || processId }
+      : null,
+  };
+}
+
 /** Числа игроку видны, но рядом с ними — то же слово, которым говорит правитель. */
 function statsWithEpithets(stats, config) {
   return (config.stats || []).map((def) => {
@@ -244,7 +267,7 @@ export function createWebServer({ config, app, runtime, storage }) {
               gameDateLabel: e.gameDateLabel || null,
               importance: e.importance || null,
               author: e.author || null,
-              plotlineId: e.plotlineId || null,
+              ...chronicleRelations(e, domain),
               statChanges: e.statChanges || null,
             })),
             conflux: conflux

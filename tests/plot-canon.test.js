@@ -1,0 +1,186 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  closePlotline,
+  findClosedPlotline,
+  plotCanFade,
+  plotHasActiveProcess,
+  reopenClosedPlotline,
+} from '../src/game/plotlines.js';
+import { ensureErrandForProcess, planBeats } from '../src/game/plotEngine.js';
+import { peopleUnderWatch, priorPlotChronicle } from '../src/game/storyteller.js';
+
+function plot(id, extra = {}) {
+  return {
+    id,
+    title: 'Пустая келья',
+    synopsis: 'Иару нашли живой в водосборных лестницах.',
+    closeWhen: 'Найдут или похоронят.',
+    kind: 'story',
+    tags: [],
+    relatedStats: ['stability'],
+    chronicleIds: ['lore_found'],
+    relatedProcessIds: ['act_search'],
+    relatedPlotlineIds: [],
+    importance: 40,
+    maxAgeMonths: 6,
+    ageMonths: 2,
+    temperature: 40,
+    mirrorOf: null,
+    confluxId: null,
+    partnerGone: false,
+    status: 'open',
+    createdTick: 1,
+    lastBeatTick: 6,
+    beatCount: 3,
+    ...extra,
+  };
+}
+
+test('закрытая нить помнит дело и хронику, а не только заголовок', () => {
+  const domain = { plotlines: [plot('plot_iara')], closedPlotlines: [] };
+  closePlotline(domain, 'plot_iara', { tick: 6, reason: 'Иару нашли.' });
+  assert.equal(domain.plotlines.length, 0);
+  const archived = findClosedPlotline(domain, 'plot_iara');
+  assert.ok(archived);
+  assert.deepEqual(archived.relatedProcessIds, ['act_search']);
+  assert.deepEqual(archived.chronicleIds, ['lore_found']);
+  assert.match(archived.synopsis, /нашли/);
+});
+
+test('нить с живым поручением нельзя считать свободной', () => {
+  const domain = {
+    plotlines: [plot('plot_iara')],
+    state: { pendingActions: [{ id: 'act_search', status: 'active' }] },
+  };
+  assert.equal(plotHasActiveProcess(domain, domain.plotlines[0]), true);
+  domain.state.pendingActions[0].status = 'resolved';
+  assert.equal(plotHasActiveProcess(domain, domain.plotlines[0]), false);
+});
+
+test('живое поручение возвращает закрытую нить, а не заводит пустую карточку', () => {
+  const domain = {
+    plotlines: [plot('plot_iara')],
+    closedPlotlines: [],
+    state: { pendingActions: [] },
+  };
+  closePlotline(domain, 'plot_iara', { tick: 6, reason: 'Иару нашли.' });
+  const process = {
+    id: 'act_search',
+    plotlineId: 'plot_iara',
+    summary: 'Повторный розыск Иары',
+    detail: 'Снова проверить келью.',
+    expectedMonths: 2,
+  };
+  const result = ensureErrandForProcess(domain, process, { tick: 7 });
+  assert.equal(result.created, false);
+  assert.equal(result.reopened, true);
+  assert.equal(result.plot.id, 'plot_iara');
+  assert.match(result.plot.synopsis, /нашли/);
+  assert.ok(result.plot.relatedProcessIds.includes('act_search'));
+  assert.equal(domain.plotlines.length, 1);
+  assert.equal((domain.closedPlotlines || []).length, 0);
+});
+
+test('бит видит прошлую хронику нити и людей в розыске', () => {
+  const domain = {
+    lore: [
+      {
+        id: 'lore_found',
+        tags: ['chronicle'],
+        text: 'В лестницах нашли Иару.',
+        gameDateLabel: 'Год 1, месяц 7',
+        relatedPlotlineIds: ['plot_iara'],
+      },
+      {
+        id: 'lore_levra',
+        tags: ['character'],
+        name: 'Левра',
+        role: 'переписчица',
+        about: 'Работает в храме.',
+        status: 'alive',
+      },
+    ],
+    plotlines: [plot('plot_iara')],
+    state: {
+      pendingActions: [
+        {
+          id: 'act_hunt',
+          status: 'active',
+          summary: 'Задержание и разбор угроз Левры',
+          detail: 'Разыскать и задержать Левру.',
+        },
+      ],
+    },
+  };
+  const prior = priorPlotChronicle(domain, domain.plotlines[0]);
+  assert.equal(prior.length, 1);
+  assert.match(prior[0], /нашли Иару/);
+  const watched = peopleUnderWatch(domain);
+  assert.equal(watched.length, 1);
+  assert.equal(watched[0].name, 'Левра');
+});
+
+test('просроченная нить гаснет только без дел и без внимания', () => {
+  const cold = plot('p_cold', { ageMonths: 6, maxAgeMonths: 5, temperature: 8, relatedProcessIds: [] });
+  const busy = plot('p_busy', { ageMonths: 6, maxAgeMonths: 5, temperature: 8, relatedProcessIds: ['act_1'] });
+  const hot = plot('p_hot', { ageMonths: 6, maxAgeMonths: 5, temperature: 40, relatedProcessIds: [] });
+  assert.equal(plotCanFade({ plotlines: [cold], state: { pendingActions: [] } }, cold), true);
+  assert.equal(
+    plotCanFade(
+      { plotlines: [busy], state: { pendingActions: [{ id: 'act_1', status: 'active' }] } },
+      busy,
+    ),
+    false,
+  );
+  assert.equal(plotCanFade({ plotlines: [hot], state: { pendingActions: [] } }, hot), false);
+  assert.equal(
+    plotCanFade(
+      { plotlines: [plot('p_young', { ageMonths: 2, maxAgeMonths: 5, temperature: 0, relatedProcessIds: [] })] },
+      plot('p_young', { ageMonths: 2, maxAgeMonths: 5, temperature: 0, relatedProcessIds: [] }),
+    ),
+    false,
+  );
+});
+
+test('план битов: забытую нить гасит тихо, живую просроченную не финалит', () => {
+  const forgotten = plot('p_fade', {
+    ageMonths: 6,
+    maxAgeMonths: 5,
+    temperature: 5,
+    relatedProcessIds: [],
+  });
+  const watched = plot('p_hot', {
+    ageMonths: 6,
+    maxAgeMonths: 5,
+    temperature: 50,
+    relatedProcessIds: [],
+  });
+  const beats = planBeats({
+    domain: { plotlines: [forgotten, watched], state: { pendingActions: [] } },
+    rng: () => 1,
+  });
+  const fade = beats.find((b) => b.plotId === 'p_fade');
+  const hot = beats.find((b) => b.plotId === 'p_hot');
+  assert.equal(fade?.fade, true);
+  assert.equal(fade?.finale, false);
+  assert.equal(fade?.reason, 'fade');
+  assert.equal(hot, undefined);
+});
+
+test('тонкий архив без синопсиса всё равно поднимает развязку в карточку', () => {
+  const domain = {
+    plotlines: [],
+    closedPlotlines: [
+      {
+        id: 'plot_old',
+        title: 'Пустая келья',
+        reason: 'Иару нашли, виновный переписчик задержан.',
+        beatCount: 3,
+        closedTick: 6,
+      },
+    ],
+  };
+  const plotline = reopenClosedPlotline(domain, 'plot_old');
+  assert.match(plotline.synopsis, /Иару нашли/);
+});

@@ -265,7 +265,7 @@ function renderPlotsTab(d) {
             `<article class="ins-card"><h4>${esc(p.title)}</h4>` +
             `<div class="muted small">${esc(meta)}</div>` +
             (p.synopsis ? `<p class="pre">${esc(p.synopsis)}</p>` : '') +
-            (p.closeWhen ? `<p class="small muted">закроется: ${esc(p.closeWhen)}</p>` : '') +
+            (p.closeWhen ? `<p class="small muted">закроется, когда: ${esc(p.closeWhen)}</p>` : '') +
             (p.relatedStats?.length
               ? `<p class="small muted">статы: ${esc(p.relatedStats.join(', '))}</p>`
               : '') +
@@ -299,7 +299,7 @@ function renderOrdersBlocks(d) {
           .map(
             (o) =>
               `<li>${esc(o.text)} <span class="muted small">${esc(
-                [o.by, o.declaredTick != null ? `тик ${o.declaredTick}` : null].filter(Boolean).join(' · '),
+                [o.initiative === 'ruler' ? 'сам правитель' : o.by, o.declaredTick != null ? `тик ${o.declaredTick}` : null].filter(Boolean).join(' · '),
               )}</span></li>`,
           )
           .join('')}</ul>`
@@ -317,6 +317,7 @@ function processCard(p) {
   const meta = [
     clock,
     p.linkedStats?.length ? `статы: ${p.linkedStats.join(', ')}` : null,
+    p.initiative === 'ruler' ? 'сам правитель' : null,
     p.lastAdvanceKind ? `последний ход: ${p.lastAdvanceKind}${p.lastAdvance != null ? ` (${p.lastAdvance})` : ''}` : null,
   ]
     .filter(Boolean)
@@ -356,7 +357,15 @@ function renderChronicleTab(d) {
               .map(([k, v]) => `${k} ${v.from}→${v.to}`)
               .join(', ')
           : '';
-        const meta = [e.gameDateLabel, e.importance, e.author, stats].filter(Boolean).join(' · ');
+        const links = [
+          e.relatedPlots?.length
+            ? `нить: ${e.relatedPlots.map((p) => p.title).join(', ')}`
+            : null,
+          e.relatedProcess ? `дело: ${e.relatedProcess.title}` : null,
+        ].filter(Boolean);
+        const meta = [e.gameDateLabel, e.importance, e.author, stats, ...links]
+          .filter(Boolean)
+          .join(' · ');
         return (
           `<article class="ins-card"><div class="muted small">${esc(meta)}</div>` +
           `<p class="pre">${esc(e.text)}</p></article>`

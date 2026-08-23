@@ -83,6 +83,7 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
         domain: month.domain,
         chronicleAdds: month.chronicleAdds,
         highlight: month.highlight,
+        stewardActs: month.stewardActs || [],
       });
     }
   }
@@ -93,7 +94,7 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
   );
   confluxNotes.push(...(advanced.notes || []));
 
-  for (const { conflux, domain, chronicleAdds, highlight } of pairBatches) {
+  for (const { conflux, domain, chronicleAdds, highlight, stewardActs } of pairBatches) {
     handled.add(domain.id);
     await storage.saveDomain(domain);
 
@@ -109,6 +110,7 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
       undock: undockAdds.length > 0,
       partnerName: partner?.name || null,
       highlight,
+      stewardActs,
     });
     await app.persistDialog(domain, 'assistant', news, { kind: 'tick_news' });
     await app.emitOutbound(domain.ownerUserId, withDateHeader(news, world), {
@@ -169,6 +171,7 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
       );
       const news = await app.narrateTickNews(resolved.domain, newsAdds, world.gameDate, {
         highlight: resolved.highlight,
+        stewardActs: resolved.stewardActs || [],
       });
       await app.persistDialog(resolved.domain, 'assistant', news, { kind: 'tick_news' });
       await app.emitOutbound(resolved.domain.ownerUserId, withDateHeader(news, world), {

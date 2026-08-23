@@ -40,6 +40,7 @@ export function normalizeProcess(action, config = null) {
   }
 
   if (!action.status) action.status = 'active';
+  if (!action.initiative) action.initiative = 'patron';
   return action;
 }
 

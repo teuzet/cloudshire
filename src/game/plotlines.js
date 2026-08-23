@@ -8,7 +8,9 @@ import { textsLookSame } from './processes.js';
  * Механика (см. docs/PIVOT_PLOTLINES.md):
  *   temperature — интерес к нити (растёт от внимания игрока, падает со временем)
  *   importance  — судьбоносность для города, задаёт масштаб последствий
- *   maxAgeMonths / ageMonths — сколько месяцев ждём интереса и сколько уже прошло
+ *   maxAgeMonths / ageMonths — сколько месяцев история живёт без внимания;
+ *     срок сам по себе не развязка: выдохшаяся нить гаснет, только если нет дел и упоминаний
+ *   closeWhen — что должно случиться, чтобы историю закрыть по существу, не «что писать в последний месяц»
  *   relatedStats — какие стороны города сейчас в игре (по ним кидается окраска бита)
  */
 
@@ -28,8 +30,8 @@ function clipText(s, max) {
   return `${body.replace(/[\s,;:—-]+$/, '')}…`;
 }
 
-export const PLOT_SUMMARY_MAX = 400;
-export const PLOT_HOOK_MAX = 120;
+export const PLOT_SUMMARY_MAX = 900;
+export const PLOT_HOOK_MAX = 160;
 export const PLOT_TITLE_MAX = 120;
 export { clipText as clipPlotText };
 
@@ -66,6 +68,8 @@ export function plotConfig(config) {
       decayPerTick: Math.max(0, Number(p.temperature?.decayPerTick ?? 8)),
       perTouch: Math.max(0, Number(p.temperature?.perTouch ?? 12)),
       afterBeat: clamp100(p.temperature?.afterBeat ?? 20),
+      // Ниже этого порога просроченную нить без дел считаем забытой.
+      fadeBelow: clamp100(p.temperature?.fadeBelow ?? 18, 18),
     },
     roll: {
       // Сжатая шкала: слабость чувствуется, но не приговаривает.
@@ -206,6 +210,17 @@ export function isOverdue(plotline) {
   return plotlineAge(plotline) >= Math.max(1, Number(plotline?.maxAgeMonths) || 6);
 }
 
+/**
+ * Принудительно гаснет только забытая нить: срок вышел, связанных дел нет,
+ * упоминаний нет (температура остыла). Иначе срок просто ждёт.
+ */
+export function plotCanFade(domain, plot, cfg) {
+  if (!isOverdue(plot)) return false;
+  if (plotHasActiveProcess(domain, plot)) return false;
+  const floor = Number(cfg?.temperature?.fadeBelow ?? 18);
+  return Number(plot.temperature || 0) <= floor;
+}
+
 export function countOpen(domain) {
   const list = domain?.plotlines || [];
   return {
@@ -225,6 +240,96 @@ export function boardHasRoom(domain, cfg) {
 
 export function findPlotline(domain, plotlineId) {
   return (domain?.plotlines || []).find((p) => p.id === plotlineId) || null;
+}
+
+export function findClosedPlotline(domain, plotlineId) {
+  const id = String(plotlineId || '');
+  if (!id) return null;
+  return (domain?.closedPlotlines || []).find((p) => p.id === id) || null;
+}
+
+/** Поручение ещё идёт — нить рано убирать с доски, иначе дело получит пустую карточку. */
+export function plotHasActiveProcess(domain, plot) {
+  const ids = new Set((plot?.relatedProcessIds || []).map(String));
+  if (!ids.size) return false;
+  return (domain?.state?.pendingActions || []).some(
+    (a) => ids.has(String(a.id)) && (!a.status || a.status === 'active'),
+  );
+}
+
+function archiveClosedPlot(plot, { tick = null, reason = '' } = {}) {
+  const closeReason = reason || plot.closeReason || '';
+  return {
+    id: plot.id,
+    title: plot.title,
+    synopsis: plot.synopsis || '',
+    closeWhen: plot.closeWhen || '',
+    kind: plot.kind || 'story',
+    tags: Array.isArray(plot.tags) ? plot.tags : [],
+    relatedStats: Array.isArray(plot.relatedStats) ? [...plot.relatedStats] : [],
+    chronicleIds: Array.isArray(plot.chronicleIds) ? [...plot.chronicleIds] : [],
+    relatedProcessIds: Array.isArray(plot.relatedProcessIds) ? [...plot.relatedProcessIds] : [],
+    relatedPlotlineIds: Array.isArray(plot.relatedPlotlineIds) ? [...plot.relatedPlotlineIds] : [],
+    importance: plot.importance,
+    maxAgeMonths: plot.maxAgeMonths,
+    ageMonths: plot.ageMonths,
+    temperature: plot.temperature,
+    mirrorOf: plot.mirrorOf || null,
+    confluxId: plot.confluxId || null,
+    partnerGone: Boolean(plot.partnerGone),
+    status: 'closed',
+    createdTick: plot.createdTick ?? null,
+    lastBeatTick: plot.lastBeatTick ?? null,
+    beatCount: plot.beatCount || 0,
+    closedTick: tick,
+    reason: closeReason,
+    closeReason,
+  };
+}
+
+/** Вернуть закрытую нить на доску: поручение ещё живо, развязку забывать нельзя. */
+export function reopenClosedPlotline(domain, closedOrId) {
+  const closed =
+    typeof closedOrId === 'string' ? findClosedPlotline(domain, closedOrId) : closedOrId;
+  if (!closed?.id) return null;
+  if (findPlotline(domain, closed.id)) {
+    domain.closedPlotlines = (domain.closedPlotlines || []).filter((p) => p.id !== closed.id);
+    return findPlotline(domain, closed.id);
+  }
+  const plot = {
+    id: closed.id,
+    title: clipText(closed.title || 'Сюжет', PLOT_TITLE_MAX),
+    synopsis: clipText(
+      closed.synopsis || (closed.reason ? `Уже установлено: ${closed.reason}` : ''),
+      PLOT_SUMMARY_MAX,
+    ),
+    closeWhen: clipText(closed.closeWhen, PLOT_HOOK_MAX),
+    kind: PLOT_KINDS.includes(closed.kind) ? closed.kind : 'story',
+    tags: Array.isArray(closed.tags) ? closed.tags : [],
+    relatedStats: Array.isArray(closed.relatedStats) ? [...closed.relatedStats] : [],
+    chronicleIds: Array.isArray(closed.chronicleIds) ? closed.chronicleIds.map(String) : [],
+    relatedProcessIds: Array.isArray(closed.relatedProcessIds)
+      ? closed.relatedProcessIds.map(String)
+      : [],
+    relatedPlotlineIds: Array.isArray(closed.relatedPlotlineIds)
+      ? closed.relatedPlotlineIds.map(String)
+      : [],
+    importance: clamp100(closed.importance, 40),
+    maxAgeMonths: Math.max(1, Math.min(36, Math.round(Number(closed.maxAgeMonths) || 6))),
+    ageMonths: Math.max(0, Math.round(Number(closed.ageMonths) || 0)),
+    temperature: clamp100(closed.temperature, 30),
+    mirrorOf: closed.mirrorOf ? String(closed.mirrorOf) : null,
+    confluxId: closed.confluxId ? String(closed.confluxId) : null,
+    partnerGone: Boolean(closed.partnerGone),
+    status: 'open',
+    createdTick: closed.createdTick == null ? null : Number(closed.createdTick),
+    lastBeatTick: closed.lastBeatTick == null ? null : Number(closed.lastBeatTick),
+    beatCount: Math.max(0, Math.round(Number(closed.beatCount) || 0)),
+  };
+  domain.plotlines = domain.plotlines || [];
+  domain.plotlines.push(plot);
+  domain.closedPlotlines = (domain.closedPlotlines || []).filter((p) => p.id !== closed.id);
+  return plot;
 }
 
 /** Внимание игрока → температура. Числом, не формулировкой. */
@@ -271,173 +376,45 @@ export function closePlotline(domain, plotlineId, { tick = null, reason = '' } =
   plot.closedTick = tick;
   plot.closeReason = reason || '';
   domain.closedPlotlines = Array.isArray(domain.closedPlotlines) ? domain.closedPlotlines : [];
-  domain.closedPlotlines.push({
-    id: plot.id,
-    title: plot.title,
-    closedTick: tick,
-    reason: plot.closeReason,
-    beatCount: plot.beatCount,
-  });
+  domain.closedPlotlines.push(archiveClosedPlot(plot, { tick, reason: plot.closeReason }));
   if (domain.closedPlotlines.length > 40) {
     domain.closedPlotlines = domain.closedPlotlines.slice(-40);
   }
   return plot;
 }
 
-/** Жребий тегов новой нити — движок, не агент. */
 /**
- * Жребий завязки: два-три тега, не семь.
- * Больше — и рассказчик склеивает несовместимое: чужак, клятва, дети, голод и силуэт
- * в небе в одной записи. Нужны повод и ставка, остальное придумается из жизни города.
+ * Жребий завязки: по одному тегу из каждой группы, все обязательны.
+ * Группы сами по себе узкие и абстрактные — тон, искра, масштаб.
  */
-const TAG_THEME = {
-  water: 'water',
-  well: 'water',
-  drains: 'water',
-  oath_curse: 'oath',
-  new_cult: 'cult',
-  heresy: 'cult',
-  miracle_right: 'cult',
-  rite_purity: 'cult',
-  patron_priests: 'cult',
-  old_gods_priests: 'cult',
-  pious_dispute: 'cult',
-  faith: 'cult',
-  rim: 'rim',
-  rim_mist: 'rim',
-  rim_safety: 'rim',
-  rim_land: 'rim',
-  guard: 'guard',
-  sergeants: 'guard',
-  archive: 'archive',
-  forbidden_book: 'archive',
-  knowledge_control: 'archive',
-  hunger: 'food',
-  field: 'food',
-  sudden_famine: 'food',
-  sudden_fertility: 'food',
-};
-
-const TEXT_THEMES = [
-  { key: 'water', re: /водосбор|цистерн|чаш[аеиуы]|кувшин|сосуд|колодц|заслонк|водян/ },
-  { key: 'oath', re: /клятв|проклят|\bобет/ },
-  { key: 'cult', re: /культ|обряд|ерес|жрец|алтар/ },
-  { key: 'guard', re: /страж|храмовник|караул/ },
-  { key: 'rim', re: /обрыв|дозорной площад|края остров/ },
-  { key: 'archive', re: /архив|свитк|запретн/ },
-  { key: 'food', re: /голод|амбар|урожа|хлеб|мук[аи]/ },
-];
-
-export function plotThemeKeys(text, tags = []) {
-  const blob = String(text || '').toLowerCase();
-  const keys = new Set();
-  for (const { key, re } of TEXT_THEMES) {
-    if (re.test(blob)) keys.add(key);
-  }
-  for (const t of tags || []) {
-    const id = t.tagId || t.id || t;
-    const theme = TAG_THEME[String(id)];
-    if (theme) keys.add(theme);
-  }
-  return [...keys];
-}
-
-export function occupiedPlotThemes(domain) {
-  const keys = new Set();
-  const ids = new Set();
-  for (const p of domain?.plotlines || []) {
-    if (p.kind === 'errand') continue;
-    for (const t of p.tags || []) {
-      if (t.tagId) ids.add(t.tagId);
-    }
-    for (const key of plotThemeKeys(`${p.title} ${p.synopsis} ${p.closeWhen}`, p.tags)) {
-      keys.add(key);
-    }
-  }
-  return { themes: [...keys], tagIds: [...ids] };
-}
-
-export function pickPlotTags(cfg, rng = Math.random, { avoidIds = [], avoidThemes = [] } = {}) {
+export function pickPlotTags(cfg, rng = Math.random) {
   const groups = cfg?.tagGroups || [];
-  const bannedIds = new Set(avoidIds);
-  const bannedThemes = new Set(avoidThemes);
-  const pickFromGroup = (gid) => {
-    const g = groups.find((x) => x.id === gid);
-    if (!g?.tags?.length) return null;
-    const free = g.tags.filter((tag) => !bannedIds.has(tag.id) && !bannedThemes.has(TAG_THEME[tag.id]));
-    const pool = free.length ? free : g.tags;
-    const tag = pool[Math.floor(rng() * pool.length)];
-    if (!tag) return null;
-    return { groupId: g.id, groupName: g.name || g.id, tagId: tag.id, tagName: tag.name };
-  };
-
-  const picked = [];
-  // Повод: обычно бытовой случай, иногда — явление покрупнее.
-  const occasion = pickFromGroup(rng() < 0.7 ? 'start_event' : 'phenomenon');
-  if (occasion) picked.push(occasion);
-  // Ставка — обязательна: без неё история не про что.
-  const stake = pickFromGroup('stake');
-  if (stake) picked.push(stake);
-  // Третий тег — только иногда, чтобы задать угол зрения.
-  if (rng() < 0.45) {
-    const extra = pickFromGroup(rng() < 0.5 ? 'tone' : 'stakeholders');
-    if (extra) picked.push(extra);
-  }
-  return picked;
+  return groups
+    .map((g) => {
+      if (!g?.tags?.length) return null;
+      const tag = g.tags[Math.floor(rng() * g.tags.length)];
+      if (!tag) return null;
+      return { groupId: g.id, groupName: g.name || g.id, tagId: tag.id, tagName: tag.name };
+    })
+    .filter(Boolean);
 }
 
-function firstName(s) {
-  return String(s || '')
-    .trim()
-    .split(/\s+/)[0];
-}
-
-/** Синопсис доски собираем из сюжета, а не из бытовой сводки. */
-export function composeSeedSynopsis({ who, wants, obstacle, threat } = {}) {
-  const name = String(who || '').trim();
-  const want = String(wants || '')
-    .trim()
-    .replace(/\.+$/, '');
-  const block = String(obstacle || '')
-    .trim()
-    .replace(/\.+$/, '');
-  const risk = String(threat || '')
-    .trim()
-    .replace(/\.+$/, '');
-  const parts = [];
-  if (name && want) parts.push(`${name} хочет ${want}`);
-  if (block) parts.push(block);
-  if (risk) parts.push(risk);
-  return parts.length ? `${parts.join('. ')}.` : '';
-}
+const SEED_HOOK_MIN = 220;
 
 /**
- * Завязка должна быть сюжетом, а не соседним клоном и не сводкой обряда.
- * @returns {string|null} причина отказа или null, если можно сеять
+ * Отсев пустышки и близнеца. Форму «кто хочет / что мешает» не проверяем.
  */
-export function judgePlotSeed(domain, draft, tags = []) {
+export function judgePlotSeed(domain, draft) {
   if (!draft) return 'empty';
-  const who = String(draft.who || '').trim();
-  const wants = String(draft.wants || '').trim();
-  const obstacle = String(draft.obstacle || '').trim();
-  if (who.length < 2 || wants.length < 8 || obstacle.length < 8) return 'no_plot';
-
-  const name = firstName(who);
-  const seenIn = `${draft.entry || ''} ${draft.synopsis || ''}`;
-  if (name.length >= 2 && !seenIn.includes(name)) return 'who_not_in_entry';
-
-  const composed = composeSeedSynopsis(draft);
+  const title = String(draft.title || '').trim();
+  const entry = String(draft.entry || '').trim();
+  const synopsis = String(draft.synopsis || '').trim();
+  if (!title || !entry || !synopsis) return 'empty';
+  if (synopsis.length < SEED_HOOK_MIN) return 'thin_hook';
   const twin = (domain.plotlines || []).find((p) =>
-    textsLookSame(`${p.title} ${p.synopsis}`, `${draft.title} ${composed || draft.synopsis}`),
+    textsLookSame(`${p.title} ${p.synopsis}`, `${title} ${synopsis}`),
   );
   if (twin) return 'twin';
-
-  const occupied = new Set(occupiedPlotThemes(domain).themes);
-  const incoming = plotThemeKeys(
-    `${draft.title} ${composed} ${draft.entry} ${draft.closeWhen}`,
-    tags,
-  );
-  if (incoming.some((key) => occupied.has(key))) return 'theme_overlap';
   return null;
 }
 
@@ -499,8 +476,14 @@ export function formatBoardForSpeech(domain, { statsFeel = null, max = 5 } = {})
     .map((p) => {
       const feel =
         statsFeel && p.relatedStats.length ? ` Упирается в: ${statsFeel(p.relatedStats)}.` : '';
-      const proc = p.relatedProcessIds.length ? ' По ней идёт дело.' : '';
-      return `«${p.title}» [${p.id}]: ${p.synopsis || 'только началось'}${feel}${proc}`;
+      const kind = p.kind === 'errand' ? 'поручение' : 'история';
+      const duty = (p.relatedProcessIds || []).length
+        ? 'дело уже идёт'
+        : p.kind === 'errand'
+          ? 'дела нет'
+          : 'поручения ещё нет';
+      const syn = clipText(p.synopsis || 'только началось', 180);
+      return `«${p.title}» [${p.id}] (${kind}, ${duty}): ${syn}${feel}`;
     })
     .join('\n');
 }

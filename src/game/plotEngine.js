@@ -8,10 +8,14 @@ import {
   normalizePlotlines,
   advancePlotClocks,
   findPlotline,
-  isOverdue,
+  findClosedPlotline,
+  reopenClosedPlotline,
+  plotCanFade,
   createErrandPlotline,
   boardHasRoom,
   plotConfig,
+  clipPlotText,
+  PLOT_SUMMARY_MAX,
 } from './plotlines.js';
 import {
   beatChance,
@@ -26,19 +30,50 @@ export function advancePlotMonth(domain, cfg) {
   return advancePlotClocks(domain, cfg);
 }
 
-/** У каждого дела своя нить: либо существующая, либо проходная. */
+function attachProcess(plot, processId) {
+  const id = String(processId);
+  if (id && !plot.relatedProcessIds.includes(id)) plot.relatedProcessIds.push(id);
+  return plot;
+}
+
+/**
+ * У каждого дела своя нить: открытая, недавно закрытая (её надо вернуть),
+ * либо новая проходная. Нельзя заводить пустую карточку поверх уже случившейся развязки.
+ */
 export function ensureErrandForProcess(domain, process, { tick = null, config = null } = {}) {
   normalizePlotlines(domain, config);
+  const processId = String(process?.id || '');
   const existing = (domain.plotlines || []).find((p) =>
-    (p.relatedProcessIds || []).includes(String(process?.id)),
+    (p.relatedProcessIds || []).includes(processId),
   );
   if (existing) return { plot: existing, created: false };
+
+  if (process?.plotlineId) {
+    const named = findPlotline(domain, process.plotlineId);
+    if (named) return { plot: attachProcess(named, processId), created: false };
+  }
+
+  const closed =
+    (process?.plotlineId && findClosedPlotline(domain, process.plotlineId)) ||
+    (domain.closedPlotlines || []).find((p) => (p.relatedProcessIds || []).includes(processId));
+  if (closed) {
+    const plot = reopenClosedPlotline(domain, closed);
+    if (plot) return { plot: attachProcess(plot, processId), created: false, reopened: true };
+  }
 
   const cfg = plotConfig(config || {});
   const room = boardHasRoom(domain, cfg);
   if (!room.errand) return { plot: null, created: false, reason: 'board_full' };
 
   const plot = createErrandPlotline(process, { tick, config });
+  const parent = process?.plotlineId ? findClosedPlotline(domain, process.plotlineId) : null;
+  if (parent?.reason || parent?.synopsis) {
+    const known = parent.synopsis || `Уже установлено: ${parent.reason}`;
+    plot.synopsis = clipPlotText(
+      `${known} Поручение ещё шло: ${process.detail || process.summary || ''}`.trim(),
+      PLOT_SUMMARY_MAX,
+    );
+  }
   domain.plotlines.push(plot);
   return { plot, created: true };
 }
@@ -65,7 +100,7 @@ function statValue(domain, statId) {
 /**
  * План битов месяца.
  * Обязательные идут первыми и потолок пробивают: дело завершилось или сорвалось,
- * нить пережила отпущенный срок. Добровольные добираются по вероятности до потолка.
+ * забытая нить выдохлась без дел и внимания. Добровольные добираются по вероятности.
  */
 export function planBeats({ domain, config, processOutcomes = [], rng = Math.random }) {
   const cfg = plotConfig(config || {});
@@ -74,7 +109,7 @@ export function planBeats({ domain, config, processOutcomes = [], rng = Math.ran
   const beats = [];
   const taken = new Set();
 
-  const addBeat = (plot, { mandatory, reason, tint, finale = false, outcome = null }) => {
+  const addBeat = (plot, { mandatory, reason, tint, finale = false, fade = false, outcome = null }) => {
     if (!plot || taken.has(plot.id)) return;
     taken.add(plot.id);
     const rolled =
@@ -89,7 +124,8 @@ export function planBeats({ domain, config, processOutcomes = [], rng = Math.ran
       title: plot.title,
       mandatory,
       reason,
-      finale: finale || isOverdue(plot),
+      finale: Boolean(finale),
+      fade: Boolean(fade),
       tint: typeof rolled === 'string' ? rolled : rolled.tint,
       tintLabel: TINT_LABELS[typeof rolled === 'string' ? rolled : rolled.tint],
       statId: typeof rolled === 'string' ? null : rolled.statId || null,
@@ -113,10 +149,10 @@ export function planBeats({ domain, config, processOutcomes = [], rng = Math.ran
     }
   }
 
-  // 2. Обязательные по возрасту: нить дожила до предела — финальный бит.
+  // 2. Срок вышел, дел нет, интереса нет — тихий сход, не выдуманная развязка.
   for (const plot of domain.plotlines) {
-    if (!isOverdue(plot)) continue;
-    addBeat(plot, { mandatory: true, reason: 'overdue', finale: true });
+    if (!plotCanFade(domain, plot, cfg)) continue;
+    addBeat(plot, { mandatory: true, reason: 'fade', fade: true, tint: 'dual' });
   }
 
   // 3. Добровольные — до потолка.
@@ -251,7 +287,7 @@ export function formatBeatPlanForLog(beats) {
       (b) =>
         `${b.mandatory ? '!' : ' '} «${b.title}» ${b.reason} → ${b.tint}` +
         (b.statId ? ` (по ${b.statId}: ${b.roll}/${b.chance})` : '') +
-        (b.finale ? ' [финал]' : ''),
+        (b.fade ? ' [угасла]' : b.finale ? ' [финал]' : ''),
     )
     .join('\n');
 }

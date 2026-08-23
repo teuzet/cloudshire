@@ -262,7 +262,8 @@ function characterTools(domain, storage, character, ctx) {
     {
       name: 'read_domain_brief',
       description:
-        'Состояние города: население, статы (эпитеты), активные дела/процессы. Для вопросов «как дела / сыты ли».',
+        'Состояние города: население, статы (эпитеты), активные дела, указы, нити. ' +
+        'Нужен и для «как дела», и для «что ты решил / какие приказы действуют».',
       parameters: { type: 'object', properties: {} },
       handler: async () => ({
         ok: true,
@@ -286,6 +287,7 @@ function characterTools(domain, storage, character, ctx) {
           text: m.text,
           kind: m.kind || null,
           since: m.since || null,
+          initiative: m.initiative || 'patron',
         })),
         guidanceOrders:
           'standingOrders — действующие указы/порядки. Для отмены — revoke_order с этим id ' +
@@ -298,16 +300,29 @@ function characterTools(domain, storage, character, ctx) {
           monthsLeft: a.monthsLeft,
           expectedMonths: a.expectedMonths,
           linkedStats: a.linkedStats,
-          // Как шло в последний месяц — чтобы отвечать «идёт по плану» осознанно.
+          initiative: a.initiative || 'patron',
           progress: processProgressFeel(a),
         })),
         recentlyClosed: recentlyClosedProcesses(domain, world?.tickIndex),
         processSlots: canStartProcess(domain, ctx.config),
+        plots: (domain.plotlines || []).map((p) => ({
+          id: p.id,
+          title: p.title,
+          kind: p.kind === 'errand' ? 'errand' : 'story',
+          hasProcess: Boolean((p.relatedProcessIds || []).length),
+        })),
         guidanceProcesses:
           'processes[].progress — как дело шло в прошлом месяце: так и отвечай, если спрашивают. ' +
           'recentlyClosed — недавно законченные дела: про них не говори «не знаю». ' +
           'Для update_process / revoke_process бери id из processes[].id. ' +
-          'Если id не помнишь — передай краткий смысл дела в processId (например «университет»), система найдёт.',
+          'Если id не помнишь — передай краткий смысл дела в processId (например «университет»), система найдёт. ' +
+          'Новый приказ покровителя — новое дело, если это не правка уже идущей той же работы. ' +
+          'Общий храм, общий двор или общие имена — не дубль и не повод для update_process. ' +
+          'initiative=ruler — это дело ты завёл сам, пока покровитель молчал; на вопрос «что ты решал» называй их.',
+        guidancePlots:
+          'plots[] — живые нити. kind=errand уже привязана к делу; kind=story может быть без поручения. ' +
+          'Приказ по истории без дела — declare_process с plotId этой истории. ' +
+          'Не бери id соседней нити из-за общего места или общих людей.',
       }),
     },
     {
@@ -467,8 +482,10 @@ function characterTools(domain, storage, character, ctx) {
           plotId: {
             type: 'string',
             description:
-              'Если дело продолжает живую историю — её id из доски нитей. Иначе оставь пустым, ' +
-              'дело заведёт свою нить само.',
+              'id истории с доски, О КОТОРОЙ говорит покровитель. ' +
+              'Если у этой истории ещё нет дела — укажи её id. ' +
+              'Не подставляй соседнюю нить из-за общего места или общих людей. ' +
+              'Если приказ не про живую историю — оставь пустым, дело заведёт свою нить само.',
           },
         },
       },
@@ -544,6 +561,7 @@ function characterTools(domain, storage, character, ctx) {
           characterNote: characterNote || null,
           hardDeadline: hard,
           status: 'active',
+          initiative: 'patron',
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -626,6 +644,7 @@ function characterTools(domain, storage, character, ctx) {
             declaredTick: world?.tickIndex ?? null,
             updatedAt: new Date().toISOString(),
             by: character.name,
+            initiative: 'patron',
           };
           list.push(mod);
           pushOrderFact(`Действующий указ города: ${body}`, 'edict');
@@ -1603,6 +1622,8 @@ export class GameApp {
         ? [
             'ЖИВЫЕ НИТИ СЮЖЕТА (внутренняя правда; вплетай в речь, не рапортуй списком):',
             plotBrief,
+            'Каждая нить сама по себе. Общее место или общие люди не делают их одним делом.',
+            'Приказ по истории без поручения — новое дело с plotId этой истории, не правка соседнего.',
           ].join('\n')
         : '',
     ]
@@ -1791,11 +1812,23 @@ export class GameApp {
     // Про молчание бога — не каждый месяц и не одними словами: иначе письма
     // кончаются одной и той же формулой и перестают читаться.
     const unanswered = countTrailingUnansweredDigests(character.dialogHistory || []);
-    const askPresence = unanswered >= 2 && unanswered % 2 === 0;
+    const stewardActs = (opts.stewardActs || []).filter((a) => a && a.kind && a.kind !== 'none');
+    const stewardHint = stewardActs.length
+      ? [
+          'В этом месяце ТЫ САМ, без воли покровителя, распорядился — это правда, так и скажи:',
+          ...stewardActs.map((a) =>
+            a.kind === 'standing_order'
+              ? `- постоянный порядок: ${a.text}`
+              : `- дело: ${a.summary}`,
+          ),
+          'Не прячь это. Коротко признайся, что решал сам, пока не слышал его голоса.',
+        ].join('\n')
+      : '';
+    const askPresence = !stewardHint && unanswered >= 2 && unanswered % 2 === 0;
     const silenceAngles = [
       'спроси, слышит ли он тебя ещё',
       'скажи, что люди спрашивают, не отвернулся ли покровитель, и ты не знаешь, что отвечать',
-      'признайся, что решал этот месяц сам, и не уверен, что угадал его волю',
+      'скажи, что вёл уже начатые дела и ждал его голоса',
       'скажи, что оставил у алтаря знак и ждёшь ответа',
       'обмолвись, что давно не слышал его голоса, и вернись к делам',
     ];
@@ -1823,9 +1856,9 @@ export class GameApp {
     const seedAdds = mine.filter((c) => c.author === 'storyteller:seed');
     const seedLead = seedAdds.length
       ? [
-          'В этом месяце НАЧАЛАСЬ новая история. Представь её с нуля:',
-          'назови человека, чего он хочет и что ему мешает. Покровитель этих людей ещё не знает.',
-          'Не пиши так, будто он уже в курсе. Сначала желание и спор, не новый порядок и не очередь.',
+          'В этом месяце НАЧАЛАСЬ новая история.',
+          'Представь её с нуля, будто покровитель ничего о ней не слышал.',
+          'Крючок, не очередь и не новый порядок.',
         ].join(' ')
       : '';
 
@@ -1889,6 +1922,7 @@ export class GameApp {
                 'но не додумывай событий и не копируй формулировки. Статы и механики не упоминай.',
               addressHint,
               moodHint,
+              stewardHint,
               presenceHint,
               scopeHint,
               confluxLead || undockHint ? '' : highlightLead || seedLead,

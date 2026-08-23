@@ -10,7 +10,8 @@
     "web": "node src/index.js",
     "playtest": "node src/cli.js playtest",
     "tokens": "node scripts/token-report.js",
-    "report": "node scripts/world-report.js"
+    "report": "node scripts/world-report.js",
+    "test": "node --test tests"
   },
   "engines": {
     "node": ">=20"

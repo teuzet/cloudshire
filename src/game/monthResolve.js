@@ -2,7 +2,8 @@
  * Месяц города на новых рельсах: событий вне нитей не бывает.
  *
  * Движок считает ход дел, часы нитей, отбор битов и окраску; рассказчик
- * превращает готовые факты в записи хроники. См. docs/PIVOT_PLOTLINES.md.
+ * пишет хронику; оценщик статов читает записи месяца и ставит след.
+ * См. docs/PIVOT_PLOTLINES.md.
  */
 
 import { newId } from './ids.js';
@@ -20,6 +21,8 @@ import {
   plotSeedChance,
   findPlotline,
   closePlotline,
+  plotHasActiveProcess,
+  attachChronicleToPlotlines,
 } from './plotlines.js';
 import {
   advancePlotMonth,
@@ -30,7 +33,9 @@ import {
   formatBeatPlanForLog,
   clearMonthLog,
 } from './plotEngine.js';
-import { seedPlot, beatPlot, echoDecisions, quietMonth } from './storyteller.js';
+import { seedPlot, beatPlot, echoDecisions, quietMonth, keepStories, fadeQuietPlot } from './storyteller.js';
+import { scoreMonthStats } from './statJudge.js';
+import { runSteward } from './steward.js';
 import { getLogger } from '../log.js';
 
 /** Указы, объявленные в этом месяце: их последствия и отыгрывает отзвук. */
@@ -69,6 +74,15 @@ export async function resolveDomainMonth({
   const chronicleAdds = [];
   const mirrorAdds = [];
   const budget = createStatBudget(config);
+
+  // 0. Покровитель молчит — правитель может сам отдать один приказ (дело или указ).
+  const steward = await runSteward({
+    config,
+    runtime,
+    domain: working,
+    world,
+    log,
+  });
   // Пик месяца: то, с чего правитель начнёт письмо. Без него развязка тонет
   // в ряду обычных записей и большое дело проходит незамеченным.
   let highlight = null;
@@ -111,6 +125,12 @@ export async function resolveDomainMonth({
   for (const beat of beats) {
     const plot = findPlotline(working, beat.plotId);
     if (!plot) continue;
+    if (beat.fade) {
+      const faded = fadeQuietPlot({ domain: working, plot, world });
+      if (faded?.fact) chronicleAdds.push(faded.fact);
+      log.info('month.plot_faded', { plotId: plot.id, title: plot.title });
+      continue;
+    }
     const logLine = openLogGate(working, plot, config);
     const result = await beatPlot({
       config,
@@ -119,7 +139,6 @@ export async function resolveDomainMonth({
       world,
       beat,
       logLine,
-      budget,
       partner,
       confluxId,
       log,
@@ -127,9 +146,7 @@ export async function resolveDomainMonth({
     if (result?.mirror?.fact) mirrorAdds.push(result.mirror.fact);
     if (result?.fact) {
       chronicleAdds.push(result.fact);
-      if (result.catastrophe) {
-        raiseHighlight({ kind: 'catastrophe', title: plot.title, text: result.fact.text });
-      } else if (result.closed) {
+      if (result.closed) {
         raiseHighlight({
           kind: 'finale',
           title: plot.title,
@@ -139,21 +156,33 @@ export async function resolveDomainMonth({
       }
     } else {
       // Рассказчик не справился — движок пишет сухой минимум, чтобы месяц не пропал.
+      const outcome = beat.processOutcome;
+      const text = beat.finale
+        ? `История «${beat.title}» закончилась.`
+        : outcome?.finished
+          ? `Дело «${outcome.summary}» закончилось.`
+          : outcome
+            ? `В деле «${outcome.summary}» произошёл сдвиг.`
+            : `В истории «${beat.title}» произошёл сдвиг.`;
       const fact = createLoreFact({
         id: newId('lore'),
-        text: beat.finale
-          ? `История «${beat.title}» закончилась.`
-          : `В деле «${beat.title}» произошёл сдвиг.`,
+        text,
         tags: ['chronicle'],
         gameDateLabel: world.gameDate.label,
         tick: world.tickIndex,
         author: 'month-fallback',
-        importance: 'minor',
+        importance: beat.finale || outcome?.finished ? 'major' : 'minor',
         relatedPlotlineIds: [beat.plotId],
+        relatedPendingId: outcome?.processId || null,
       });
       working.lore.push(fact);
+      attachChronicleToPlotlines(working, fact.id, [beat.plotId]);
       chronicleAdds.push(fact);
-      if (beat.finale) closePlotline(working, beat.plotId, { tick: world.tickIndex, reason: 'fallback' });
+      plot.lastBeatTick = world.tickIndex;
+      plot.beatCount += 1;
+      if (beat.finale && !plotHasActiveProcess(working, plot)) {
+        closePlotline(working, beat.plotId, { tick: world.tickIndex, reason: 'fallback' });
+      }
     }
   }
 
@@ -174,17 +203,45 @@ export async function resolveDomainMonth({
       domain: working,
       world,
       edicts,
-      budget,
       log,
     });
     if (echo?.fact) chronicleAdds.push(echo.fact);
   }
 
-  // 7. Тихий месяц: без сюжета, но со своей погодой в статах.
+  // 7. Тихий месяц: без сюжета, но город всё равно жил.
   if (!chronicleAdds.length) {
-    const quiet = await quietMonth({ config, runtime, domain: working, world, budget, log });
+    const quiet = await quietMonth({ config, runtime, domain: working, world, log });
     if (quiet?.fact) chronicleAdds.push(quiet.fact);
   }
+
+  // 8. Оценщик статов: читает записи месяца и ставит след. Величину считает движок.
+  const scored = await scoreMonthStats({
+    config,
+    runtime,
+    domain: working,
+    world,
+    chronicleAdds,
+    budget,
+    log,
+  });
+  if (scored?.catastrophe) {
+    raiseHighlight({
+      kind: 'catastrophe',
+      title: scored.catastrophe.title,
+      text: scored.catastrophe.text,
+    });
+  }
+
+  // 9. Хранитель: синопсисы по свежей хронике; «история всплыла» → жар считает движок.
+  // Журнал месяца ещё жив: по нему хранитель видит, о чём говорили до тика.
+  const kept = await keepStories({
+    config,
+    runtime,
+    domain: working,
+    world,
+    chronicleAdds,
+    log,
+  });
 
   // Журнал донёс разговоры до тика и здесь же гасится: чистить его снаружи нельзя —
   // там остаётся объект домена до резолва, и запись поверх стирает весь месяц.
@@ -198,10 +255,13 @@ export async function resolveDomainMonth({
     plots: working.plotlines.length,
     seedChance: Number(seedChance.toFixed(2)),
     seeded: wantSeed,
+    kept: kept ? { updated: kept.updated, surfaced: kept.surfaced } : null,
+    statsScored: scored?.scored ?? 0,
+    steward: steward?.act || null,
     highlight: highlight ? `${highlight.kind}: ${highlight.title}` : null,
     budgetSpent: { world: budget.spentWorld, player: budget.spentPlayer },
     stats: working.stats,
   });
 
-  return { domain: working, chronicleAdds, mirrorAdds, highlight };
+  return { domain: working, chronicleAdds, mirrorAdds, highlight, stewardActs: steward?.act ? [steward.act] : [] };
 }
