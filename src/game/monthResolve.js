@@ -187,7 +187,7 @@ export async function resolveDomainMonth({
     }
   }
 
-  // 5. Завязка новой нити: чем пустее доска, тем охотнее.
+  // 5. Завязка новой нити: пустая доска — всегда, иначе чем пустее, тем охотнее.
   const seedChance = plotSeedChance(working, cfg, world.tickIndex);
   const wantSeed = Math.random() < seedChance;
   if (wantSeed) {

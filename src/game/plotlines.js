@@ -420,12 +420,15 @@ export function judgePlotSeed(domain, draft) {
 
 /**
  * Шанс завязки: чем меньше живых историй, тем охотнее сеем.
+ * Пустая доска (нет ни одной настоящей истории) — завязка обязательна:
+ * иначе город месяцами живёт без сюжета.
  * Проходные нити дел за истории не считаются — иначе одна стройка глушит весь год.
  * После свежей завязки держим паузу: иначе доска набивается клонами одного события.
  */
 export function plotSeedChance(domain, cfg, tick = null) {
   const { total, stories } = countOpen(domain);
   if (total >= cfg.board.maxOpen) return 0;
+  if (stories === 0) return 1;
 
   const cooldown = cfg.board.seedCooldownMonths;
   if (cooldown > 0 && Number.isFinite(Number(tick))) {

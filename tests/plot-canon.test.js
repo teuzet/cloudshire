@@ -4,7 +4,9 @@ import {
   closePlotline,
   findClosedPlotline,
   plotCanFade,
+  plotConfig,
   plotHasActiveProcess,
+  plotSeedChance,
   reopenClosedPlotline,
 } from '../src/game/plotlines.js';
 import { ensureErrandForProcess, planBeats } from '../src/game/plotEngine.js';
@@ -183,4 +185,18 @@ test('тонкий архив без синопсиса всё равно под
   };
   const plotline = reopenClosedPlotline(domain, 'plot_old');
   assert.match(plotline.synopsis, /Иару нашли/);
+});
+
+test('пустая доска всегда сеет историю, пауза не глушит', () => {
+  const cfg = plotConfig({ tick: { plot: { board: { seedCooldownMonths: 2 } } } });
+  assert.equal(plotSeedChance({ plotlines: [] }, cfg, 10), 1);
+  assert.equal(plotSeedChance({ plotlines: [{ kind: 'errand', createdTick: 10 }] }, cfg, 10), 1);
+});
+
+test('пока на доске есть история, свежая завязка держит паузу', () => {
+  const cfg = plotConfig({ tick: { plot: { board: { seedCooldownMonths: 2 } } } });
+  assert.equal(
+    plotSeedChance({ plotlines: [{ kind: 'story', createdTick: 9 }] }, cfg, 10),
+    0,
+  );
 });
