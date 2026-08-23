@@ -369,6 +369,38 @@ function themesOverlap(a, b) {
 }
 
 /**
+ * Одна ли это работа. «Стройка храма» и «набор в храмовую стражу» делят предмет (храм),
+ * но не род работы, поэтому дублем не считаются: у каждой стороны есть своя тема,
+ * которой нет у другой.
+ */
+function sameWorkKind(a, b) {
+  if (!a?.length || !b?.length) return false;
+  const setA = new Set(a);
+  const setB = new Set(b);
+  return a.every((k) => setB.has(k)) || b.every((k) => setA.has(k));
+}
+
+/**
+ * Похожи ли по смыслу две короткие формулировки (дело, указ, порядок).
+ * Подстрочного совпадения мало: «Открыть донабор в стражу» и «Продолжать донабор
+ * в стражу» не пересекаются началами, но это одно и то же распоряжение.
+ */
+export function textsLookSame(a, b) {
+  const na = normProcessText(a);
+  const nb = normProcessText(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  if (Math.min(na.length, nb.length) >= 12 && (na.includes(nb) || nb.includes(na))) return true;
+
+  const ta = new Set(processTokens(na));
+  const tb = new Set(processTokens(nb));
+  if (!ta.size || !tb.size) return false;
+  const shared = [...tb].filter((t) => ta.has(t));
+  const need = Math.min(3, Math.max(2, Math.ceil(Math.min(ta.size, tb.size) * 0.5)));
+  return shared.length >= need;
+}
+
+/**
  * Найти уже идущее дело той же смысловой нити (не только точное совпадение summary).
  */
 export function findDuplicateProcess(domain, summary, detail = '') {
@@ -391,14 +423,15 @@ export function findDuplicateProcess(domain, summary, detail = '') {
     if (needleThemes.length && hayThemes.length && !themesOverlap(needleThemes, hayThemes)) {
       return false;
     }
-    const hayTokens = processTokens(hay);
-    if (needleTokens.size && hayTokens.length) {
-      const overlap = hayTokens.filter((t) => needleTokens.has(t));
+    const hayTokens = new Set(processTokens(hay));
+    if (needleTokens.size && hayTokens.size) {
+      const overlap = [...hayTokens].filter((t) => needleTokens.has(t));
       const need = Math.min(3, Math.max(2, Math.ceil(needleTokens.size * 0.45)));
       if (overlap.length >= need) return true;
     }
-    if (needleThemes.length && themesOverlap(needleThemes, hayThemes)) {
-      const shared = hayTokens.filter((t) => needleTokens.has(t));
+    // Общей темы мало: она бывает лишь предметом («храм»), а работы разные.
+    if (needleThemes.length && sameWorkKind(needleThemes, hayThemes)) {
+      const shared = [...hayTokens].filter((t) => needleTokens.has(t));
       if (shared.length >= 1) return true;
       if (needleThemes.length === 1 && hayThemes.length === 1 && needleThemes[0] === hayThemes[0]) {
         return true;

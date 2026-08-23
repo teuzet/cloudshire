@@ -5,7 +5,6 @@ import {
   maybeMatchmakeConfluxes,
   advanceConfluxLifetimeCounters,
 } from './conflux.js';
-import { clearMonthLog } from './plotEngine.js';
 import { resolveDomainMonth } from './monthResolve.js';
 import { getLogger } from '../log.js';
 
@@ -79,7 +78,12 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
         resolvedDomains[1 - i].lore = other.lore;
         resolvedDomains[1 - i].plotlines = other.plotlines;
       }
-      pairBatches.push({ conflux, domain: month.domain, chronicleAdds: month.chronicleAdds });
+      pairBatches.push({
+        conflux,
+        domain: month.domain,
+        chronicleAdds: month.chronicleAdds,
+        highlight: month.highlight,
+      });
     }
   }
 
@@ -89,7 +93,7 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
   );
   confluxNotes.push(...(advanced.notes || []));
 
-  for (const { conflux, domain, chronicleAdds } of pairBatches) {
+  for (const { conflux, domain, chronicleAdds, highlight } of pairBatches) {
     handled.add(domain.id);
     await storage.saveDomain(domain);
 
@@ -104,6 +108,7 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
     const news = await app.narrateTickNews(domain, newsAdds, world.gameDate, {
       undock: undockAdds.length > 0,
       partnerName: partner?.name || null,
+      highlight,
     });
     await app.persistDialog(domain, 'assistant', news, { kind: 'tick_news' });
     await app.emitOutbound(domain.ownerUserId, withDateHeader(news, world), {
@@ -162,7 +167,9 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
         [...prelude, ...resolved.chronicleAdds],
         domain.id,
       );
-      const news = await app.narrateTickNews(resolved.domain, newsAdds, world.gameDate);
+      const news = await app.narrateTickNews(resolved.domain, newsAdds, world.gameDate, {
+        highlight: resolved.highlight,
+      });
       await app.persistDialog(resolved.domain, 'assistant', news, { kind: 'tick_news' });
       await app.emitOutbound(resolved.domain.ownerUserId, withDateHeader(news, world), {
         agent: 'ruler',
@@ -189,13 +196,6 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
     }),
   );
   results.push(...soloResults);
-
-  // Журнал месяца донёс разговоры до тика — дальше всё важное уже в хронике и касте.
-  for (const domain of domains) {
-    if (!domain?.state?.monthLog?.length) continue;
-    clearMonthLog(domain);
-    await storage.saveDomain(domain);
-  }
 
   return {
     world: {

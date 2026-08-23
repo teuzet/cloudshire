@@ -164,7 +164,7 @@ async function loadDomain(domainId) {
   activeDomainId = domainId || null;
   if (!domainId) {
     $('domain').textContent = 'выбери домен';
-    $('milestones').textContent = '—';
+    $('rulerPanel').textContent = '—';
     $('pending').textContent = '—';
     $('plotlines').textContent = '—';
     $('genesis').textContent = '—';
@@ -203,7 +203,7 @@ async function loadDomain(domainId) {
   );
 
   const ruler = domain.characters?.[0];
-  $('milestones').textContent = JSON.stringify(
+  $('rulerPanel').textContent = JSON.stringify(
     {
       ruler: ruler
         ? {
@@ -213,7 +213,6 @@ async function loadDomain(domainId) {
             terror: ruler.terror,
           }
         : null,
-      milestones: domain.milestones || [],
       tags: (domain.tags || []).map((t) => t.tagName || t.tagId),
     },
     null,

@@ -1,8 +1,9 @@
 import { newId } from './ids.js';
-import { createLoreFact } from './models.js';
+import { createLoreFact, formatCastForPrompt } from './models.js';
 import { formatFullChronicleForPrompt, formatFactsForPrompt } from './memory.js';
 import { findActiveConfluxForDomain, monthsUntilDock } from './conflux.js';
 import { getLogger, truncate } from '../log.js';
+import { toolFail } from '../agents/toolResult.js';
 
 function visibleLoreForDomain(lore, domainId) {
   return (lore || []).filter((f) => {
@@ -89,6 +90,8 @@ export async function askLoremaster({
           // Лормастеру нужна вся история: часть фактов выводится только из неё.
           chronicle: formatFullChronicleForPrompt({ ...working, lore: visible }),
           facts: formatFactsForPrompt(visible, { limit: 60 }),
+          // Каст — такой же источник, как хроника: там живут судьбы названных людей.
+          knownPeople: formatCastForPrompt(visible, { limit: 30 }),
           // Без состояния лормастер противоречит сам себе («переписи нет», пока процесс идёт).
           standingOrders: (working.state?.modifiers || []).map((m) => m.text),
           currentEvents: (working.state?.events || []).map((e) =>
@@ -102,7 +105,8 @@ export async function askLoremaster({
               expectedMonths: a.expectedMonths,
             })),
           reminder:
-            'Хроника приложена целиком — это твой главный источник. Ты её только читаешь: ' +
+            'Хроника приложена целиком — это твой главный источник, рядом с ним knownPeople: ' +
+            'судьбы названных людей записаны там, даже если хроника о них молчит. Ты их только читаешь: ' +
             'писать и менять записи хроники нельзя, твой инструмент — факты. ' +
             'Если хроника упоминает явление без деталей — add_fact с конкретными именами/деталями. ' +
             '«Неизвестно» при уже упомянутом явлении запрещено. ' +
@@ -152,14 +156,28 @@ export async function askLoremaster({
           text: {
             type: 'string',
             description:
-              'Сухой факт: 1–2 короткие фразы, без эпитетов и пафоса. Пример: «Местный продукт — виноград; сладкий, тонкая кожица.»',
+              'Сухой факт: 1–2 короткие фразы, без эпитетов и пафоса. Пример: «Местный продукт — виноград; сладкий, тонкая кожица.» ' +
+              'Только утверждение о том, ЧТО ЕСТЬ. Незнание — не факт: «не установлено», ' +
+              '«сведений нет», «смерть или исчезновение», «возможно» в факт не пишутся. ' +
+              'Не переписывай формулировку вопроса: спросили «смерть или исчезновение» — ' +
+              'запиши то, что знаешь («Неван мёртв, тело нашли у соляного поля»), или не пиши ничего.',
           },
         },
       },
       handler: async ({ text }) => {
+        const body = String(text || '').trim();
+        // Факт-незнание — мусор в лоре навсегда: он потом читается как правда о мире.
+        if (/не установлен|сведений нет|неизвестн|или исчезновени|возможно,|предположительно/i.test(body)) {
+          return toolFail(
+            'not_a_fact',
+            'Это не факт, а запись незнания. Факт — утверждение о том, что есть. ' +
+              'Если знаешь по хронике или knownPeople — сформулируй утвердительно; если не знаешь — ' +
+              'просто ответь в submit_answers, без add_fact.',
+          );
+        }
         const fact = createLoreFact({
           id: newId('lore'),
-          text,
+          text: body,
           tags: ['fact'],
           gameDateLabel: world.gameDate.label,
           tick: world.tickIndex,
@@ -167,7 +185,7 @@ export async function askLoremaster({
         });
         working.lore.push(fact);
         addedFacts.push(fact);
-        log.info('loremaster.add_fact', { factId: fact.id, text: truncate(text, 300) });
+        log.info('loremaster.add_fact', { factId: fact.id, text: truncate(body, 300) });
         return { ok: true, factId: fact.id };
       },
     },

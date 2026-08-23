@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cloudshire</title>
+  <link rel="stylesheet" href="/play/style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div class="city">
+        <span id="cityName">…</span>
+        <span id="rulerName" class="muted"></span>
+      </div>
+      <div class="when">
+        <span id="gameDate" class="muted"></span>
+        <button type="button" id="btnTick" class="ghost hidden" title="Прокрутить месяц вручную">тик</button>
+        <button type="button" id="btnInspect" class="ghost" title="Все данные города">город</button>
+        <button type="button" id="btnSlots" class="ghost" title="Слоты">слоты</button>
+      </div>
+    </header>
+
+    <div id="statsRow" class="stats"></div>
+
+    <div id="slots" class="slots hidden">
+      <label>Слот игрока
+        <input id="userId" value="local-user" autocomplete="off" />
+      </label>
+      <div class="row">
+        <button type="button" id="btnSwitch">Открыть</button>
+        <button type="button" id="btnNew">Новый слот</button>
+        <button type="button" id="btnWipe" class="danger hidden">Вайп мира</button>
+      </div>
+      <p class="muted small">Слот — это «кто ты» для сервера. Новый слот = новый город с нуля.</p>
+      <p class="muted small" id="wipeNote" hidden>
+        Вайп сносит все города и заводит новый мир: прежний уходит в архив.
+      </p>
+    </div>
+
+    <main id="messages" class="messages"></main>
+
+    <div id="banner" class="banner hidden"></div>
+
+    <form id="form" class="composer">
+      <input id="text" autocomplete="off" placeholder="Скажи что-нибудь правителю…" />
+      <button type="submit" id="send">Сказать</button>
+    </form>
+  </div>
+
+  <aside id="inspector" class="inspector hidden">
+    <header class="inspector-top">
+      <strong>Данные города</strong>
+      <div class="row tabs" id="inspectTabs">
+        <button type="button" class="ghost tab" data-tab="city">город</button>
+        <button type="button" class="ghost tab" data-tab="plots">нити</button>
+        <button type="button" class="ghost tab" data-tab="processes">дела</button>
+        <button type="button" class="ghost tab" data-tab="chronicle">хроника</button>
+        <button type="button" class="ghost tab" data-tab="facts">факты</button>
+        <button type="button" class="ghost tab" data-tab="cast">люди</button>
+        <button type="button" class="ghost tab" data-tab="raw">json</button>
+      </div>
+      <button type="button" id="btnInspectClose" class="ghost" title="Закрыть">✕</button>
+    </header>
+    <div id="inspectBody" class="inspector-body">загрузка…</div>
+  </aside>
+  <script src="/play/app.js"></script>
+</body>
+</html>

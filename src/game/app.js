@@ -6,6 +6,7 @@ import {
   formatChronicleScope,
   normalizeDomain,
   createLoreFact,
+  formatCastForPrompt,
 } from './models.js';
 import {
   qualitativePopulation,
@@ -42,6 +43,7 @@ import {
   canStartProcess,
   processProgressFeel,
   recentlyClosedProcesses,
+  textsLookSame,
 } from './processes.js';
 import { formatBoardForSpeech, warmPlotlines, plotConfig } from './plotlines.js';
 import { ensureErrandForProcess, linkProcessToPlotline } from './plotEngine.js';
@@ -152,9 +154,9 @@ function submitReplyTool(turn, character) {
         },
         commitment: {
           type: 'string',
-          enum: ['none', 'process', 'standing_order', 'act', 'revoked', 'refused'],
+          enum: ['none', 'process', 'standing_order', 'revoked', 'refused'],
           description:
-            'Что сделано этим ходом: process (declare_process/update_process), standing_order, act, ' +
+            'Что сделано этим ходом: process (declare_process/update_process), standing_order, ' +
             'revoked (отменил указ или свернул дело), refused (честно отказал или отговорил), ' +
             'none (действий не требовалось).',
         },
@@ -179,12 +181,6 @@ function submitReplyTool(turn, character) {
           'commitment=standing_order, но declare_standing_order не выполнен. Объяви порядок через tool или смени commitment.',
         );
       }
-      if (commitment === 'act' && !succeeded('declare_act')) {
-        return toolFail(
-          'act_missing',
-          'commitment=act, но declare_act не выполнен. Соверши деяние через tool или смени commitment.',
-        );
-      }
       if (commitment === 'revoked' && !succeeded('revoke_order', 'revoke_process')) {
         return toolFail(
           'revoke_missing',
@@ -201,8 +197,12 @@ function submitReplyTool(turn, character) {
       if (requestKind === 'order_instant' && commitment === 'none') {
         return toolFail(
           'instant_ignored',
-          'Покровитель велел решение сейчас. Используй declare_act или declare_standing_order (commitment соответственно), ' +
-            'либо откажи в речи с commitment=refused.',
+          'Покровитель велел решение сейчас, а в мире ничего не заведено. У тебя два способа: ' +
+            'declare_standing_order — если это порядок, который теперь соблюдают всегда; ' +
+            'declare_process на 1 месяц — если это дело, у которого будет исход (послать людей, ' +
+            'разобрать спор, провести обряд, найти виновного). Разовых «сделал и забыли» не бывает: ' +
+            'у любого приказа есть последствия, и город должен их отследить. ' +
+            'Либо откажи в речи с commitment=refused.',
         );
       }
       if (requestKind === 'order_impossible' && commitment !== 'refused') {
@@ -272,10 +272,15 @@ function characterTools(domain, storage, character, ctx) {
         populationFeel: qualitativePopulation(domain.population || 0),
         conditionFeel: qualitativeStatsBrief(domain.stats || {}, ctx.config),
         attitudes: formatRulerAttitudes(character, ctx.config),
+        // Без каста правитель не знает своих же людей и додумывает за них.
+        knownPeople: formatCastForPrompt(domain.lore, { limit: 20 }),
         guidance:
           'Отвечай в духе conditionFeel: качественно, без чисел и без имён статов. ' +
           'О делах — по-человечески: что делается и сколько примерно ждать.',
-        stateEvents: domain.state.events,
+        guidancePeople:
+          'knownPeople — люди, которых город уже знает: имя, пол, ремесло и что о них известно. ' +
+          'Это правда, а не слухи. Не переспрашивай о том, что здесь написано, и не придумывай ' +
+          'им другую судьбу.',
         standingOrders: (domain.state.modifiers || []).map((m) => ({
           id: m.id,
           text: m.text,
@@ -600,13 +605,7 @@ function characterTools(domain, storage, character, ctx) {
         const list = domain.state.modifiers;
         let mod = id ? list.find((m) => m.id === id) : null;
         if (!mod) {
-          const dup = list.find(
-            (m) =>
-              String(m.text || '')
-                .toLowerCase()
-                .includes(body.toLowerCase().slice(0, 40)) ||
-              body.toLowerCase().includes(String(m.text || '').toLowerCase().slice(0, 40)),
-          );
+          const dup = list.find((m) => textsLookSame(m.text, body));
           if (dup) {
             dup.text = body;
             dup.kind = 'order';
@@ -649,54 +648,6 @@ function characterTools(domain, storage, character, ctx) {
           created: false,
           modifier: mod,
           hint: 'Порядок обновлён. Подтверди в речи коротко.',
-        };
-      },
-    },
-    {
-      name: 'declare_act',
-      description:
-        'Одноразовое деяние СЕЙЧАС (казнь, обряд, вскрыть склады, назначить человека, освободить, объявить праздник). ' +
-        'Не постоянное правило (declare_standing_order) и не многомесячное дело (declare_process). ' +
-        'Пишет событие месяца в state.events; последствия отыграет мир к концу месяца.',
-      parameters: {
-        type: 'object',
-        required: ['text'],
-        properties: {
-          text: {
-            type: 'string',
-            description: 'Что именно сделано сейчас, одной-двумя фразами. Конкретно, без пафоса.',
-          },
-        },
-      },
-      handler: async ({ text }) => {
-        const body = String(text || '').trim().slice(0, 400);
-        if (body.length < 3) {
-          return toolFail(
-            'too_short',
-            'Опиши деяние конкретнее (≥3 символа) и вызови declare_act снова.',
-          );
-        }
-        if (!domain.state) {
-          domain.state = { events: [], modifiers: [], pendingActions: [], patronName: null };
-        }
-        if (!Array.isArray(domain.state.events)) domain.state.events = [];
-        const event = {
-          id: newId('act'),
-          text: body,
-          kind: 'act',
-          by: character.name,
-          declaredTick: world?.tickIndex ?? null,
-          at: new Date().toISOString(),
-        };
-        domain.state.events.push(event);
-        pushOrderFact(`Деяние правителя: ${body}`, 'act');
-        await save();
-        return {
-          ok: true,
-          act: event,
-          hint:
-            'В речи: это сделано сейчас, без месяцев ожидания. Не говори «процесс», «событие», «зафиксировал». ' +
-            'Последствия придут с новостями месяца.',
         };
       },
     },
@@ -1837,13 +1788,24 @@ export class GameApp {
       .filter(Boolean)
       .join(' ');
 
+    // Про молчание бога — не каждый месяц и не одними словами: иначе письма
+    // кончаются одной и той же формулой и перестают читаться.
     const unanswered = countTrailingUnansweredDigests(character.dialogHistory || []);
-    const askPresence = unanswered >= 2;
+    const askPresence = unanswered >= 2 && unanswered % 2 === 0;
+    const silenceAngles = [
+      'спроси, слышит ли он тебя ещё',
+      'скажи, что люди спрашивают, не отвернулся ли покровитель, и ты не знаешь, что отвечать',
+      'признайся, что решал этот месяц сам, и не уверен, что угадал его волю',
+      'скажи, что оставил у алтаря знак и ждёшь ответа',
+      'обмолвись, что давно не слышал его голоса, и вернись к делам',
+    ];
     const presenceHint = askPresence
       ? [
-          'ВАЖНО: покровитель молчит уже несколько месяцев подряд (не отвечал после прошлых писем о месяце).',
-          'В конце письма коротко, по-человечески спроси: слышит ли он тебя ещё, не оставил ли город без знака.',
-          'Без истерики и без сервисного тона — тревога слуги, 1–2 предложения.',
+          `ВАЖНО: покровитель молчит ${unanswered} месяца подряд.`,
+          `В конце письма, коротко и по-человечески: ${
+            silenceAngles[Math.floor(Math.random() * silenceAngles.length)]
+          }.`,
+          'Своими словами, не повторяя прошлых писем. Без истерики и сервисного тона, 1–2 предложения.',
         ].join(' ')
       : '';
 
@@ -1854,6 +1816,28 @@ export class GameApp {
           'ГЛАВНОЕ СОБЫТИЕ МЕСЯЦА — чужой летающий остров (сближение или стык).',
           'Начни письмо с него и говори прямо: назови город соседа, срок или характер стыка.',
           'Это не примета и не слух — покровитель должен понять масштаб.',
+          'Прочие дела — коротко, после.',
+        ].join(' ')
+      : '';
+
+    const seedAdds = mine.filter((c) => c.author === 'storyteller:seed');
+    const seedLead = seedAdds.length
+      ? [
+          'В этом месяце НАЧАЛАСЬ новая история. Представь её с нуля:',
+          'назови человека, чего он хочет и что ему мешает. Покровитель этих людей ещё не знает.',
+          'Не пиши так, будто он уже в курсе. Сначала желание и спор, не новый порядок и не очередь.',
+        ].join(' ')
+      : '';
+
+    // Развязка, катастрофа или взятая цель сезона — с этого письмо и начинается.
+    const highlight = opts.highlight;
+    const highlightLead = highlight
+      ? [
+          `ГЛАВНОЕ СОБЫТИЕ МЕСЯЦА — ${highlight.note || `история «${highlight.title}» дошла до конца`}.`,
+          'Начни письмо с него и дай ему место: кто был, что сделали, чем это кончилось.',
+          highlight.kind === 'catastrophe'
+            ? 'Не смягчай: покровитель должен понять, что город потерял.'
+            : 'Не отчитывайся о работах — расскажи, чем дело кончилось для людей.',
           'Прочие дела — коротко, после.',
         ].join(' ')
       : '';
@@ -1885,13 +1869,19 @@ export class GameApp {
           {
             role: 'user',
             content: [
-              `Прошёл месяц (${gameDate.label}). Ниже сырая хроника для тебя (не факты лормастера).`,
+              `Прошёл месяц (${gameDate.label}). Ниже — ЧТО ДЕЙСТВИТЕЛЬНО СЛУЧИЛОСЬ в городе за этот месяц.`,
+              'Это не слухи и не донесения, ждущие проверки: так было. Не сомневайся в записях, ' +
+                'не проси подтверждений и не отказывайся о них говорить — просто расскажи об этом покровителю.',
               'Напиши покровителю письмо о месяце — вольный пересказ, НЕ дайджест и НЕ отчёт.',
               undockHint
                 ? 'Сделай уход чужого острова в небо центральной нитью письма.'
                 : confluxLead
                   ? 'Сделай чужой остров центральной нитью письма.'
-                  : 'Бюджет письма: одна-две нити (дело, прорыв, беда) и при желании штрих. Мелочь опусти.',
+                  : highlightLead
+                    ? 'Главное событие месяца веди первым и подробнее прочего.'
+                    : seedLead
+                      ? 'Новую историю представь так, чтобы покровитель понял её без прошлого письма.'
+                      : 'Бюджет письма: одна-две нити (дело, прорыв, беда) и при желании штрих. Мелочь опусти.',
               'ОБЯЗАТЕЛЬНО упомяни каждую [critical] запись СВОЕГО города — такое не заметить нельзя.',
               'Связная проза от первого лица, 1–3 коротких абзаца. Без списков, markdown, нумерации, канцелярита.',
               `Не начинай с «${character.name}:» — сразу текст письма.`,
@@ -1901,6 +1891,7 @@ export class GameApp {
               moodHint,
               presenceHint,
               scopeHint,
+              confluxLead || undockHint ? '' : highlightLead || seedLead,
               confluxLead,
               undockHint,
               extraUserNote,

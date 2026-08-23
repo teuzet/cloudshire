@@ -10,6 +10,8 @@ export function emptyState() {
     // Короткие пометки о том, что случилось в разговорах этого месяца (dayNote).
     // Доносит день до тика и очищается после него.
     monthLog: [],
+    // Темы последних тихих месяцев: жребий не повторяет их подряд.
+    quietPicks: [],
     // Как обращаться к божеству-покровителю; null = ещё не названо
     patronName: null,
   };
@@ -25,6 +27,7 @@ export function normalizeDomain(domain) {
     if (!Array.isArray(domain.state.modifiers)) domain.state.modifiers = [];
     if (!Array.isArray(domain.state.pendingActions)) domain.state.pendingActions = [];
     if (!Array.isArray(domain.state.monthLog)) domain.state.monthLog = [];
+    if (!Array.isArray(domain.state.quietPicks)) domain.state.quietPicks = [];
     if (!('patronName' in domain.state)) domain.state.patronName = null;
   }
   if (!Array.isArray(domain.tags)) domain.tags = [];
@@ -61,7 +64,6 @@ export function createWorldFromConfig(config) {
     description: config.world?.description || '',
     cosmology: config.world?.cosmology || '',
     lore: [],
-    milestonePool: structuredClone(config.world?.milestonePool || []),
     globalEvents: [],
     tickIndex: 0,
     gameDate: {
@@ -120,7 +122,6 @@ export function createDomainRecord({
   stats,
   population,
   aspects = {},
-  milestones = [],
   tags = [],
   character,
   lore = [],
@@ -135,7 +136,6 @@ export function createDomainRecord({
     name,
     description,
     aspects,
-    milestones,
     /** Стартовые теги генезиса (groupId/tagId + имена) — для отладки и контекста */
     tags: (tags || []).map((t) => ({
       groupId: t.groupId,
@@ -188,19 +188,25 @@ export function createCharacterRecord({
   name,
   role = '',
   about = '',
+  gender = 'unknown',
+  status = 'alive',
   tick = null,
   gameDateLabel = null,
   author = 'system',
   relatedPlotlineIds = [],
 }) {
+  const sex = ['male', 'female'].includes(gender) ? gender : 'unknown';
+  const state = ['alive', 'dead', 'gone'].includes(status) ? status : 'alive';
   return {
     id,
     tags: ['character'],
     name: String(name || '').trim().slice(0, 80),
     role: String(role || '').trim().slice(0, 120),
     about: String(about || '').trim().slice(0, 400),
+    // Без пола рассказчик каждый месяц решает заново, и человек меняет род на ходу.
+    gender: sex,
     text: [String(name || '').trim(), role, about].filter(Boolean).join(' — ').slice(0, 500),
-    status: 'alive',
+    status: state,
     firstSeenTick: tick,
     gameDateLabel,
     author,
@@ -217,11 +223,14 @@ export function castRecords(lore = []) {
 export function formatCastForPrompt(lore = [], { limit = 20 } = {}) {
   const cast = castRecords(lore).slice(-limit);
   if (!cast.length) return '(названных людей пока нет)';
+  const sexWord = { male: 'он', female: 'она' };
+  const stateWord = { dead: 'мёртв', gone: 'пропал без вести' };
   return cast
     .map((c) => {
-      const state = c.status && c.status !== 'alive' ? ` [${c.status}]` : '';
+      const state = stateWord[c.status] ? ` [${stateWord[c.status]}]` : '';
       const role = c.role ? `, ${c.role}` : '';
-      return `- ${c.name}${role}${state}${c.about ? `: ${c.about}` : ''}`;
+      const sex = sexWord[c.gender] ? ` (${sexWord[c.gender]})` : '';
+      return `- ${c.name}${sex}${role}${state}${c.about ? `: ${c.about}` : ''}`;
     })
     .join('\n');
 }

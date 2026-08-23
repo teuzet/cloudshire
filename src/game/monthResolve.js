@@ -17,8 +17,7 @@ import {
 import {
   normalizePlotlines,
   plotConfig,
-  boardHasRoom,
-  pickPlotTags,
+  plotSeedChance,
   findPlotline,
   closePlotline,
 } from './plotlines.js';
@@ -29,19 +28,17 @@ import {
   createStatBudget,
   ensureErrandForProcess,
   formatBeatPlanForLog,
+  clearMonthLog,
 } from './plotEngine.js';
 import { seedPlot, beatPlot, echoDecisions, quietMonth } from './storyteller.js';
 import { getLogger } from '../log.js';
 
-function newDecisionsThisMonth(domain, world) {
+/** Указы, объявленные в этом месяце: их последствия и отыгрывает отзвук. */
+function newEdictsThisMonth(domain, world) {
   const since = Math.max(0, (world.tickIndex || 0) - 1);
-  const edicts = (domain.state?.modifiers || []).filter(
+  return (domain.state?.modifiers || []).filter(
     (m) => Number.isInteger(m.declaredTick) && m.declaredTick >= since,
   );
-  const acts = (domain.state?.events || []).filter(
-    (e) => e?.kind === 'act' && Number.isInteger(e.declaredTick) && e.declaredTick >= since,
-  );
-  return { edicts, acts };
 }
 
 /**
@@ -72,6 +69,13 @@ export async function resolveDomainMonth({
   const chronicleAdds = [];
   const mirrorAdds = [];
   const budget = createStatBudget(config);
+  // Пик месяца: то, с чего правитель начнёт письмо. Без него развязка тонет
+  // в ряду обычных записей и большое дело проходит незамеченным.
+  let highlight = null;
+  const raiseHighlight = (next) => {
+    const rank = { finale: 1, catastrophe: 2 };
+    if (!highlight || rank[next.kind] > rank[highlight.kind]) highlight = next;
+  };
 
   // 1. Дела: ход считает движок, у каждого дела есть нить.
   for (const process of activeProcesses(working, config)) {
@@ -92,6 +96,14 @@ export async function resolveDomainMonth({
     beats: beats.length,
     mandatory: beats.filter((b) => b.mandatory).length,
     plan: formatBeatPlanForLog(beats),
+    processes: processOutcomes.map((o) => ({
+      id: o.processId,
+      summary: o.summary,
+      kind: o.kind,
+      advance: o.advance,
+      left: `${o.monthsLeftBefore}→${o.monthsLeft}`,
+      finished: o.finished,
+    })),
     budget: { world: budget.world, player: budget.player },
   });
 
@@ -115,6 +127,16 @@ export async function resolveDomainMonth({
     if (result?.mirror?.fact) mirrorAdds.push(result.mirror.fact);
     if (result?.fact) {
       chronicleAdds.push(result.fact);
+      if (result.catastrophe) {
+        raiseHighlight({ kind: 'catastrophe', title: plot.title, text: result.fact.text });
+      } else if (result.closed) {
+        raiseHighlight({
+          kind: 'finale',
+          title: plot.title,
+          text: result.fact.text,
+          note: `история «${plot.title}» кончилась`,
+        });
+      }
     } else {
       // Рассказчик не справился — движок пишет сухой минимум, чтобы месяц не пропал.
       const fact = createLoreFact({
@@ -135,38 +157,38 @@ export async function resolveDomainMonth({
     }
   }
 
-  // 5. Завязка новой нити, если доска не полна.
-  const room = boardHasRoom(working, cfg);
-  const wantSeed = room.story && Math.random() < cfg.beats.baseChance + (working.plotlines.length === 0 ? 0.5 : 0);
+  // 5. Завязка новой нити: чем пустее доска, тем охотнее.
+  const seedChance = plotSeedChance(working, cfg, world.tickIndex);
+  const wantSeed = Math.random() < seedChance;
   if (wantSeed) {
-    const tags = pickPlotTags(cfg);
-    const seeded = await seedPlot({ config, runtime, domain: working, world, tags, log });
+    const seeded = await seedPlot({ config, runtime, domain: working, world, log });
     if (seeded?.fact) chronicleAdds.push(seeded.fact);
   }
 
-  // 6. Отзвук воли покровителя.
-  const { edicts, acts } = newDecisionsThisMonth(working, world);
-  if (edicts.length || acts.length) {
+  // 6. Отзвук воли покровителя: указы этого месяца.
+  const edicts = newEdictsThisMonth(working, world);
+  if (edicts.length) {
     const echo = await echoDecisions({
       config,
       runtime,
       domain: working,
       world,
       edicts,
-      acts,
       budget,
       log,
     });
     if (echo?.fact) chronicleAdds.push(echo.fact);
-    // Деяния — разовые: отыграны и уходят из состояния месяца.
-    working.state.events = (working.state.events || []).filter((e) => !acts.includes(e));
   }
 
-  // 7. Тихий месяц.
+  // 7. Тихий месяц: без сюжета, но со своей погодой в статах.
   if (!chronicleAdds.length) {
-    const quiet = await quietMonth({ config, runtime, domain: working, world, log });
+    const quiet = await quietMonth({ config, runtime, domain: working, world, budget, log });
     if (quiet?.fact) chronicleAdds.push(quiet.fact);
   }
+
+  // Журнал донёс разговоры до тика и здесь же гасится: чистить его снаружи нельзя —
+  // там остаётся объект домена до резолва, и запись поверх стирает весь месяц.
+  clearMonthLog(working);
 
   refreshChronicleDigest(working, config);
   working.lastTickAt = new Date().toISOString();
@@ -174,9 +196,12 @@ export async function resolveDomainMonth({
   log.info('month.done', {
     chronicle: chronicleAdds.length,
     plots: working.plotlines.length,
+    seedChance: Number(seedChance.toFixed(2)),
+    seeded: wantSeed,
+    highlight: highlight ? `${highlight.kind}: ${highlight.title}` : null,
     budgetSpent: { world: budget.spentWorld, player: budget.spentPlayer },
     stats: working.stats,
   });
 
-  return { domain: working, chronicleAdds, mirrorAdds };
+  return { domain: working, chronicleAdds, mirrorAdds, highlight };
 }

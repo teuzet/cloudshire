@@ -36,18 +36,6 @@ function formatPending(domain) {
     .join('\n');
 }
 
-function formatMilestones(domain) {
-  const list = domain.milestones || [];
-  if (!list.length) return '(майлстоунов нет)';
-  return list
-    .map((m) => {
-      const st = m.status && m.status !== 'open' ? ` [${m.status}]` : '';
-      const pts = m.points != null ? ` (${m.points} очков)` : '';
-      return `- ${m.text}${pts}${st}`;
-    })
-    .join('\n');
-}
-
 function formatGoals(scenario) {
   const parts = [];
   if (scenario.ambition) {
@@ -56,7 +44,7 @@ function formatGoals(scenario) {
   if (scenario.goals?.length) {
     parts.push(`Goals:\n${scenario.goals.map((g, i) => `${i + 1}. ${g}`).join('\n')}`);
   }
-  return parts.join('\n\n') || 'Двигай открытые майлстоуны домена.';
+  return parts.join('\n\n') || 'Веди свою линию: выбери, чего добиваешься от города, и добивайся.';
 }
 
 async function applyTalk({ app, domainId, playerLine, step, ticksDone, transcript, log }) {
@@ -373,7 +361,7 @@ async function decidePlayerAction({
     {
       name: 'talk_to_ruler',
       description:
-        'ОБЯЗАТЕЛЬНО на каждом ходе: одна сухая реплика правителю (статус, майлстоун, приказ).',
+        'ОБЯЗАТЕЛЬНО на каждом ходе: одна сухая реплика правителю (статус, вопрос, приказ).',
       parameters: {
         type: 'object',
         required: ['message'],
@@ -417,9 +405,6 @@ async function decidePlayerAction({
           `Город: «${domain.name}». Правитель: ${domain.characters?.[0]?.name || 'правитель'}.`,
           `Тиков сделано ${ticksDone}/${targetTicks} (осталось ${remaining}). Ход/шаг ${step}/${stepCap}.`,
           '',
-          'МАЙЛСТОУНЫ СЕЗОНА (главный ориентир — пытайся их двигать):',
-          formatMilestones(domain),
-          '',
           formatGoals(scenario),
           '',
           'Pending сейчас:',
@@ -429,10 +414,8 @@ async function decidePlayerAction({
           formatDialogHistory(domain),
           '',
           'Сейчас: СНАЧАЛА talk_to_ruler (обязательно). Потом при необходимости force_tick.',
-          'Молчать нельзя. Говори по майлстоуну или по последствиям прошлого месяца.',
-          remaining <= 1
-            ? 'Последние тики — добей видимый прогресс по выбранному майлстоуну.'
-            : '',
+          'Молчать нельзя. Говори по своей линии или по последствиям прошлого месяца.',
+          remaining <= 1 ? 'Последние тики — добей видимый прогресс по своей линии.' : '',
         ]
           .filter(Boolean)
           .join('\n'),

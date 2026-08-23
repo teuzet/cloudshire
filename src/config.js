@@ -78,6 +78,19 @@ export function loadConfig(configPath = process.env.CLOUDSHIRE_CONFIG || 'config
     password: process.env.ADMIN_PASSWORD || config.admin?.password || '',
   };
 
+  // Две независимые веб-поверхности: игровой клиент и админка.
+  // Локально удобно поднимать только клиент, на хостинге — только админку.
+  const playFlag = truthyEnv('WEB_PLAY');
+  const adminFlag = truthyEnv('WEB_ADMIN');
+  // Отладочные кнопки в игровом клиенте (форс-тик, вайп мира): локально да,
+  // на хостинге только явным флагом.
+  const playDevFlag = truthyEnv('WEB_PLAY_DEV') ?? truthyEnv('WEB_PLAY_TICK');
+  config.web = {
+    play: playFlag != null ? playFlag : !onPaaS && config.web?.play !== false,
+    admin: adminFlag != null ? adminFlag : config.web?.admin !== false,
+    playDev: playDevFlag != null ? playDevFlag : !onPaaS,
+  };
+
   config.telegram = config.telegram || {};
   config.telegram.enabled = resolveTelegramEnabled(config.telegram);
 

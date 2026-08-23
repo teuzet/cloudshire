@@ -3,7 +3,6 @@ import {
   rollDomainStats,
   rollPopulation,
   pickTags,
-  pickMilestones,
   formatStatsForPrompt,
   formatTagsForPrompt,
   isForbiddenDomainName,
@@ -41,7 +40,8 @@ function cosmologyBlock() {
 }
 
 function fallbackName() {
-  const names = ['Ветроград', 'Острокрыл', 'Туманск', 'Крутолом', 'Яснояр', 'Шипоград', 'Небокрай'];
+  // Кириллица, но не русские топонимы: имена этого мира, а не земные.
+  const names = ['Ирмала', 'Кальдра', 'Тавронь', 'Сатрея', 'Улдин', 'Веналь', 'Мардон', 'Оренга'];
   return names[Math.floor(Math.random() * names.length)];
 }
 
@@ -140,9 +140,12 @@ async function generateCore({
             type: 'string',
             description: lockedName
               ? `ОБЯЗАТЕЛЬНО точно: ${lockedName}`
-              : 'Фэнтезийное имя по-русски',
+              : 'Придуманное имя кириллицей: не русское и не земное',
           },
-          rulerName: { type: 'string' },
+          rulerName: {
+            type: 'string',
+            description: 'Одно придуманное имя кириллицей, без фамилии и отчества',
+          },
           rulerTitle: { type: 'string' },
           rulerDescription: {
             type: 'string',
@@ -223,7 +226,7 @@ async function generateCore({
     `Население (внутреннее): ${population}`,
     lockedName
       ? `Имя города УЖЕ выбрано: «${lockedName}» — поле domainName = точно это.`
-      : 'Имя — фэнтезийное по-русски.',
+      : 'Имя города — придуманное, кириллицей, не русское и не земное.',
     '',
     'ПОЖЕЛАНИЯ ИГРОКА:',
     briefText,
@@ -447,7 +450,6 @@ export async function generateDomain({
   const stats = rollDomainStats(config);
   const population = rollPopulation(config);
   const tags = pickTags(config, Math.random, forcedTagChoices || {});
-  const milestones = pickMilestones(config);
   const aspectsConfig = aspectDefs(config);
   const batchSize = config.genesis.aspectBatchSize || 4;
 
@@ -455,7 +457,6 @@ export async function generateDomain({
     forcedName,
     population,
     tags: tags.map((t) => `${t.groupId}:${t.tagId}`),
-    milestones: milestones.map((m) => m.text),
   });
 
   const core = await generateCore({
@@ -541,7 +542,6 @@ export async function generateDomain({
     name: domainName,
     description,
     aspects,
-    milestones,
     tags,
     stats,
     population,
@@ -600,7 +600,6 @@ export function domainSummary(domain) {
     stats: domain.stats,
     tags: domain.tags || [],
     patronName: domain.state?.patronName || null,
-    milestones: domain.milestones || [],
     character: domain.characters[0]
       ? {
           id: domain.characters[0].id,

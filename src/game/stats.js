@@ -75,25 +75,6 @@ export function pickTags(config, rng = Math.random, forcedChoices = {}) {
   });
 }
 
-export function pickMilestones(config, rng = Math.random) {
-  const pool = [...(config.world.milestonePool || [])];
-  const min = config.world.milestonesPerDomain?.min ?? 3;
-  const max = config.world.milestonesPerDomain?.max ?? 5;
-  const count = Math.min(pool.length, min + Math.floor(rng() * (max - min + 1)));
-
-  for (let i = pool.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(rng() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
-  }
-
-  return pool.slice(0, count).map((m) => ({
-    id: m.id,
-    text: m.text,
-    points: m.points,
-    status: 'open',
-  }));
-}
-
 function nearestScaleKey(value, scale) {
   const keys = Object.keys(scale)
     .map(Number)

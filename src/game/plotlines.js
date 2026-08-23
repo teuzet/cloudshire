@@ -1,4 +1,5 @@
 import { newId } from './ids.js';
+import { textsLookSame } from './processes.js';
 
 /**
  * Сюжетные нити — ядро мира: событий вне нитей не бывает.
@@ -46,6 +47,10 @@ export function plotConfig(config) {
     board: {
       maxOpen: Math.max(2, Math.min(10, Number(board.maxOpen) || 5)),
       maxErrands: Math.max(0, Math.min(6, Number(board.maxErrands) ?? 2)),
+      targetStories: Math.max(0, Math.min(8, Number(board.targetStories) ?? 2)),
+      seedPerMissing: Number(board.seedPerMissing ?? 0.2),
+      seedMaxChance: Number(board.seedMaxChance ?? 0.5),
+      seedCooldownMonths: Math.max(0, Math.min(12, Number(board.seedCooldownMonths) ?? 2)),
     },
     beats: {
       maxPerTick: Math.max(1, Math.min(6, Number(beats.maxPerTick) || 3)),
@@ -78,6 +83,13 @@ export function plotConfig(config) {
     },
     log: {
       influenceChance: Number(log.influenceChance ?? 0.35),
+    },
+    quiet: {
+      driftChance: Number(p.quiet?.driftChance ?? 0.65),
+      notableChance: Number(p.quiet?.notableChance ?? 0.25),
+      meanReversion: Number(p.quiet?.meanReversion ?? 0.7),
+      extremeBias: Number(p.quiet?.extremeBias ?? 1),
+      avoidRepeat: Math.max(0, Math.min(10, Number(p.quiet?.avoidRepeat ?? 4))),
     },
     tagGroups: Array.isArray(p.tagGroups) ? p.tagGroups : [],
   };
@@ -273,25 +285,182 @@ export function closePlotline(domain, plotlineId, { tick = null, reason = '' } =
 }
 
 /** Жребий тегов новой нити — движок, не агент. */
-export function pickPlotTags(cfg, rng = Math.random) {
+/**
+ * Жребий завязки: два-три тега, не семь.
+ * Больше — и рассказчик склеивает несовместимое: чужак, клятва, дети, голод и силуэт
+ * в небе в одной записи. Нужны повод и ставка, остальное придумается из жизни города.
+ */
+const TAG_THEME = {
+  water: 'water',
+  well: 'water',
+  drains: 'water',
+  oath_curse: 'oath',
+  new_cult: 'cult',
+  heresy: 'cult',
+  miracle_right: 'cult',
+  rite_purity: 'cult',
+  patron_priests: 'cult',
+  old_gods_priests: 'cult',
+  pious_dispute: 'cult',
+  faith: 'cult',
+  rim: 'rim',
+  rim_mist: 'rim',
+  rim_safety: 'rim',
+  rim_land: 'rim',
+  guard: 'guard',
+  sergeants: 'guard',
+  archive: 'archive',
+  forbidden_book: 'archive',
+  knowledge_control: 'archive',
+  hunger: 'food',
+  field: 'food',
+  sudden_famine: 'food',
+  sudden_fertility: 'food',
+};
+
+const TEXT_THEMES = [
+  { key: 'water', re: /водосбор|цистерн|чаш[аеиуы]|кувшин|сосуд|колодц|заслонк|водян/ },
+  { key: 'oath', re: /клятв|проклят|\bобет/ },
+  { key: 'cult', re: /культ|обряд|ерес|жрец|алтар/ },
+  { key: 'guard', re: /страж|храмовник|караул/ },
+  { key: 'rim', re: /обрыв|дозорной площад|края остров/ },
+  { key: 'archive', re: /архив|свитк|запретн/ },
+  { key: 'food', re: /голод|амбар|урожа|хлеб|мук[аи]/ },
+];
+
+export function plotThemeKeys(text, tags = []) {
+  const blob = String(text || '').toLowerCase();
+  const keys = new Set();
+  for (const { key, re } of TEXT_THEMES) {
+    if (re.test(blob)) keys.add(key);
+  }
+  for (const t of tags || []) {
+    const id = t.tagId || t.id || t;
+    const theme = TAG_THEME[String(id)];
+    if (theme) keys.add(theme);
+  }
+  return [...keys];
+}
+
+export function occupiedPlotThemes(domain) {
+  const keys = new Set();
+  const ids = new Set();
+  for (const p of domain?.plotlines || []) {
+    if (p.kind === 'errand') continue;
+    for (const t of p.tags || []) {
+      if (t.tagId) ids.add(t.tagId);
+    }
+    for (const key of plotThemeKeys(`${p.title} ${p.synopsis} ${p.closeWhen}`, p.tags)) {
+      keys.add(key);
+    }
+  }
+  return { themes: [...keys], tagIds: [...ids] };
+}
+
+export function pickPlotTags(cfg, rng = Math.random, { avoidIds = [], avoidThemes = [] } = {}) {
   const groups = cfg?.tagGroups || [];
-  const core = ['tone', 'start_event', 'spark_source', 'stake'];
-  const extra = ['phenomenon', 'stakeholders', 'scale', 'urgency'];
-  const picked = [];
-  for (const gid of [...core, ...extra]) {
+  const bannedIds = new Set(avoidIds);
+  const bannedThemes = new Set(avoidThemes);
+  const pickFromGroup = (gid) => {
     const g = groups.find((x) => x.id === gid);
-    if (!g?.tags?.length) continue;
-    if (extra.includes(gid) && rng() > 0.6) continue;
-    const tag = g.tags[Math.floor(rng() * g.tags.length)];
-    if (!tag) continue;
-    picked.push({
-      groupId: g.id,
-      groupName: g.name || g.id,
-      tagId: tag.id,
-      tagName: tag.name,
-    });
+    if (!g?.tags?.length) return null;
+    const free = g.tags.filter((tag) => !bannedIds.has(tag.id) && !bannedThemes.has(TAG_THEME[tag.id]));
+    const pool = free.length ? free : g.tags;
+    const tag = pool[Math.floor(rng() * pool.length)];
+    if (!tag) return null;
+    return { groupId: g.id, groupName: g.name || g.id, tagId: tag.id, tagName: tag.name };
+  };
+
+  const picked = [];
+  // Повод: обычно бытовой случай, иногда — явление покрупнее.
+  const occasion = pickFromGroup(rng() < 0.7 ? 'start_event' : 'phenomenon');
+  if (occasion) picked.push(occasion);
+  // Ставка — обязательна: без неё история не про что.
+  const stake = pickFromGroup('stake');
+  if (stake) picked.push(stake);
+  // Третий тег — только иногда, чтобы задать угол зрения.
+  if (rng() < 0.45) {
+    const extra = pickFromGroup(rng() < 0.5 ? 'tone' : 'stakeholders');
+    if (extra) picked.push(extra);
   }
   return picked;
+}
+
+function firstName(s) {
+  return String(s || '')
+    .trim()
+    .split(/\s+/)[0];
+}
+
+/** Синопсис доски собираем из сюжета, а не из бытовой сводки. */
+export function composeSeedSynopsis({ who, wants, obstacle, threat } = {}) {
+  const name = String(who || '').trim();
+  const want = String(wants || '')
+    .trim()
+    .replace(/\.+$/, '');
+  const block = String(obstacle || '')
+    .trim()
+    .replace(/\.+$/, '');
+  const risk = String(threat || '')
+    .trim()
+    .replace(/\.+$/, '');
+  const parts = [];
+  if (name && want) parts.push(`${name} хочет ${want}`);
+  if (block) parts.push(block);
+  if (risk) parts.push(risk);
+  return parts.length ? `${parts.join('. ')}.` : '';
+}
+
+/**
+ * Завязка должна быть сюжетом, а не соседним клоном и не сводкой обряда.
+ * @returns {string|null} причина отказа или null, если можно сеять
+ */
+export function judgePlotSeed(domain, draft, tags = []) {
+  if (!draft) return 'empty';
+  const who = String(draft.who || '').trim();
+  const wants = String(draft.wants || '').trim();
+  const obstacle = String(draft.obstacle || '').trim();
+  if (who.length < 2 || wants.length < 8 || obstacle.length < 8) return 'no_plot';
+
+  const name = firstName(who);
+  const seenIn = `${draft.entry || ''} ${draft.synopsis || ''}`;
+  if (name.length >= 2 && !seenIn.includes(name)) return 'who_not_in_entry';
+
+  const composed = composeSeedSynopsis(draft);
+  const twin = (domain.plotlines || []).find((p) =>
+    textsLookSame(`${p.title} ${p.synopsis}`, `${draft.title} ${composed || draft.synopsis}`),
+  );
+  if (twin) return 'twin';
+
+  const occupied = new Set(occupiedPlotThemes(domain).themes);
+  const incoming = plotThemeKeys(
+    `${draft.title} ${composed} ${draft.entry} ${draft.closeWhen}`,
+    tags,
+  );
+  if (incoming.some((key) => occupied.has(key))) return 'theme_overlap';
+  return null;
+}
+
+/**
+ * Шанс завязки: чем меньше живых историй, тем охотнее сеем.
+ * Проходные нити дел за истории не считаются — иначе одна стройка глушит весь год.
+ * После свежей завязки держим паузу: иначе доска набивается клонами одного события.
+ */
+export function plotSeedChance(domain, cfg, tick = null) {
+  const { total, stories } = countOpen(domain);
+  if (total >= cfg.board.maxOpen) return 0;
+
+  const cooldown = cfg.board.seedCooldownMonths;
+  if (cooldown > 0 && Number.isFinite(Number(tick))) {
+    const youngest = (domain.plotlines || [])
+      .filter((p) => p.kind !== 'errand' && Number.isFinite(Number(p.createdTick)))
+      .reduce((max, p) => Math.max(max, Number(p.createdTick)), -Infinity);
+    if (Number.isFinite(youngest) && Number(tick) - youngest < cooldown) return 0;
+  }
+
+  const missing = Math.max(0, cfg.board.targetStories - stories);
+  const chance = cfg.beats.baseChance + missing * cfg.board.seedPerMissing;
+  return Math.max(0, Math.min(cfg.board.seedMaxChance, chance));
 }
 
 export function formatPlotTagsForPrompt(tags) {

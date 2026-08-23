@@ -202,6 +202,41 @@ export function resolveStatDeltas(
   return deltas;
 }
 
+function pickWeighted(items, weights, rng) {
+  const total = weights.reduce((a, b) => a + b, 0);
+  if (!(total > 0)) return items[Math.floor(rng() * items.length)] || null;
+  let roll = rng() * total;
+  for (let i = 0; i < items.length; i += 1) {
+    roll -= weights[i];
+    if (roll <= 0) return items[i];
+  }
+  return items[items.length - 1] || null;
+}
+
+/**
+ * След тихого месяца в статах: небольшой сдвиг с тягой к середине.
+ * Просевшее чаще выправляется, раздутое чаще садится — спираль не разгоняется.
+ * @returns {{stat: string, name: string, direction: 'up'|'down', force: string}|null}
+ */
+export function planQuietDrift(domain, config, rng = Math.random) {
+  const cfg = plotConfig(config || {}).quiet;
+  const stats = config?.stats || [];
+  if (!stats.length || rng() >= cfg.driftChance) return null;
+
+  const weights = stats.map((s) => 1 + (Math.abs(50 - statValue(domain, s.id)) / 50) * cfg.extremeBias);
+  const stat = pickWeighted(stats, weights, rng);
+  if (!stat) return null;
+
+  const value = statValue(domain, stat.id);
+  const upChance = 0.5 + ((50 - value) / 50) * cfg.meanReversion * 0.5;
+  return {
+    stat: stat.id,
+    name: stat.name || stat.id,
+    direction: rng() < upChance ? 'up' : 'down',
+    force: rng() < cfg.notableChance ? 'notable' : 'slight',
+  };
+}
+
 /** Просевшие стороны города — для подсказки о шансе на восстановление. */
 export function lowStats(domain, config, threshold = 25) {
   return (config?.stats || [])

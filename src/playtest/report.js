@@ -51,7 +51,6 @@ export function buildGenesisSnapshot(domain) {
     descriptionPreview: String(domain.description || '').slice(0, 800),
     factCount: lore.facts.length,
     chronicleCount: lore.chronicle.length,
-    milestones: (domain.milestones || []).map((m) => m.text),
   };
 }
 
@@ -67,11 +66,6 @@ export function buildDomainSnapshot(domain) {
       events: domain.state?.events || [],
       modifiers: domain.state?.modifiers || [],
     },
-    milestones: (domain.milestones || []).map((m) => ({
-      text: m.text,
-      status: m.status,
-      points: m.points,
-    })),
     ...lore,
   };
 }
@@ -116,10 +110,6 @@ export function buildSummaryMarkdown({
   lines.push(`- facts: ${genesis.factCount}, chronicle: ${genesis.chronicleCount}`);
   lines.push(`- population: ${genesis.population}`);
   lines.push(`- stats: \`${JSON.stringify(genesis.stats)}\``);
-  if (genesis.milestones?.length) {
-    lines.push('- milestones:');
-    for (const m of genesis.milestones) lines.push(`  - ${m}`);
-  }
   lines.push('');
   lines.push('## Timeline');
   lines.push('');
@@ -176,13 +166,6 @@ export function buildSummaryMarkdown({
   lines.push('### modifiers (постоянные)');
   if (!modifiers.length) lines.push('(нет)');
   else for (const m of modifiers) lines.push(`- [${m.kind || 'other'}] ${m.text}`);
-  lines.push('');
-
-  lines.push('## Milestones (только игрок / отчёт)');
-  lines.push('');
-  const ms = snapshot.milestones || [];
-  if (!ms.length) lines.push('(нет)');
-  else for (const m of ms) lines.push(`- [${m.status || 'open'}] ${m.text}`);
   lines.push('');
 
   lines.push('## Chronicle (итог)');
