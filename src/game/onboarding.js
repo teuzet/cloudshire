@@ -91,6 +91,9 @@ export function emptyOnboardingDraft() {
     pitchedName: null,
     /** Теги на момент этого питча — чтобы не потерять их, если агент рандомит снова. */
     pitchedTagChoices: {},
+    /** Как к игроку-богу будут обращаться. Без этого генезис не стартует. */
+    patronName: null,
+    patronNameApproved: false,
   };
 }
 
@@ -119,6 +122,8 @@ export function normalizeOnboardingDraft(draft) {
   if (!('pitched' in d)) d.pitched = false;
   if (!('cityName' in d)) d.cityName = null;
   if (!('cityNameApproved' in d)) d.cityNameApproved = false;
+  if (!('patronName' in d)) d.patronName = null;
+  if (!('patronNameApproved' in d)) d.patronNameApproved = false;
   clipOnboardingBrief(d.playerBrief);
   d.phase = deriveOnboardingPhase(d);
   return d;
@@ -144,6 +149,14 @@ export function hasPitchedCity(draft) {
   return Boolean(draft?.pitchedName || draft?.cityName || draft?.pitched);
 }
 
+export function hasPatronName(draft) {
+  return Boolean(String(draft?.patronName || '').trim());
+}
+
+export function canStartOnboarding(draft) {
+  return Boolean(draft?.cityNameApproved && draft?.cityName && hasPatronName(draft));
+}
+
 export function formatOnboardingStatusCard(draft, config, { generating = false } = {}) {
   const d = draft || emptyOnboardingDraft();
   const phase = deriveOnboardingPhase(d, { generating });
@@ -157,7 +170,8 @@ export function formatOnboardingStatusCard(draft, config, { generating = false }
   const lines = [
     `фаза=${phase}; режим=${d.mode || 'не выбран'};`,
     `питч=${d.pitchedName || '—'}; имя=${d.cityName || '—'} approved=${Boolean(d.cityNameApproved)};`,
-    `черты=${tagCount}/${tagTotal}${pitched ? '' : ' (это не питч)'}; ждатьСтарта=${pitched ? 'да, только после явного согласия' : 'нет'}.`,
+    `покровитель=${d.patronName || '—'} approved=${Boolean(d.patronNameApproved)};`,
+    `черты=${tagCount}/${tagTotal}${pitched ? '' : ' (это не питч)'}; ждатьСтарта=${pitched ? 'да, только после имени бога и явного согласия' : 'нет'}.`,
   ];
   if (cityPreview) lines.push(`бриф города для генезиса:\n${cityPreview}`);
   if (rulerPreview) lines.push(`правитель:\n${rulerPreview}`);
@@ -166,9 +180,11 @@ export function formatOnboardingStatusCard(draft, config, { generating = false }
     lines.push('Город ещё не предложен. Не пиши «город уже предложен» и не вызывай start_new_game.');
   } else {
     lines.push(
-      'Имя уже названо. НЕ вызывай randomize_all_tags и не выдумывай новый город. ' +
-        'Согласие («да/начинаем/создавай/готов») → set_city_name(это имя) и start_new_game. ' +
-        'Новый набор — только если игрок просит другой город.',
+      'Имя города уже названо. НЕ вызывай randomize_all_tags и не выдумывай новый город. ' +
+        (hasPatronName(d)
+          ? 'Согласие («да/начинаем/создавай/готов») → set_city_name + start_new_game.'
+          : 'Спроси, как к игроку-богу обращаться. Имя бога придумывает игрок, не ты. Без set_patron_name генезис не стартует.') +
+        ' Новый набор — только если игрок просит другой город.',
     );
   }
   if (d.mode === 'quick' && !pitched) {
@@ -192,6 +208,9 @@ export function formatOnboardingStatusCard(draft, config, { generating = false }
 export const ONBOARDING_NEED_NAME_NOTE =
   'Имя города ещё не зафиксировано. Назови его или подтверди последнее предложенное — и скажи «создавай», когда будешь готов.';
 
+export const ONBOARDING_NEED_PATRON_NOTE =
+  'Как к тебе будут обращаться в городе? Назови имя — без него остров не поднять.';
+
 export const ONBOARDING_FALSE_START_REPLY = ONBOARDING_NEED_NAME_NOTE;
 
 export const ONBOARDING_BUSY_REPLY =
@@ -207,6 +226,26 @@ export function formatPlayerBrief(brief = {}) {
   if (brief.ruler) parts.push(`Правитель (связной): ${brief.ruler}`);
   if (brief.freeform) parts.push(`Ещё: ${brief.freeform}`);
   return parts.length ? parts.join('\n') : '(пожеланий нет — полная свобода генезиса)';
+}
+
+export function validatePatronName(raw) {
+  const name = String(raw || '').trim().replace(/\s+/g, ' ');
+  if (name.length < 2) return { ok: false, reason: 'Слишком коротко.' };
+  if (name.length > 40) return { ok: false, reason: 'Слишком длинно (до 40 символов).' };
+  if (!/^[\p{L}\p{M}\d\s\-']+$/u.test(name)) {
+    return { ok: false, reason: 'Только буквы, цифры, пробел, дефис.' };
+  }
+  const lower = name.toLowerCase();
+  if (BANNED_EXACT.has(lower) || ['бог', 'богиня', 'покровитель', 'покровительница'].includes(lower)) {
+    return { ok: false, reason: 'Нужно собственное имя, не титул.' };
+  }
+  for (const bad of BANNED_SUBSTR) {
+    if (lower.includes(bad)) {
+      return { ok: false, reason: 'Имя неприемлемо. Давай без мата и пошлостей.' };
+    }
+  }
+  if (/^\d+$/.test(name)) return { ok: false, reason: 'Одни цифры — не имя.' };
+  return { ok: true, name };
 }
 
 export function validateCityName(raw) {
@@ -607,6 +646,50 @@ export function applyUserNamedCity(draft, text) {
   return name;
 }
 
+const USER_PATRON_RES = [
+  /зови(?:те)?\s+меня\s+[«"]?([\p{Lu}][\p{L}\p{M}\s'-]{0,39})/u,
+  /называй(?:те)?\s+меня\s+[«"]?([\p{Lu}][\p{L}\p{M}\s'-]{0,39})/u,
+  /меня\s+зовут\s+[«"]?([\p{Lu}][\p{L}\p{M}\s'-]{0,39})/u,
+  /обраща(?:йся|йтесь)\s+(?:ко?\s+мне\s+)?(?:как\s+)?[«"]?([\p{Lu}][\p{L}\p{M}\s'-]{0,39})/u,
+  /(?:я|мое\s+имя|моё\s+имя)\s*[—–:-]\s*[«"]?([\p{Lu}][\p{L}\p{M}\s'-]{0,39})/u,
+  /имя\s+(?:бога|покровителя)\s*[—–:-]?\s*[«"]?([\p{Lu}][\p{L}\p{M}\s'-]{0,39})/u,
+];
+
+export function extractUserPatronName(text) {
+  const raw = String(text || '');
+  if (!raw.trim()) return null;
+  for (const re of USER_PATRON_RES) {
+    re.lastIndex = 0;
+    const m = re.exec(raw);
+    if (!m) continue;
+    const v = validatePatronName(String(m[1] || '').replace(/[«»""]/g, '').trim());
+    if (v.ok) return v.name;
+  }
+  return null;
+}
+
+export function applyUserNamedPatron(draft, text) {
+  if (!draft || draft.patronNameApproved) return null;
+  const named = extractUserPatronName(text);
+  if (named) {
+    draft.patronName = named;
+    draft.patronNameApproved = true;
+    return named;
+  }
+  if (!hasPitchedCity(draft)) return null;
+  const raw = String(text || '').trim();
+  if (playerConsentsToStart(raw, { pitched: true })) return null;
+  if (extractUserCityName(raw)) return null;
+  const city = lastPitchedCityName(draft);
+  if (city && raw.toLowerCase() === city.toLowerCase()) return null;
+  if (!/^[\p{Lu}][\p{L}\p{M}'-]{1,39}$/u.test(raw)) return null;
+  const v = validatePatronName(raw);
+  if (!v.ok) return null;
+  draft.patronName = v.name;
+  draft.patronNameApproved = true;
+  return v.name;
+}
+
 export function lastPitchedCityName(draft) {
   if (draft?.cityName) {
     const v = validateCityName(draft.cityName);
@@ -672,9 +755,9 @@ export function playerAsksReroll(text) {
 function withNeedNameFlags(reply, reason) {
   const len = String(reply || '').trim().length;
   if (len > 0 && len <= FALSE_START_STRIP_MAX) {
-    return { start: false, name: null, stripFalseStart: true, appendNeedName: false, reason };
+    return { start: false, name: null, stripFalseStart: true, appendNeedName: false, appendNeedPatron: false, reason };
   }
-  return { start: false, name: null, stripFalseStart: false, appendNeedName: true, reason };
+  return { start: false, name: null, stripFalseStart: false, appendNeedName: true, appendNeedPatron: false, reason };
 }
 
 /**
@@ -689,7 +772,7 @@ export function planOnboardingAutoStart({
   generating = false,
 } = {}) {
   if (usedStart || generating) {
-    return { start: false, name: null, stripFalseStart: false, appendNeedName: false, reason: null };
+    return { start: false, name: null, stripFalseStart: false, appendNeedName: false, appendNeedPatron: false, reason: null };
   }
   const historyName = lastPitchedCityName(draft);
   const replyName = extractPitchedCityName(reply);
@@ -701,15 +784,30 @@ export function planOnboardingAutoStart({
   if (consented) {
     const name = historyName || replyName;
     const v = name ? validateCityName(name) : { ok: false };
-    if (v.ok) {
-      return { start: true, name: v.name, stripFalseStart: false, appendNeedName: false, reason: 'player_consent' };
+    if (!v.ok) return withNeedNameFlags(reply, 'consent_without_name');
+    if (!hasPatronName(draft)) {
+      return {
+        start: false,
+        name: v.name,
+        stripFalseStart: false,
+        appendNeedName: false,
+        appendNeedPatron: true,
+        reason: 'consent_without_patron',
+      };
     }
-    return withNeedNameFlags(reply, 'consent_without_name');
+    return {
+      start: true,
+      name: v.name,
+      stripFalseStart: false,
+      appendNeedName: false,
+      appendNeedPatron: false,
+      reason: 'player_consent',
+    };
   }
   if (claimed) {
     return withNeedNameFlags(reply, 'false_start_claim');
   }
-  return { start: false, name: null, stripFalseStart: false, appendNeedName: false, reason: null };
+  return { start: false, name: null, stripFalseStart: false, appendNeedName: false, appendNeedPatron: false, reason: null };
 }
 
 export function maybeSwitchToDossier(draft, userText) {
@@ -742,4 +840,11 @@ export function appendNeedNameNote(reply) {
   if (!text) return ONBOARDING_NEED_NAME_NOTE;
   if (text.includes(ONBOARDING_NEED_NAME_NOTE)) return text;
   return `${text}\n\n${ONBOARDING_NEED_NAME_NOTE}`;
+}
+
+export function appendNeedPatronNote(reply) {
+  const text = String(reply || '').trim();
+  if (!text) return ONBOARDING_NEED_PATRON_NOTE;
+  if (text.includes(ONBOARDING_NEED_PATRON_NOTE)) return text;
+  return `${text}\n\n${ONBOARDING_NEED_PATRON_NOTE}`;
 }

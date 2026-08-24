@@ -159,6 +159,7 @@ export async function runPlayerSim(ctx, opts = {}) {
     storage,
     ownerUserId: PLAYTEST_USER,
     forcedName: scenario.cityName,
+    forcedPatronName: scenario.patronName || 'Астра',
     playerBrief: scenario.playerBrief,
     log: parentLog,
     onProgress: (msg) => parentLog.info('playtest.genesis.progress', { message: msg }),

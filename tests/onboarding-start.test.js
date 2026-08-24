@@ -9,6 +9,7 @@ import {
   planOnboardingAutoStart,
   claimsOnboardingGenerating,
   applyUserNamedCity,
+  applyUserNamedPatron,
   deriveOnboardingPhase,
   formatOnboardingStatusCard,
   hasPitchedCity,
@@ -77,10 +78,29 @@ test('полный реролл только по явной просьбе др
   assert.equal(playerAsksReroll('давай быстрый старт'), false);
 });
 
-test('«Начинаем» после питча стартует старое имя, даже если агент выдумал новое', () => {
+test('«Начинаем» после питча без имени бога не стартует', () => {
   const draft = {
     pitched: true,
     pitchedName: 'Варкен',
+    messages: [{ role: 'assistant', content: varkenPitch }],
+  };
+  const plan = planOnboardingAutoStart({
+    userText: 'Начинаем',
+    reply: 'Тогда начинаем. Твой город — **Элвар**. Остров начинает создаваться.',
+    draft,
+  });
+  assert.equal(plan.start, false);
+  assert.equal(plan.appendNeedPatron, true);
+  assert.equal(plan.name, 'Варкен');
+  assert.equal(plan.reason, 'consent_without_patron');
+});
+
+test('«Начинаем» после питча и имени бога стартует старое имя города', () => {
+  const draft = {
+    pitched: true,
+    pitchedName: 'Варкен',
+    patronName: 'Астра',
+    patronNameApproved: true,
     messages: [{ role: 'assistant', content: varkenPitch }],
   };
   const plan = planOnboardingAutoStart({
@@ -93,6 +113,7 @@ test('«Начинаем» после питча стартует старое �
     name: 'Варкен',
     stripFalseStart: false,
     appendNeedName: false,
+    appendNeedPatron: false,
     reason: 'player_consent',
   });
 });
@@ -183,6 +204,8 @@ test('анкета: ответы не стартуют; после имени «
   const named = {
     pitched: true,
     pitchedName: 'Цитадель Нокс',
+    patronName: 'Нокс',
+    patronNameApproved: true,
     mode: 'dossier',
     messages: [{ role: 'user', content: 'город называется Цитадель Нокс' }],
   };
@@ -232,4 +255,13 @@ test('агент соврал про старт в длинном ответе �
   assert.equal(plan.start, false);
   assert.equal(plan.stripFalseStart, false);
   assert.equal(plan.appendNeedName, true);
+});
+
+test('игрок сам называет имя бога', () => {
+  const draft = emptyOnboardingDraft();
+  draft.pitched = true;
+  draft.pitchedName = 'Саркум';
+  assert.equal(applyUserNamedPatron(draft, 'зови меня Астра'), 'Астра');
+  assert.equal(draft.patronName, 'Астра');
+  assert.equal(draft.patronNameApproved, true);
 });

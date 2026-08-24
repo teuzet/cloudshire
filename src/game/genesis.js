@@ -12,6 +12,7 @@ import {
   createDomainRecord,
   createLoreFact,
   assembleDescription,
+  applyPatronName,
 } from './models.js';
 import { formatPlayerBrief } from './onboarding.js';
 import { seedOpeningPlots } from './storyteller.js';
@@ -59,23 +60,32 @@ function looksLikeTouristGreeting(text) {
   );
 }
 
-function looksLikePatronAddress(text) {
-  const t = String(text || '');
-  return (
-    /покровител|божеств|как\s+(тебя|вам|нам)\s+(звать|обращ)|назов|имя|знак|воли|слышу\s+тебя|алтар/i.test(
-      t,
-    ) && !looksLikeTouristGreeting(t)
+function greetingAsksForName(text) {
+  return /как\s+(тебя|вам|нам)\s+(звать|обращ)|назов(и|ите)\s+(себя|имя)|как\s+к\s+тебе\s+обращ/i.test(
+    String(text || ''),
   );
 }
 
-function defaultGreeting(domainName) {
+function looksLikePatronAddress(text, patronName = null) {
+  const t = String(text || '');
+  if (looksLikeTouristGreeting(t)) return false;
+  if (patronName) {
+    return t.toLowerCase().includes(String(patronName).toLowerCase()) && !greetingAsksForName(t);
+  }
+  return /покровител|божеств|как\s+(тебя|вам|нам)\s+(звать|обращ)|назов|имя|знак|воли|слышу\s+тебя|алтар/i.test(t);
+}
+
+function defaultGreeting(domainName, patronName = null) {
+  if (patronName) {
+    return `${patronName}, я слышу тебя над «${domainName}». Город ждёт твоего слова.`;
+  }
   return (
     `Покровитель, я слышу тебя над «${domainName}». ` +
     'Как нам к тебе обращаться — скажи имя или знак. Город ждёт твоего слова.'
   );
 }
 
-function fallbackCore(lockedName, playerBrief) {
+function fallbackCore(lockedName, playerBrief, patronName = null) {
   const name = lockedName || fallbackName();
   const rulerWish = playerBrief?.ruler || 'Сдержанный правитель, внимательный к знамениям покровителя.';
   return {
@@ -83,7 +93,7 @@ function fallbackCore(lockedName, playerBrief) {
     rulerName: /жриц/i.test(rulerWish) ? 'Ицка' : 'Кайрен',
     rulerTitle: /жриц/i.test(rulerWish) ? 'Верховная жрица' : 'Правитель',
     rulerDescription: rulerWish,
-    greeting: defaultGreeting(name),
+    greeting: defaultGreeting(name, patronName),
     openingLore: [
       `Город «${name}» стоит в центре летающего острова.`,
       'От стен до края острова — порядка двадцати километров земли.',
@@ -111,6 +121,7 @@ async function generateCore({
   population,
   tags,
   forcedName,
+  forcedPatronName = null,
   playerBrief,
   onProgress,
   log: parentLog,
@@ -119,6 +130,7 @@ async function generateCore({
   const loreMin = Math.min(8, config.genesis.openingLoreCount?.min || 12);
   const draft = { submitted: null, lastError: null };
   const lockedName = forcedName ? String(forcedName).trim() : null;
+  const lockedPatron = forcedPatronName ? String(forcedPatronName).trim() : null;
   const briefText = formatPlayerBrief(playerBrief);
 
   const tools = [
@@ -154,10 +166,11 @@ async function generateCore({
           },
           greeting: {
             type: 'string',
-            description:
-              'Первая реплика правителя/жреца К божеству-покровителю (1–3 предложения). ' +
-              'Слуга снизу вверх: слышит голос, просит имя/знак обращения, ждёт воли. ' +
-              'НЕ туристическое «добро пожаловать в город», НЕ реклама острова.',
+            description: lockedPatron
+              ? `Первая реплика правителя к «${lockedPatron}» (1–3 предложения). Слуга снизу вверх, по имени. Не проси, как звать.`
+              : 'Первая реплика правителя/жреца К божеству-покровителю (1–3 предложения). ' +
+                'Слуга снизу вверх: слышит голос, просит имя/знак обращения, ждёт воли. ' +
+                'НЕ туристическое «добро пожаловать в город», НЕ реклама острова.',
           },
           openingLore: {
             type: 'array',
@@ -185,20 +198,23 @@ async function generateCore({
         fixed.openingLore = lore.slice(0, 20);
 
         if (!String(fixed.greeting || '').trim()) {
-          fixed.greeting = defaultGreeting(fixed.domainName);
+          fixed.greeting = defaultGreeting(fixed.domainName, lockedPatron);
         }
         if (String(fixed.greeting).length > 600) {
           fixed.greeting = String(fixed.greeting).slice(0, 500);
         }
         if (
           looksLikeTouristGreeting(fixed.greeting) ||
-          !looksLikePatronAddress(fixed.greeting)
+          !looksLikePatronAddress(fixed.greeting, lockedPatron)
         ) {
-          draft.lastError =
-            'greeting: нужна речь слуги к божеству (имя/знак), не «добро пожаловать в город»';
+          draft.lastError = lockedPatron
+            ? `greeting: речь слуги к «${lockedPatron}», без просьбы имени`
+            : 'greeting: нужна речь слуги к божеству (имя/знак), не «добро пожаловать в город»';
           return toolFail(
             'bad_greeting',
-            'greeting: нужна речь слуги к божеству (просить имя/знак), не туристическое «добро пожаловать в город». Перепиши greeting.',
+            lockedPatron
+              ? `greeting: обратись к «${lockedPatron}» по имени и не проси, как звать.`
+              : 'greeting: нужна речь слуги к божеству (просить имя/знак), не туристическое «добро пожаловать в город». Перепиши greeting.',
           );
         }
         if (!fixed.rulerName) fixed.rulerName = 'Кайрен';
@@ -241,13 +257,23 @@ async function generateCore({
     `openingLore: минимум ${loreMin} коротких ПОСТОЯННЫХ фактов (не новости месяца).`,
     'Учти изоляцию острова: без паломников/торговцев «из соседних регионов».',
     '',
-    'greeting — ПЕРВАЯ РЕПЛИКА правителя/жреца божеству-покровителю (не игроку-туристу):',
-    '- Ты слуга снизу вверх: голос дошёл до алтаря / ты слышишь покровителя.',
-    '- Попроси, как обращаться: имя, титул или знак. Или попроси сказать волю.',
-    '- 1–3 коротких предложения, живая речь от первого лица.',
-    '- ЗАПРЕЩЕНО: «Добро пожаловать в …», реклама острова («волшебство пронизывает…»),',
-    '  гид по достопримечательностям, тон онбординга/брошюры.',
-    '- Пример тона: «Покровитель, я слышу тебя над [город]. Как нам звать тебя? Скажи знак — народ ждёт.»',
+    lockedPatron
+      ? [
+          `Имя покровителя УЖЕ дано: «${lockedPatron}». Храм и культ города — его.`,
+          'greeting — ПЕРВАЯ РЕПЛИКА правителя к этому богу по имени:',
+          `- Обратись «${lockedPatron}». Не проси, как звать: имя уже известно.`,
+          '- 1–3 коротких предложения, живая речь от первого лица.',
+          '- ЗАПРЕЩЕНО: «Добро пожаловать в …», реклама острова, гид по городу.',
+        ].join('\n')
+      : [
+          'greeting — ПЕРВАЯ РЕПЛИКА правителя/жреца божеству-покровителю (не игроку-туристу):',
+          '- Ты слуга снизу вверх: голос дошёл до алтаря / ты слышишь покровителя.',
+          '- Попроси, как обращаться: имя, титул или знак. Или попроси сказать волю.',
+          '- 1–3 коротких предложения, живая речь от первого лица.',
+          '- ЗАПРЕЩЕНО: «Добро пожаловать в …», реклама острова («волшебство пронизывает…»),',
+          '  гид по достопримечательностям, тон онбординга/брошюры.',
+          '- Пример тона: «Покровитель, я слышу тебя над [город]. Как нам звать тебя? Скажи знак — народ ждёт.»',
+        ].join('\n'),
   ].join('\n');
 
   for (let attempt = 1; attempt <= 3 && !draft.submitted; attempt += 1) {
@@ -260,7 +286,9 @@ async function generateCore({
             `Попытка ${attempt}: прошлый вызов не принят (${draft.lastError || 'нет submit_core'}).`,
             'Снова вызови submit_core. Имя не меняй. openingLore — простой массив строк.',
             draft.lastError && /greeting/i.test(draft.lastError)
-              ? 'greeting перепиши: слуга к божеству, просьба имени/знака; без «добро пожаловать».'
+              ? lockedPatron
+                ? `greeting перепиши: обратись к «${lockedPatron}» по имени, не проси как звать.`
+                : 'greeting перепиши: слуга к божеству, просьба имени/знака; без «добро пожаловать».'
               : '',
           ]
             .filter(Boolean)
@@ -305,7 +333,7 @@ async function generateCore({
 
   if (!draft.submitted) {
     log.warn('genesis.core.fallback', { lastError: draft.lastError });
-    draft.submitted = fallbackCore(lockedName, playerBrief);
+    draft.submitted = fallbackCore(lockedName, playerBrief, lockedPatron);
   }
   return draft.submitted;
 }
@@ -442,6 +470,7 @@ export async function generateDomain({
   channel = null,
   onProgress,
   forcedName = null,
+  forcedPatronName = null,
   forcedTagChoices = {},
   playerBrief = null,
   log: parentLog,
@@ -456,6 +485,7 @@ export async function generateDomain({
 
   log.info('genesis.roll', {
     forcedName,
+    forcedPatronName,
     population,
     tags: tags.map((t) => `${t.groupId}:${t.tagId}`),
   });
@@ -467,6 +497,7 @@ export async function generateDomain({
     population,
     tags,
     forcedName,
+    forcedPatronName,
     playerBrief,
     onProgress,
     log,
@@ -552,6 +583,10 @@ export async function generateDomain({
     playerBrief,
   });
 
+  if (forcedPatronName) {
+    applyPatronName(domain, forcedPatronName, { world, allowReplace: true });
+  }
+
   await storage.saveDomain(domain);
   const prev = await storage.getUserBinding(String(ownerUserId));
   await storage.saveUserBinding({
@@ -565,9 +600,9 @@ export async function generateDomain({
   });
 
   domain._greeting =
-    core.greeting && looksLikePatronAddress(core.greeting) && !looksLikeTouristGreeting(core.greeting)
+    core.greeting && looksLikePatronAddress(core.greeting, forcedPatronName) && !looksLikeTouristGreeting(core.greeting)
       ? core.greeting
-      : defaultGreeting(domain.name);
+      : defaultGreeting(domain.name, forcedPatronName);
 
   await onProgress?.(`остров «${domain.name}» собран`);
   await onProgress?.('первые истории');

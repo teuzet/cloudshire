@@ -258,10 +258,11 @@ function pickWeighted(items, weights, rng) {
  * Просевшее чаще выправляется, раздутое чаще садится — спираль не разгоняется.
  * @returns {{stat: string, name: string, direction: 'up'|'down', force: string}|null}
  */
-export function planQuietDrift(domain, config, rng = Math.random) {
+export function planQuietDrift(domain, config, rng = Math.random, { force = false } = {}) {
   const cfg = plotConfig(config || {}).quiet;
   const stats = config?.stats || [];
-  if (!stats.length || rng() >= cfg.driftChance) return null;
+  if (!stats.length) return null;
+  if (!force && rng() >= cfg.driftChance) return null;
 
   const weights = stats.map((s) => 1 + (Math.abs(50 - statValue(domain, s.id)) / 50) * cfg.extremeBias);
   const stat = pickWeighted(stats, weights, rng);

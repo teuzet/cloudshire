@@ -6,6 +6,7 @@ import {
   formatChronicleScope,
   normalizeDomain,
   formatCastForPrompt,
+  applyPatronName,
 } from './models.js';
 import {
   qualitativePopulation,
@@ -22,6 +23,7 @@ import {
   emptyOnboardingDraft,
   normalizeOnboardingDraft,
   validateCityName,
+  validatePatronName,
   listTagCatalog,
   formatPlayerBrief,
   formatTagCatalogForPrompt,
@@ -37,11 +39,14 @@ import {
   formatOnboardingStatusCard,
   deriveOnboardingPhase,
   hasPitchedCity,
+  canStartOnboarding,
   applyUserNamedCity,
+  applyUserNamedPatron,
   maybeSwitchToDossier,
   rememberLongUserBrief,
   clipOnboardingBrief,
   appendNeedNameNote,
+  appendNeedPatronNote,
   ONBOARDING_NEED_NAME_NOTE,
   ONBOARDING_BUSY_REPLY,
   ONBOARDING_HISTORY_MESSAGES,
@@ -354,10 +359,10 @@ function characterTools(domain, storage, character, ctx) {
           'Не бери id соседней нити из-за общего места или общих людей.',
       }),
     },
-    {
+    !domain.state?.patronName && {
       name: 'set_patron_name',
       description:
-        'Запомнить или сменить имя/обращение к божеству-покровителю. Вызови, когда покровитель впервые назвал, как к нему обращаться, или попросил сменить имя.',
+        'Запомнить имя/обращение к божеству-покровителю. Только если имени ещё нет.',
       parameters: {
         type: 'object',
         required: ['name'],
@@ -369,27 +374,26 @@ function characterTools(domain, storage, character, ctx) {
         },
       },
       handler: async ({ name }) => {
-        const cleaned = String(name || '')
-          .trim()
-          .replace(/\s+/g, ' ')
-          .slice(0, 64);
-        if (cleaned.length < 2) {
+        const result = applyPatronName(domain, name, { world, allowReplace: false });
+        if (result.error === 'too_short') {
           return toolFail(
             'too_short',
             'Имя покровителя слишком короткое. Передай нормальное имя или титул (от 2 символов).',
           );
         }
-        if (!domain.state) domain.state = { events: [], modifiers: [], pendingActions: [], patronName: null };
-        const prev = domain.state.patronName || null;
-        domain.state.patronName = cleaned;
+        if (result.error === 'locked') {
+          return toolFail(
+            'locked',
+            `Имя уже дано: «${result.patronName}». Его нельзя сменить.`,
+            { patronName: result.patronName },
+          );
+        }
         await save();
         return {
           ok: true,
-          patronName: cleaned,
-          previous: prev,
-          hint:
-            `Дальше обращайся только так: «${cleaned}». ` +
-            'Имена богов из хроник соседей и чужих храмов не используй.',
+          patronName: result.patronName,
+          previous: result.previous,
+          hint: `Дальше обращайся только так: «${result.patronName}».`,
         };
       },
     },
@@ -864,7 +868,7 @@ function characterTools(domain, storage, character, ctx) {
         };
       },
     },
-  ];
+  ].filter(Boolean);
 }
 
 export class GameApp {
@@ -999,7 +1003,7 @@ export class GameApp {
     }
   }
 
-  startDomainGeneration(userId, { channel, forcedName, forcedTagChoices, playerBrief }) {
+  startDomainGeneration(userId, { channel, forcedName, forcedPatronName, forcedTagChoices, playerBrief }) {
     const uid = String(userId);
     if (this.generatingUsers.has(uid)) {
       getLogger().warn('genesis.already_running', { userId: uid });
@@ -1012,6 +1016,7 @@ export class GameApp {
       try {
         log.info('genesis.start', {
           forcedName: forcedName || null,
+          forcedPatronName: forcedPatronName || null,
           tagChoices: forcedTagChoices || {},
           playerBrief: truncate(playerBrief, 500),
         });
@@ -1036,6 +1041,7 @@ export class GameApp {
           ownerUserId: uid,
           channel,
           forcedName: forcedName || null,
+          forcedPatronName: forcedPatronName || null,
           forcedTagChoices: forcedTagChoices || {},
           playerBrief: playerBrief || null,
           log,
@@ -1139,6 +1145,7 @@ export class GameApp {
     if (!bootstrap && rawUser) {
       maybeSwitchToDossier(draft, rawUser);
       applyUserNamedCity(draft, rawUser);
+      applyUserNamedPatron(draft, rawUser);
     }
     draft.phase = deriveOnboardingPhase(draft, { generating: this.isGenerating(userId) });
 
@@ -1177,7 +1184,9 @@ export class GameApp {
           },
           cityName: draft.cityName,
           cityNameApproved: draft.cityNameApproved,
-          canStart: Boolean(draft.cityNameApproved && draft.cityName),
+          patronName: draft.patronName,
+          patronNameApproved: Boolean(draft.patronNameApproved),
+          canStart: canStartOnboarding(draft),
           pitchedName: draft.pitchedName || null,
           pitched: hasPitchedCity(draft),
           modes: {
@@ -1316,6 +1325,30 @@ export class GameApp {
           draft.phase = deriveOnboardingPhase(draft);
           await saveDraft();
           return { ok: true, cityName: v.name };
+        },
+      },
+      {
+        name: 'set_patron_name',
+        description:
+          'Зафиксировать имя бога-покровителя, как его назвал игрок. Не выдумывай имя сам. Без этого start_new_game нельзя.',
+        parameters: {
+          type: 'object',
+          required: ['name'],
+          properties: {
+            name: { type: 'string', description: 'Как к игроку будут обращаться в городе' },
+          },
+        },
+        handler: async ({ name }) => {
+          const v = validatePatronName(name);
+          if (!v.ok) {
+            draft.patronNameApproved = false;
+            await saveDraft();
+            return toolFail('invalid_patron_name', v.reason, { reason: v.reason });
+          }
+          draft.patronName = v.name;
+          draft.patronNameApproved = true;
+          await saveDraft();
+          return { ok: true, patronName: v.name };
         },
       },
       {
@@ -1474,7 +1507,7 @@ export class GameApp {
       {
         name: 'start_new_game',
         description:
-          'Запуск генерации. Нужно утверждённое имя. Невыбранные теги — случайные. Brief уходит в генезис.',
+          'Запуск генерации. Нужны утверждённые имя города и имя бога. Невыбранные теги — случайные. Brief уходит в генезис.',
         parameters: { type: 'object', properties: {} },
         handler: async () => {
           const world = await this.storage.getWorld();
@@ -1499,6 +1532,13 @@ export class GameApp {
               );
             }
           }
+          if (!draft.patronName) {
+            return toolFail(
+              'patron_name_required',
+              'Сначала спроси, как к игроку-богу обращаться, вызови set_patron_name с его именем, затем start_new_game. Имя бога игрок придумывает сам.',
+            );
+          }
+
           if (this.isGenerating(userId)) {
             return { ok: true, status: 'generating' };
           }
@@ -1518,6 +1558,7 @@ export class GameApp {
           this.startDomainGeneration(userId, {
             channel,
             forcedName: draft.cityName,
+            forcedPatronName: draft.patronName,
             forcedTagChoices: { ...draft.tagChoices },
             playerBrief: { ...(draft.playerBrief || {}) },
           });
@@ -1633,11 +1674,13 @@ export class GameApp {
       );
       log.warn('onboarding.auto_start_new_game', {
         cityName: draft.cityName,
+        patronName: draft.patronName,
         reason: auto.reason,
       });
       this.startDomainGeneration(userId, {
         channel,
         forcedName: draft.cityName,
+        forcedPatronName: draft.patronName,
         forcedTagChoices: { ...draft.tagChoices },
         playerBrief: { ...(draft.playerBrief || {}) },
       });
@@ -1656,6 +1699,18 @@ export class GameApp {
         replyPreview: truncate(rawReply, 400),
       });
       reply = appendNeedNameNote(rawReply);
+    } else if (auto.appendNeedPatron) {
+      log.warn('onboarding.need_patron', {
+        reason: auto.reason,
+        cityName: auto.name,
+      });
+      if (auto.name) {
+        draft.cityName = auto.name;
+        draft.cityNameApproved = true;
+        draft.pitchedName = auto.name;
+        draft.pitched = true;
+      }
+      reply = appendNeedPatronNote(rawReply);
     }
 
     // Нельзя говорить «уже создан», пока генезис только стартовал.
@@ -1785,7 +1840,7 @@ export class GameApp {
     const attitudes = formatRulerAttitudes(character, this.config);
     const patronName = domain.state?.patronName || null;
     const patronLine = patronName
-      ? `Имя покровителя: «${patronName}» — обращайся так.`
+      ? `Имя покровителя: «${patronName}» — обращайся только так. Не предлагай другое и не вызывай set_patron_name.`
       : 'Имя покровителя ещё не названо.';
     const undock = recentUndockFact(domain);
     const undockCanon = undock
@@ -1949,6 +2004,7 @@ export class GameApp {
     };
     const mine = forNews.filter((c) => !isForeign(c));
     const foreign = forNews.filter(isForeign);
+    const quietOnly = mine.length > 0 && mine.every((c) => c.author === 'storyteller:quiet');
 
     const facts = (mine.length ? mine : forNews)
       .map((c) => `- [${c.importance || 'event'}] ${formatChronicleScope(c)}${c.text}`)
@@ -2120,6 +2176,9 @@ export class GameApp {
               stewardHint,
               presenceHint,
               scopeHint,
+              quietOnly
+                ? 'Месяц без сюжета: не называй людей по имени. Ремесло, место, случай — достаточно.'
+                : '',
               confluxLead || undockHint ? '' : highlightLead || seedLead,
               confluxLead,
               undockHint,

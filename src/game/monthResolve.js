@@ -38,7 +38,7 @@ import {
 import { planOrderTicks, pickOrderOutcome } from './orders.js';
 import { resolvePendingOrders } from './orderSmith.js';
 import { seedPlot, beatPlot, tickOrder, quietMonth, keepStories, fadeQuietPlot } from './storyteller.js';
-import { scoreMonthStats } from './statJudge.js';
+import { scoreMonthStats, factsForStatJudge } from './statJudge.js';
 import { runSteward } from './steward.js';
 import { getLogger } from '../log.js';
 
@@ -210,7 +210,7 @@ export async function resolveDomainMonth({
     }
   }
 
-  // 5. Указы — только если после историй ещё есть слот.
+  // 5. Указы: расписание — всегда, даже сверх лимита; вероятность — только в остаток слотов.
   const orderPlan = planOrderTicks({
     domain: working,
     config,
@@ -265,16 +265,19 @@ export async function resolveDomainMonth({
     if (quiet?.fact) chronicleAdds.push(quiet.fact);
   }
 
-  // 8. Оценщик статов: читает записи месяца и ставит след. Величину считает движок.
-  const scored = await scoreMonthStats({
-    config,
-    runtime,
-    domain: working,
-    world,
-    chronicleAdds,
-    budget,
-    log,
-  });
+  // 8. Оценщик статов: только события. Тихий месяц без сюжета — не зовём.
+  const toScore = factsForStatJudge(chronicleAdds);
+  const scored = toScore.length
+    ? await scoreMonthStats({
+        config,
+        runtime,
+        domain: working,
+        world,
+        chronicleAdds: toScore,
+        budget,
+        log,
+      })
+    : { scored: 0, catastrophe: null };
   if (scored?.catastrophe) {
     raiseHighlight({
       kind: 'catastrophe',

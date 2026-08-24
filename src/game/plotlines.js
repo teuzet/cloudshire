@@ -54,11 +54,13 @@ function clampChance(n, fallback = 0.2) {
 function orderCadence(p, config = null) {
   const fallback = Number(config?.tick?.plot?.orders?.defaultChance ?? 0.2);
   const every = Math.round(Number(p?.scheduleEveryMonths));
+  const scheduled = Number.isInteger(every) && every >= 1 && every <= 12;
   const due = Number(p?.nextDueTick);
   return {
     modifierId: p?.modifierId ? String(p.modifierId) : null,
-    fireChance: clampChance(p?.fireChance, Number.isFinite(fallback) ? fallback : 0.2),
-    scheduleEveryMonths: Number.isInteger(every) && every >= 1 && every <= 12 ? every : null,
+    // Регулярность и вероятность взаимоисключающи: расписание = гарантия, шанс = лотерея.
+    fireChance: scheduled ? 0 : clampChance(p?.fireChance, Number.isFinite(fallback) ? fallback : 0.2),
+    scheduleEveryMonths: scheduled ? every : null,
     nextDueTick: Number.isInteger(due) ? due : null,
   };
 }

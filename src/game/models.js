@@ -45,6 +45,7 @@ export function normalizeDomain(domain) {
     domain.confluxPartners = {};
   }
   if (typeof domain.imagePath !== 'string') domain.imagePath = domain.imagePath || null;
+  ensurePatronFact(domain);
   // pendingActions = длительные процессы; нормализация полей — в processes.normalizeDomainProcesses
   if (Array.isArray(domain.characters)) {
     for (const ch of domain.characters) {
@@ -305,6 +306,54 @@ export function createLoreFact({
     fact.concernsDomainNames = concernsDomainNames.map(String);
   }
   return fact;
+}
+
+export function patronFactText(patronName, cityName) {
+  return `${patronName} является покровителем города «${cityName}».`;
+}
+
+export function findPatronFact(domain) {
+  return (domain?.lore || []).find((f) => (f.tags || []).includes('patron')) || null;
+}
+
+/** Имя покровителя — факт города, не через лормастера. */
+export function ensurePatronFact(domain, { world = null } = {}) {
+  const name = String(domain?.state?.patronName || '').trim();
+  const city = String(domain?.name || '').trim();
+  if (!name || !city) return null;
+  const text = patronFactText(name, city);
+  const existing = findPatronFact(domain);
+  if (existing) {
+    existing.text = text;
+    return existing;
+  }
+  const fact = createLoreFact({
+    id: newId('lore'),
+    text,
+    tags: ['fact', 'patron'],
+    gameDateLabel: world?.gameDate?.label || null,
+    tick: world?.tickIndex ?? domain.createdTick ?? null,
+    author: 'system',
+  });
+  if (!Array.isArray(domain.lore)) domain.lore = [];
+  domain.lore.push(fact);
+  return fact;
+}
+
+export function applyPatronName(domain, raw, { world = null, allowReplace = false } = {}) {
+  const cleaned = String(raw || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, 64);
+  if (cleaned.length < 2) return { error: 'too_short' };
+  if (!domain.state) domain.state = emptyState();
+  const prev = domain.state.patronName || null;
+  if (prev && prev !== cleaned && !allowReplace) {
+    return { error: 'locked', previous: prev, patronName: prev };
+  }
+  domain.state.patronName = cleaned;
+  ensurePatronFact(domain, { world });
+  return { ok: true, patronName: cleaned, previous: prev };
 }
 
 /** Краткая пометка «где / кого касается» для хроники стыка. */

@@ -55,9 +55,11 @@ function applyCardToPlot(plot, card, { tick, cfg, modifierId }) {
   plot.title = clipPlotText(card.title || plot.title, PLOT_TITLE_MAX);
   plot.synopsis = clipPlotText(card.synopsis || plot.synopsis, PLOT_SUMMARY_MAX);
   plot.closeWhen = clipPlotText(card.closeWhen || plot.closeWhen, PLOT_HOOK_MAX);
-  plot.fireChance = clampChance(card.fireChance, cfg.orders.defaultChance);
   const every = Math.round(Number(card.scheduleEveryMonths) || 0);
   plot.scheduleEveryMonths = every >= 1 && every <= 12 ? every : null;
+  plot.fireChance = plot.scheduleEveryMonths
+    ? 0
+    : clampChance(card.fireChance, cfg.orders.defaultChance);
   plot.modifierId = modifierId || plot.modifierId || null;
   if (card.dueNow) plot.nextDueTick = tick;
   else if (plot.scheduleEveryMonths && plot.nextDueTick == null) {

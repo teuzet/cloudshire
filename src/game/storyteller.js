@@ -1084,7 +1084,7 @@ export async function quietMonth({ config, runtime, domain, world, log: parentLo
   const log = (parentLog || getLogger()).child({ scope: 'storyteller.quiet', domainId: domain.id });
   const maxChars = chronicleMaxChars(config);
   const cfg = plotConfig(config);
-  const draft = { text: null, characters: [] };
+  const draft = { text: null };
 
   const used = (domain.state?.quietPicks || []).slice(-cfg.quiet.avoidRepeat);
   const topic = pickAvoiding(
@@ -1097,19 +1097,17 @@ export async function quietMonth({ config, runtime, domain, world, log: parentLo
   const tools = [
     {
       name: 'submit_quiet_month',
-      description: 'Одна запись о тихом месяце: погода, цены, быт, люди.',
+      description: 'Одна запись о тихом месяце: погода, цены, быт. Без личных имён.',
       parameters: {
         type: 'object',
         required: ['entry'],
         properties: {
-          entry: { type: 'string', description: `Сухой факт быта, до ${maxChars} символов.` },
-          newCharacters: CHARACTERS_SCHEMA,
+          entry: { type: 'string', description: `Сухой факт быта, до ${maxChars} символов. Без личных имён.` },
         },
       },
-      handler: async ({ entry, newCharacters }) => {
+      handler: async ({ entry }) => {
         if (!String(entry || '').trim()) return toolFail('empty', 'Нужна запись.');
         draft.text = entry;
-        draft.characters = newCharacters || [];
         return { ok: true };
       },
     },
@@ -1130,10 +1128,7 @@ export async function quietMonth({ config, runtime, domain, world, log: parentLo
     log,
     scene: 'quiet_month',
     domainId: domain.id,
-    extraSystem: [
-      `Город «${domain.name}». ${cityBrief(domain, 500)}`,
-      `Известные люди города:\n${formatCastForPrompt(domain.lore, { limit: 10 })}`,
-    ].join('\n\n'),
+    extraSystem: `Город «${domain.name}». ${cityBrief(domain, 500)}`,
     userMessages: [
       {
         role: 'user',
@@ -1142,7 +1137,8 @@ export async function quietMonth({ config, runtime, domain, world, log: parentLo
           `О чём запись: ${topic.text}.`,
           `Кто в кадре: ${focus}.`,
           `Что за случай: ${shape}.`,
-          'Одна запись: место этого города, названные люди, предметный исход.',
+          'Одна запись: место этого города, ремесло или случай, предметный исход.',
+          'Людей по имени не называй — ни известных, ни новых.',
           'Никаких предвестий и намёков на будущее — это не завязка истории.',
           recentQuiet ? `Так уже писали в прошлые тихие месяцы — не повторяйся:\n${recentQuiet}` : null,
           '',
@@ -1162,7 +1158,6 @@ export async function quietMonth({ config, runtime, domain, world, log: parentLo
     world,
     author: 'storyteller:quiet',
   });
-  registerCharacters(domain, draft.characters, { world, author: 'storyteller:quiet' });
   rememberQuietPick(domain, { topic: topic.id, tick: world.tickIndex }, cfg.quiet.avoidRepeat);
 
   log.info('storyteller.quiet', {

@@ -10,7 +10,7 @@ import {
   normalizeOrders,
 } from '../src/game/orders.js';
 import { resolvePendingOrders } from '../src/game/orderSmith.js';
-import { plotConfig, liveStoryImportance, countOpen } from '../src/game/plotlines.js';
+import { plotConfig, liveStoryImportance, countOpen, normalizePlotlines } from '../src/game/plotlines.js';
 import { normalizeDomain } from '../src/game/models.js';
 
 function cfg() {
@@ -97,14 +97,22 @@ test('агент порядка по заявке создаёт пару мод
   assert.equal(liveStoryImportance(domain), 0);
 });
 
-test('расписание хочет тик в срок, иначе — по вероятности', () => {
-  const due = { kind: 'order', nextDueTick: 5, fireChance: 0 };
+test('расписание хочет тик в срок; без расписания — только вероятность', () => {
+  const due = { kind: 'order', nextDueTick: 5, fireChance: 0, scheduleEveryMonths: 1 };
   assert.equal(orderWantsTick(due, 5, () => 0).want, true);
   assert.equal(orderWantsTick(due, 5, () => 0).scheduled, true);
   assert.equal(orderWantsTick(due, 4, () => 0).want, false);
   const chance = { kind: 'order', nextDueTick: null, fireChance: 0.4 };
   assert.equal(orderWantsTick(chance, 3, () => 0.1).want, true);
+  assert.equal(orderWantsTick(chance, 3, () => 0.1).scheduled, false);
   assert.equal(orderWantsTick(chance, 3, () => 0.9).want, false);
+});
+
+test('если есть и шанс и расписание — тик только по сроку, шанс игнорируется', () => {
+  const plot = { kind: 'order', nextDueTick: 10, fireChance: 0.9, scheduleEveryMonths: 1 };
+  assert.equal(orderWantsTick(plot, 10, () => 0.99).want, true);
+  assert.equal(orderWantsTick(plot, 10, () => 0.99).scheduled, true);
+  assert.equal(orderWantsTick(plot, 9, () => 0).want, false);
 });
 
 test('пустая доска рождает историю, полная — хронику', () => {
@@ -123,7 +131,7 @@ test('пустая доска рождает историю, полная — х
   assert.equal(pickOrderOutcome(full, c, () => 0), 'chronicle');
 });
 
-test('нет слота — расписание переносится, вероятностный указ молчит', () => {
+test('нет слота — расписание всё равно идёт, вероятностный указ молчит', () => {
   const domain = {
     plotlines: [
       { id: 'o_due', title: 'Избранный', kind: 'order', nextDueTick: 8, fireChance: 0, scheduleEveryMonths: 2 },
@@ -131,9 +139,65 @@ test('нет слота — расписание переносится, вер�
     ],
   };
   const planned = planOrderTicks({ domain, slotsLeft: 0, tick: 8, rng: () => 0 });
-  assert.equal(planned.length, 0);
-  assert.equal(domain.plotlines[0].nextDueTick, 9);
-  assert.equal(domain.plotlines[1].nextDueTick, null);
+  assert.equal(planned.length, 1);
+  assert.equal(planned[0].plotId, 'o_due');
+  assert.equal(planned[0].scheduled, true);
+  assert.equal(domain.plotlines[0].nextDueTick, 8);
+});
+
+test('нормализация обнуляет шанс у указа с расписанием', () => {
+  const domain = {
+    plotlines: [
+      {
+        id: 'o1',
+        title: 'Жребий',
+        kind: 'order',
+        fireChance: 0.9,
+        scheduleEveryMonths: 1,
+        nextDueTick: 10,
+      },
+    ],
+  };
+  normalizePlotlines(domain);
+  assert.equal(domain.plotlines[0].fireChance, 0);
+  assert.equal(domain.plotlines[0].scheduleEveryMonths, 1);
+  assert.equal(domain.plotlines[0].nextDueTick, 10);
+});
+
+test('агент порядка с расписанием не оставляет живой шанс', async () => {
+  const domain = normalizeDomain({
+    id: 'd1',
+    name: 'Саркум',
+    description: 'Город у края.',
+    state: { modifiers: [], pendingOrderRequests: [] },
+    plotlines: [],
+  });
+  queueOrderRequest(domain, {
+    action: 'create',
+    text: 'Каждый месяц тянуть жребий у храма',
+    tick: 4,
+  });
+  const runtime = {
+    async run({ tools }) {
+      const submit = tools.find((t) => t.name === 'submit_order_card');
+      await submit.handler({
+        title: 'Жребий замыслов',
+        synopsis: 'Раз в месяц тянут жребий.',
+        closeWhen: 'Покровитель отменил.',
+        fireChance: 0.9,
+        scheduleEveryMonths: 1,
+        dueNow: false,
+      });
+    },
+  };
+  await resolvePendingOrders({
+    config: { tick: { plot: {} } },
+    runtime,
+    domain,
+    world: { tickIndex: 4, gameDate: { label: 'Год 1, месяц 4' } },
+  });
+  assert.equal(domain.plotlines[0].fireChance, 0);
+  assert.equal(domain.plotlines[0].scheduleEveryMonths, 1);
 });
 
 test('после срабатывания расписание ставит следующий срок', () => {

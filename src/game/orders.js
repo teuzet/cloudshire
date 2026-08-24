@@ -214,10 +214,21 @@ export function queueOrderRequest(
   return { error: 'bad_action', message: 'action: create, edit или revoke.' };
 }
 
+export function orderIsScheduled(plot) {
+  const every = Number(plot?.scheduleEveryMonths);
+  return Number.isInteger(every) && every >= 1;
+}
+
 export function orderWantsTick(plot, tick, rng = Math.random) {
   if (!plot || plot.kind !== 'order') return { want: false, scheduled: false };
-  const due = Number.isInteger(plot.nextDueTick) && Number(tick) >= plot.nextDueTick;
-  if (due) return { want: true, scheduled: true };
+  if (orderIsScheduled(plot)) {
+    const due = Number.isInteger(plot.nextDueTick) ? plot.nextDueTick : Number(tick);
+    return { want: Number(tick) >= due, scheduled: true };
+  }
+  // dueNow у вероятностного указа: одна попытка в этот месяц, всё ещё в лимите слотов.
+  if (Number.isInteger(plot.nextDueTick) && Number(tick) >= plot.nextDueTick) {
+    return { want: true, scheduled: false };
+  }
   const chance = Number(plot.fireChance);
   if (Number.isFinite(chance) && chance > 0 && rng() < chance) {
     return { want: true, scheduled: false };
@@ -244,23 +255,21 @@ export function pickOrderOutcome(domain, cfg, rng = Math.random) {
 }
 
 export function planOrderTicks({ domain, config, slotsLeft, tick, rng = Math.random }) {
-  const cap = Math.max(0, Math.round(Number(slotsLeft) || 0));
-  const orders = (domain.plotlines || []).filter((p) => p.kind === 'order');
-  const wanted = [];
-  for (const plot of orders) {
+  const remainder = Math.max(0, Math.round(Number(slotsLeft) || 0));
+  const scheduled = [];
+  const chance = [];
+  for (const plot of domain.plotlines || []) {
+    if (plot?.kind !== 'order') continue;
     const w = orderWantsTick(plot, tick, rng);
-    if (w.want) wanted.push({ plot, scheduled: w.scheduled });
+    if (!w.want) continue;
+    if (w.scheduled) scheduled.push(plot);
+    else chance.push(plot);
   }
-  wanted.sort((a, b) => Number(b.scheduled) - Number(a.scheduled));
-  const taken = wanted.slice(0, cap);
-  for (const skipped of wanted.slice(cap)) {
-    if (skipped.scheduled) skipped.plot.nextDueTick = Number(tick) + 1;
-  }
-  return taken.map((t) => ({
-    plotId: t.plot.id,
-    title: t.plot.title,
-    scheduled: t.scheduled,
-  }));
+  const takenChance = chance.slice(0, remainder);
+  return [
+    ...scheduled.map((p) => ({ plotId: p.id, title: p.title, scheduled: true })),
+    ...takenChance.map((p) => ({ plotId: p.id, title: p.title, scheduled: false })),
+  ];
 }
 
 export function markOrderFired(plot, tick) {

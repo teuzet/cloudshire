@@ -4,13 +4,20 @@
  */
 
 import { findPlotline } from './plotlines.js';
-import { resolveStatDeltas } from './plotEngine.js';
+import { resolveStatDeltas, planQuietDrift } from './plotEngine.js';
 import { applyStatDeltas, statEpithet } from './stats.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 
-function sourceForFact(fact) {
-  return fact?.author === 'storyteller:echo' ? 'player' : 'world';
+const PLAYER_AUTHORS = new Set([
+  'storyteller:echo',
+  'storyteller:order',
+  'storyteller:order-story',
+  'storyteller:order-fallback',
+]);
+
+export function sourceForFact(fact) {
+  return PLAYER_AUTHORS.has(fact?.author) ? 'player' : 'world';
 }
 
 function plotForFact(domain, fact) {
@@ -28,12 +35,48 @@ function closedThisTick(domain, fact, tick) {
   );
 }
 
+export function factsForStatJudge(chronicleAdds = []) {
+  return (chronicleAdds || []).filter((f) => f && f.author !== 'storyteller:quiet');
+}
+
 function importanceForFact(domain, fact) {
   const plot = plotForFact(domain, fact);
   if (plot) return plot.importance;
-  if (fact?.author === 'storyteller:echo') return 45;
+  if (PLAYER_AUTHORS.has(fact?.author)) return 45;
   if (fact?.importance === 'major' || fact?.importance === 'critical') return 70;
   return 40;
+}
+
+/** Если оценщик пропустил запись, движок всё равно оставляет лёгкий след. */
+export function applyFallbackStatDrift({
+  domain,
+  config,
+  chronicleAdds = [],
+  budget = null,
+  rng = Math.random,
+  log = null,
+} = {}) {
+  const pending = (chronicleAdds || []).filter(
+    (f) => f && !(f.statChanges && Object.keys(f.statChanges).length),
+  );
+  if (!pending.length) return null;
+  let last = null;
+  for (const fact of pending) {
+    const drift = planQuietDrift(domain, config, rng, { force: true });
+    if (!drift) continue;
+    const deltas = resolveStatDeltas(domain, [drift], {
+      importance: importanceForFact(domain, fact),
+      source: sourceForFact(fact),
+      budget,
+      config,
+    });
+    const changes = applyStatDeltas(domain.stats, deltas);
+    if (!Object.keys(changes).length) continue;
+    fact.statChanges = changes;
+    log?.info?.('statJudge.fallback_drift', { factId: fact.id, deltas, changes });
+    last = { factId: fact.id, changes };
+  }
+  return last;
 }
 
 function statsBrief(domain, config) {
@@ -49,6 +92,13 @@ function statsBrief(domain, config) {
 
 function entryKind(fact, domain) {
   if (fact.author === 'storyteller:echo') return 'воля покровителя';
+  if (
+    fact.author === 'storyteller:order' ||
+    fact.author === 'storyteller:order-story' ||
+    fact.author === 'storyteller:order-fallback'
+  ) {
+    return 'постоянный порядок покровителя';
+  }
   if (fact.author === 'storyteller:quiet') return 'быт';
   if (fact.author === 'storyteller:seed') return 'завязка истории';
   const plot = plotForFact(domain, fact);
@@ -74,9 +124,11 @@ export async function scoreMonthStats({
   log: parentLog,
 }) {
   if (!chronicleAdds.length) return { scored: 0, catastrophe: null };
+  const toScore = factsForStatJudge(chronicleAdds);
+  if (!toScore.length) return { scored: 0, catastrophe: null };
   const log = (parentLog || getLogger()).child({ scope: 'statJudge', domainId: domain.id });
   const statIds = (config.stats || []).map((s) => s.id).join(', ');
-  const byId = new Map(chronicleAdds.map((f) => [f.id, f]));
+  const byId = new Map(toScore.map((f) => [f.id, f]));
   const draft = { entries: null };
 
   const tools = [
@@ -92,13 +144,14 @@ export async function scoreMonthStats({
             type: 'array',
             items: {
               type: 'object',
-              required: ['factId'],
+              required: ['factId', 'affects'],
               properties: {
                 factId: { type: 'string', description: 'id записи из списка' },
                 affects: {
                   type: 'array',
+                  minItems: 1,
                   description:
-                    'Какие стороны задеты. Пусто или опусти запись — ничего не сдвинулось. ' +
+                    'Какие стороны задеты. Хотя бы одна. ' +
                     `stat — один из: ${statIds}.`,
                   items: {
                     type: 'object',
@@ -129,7 +182,7 @@ export async function scoreMonthStats({
     },
   ];
 
-  const listing = chronicleAdds
+  const listing = toScore
     .map((f, i) => {
       const kind = entryKind(f, domain);
       return `${i + 1}. id ${f.id} [${kind}]\n${f.text}`;
@@ -152,7 +205,8 @@ export async function scoreMonthStats({
           `Месяц ${world.gameDate.label}. Проставь след каждой записи в сторонах жизни города.`,
           'Оценивай только то, что явно следует из текста: вещи, люди, исход.',
           'Направление и грубую силу называй ты. Насколько сдвинуть — решит система, не ты.',
-          'Пустой affects — нормально. Несколько сторон — только если запись реально про несколько.',
+          'Каждая запись задевает хотя бы одну сторону.',
+          'Несколько сторон — только если запись реально про несколько.',
           'Не добивай сторону, которая уже в бедственном положении, мелкой бытовой записью.',
           '',
           'Сейчас в городе:',
@@ -213,8 +267,17 @@ export async function scoreMonthStats({
     });
   }
 
+  const fallback = applyFallbackStatDrift({
+    domain,
+    config,
+    chronicleAdds: toScore,
+    budget,
+    log,
+  });
+  if (fallback) scored = Math.max(scored, 1);
+
   log.info('statJudge.done', {
-    entries: chronicleAdds.length,
+    entries: toScore.length,
     scored,
     catastrophe: catastrophe?.note || null,
     budgetSpent: budget ? { world: budget.spentWorld, player: budget.spentPlayer } : null,
