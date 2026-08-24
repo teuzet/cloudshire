@@ -14,6 +14,7 @@ import {
 } from './processes.js';
 import { estimateProcessDuration } from './durationJudge.js';
 import { formatBoardForPrompt } from './plotlines.js';
+import { queueOrderRequest, listStandingOrders } from './orders.js';
 import { ensureErrandForProcess, linkProcessToPlotline } from './plotEngine.js';
 import { qualitativeStatsBrief, qualitativePopulation } from './stats.js';
 import { getLogger, truncate } from '../log.js';
@@ -142,28 +143,14 @@ async function applyProcess(domain, args, { config, runtime, world, character, l
   return { action, plot };
 }
 
-function applyOrder(domain, text, { world, character, chronicleAdds }) {
-  const body = String(text || '').trim().slice(0, 400);
-  if (body.length < 3) return { error: 'too_short', message: 'Слишком короткое правило.' };
-  if (!domain.state.modifiers) domain.state.modifiers = [];
-  const mod = {
-    id: newId('mod'),
-    text: body,
-    kind: 'order',
-    since: new Date().toISOString(),
-    declaredTick: world?.tickIndex ?? null,
-    updatedAt: new Date().toISOString(),
+function applyOrder(domain, text, { world, character }) {
+  return queueOrderRequest(domain, {
+    action: 'create',
+    text,
     by: character?.name || 'правитель',
     initiative: 'ruler',
-  };
-  domain.state.modifiers.push(mod);
-  rememberFact(domain, {
-    world,
-    character,
-    chronicleAdds,
-    text: `Действующий указ города (сам правитель, без воли покровителя): ${body}`,
+    tick: world?.tickIndex ?? null,
   });
-  return { modifier: mod };
 }
 
 /**
@@ -228,9 +215,9 @@ export async function runSteward({ config, runtime, domain, world, log: parentLo
           return { ok: true };
         }
         if (kind === 'standing_order') {
-          const applied = applyOrder(domain, args.text, { world, character, chronicleAdds });
+          const applied = applyOrder(domain, args.text, { world, character });
           if (applied.error) return toolFail(applied.error, applied.message);
-          draft.data = { kind: 'standing_order', text: applied.modifier.text, id: applied.modifier.id };
+          draft.data = { kind: 'standing_order', text: applied.request.text, id: applied.request.id };
           return { ok: true };
         }
         return toolFail('bad_action', 'action: none, process или standing_order.');
@@ -245,10 +232,10 @@ export async function runSteward({ config, runtime, domain, world, log: parentLo
   const processes = activeProcesses(domain, config)
     .map((p) => `- ${p.summary} (ещё ~${p.monthsLeft} мес.${p.initiative === 'ruler' ? ', сам правитель' : ''})`)
     .join('\n');
-  const orders = (domain.state?.modifiers || [])
-    .map((m) => `- ${m.text}${m.initiative === 'ruler' ? ' (сам правитель)' : ''}`)
+  const orders = listStandingOrders(domain)
+    .map((m) => `- ${m.text}${m.initiative === 'ruler' ? ' (сам правитель)' : ''}${m.pending ? ` [${m.pending}]` : ''}`)
     .join('\n');
-  const openStories = (domain.plotlines || []).filter((p) => p.kind !== 'errand' && !(p.relatedProcessIds || []).length);
+  const openStories = (domain.plotlines || []).filter((p) => p.kind === 'story' && !(p.relatedProcessIds || []).length);
 
   await runtime.run({
     agentId: 'steward',

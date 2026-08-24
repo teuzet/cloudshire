@@ -35,7 +35,33 @@ export const PLOT_HOOK_MAX = 160;
 export const PLOT_TITLE_MAX = 120;
 export { clipText as clipPlotText };
 
-export const PLOT_KINDS = ['story', 'errand'];
+export const PLOT_KINDS = ['story', 'errand', 'order'];
+
+export function isStoryPlot(plot) {
+  return plot?.kind === 'story';
+}
+
+export function isOrderPlot(plot) {
+  return plot?.kind === 'order';
+}
+
+function clampChance(n, fallback = 0.2) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return fallback;
+  return Math.max(0, Math.min(1, v));
+}
+
+function orderCadence(p, config = null) {
+  const fallback = Number(config?.tick?.plot?.orders?.defaultChance ?? 0.2);
+  const every = Math.round(Number(p?.scheduleEveryMonths));
+  const due = Number(p?.nextDueTick);
+  return {
+    modifierId: p?.modifierId ? String(p.modifierId) : null,
+    fireChance: clampChance(p?.fireChance, Number.isFinite(fallback) ? fallback : 0.2),
+    scheduleEveryMonths: Number.isInteger(every) && every >= 1 && every <= 12 ? every : null,
+    nextDueTick: Number.isInteger(due) ? due : null,
+  };
+}
 
 export function plotConfig(config) {
   const p = config?.tick?.plot || {};
@@ -96,6 +122,9 @@ export function plotConfig(config) {
       avoidRepeat: Math.max(0, Math.min(10, Number(p.quiet?.avoidRepeat ?? 4))),
     },
     tagGroups: Array.isArray(p.tagGroups) ? p.tagGroups : [],
+    orders: {
+      defaultChance: Math.max(0, Math.min(1, Number(p.orders?.defaultChance ?? 0.2))),
+    },
   };
 }
 
@@ -137,6 +166,7 @@ export function normalizePlotlines(domain, config = null) {
       createdTick: p.createdTick == null ? null : Number(p.createdTick),
       lastBeatTick: p.lastBeatTick == null ? null : Number(p.lastBeatTick),
       beatCount: Math.max(0, Math.round(Number(p.beatCount) || 0)),
+      ...(p.kind === 'order' ? orderCadence(p, config) : {}),
     }));
   return domain;
 }
@@ -157,20 +187,25 @@ export function createPlotline({
   relatedPlotlineIds = [],
   mirrorOf = null,
   confluxId = null,
+  modifierId = null,
+  fireChance = null,
+  scheduleEveryMonths = null,
+  nextDueTick = null,
   config = null,
 }) {
+  const resolvedKind = PLOT_KINDS.includes(kind) ? kind : 'story';
   return {
     id: newId('plot'),
-    title: clipText(title || 'Сюжет', PLOT_TITLE_MAX),
+    title: clipText(title || (resolvedKind === 'order' ? 'Порядок' : 'Сюжет'), PLOT_TITLE_MAX),
     synopsis: clipText(synopsis || summary, PLOT_SUMMARY_MAX),
     closeWhen: clipText(closeWhen, PLOT_HOOK_MAX),
-    kind: PLOT_KINDS.includes(kind) ? kind : 'story',
+    kind: resolvedKind,
     tags: Array.isArray(tags) ? tags : [],
     relatedStats: normalizeStatIds(relatedStats, config),
     chronicleIds: [],
     relatedProcessIds: (relatedProcessIds || []).map(String),
     relatedPlotlineIds: (relatedPlotlineIds || []).map(String),
-    importance: clamp100(importance, 40),
+    importance: clamp100(importance, resolvedKind === 'order' ? 20 : 40),
     maxAgeMonths: Math.max(1, Math.min(36, Math.round(Number(maxAgeMonths) || 6))),
     ageMonths: 0,
     temperature: clamp100(temperature, 30),
@@ -181,6 +216,12 @@ export function createPlotline({
     createdTick: tick,
     lastBeatTick: null,
     beatCount: 0,
+    ...(resolvedKind === 'order'
+      ? orderCadence(
+          { modifierId, fireChance, scheduleEveryMonths, nextDueTick },
+          config,
+        )
+      : {}),
   };
 }
 
@@ -215,6 +256,7 @@ export function isOverdue(plotline) {
  * упоминаний нет (температура остыла). Иначе срок просто ждёт.
  */
 export function plotCanFade(domain, plot, cfg) {
+  if (isOrderPlot(plot)) return false;
   if (!isOverdue(plot)) return false;
   if (plotHasActiveProcess(domain, plot)) return false;
   const floor = Number(cfg?.temperature?.fadeBelow ?? 18);
@@ -223,10 +265,16 @@ export function plotCanFade(domain, plot, cfg) {
 
 export function countOpen(domain) {
   const list = domain?.plotlines || [];
+  const stories = list.filter((p) => p.kind === 'story').length;
+  const errands = list.filter((p) => p.kind === 'errand').length;
+  const orders = list.filter((p) => p.kind === 'order').length;
   return {
-    total: list.length,
-    stories: list.filter((p) => p.kind !== 'errand').length,
-    errands: list.filter((p) => p.kind === 'errand').length,
+    // Доска историй: указы слот не занимают.
+    total: stories + errands,
+    stories,
+    errands,
+    orders,
+    all: list.length,
   };
 }
 
@@ -278,6 +326,14 @@ function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } =
     mirrorOf: plot.mirrorOf || null,
     confluxId: plot.confluxId || null,
     partnerGone: Boolean(plot.partnerGone),
+    ...(plot.kind === 'order'
+      ? {
+          modifierId: plot.modifierId || null,
+          fireChance: plot.fireChance,
+          scheduleEveryMonths: plot.scheduleEveryMonths ?? null,
+          nextDueTick: plot.nextDueTick ?? null,
+        }
+      : {}),
     status: 'closed',
     createdTick: plot.createdTick ?? null,
     lastBeatTick: plot.lastBeatTick ?? null,
@@ -327,6 +383,7 @@ export function reopenClosedPlotline(domain, closedOrId) {
     createdTick: closed.createdTick == null ? null : Number(closed.createdTick),
     lastBeatTick: closed.lastBeatTick == null ? null : Number(closed.lastBeatTick),
     beatCount: Math.max(0, Math.round(Number(closed.beatCount) || 0)),
+    ...(closed.kind === 'order' ? orderCadence(closed) : {}),
   };
   domain.plotlines = domain.plotlines || [];
   domain.plotlines.push(plot);
@@ -354,6 +411,7 @@ export function advancePlotClocks(domain, cfg) {
   normalizePlotlines(domain);
   const decay = cfg?.temperature?.decayPerTick ?? 8;
   for (const p of domain.plotlines) {
+    if (p.kind === 'order') continue;
     p.ageMonths += 1;
     p.temperature = clamp100(p.temperature - decay);
   }
@@ -465,7 +523,7 @@ export function judgePlotSeed(domain, draft) {
 /** Сумма важности живых историй. Дела не считаются. */
 export function liveStoryImportance(domain) {
   return (domain?.plotlines || [])
-    .filter((p) => p && p.kind !== 'errand')
+    .filter((p) => p && p.kind === 'story')
     .reduce((sum, p) => sum + clamp100(p.importance, 0), 0);
 }
 
@@ -486,7 +544,7 @@ export function plotSeedChance(domain, cfg, tick = null) {
     const cooldown = cfg.board.seedCooldownMonths;
     if (cooldown > 0 && Number.isFinite(Number(tick))) {
       const youngest = (domain.plotlines || [])
-        .filter((p) => p.kind !== 'errand' && Number.isFinite(Number(p.createdTick)))
+        .filter((p) => p.kind === 'story' && Number.isFinite(Number(p.createdTick)))
         .reduce((max, p) => Math.max(max, Number(p.createdTick)), -Infinity);
       if (Number.isFinite(youngest) && Number(tick) - youngest < cooldown) return 0;
     }
@@ -526,8 +584,9 @@ export function formatBoardForPrompt(domain) {
     .map((p) => {
       const stats = p.relatedStats.length ? ` | в игре: ${p.relatedStats.join('+')}` : '';
       const proc = p.relatedProcessIds.length ? ` | дела: ${p.relatedProcessIds.join(', ')}` : '';
+      const kindLabel = p.kind === 'errand' ? '(дело)' : p.kind === 'order' ? '(порядок)' : '';
       return (
-        `- [${p.id}] «${p.title}» ${p.kind === 'errand' ? '(дело)' : ''} ` +
+        `- [${p.id}] «${p.title}» ${kindLabel} ` +
         `T=${p.temperature} важность=${p.importance} возраст=${p.ageMonths}/${p.maxAgeMonths}` +
         stats +
         proc +
@@ -549,12 +608,14 @@ export function formatBoardForSpeech(domain, { statsFeel = null, max = 5 } = {})
     .map((p) => {
       const feel =
         statsFeel && p.relatedStats.length ? ` Упирается в: ${statsFeel(p.relatedStats)}.` : '';
-      const kind = p.kind === 'errand' ? 'поручение' : 'история';
+      const kind = p.kind === 'errand' ? 'поручение' : p.kind === 'order' ? 'порядок' : 'история';
       const duty = (p.relatedProcessIds || []).length
         ? 'дело уже идёт'
-        : p.kind === 'errand'
-          ? 'дела нет'
-          : 'поручения ещё нет';
+        : p.kind === 'order'
+          ? 'действует'
+          : p.kind === 'errand'
+            ? 'дела нет'
+            : 'поручения ещё нет';
       const syn = clipText(p.synopsis || 'только началось', 180);
       return `«${p.title}» [${p.id}] (${kind}, ${duty}): ${syn}${feel}`;
     })

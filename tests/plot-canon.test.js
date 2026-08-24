@@ -164,7 +164,7 @@ test('план битов: забытую нить гасит тихо, живу
     temperature: 50,
     relatedProcessIds: [],
   });
-  const beats = planBeats({
+  const { beats } = planBeats({
     domain: { plotlines: [forgotten, watched], state: { pendingActions: [] } },
     rng: () => 1,
   });
@@ -326,4 +326,30 @@ test('продолжение сеется только с крючком, пус
     pickSequelSeed({ plotlines: [{ kind: 'story' }] }, [offer], cfg, () => 0),
     null,
   );
+});
+
+test('нити указов не заполняют доску и не глушат посев', () => {
+  const cfg = plotConfig({ tick: { plot: { board: { seedCooldownMonths: 2 } } } });
+  assert.equal(plotSeedChance({ plotlines: [{ kind: 'order', createdTick: 10 }] }, cfg, 10), 1);
+  assert.equal(liveStoryImportance({ plotlines: [{ kind: 'order', importance: 80 }] }), 0);
+});
+
+test('процессы занимают лимит тика, случайная история в остаток не проходит', () => {
+  const domain = {
+    plotlines: [
+      plot('p_proc', { kind: 'errand', relatedProcessIds: ['act_1'] }),
+      plot('p_story', { kind: 'story', relatedProcessIds: [], temperature: 90, importance: 80 }),
+    ],
+    state: { pendingActions: [{ id: 'act_1', status: 'active' }] },
+  };
+  const { beats, slotsUsed, cap } = planBeats({
+    domain,
+    config: { tick: { plot: { beats: { maxPerTick: 1, minChance: 1, maxChance: 1, baseChance: 1 } } } },
+    processOutcomes: [{ processId: 'act_1', mustNarrate: true, finished: true, kind: 'normal', summary: 'Ров' }],
+    rng: () => 0,
+  });
+  assert.equal(cap, 1);
+  assert.equal(slotsUsed, 1);
+  assert.ok(beats.some((b) => b.plotId === 'p_proc' && b.mandatory));
+  assert.equal(beats.some((b) => b.plotId === 'p_story' && !b.fade), false);
 });

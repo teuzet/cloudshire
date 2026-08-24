@@ -5,7 +5,6 @@ import {
   filterChronicleForDomain,
   formatChronicleScope,
   normalizeDomain,
-  createLoreFact,
   formatCastForPrompt,
 } from './models.js';
 import {
@@ -57,6 +56,7 @@ import {
   processPaceRatio,
 } from './processes.js';
 import { formatBoardForSpeech, warmPlotlines, plotConfig, findPlotline, clipPlotText, PLOT_TITLE_MAX, PLOT_SUMMARY_MAX } from './plotlines.js';
+import { queueOrderRequest, listStandingOrders } from './orders.js';
 import { islandDeleteCheck } from '../clients/telegram/access.js';
 import { generateIslandImage, removeIslandImage } from './islandImage.js';
 import { formatIslandReveal } from './islandReveal.js';
@@ -272,20 +272,6 @@ function characterTools(domain, storage, character, ctx) {
   normalizeDomainProcesses(domain, ctx.config);
 
   const world = ctx.world || null;
-  /** Мгновенные решения оставляют след в лоре — иначе мир их не замечает. */
-  const pushOrderFact = (text, kind) => {
-    domain.lore = domain.lore || [];
-    const fact = createLoreFact({
-      id: newId('lore'),
-      text,
-      tags: ['fact', kind],
-      gameDateLabel: world?.gameDate?.label || null,
-      tick: world?.tickIndex ?? null,
-      author: `ruler:${character.name}`,
-    });
-    domain.lore.push(fact);
-    return fact;
-  };
 
   return [
     {
@@ -311,16 +297,10 @@ function characterTools(domain, storage, character, ctx) {
           'knownPeople — люди, которых город уже знает: имя, пол, ремесло и что о них известно. ' +
           'Это правда, а не слухи. Не переспрашивай о том, что здесь написано, и не придумывай ' +
           'им другую судьбу.',
-        standingOrders: (domain.state.modifiers || []).map((m) => ({
-          id: m.id,
-          text: m.text,
-          kind: m.kind || null,
-          since: m.since || null,
-          initiative: m.initiative || 'patron',
-        })),
+        standingOrders: listStandingOrders(domain),
         guidanceOrders:
-          'standingOrders — действующие указы/порядки. Для отмены — revoke_order с этим id ' +
-          'или кратким смыслом. Не объявляй новый указ, если он противоречит действующему: ' +
+          'standingOrders — действующие указы/порядки. pending=create/edit/revoke — заявка ещё не вступила, вступит с новостями месяца. ' +
+          'Для отмены — revoke_order с этим id или кратким смыслом. Не объявляй новый указ, если он противоречит действующему: ' +
           'сначала отмени старый или обнови его.',
         processes: activeProcesses(domain, ctx.config).map((a) => ({
           id: a.id,
@@ -340,7 +320,7 @@ function characterTools(domain, storage, character, ctx) {
         plots: (domain.plotlines || []).map((p) => ({
           id: p.id,
           title: p.title,
-          kind: p.kind === 'errand' ? 'errand' : 'story',
+          kind: p.kind === 'errand' ? 'errand' : p.kind === 'order' ? 'order' : 'story',
           hasProcess: Boolean((p.relatedProcessIds || []).length),
         })),
         guidanceProcesses:
@@ -356,7 +336,7 @@ function characterTools(domain, storage, character, ctx) {
           'Общий храм, общий двор или общие имена — не дубль и не повод слить РАЗНЫЕ работы. ' +
           'initiative=ruler — это дело ты завёл сам, пока покровитель молчал; на вопрос «что ты решал» называй их.',
         guidancePlots:
-          'plots[] — живые нити. kind=errand уже привязана к делу; kind=story может быть без поручения. ' +
+          'plots[] — живые нити. kind=errand уже привязана к делу; kind=story может быть без поручения; kind=order — постоянный порядок, дело на него не заводи. ' +
           'Приказ по истории без дела — declare_process с plotId этой истории. ' +
           'Не бери id соседней нити из-за общего места или общих людей.',
       }),
@@ -646,8 +626,8 @@ function characterTools(domain, storage, character, ctx) {
     {
       name: 'declare_standing_order',
       description:
-        'Постоянный порядок / правило без многомесячной подготовки (запрет, осмотр, правило улиц). ' +
-        'Пишет в state.modifiers. Не для строек, судов, походов — те через declare_process.',
+        'Заявка на постоянный порядок / правило (запрет, осмотр, регулярный обряд). ' +
+        'Карточку и каденс соберёт город к новостям месяца. Не для строек, судов, походов — те через declare_process.',
       parameters: {
         type: 'object',
         required: ['text'],
@@ -670,102 +650,87 @@ function characterTools(domain, storage, character, ctx) {
             'Текст постоянного порядка слишком короткий. Сформулируй правило (≥3 символа) и вызови снова.',
           );
         }
-        if (!domain.state) domain.state = { events: [], modifiers: [], pendingActions: [], patronName: null };
-        if (!Array.isArray(domain.state.modifiers)) domain.state.modifiers = [];
-        const list = domain.state.modifiers;
-        let mod = id ? list.find((m) => m.id === id) : null;
-        if (!mod) {
-          const dup = list.find((m) => textsLookSame(m.text, body));
-          if (dup) {
-            dup.text = body;
-            dup.kind = 'order';
-            dup.updatedAt = new Date().toISOString();
-            await save();
-            return {
-              ok: true,
-              created: false,
-              modifier: dup,
-              hint: 'Порядок обновлён. В речи: коротко подтверди, что так и будет соблюдаться. Без «процесс»/месяцев.',
-            };
-          }
-          mod = {
-            id: newId('mod'),
-            text: body,
-            kind: 'order',
-            since: new Date().toISOString(),
-            declaredTick: world?.tickIndex ?? null,
-            updatedAt: new Date().toISOString(),
-            by: character.name,
-            initiative: 'patron',
-          };
-          list.push(mod);
-          pushOrderFact(`Действующий указ города: ${body}`, 'edict');
-          await save();
+        const queued = queueOrderRequest(domain, {
+          action: id ? 'edit' : 'create',
+          text: body,
+          orderId: id || null,
+          by: character.name,
+          initiative: 'patron',
+          tick: world?.tickIndex ?? null,
+        });
+        if (queued.error === 'order_not_found') {
           return {
-            ok: true,
-            created: true,
-            modifier: mod,
-            hint:
-              'В речи: принял как постоянный порядок, начнут соблюдать. Не объявляй многомесячный срок и не говори «процесс». ' +
-              'Последствия указа город увидит к концу месяца.',
+            ok: false,
+            error: 'order_not_found',
+            standingOrders: listStandingOrders(domain),
+            agentMessage:
+              'Указ не найден. Возьми id из списка ниже и вызови declare_standing_order снова.\n' +
+              (listStandingOrders(domain).map((m) => `- ${m.id}: ${m.text}`).join('\n') || '(указов нет)'),
           };
         }
-        mod.text = body;
-        mod.kind = 'order';
-        mod.updatedAt = new Date().toISOString();
+        if (queued.error) {
+          return toolFail(queued.error, queued.message || 'Не удалось принять порядок.');
+        }
         await save();
         return {
           ok: true,
-          created: false,
-          modifier: mod,
-          hint: 'Порядок обновлён. Подтверди в речи коротко.',
+          created: Boolean(queued.created),
+          request: queued.request,
+          hint:
+            'В речи: принял как постоянный порядок, начнут соблюдать. Не объявляй многомесячный срок и не говори «процесс». ' +
+            'Последствия указа город увидит к концу месяца.',
         };
       },
     },
     {
       name: 'revoke_order',
       description:
-        'Отменить действующий указ / постоянный порядок. orderId — id из read_domain_brief.standingOrders или краткий смысл указа.',
+        'Заявка отменить действующий указ / постоянный порядок. orderId — id из read_domain_brief.standingOrders или краткий смысл указа.',
       parameters: {
         type: 'object',
         required: ['orderId'],
         properties: {
-          orderId: { type: 'string', description: 'Id (mod_…) или ключевые слова указа' },
+          orderId: { type: 'string', description: 'Id (mod_… / ordreq_…) или ключевые слова указа' },
           reason: { type: 'string' },
         },
       },
       handler: async ({ orderId, reason }) => {
-        const list = Array.isArray(domain.state?.modifiers) ? domain.state.modifiers : [];
-        const key = String(orderId || '').trim().toLowerCase();
+        const key = String(orderId || '').trim();
         if (!key) {
           return toolFail('order_required', 'Передай orderId указа из read_domain_brief.standingOrders.');
         }
-        let mod = list.find((m) => String(m.id).toLowerCase() === key);
-        if (!mod) {
-          mod = list.find((m) => String(m.text || '').toLowerCase().includes(key.slice(0, 40)));
-        }
-        if (!mod) {
+        const queued = queueOrderRequest(domain, {
+          action: 'revoke',
+          orderId: key,
+          text: key,
+          reason,
+          by: character.name,
+          initiative: 'patron',
+          tick: world?.tickIndex ?? null,
+        });
+        if (queued.error === 'order_not_found') {
+          const list = listStandingOrders(domain);
           return {
             ok: false,
             error: 'order_not_found',
-            standingOrders: list.map((m) => ({ id: m.id, text: m.text })),
+            standingOrders: list,
             agentMessage:
               'Указ не найден. Возьми id из списка ниже и вызови revoke_order снова. ' +
               'Не говори покровителю, что такого порядка нет, если список не пуст.\n' +
               (list.map((m) => `- ${m.id}: ${m.text}`).join('\n') || '(указов нет)'),
           };
         }
-        domain.state.modifiers = list.filter((m) => m.id !== mod.id);
-        pushOrderFact(
-          `Указ отменён: ${mod.text}${reason ? ` (причина: ${reason})` : ''}`,
-          'edict',
-        );
+        if (queued.error) {
+          return toolFail(queued.error, queued.message || 'Не удалось отменить порядок.');
+        }
         await save();
         return {
           ok: true,
-          revokedId: mod.id,
-          text: mod.text,
-          hint: 'В речи: порядок отменён по воле покровителя. Коротко, без механики.',
+          cancelled: Boolean(queued.cancelled),
+          request: queued.request,
+          hint: queued.cancelled
+            ? 'В речи: передумал, этот порядок так и не вступил. Коротко.'
+            : 'В речи: порядок будет снят. Коротко, без механики. Город увидит это к концу месяца.',
         };
       },
     },

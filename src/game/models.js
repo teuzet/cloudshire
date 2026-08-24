@@ -1,4 +1,5 @@
 import { newId } from './ids.js';
+import { normalizeOrders } from './orders.js';
 
 export function emptyState() {
   return {
@@ -6,6 +7,8 @@ export function emptyState() {
     events: [],
     // Важные постоянные модификаторы (институты, установленный порядок, хронические условия)
     modifiers: [],
+    // Заявки правителя на создать/править/снять порядок. Карточку пишет агент в начале месяца.
+    pendingOrderRequests: [],
     pendingActions: [],
     // Короткие пометки о том, что случилось в разговорах этого месяца (dayNote).
     // Доносит день до тика и очищается после него.
@@ -25,6 +28,7 @@ export function normalizeDomain(domain) {
   } else {
     if (!Array.isArray(domain.state.events)) domain.state.events = [];
     if (!Array.isArray(domain.state.modifiers)) domain.state.modifiers = [];
+    if (!Array.isArray(domain.state.pendingOrderRequests)) domain.state.pendingOrderRequests = [];
     if (!Array.isArray(domain.state.pendingActions)) domain.state.pendingActions = [];
     if (!Array.isArray(domain.state.monthLog)) domain.state.monthLog = [];
     if (!Array.isArray(domain.state.quietPicks)) domain.state.quietPicks = [];
@@ -51,6 +55,7 @@ export function normalizeDomain(domain) {
       else ch.terror = Math.max(0, Math.min(100, Math.round(Number(ch.terror))));
     }
   }
+  normalizeOrders(domain);
   return domain;
 }
 

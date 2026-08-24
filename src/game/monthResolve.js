@@ -3,7 +3,7 @@
  *
  * Движок считает ход дел, часы нитей, отбор битов и окраску; рассказчик
  * пишет хронику; оценщик статов читает записи месяца и ставит след.
- * См. docs/PIVOT_PLOTLINES.md.
+ * См. docs/PIVOT_PLOTLINES.md и docs/STANDING_ORDERS.md.
  */
 
 import { newId } from './ids.js';
@@ -24,6 +24,7 @@ import {
   closePlotline,
   plotHasActiveProcess,
   attachChronicleToPlotlines,
+  countOpen,
 } from './plotlines.js';
 import {
   advancePlotMonth,
@@ -34,18 +35,12 @@ import {
   formatBeatPlanForLog,
   clearMonthLog,
 } from './plotEngine.js';
-import { seedPlot, beatPlot, echoDecisions, quietMonth, keepStories, fadeQuietPlot } from './storyteller.js';
+import { planOrderTicks, pickOrderOutcome } from './orders.js';
+import { resolvePendingOrders } from './orderSmith.js';
+import { seedPlot, beatPlot, tickOrder, quietMonth, keepStories, fadeQuietPlot } from './storyteller.js';
 import { scoreMonthStats } from './statJudge.js';
 import { runSteward } from './steward.js';
 import { getLogger } from '../log.js';
-
-/** Указы, объявленные в этом месяце: их последствия и отыгрывает отзвук. */
-function newEdictsThisMonth(domain, world) {
-  const since = Math.max(0, (world.tickIndex || 0) - 1);
-  return (domain.state?.modifiers || []).filter(
-    (m) => Number.isInteger(m.declaredTick) && m.declaredTick >= since,
-  );
-}
 
 /**
  * Один месяц одного города.
@@ -86,6 +81,16 @@ export async function resolveDomainMonth({
     log,
   });
   if (steward?.chronicleAdds?.length) chronicleAdds.push(...steward.chronicleAdds);
+
+  // 0b. Заявки на указы: карточки до тика нитей, чтобы «начиная сейчас» могло сработать в этом месяце.
+  const orderCards = await resolvePendingOrders({
+    config,
+    runtime,
+    domain: working,
+    world,
+    log,
+  });
+
   // Пик месяца: то, с чего правитель начнёт письмо. Без него развязка тонет
   // в ряду обычных записей и большое дело проходит незамеченным.
   let highlight = null;
@@ -104,13 +109,16 @@ export async function resolveDomainMonth({
     config,
   });
 
-  // 2. Часы доски.
+  // 2. Часы доски (нити указов не стареют).
   advancePlotMonth(working, cfg);
 
-  // 3. План битов: обязательные впереди, потолок пробивают.
-  const beats = planBeats({ domain: working, config, processOutcomes });
+  // 3. План битов: процессы всегда, истории — в остаток.
+  const { beats, slotsUsed, cap } = planBeats({ domain: working, config, processOutcomes });
+  let used = slotsUsed;
   log.info('month.plan', {
     beats: beats.length,
+    slotsUsed,
+    cap,
     mandatory: beats.filter((b) => b.mandatory).length,
     plan: formatBeatPlanForLog(beats),
     processes: processOutcomes.map((o) => ({
@@ -121,10 +129,11 @@ export async function resolveDomainMonth({
       left: `${o.monthsLeftBefore}→${o.monthsLeft}`,
       finished: o.finished,
     })),
+    orderCards: orderCards.map((r) => r.action),
     budget: { world: budget.world, player: budget.player },
   });
 
-  // 4. Биты.
+  // 4. Биты процессов и историй.
   const sequelOffers = [];
   for (const beat of beats) {
     const plot = findPlotline(working, beat.plotId);
@@ -170,7 +179,6 @@ export async function resolveDomainMonth({
         }
       }
     } else {
-      // Рассказчик не справился — движок пишет сухой минимум, чтобы месяц не пропал.
       const outcome = beat.processOutcome;
       const text = beat.finale
         ? `История «${beat.title}» закончилась.`
@@ -202,10 +210,40 @@ export async function resolveDomainMonth({
     }
   }
 
-  // 5. Завязка: пустая доска после крючка — иногда продолжение, иначе обычный посев.
+  // 5. Указы — только если после историй ещё есть слот.
+  const orderPlan = planOrderTicks({
+    domain: working,
+    config,
+    slotsLeft: Math.max(0, cap - used),
+    tick: world.tickIndex,
+  });
+  for (const item of orderPlan) {
+    const plot = findPlotline(working, item.plotId);
+    if (!plot) continue;
+    const mode = pickOrderOutcome(working, cfg);
+    const result = await tickOrder({
+      config,
+      runtime,
+      domain: working,
+      world,
+      plot,
+      mode,
+      log,
+    });
+    if (result?.fact) {
+      chronicleAdds.push(result.fact);
+      used += 1;
+    }
+  }
+
+  // 6. Посев мира: после указов, только в остаток слота и если живых историй нет.
+  const { stories } = countOpen(working);
   const sequel = pickSequelSeed(working, sequelOffers, cfg);
   const seedChance = sequel ? 1 : plotSeedChance(working, cfg, world.tickIndex);
-  const wantSeed = Boolean(sequel) || Math.random() < seedChance;
+  const wantSeed =
+    cap - used > 0 &&
+    (Boolean(sequel) || stories === 0) &&
+    (Boolean(sequel) || Math.random() < seedChance);
   if (wantSeed) {
     const seeded = await seedPlot({
       config,
@@ -215,21 +253,10 @@ export async function resolveDomainMonth({
       fromClosed: sequel,
       log,
     });
-    if (seeded?.fact) chronicleAdds.push(seeded.fact);
-  }
-
-  // 6. Отзвук воли покровителя: указы этого месяца.
-  const edicts = newEdictsThisMonth(working, world);
-  if (edicts.length) {
-    const echo = await echoDecisions({
-      config,
-      runtime,
-      domain: working,
-      world,
-      edicts,
-      log,
-    });
-    if (echo?.fact) chronicleAdds.push(echo.fact);
+    if (seeded?.fact) {
+      chronicleAdds.push(seeded.fact);
+      used += 1;
+    }
   }
 
   // 7. Тихий месяц: без сюжета, но город всё равно жил.
@@ -257,7 +284,6 @@ export async function resolveDomainMonth({
   }
 
   // 9. Хранитель: синопсисы по свежей хронике; «история всплыла» → жар считает движок.
-  // Журнал месяца ещё жив: по нему хранитель видит, о чём говорили до тика.
   const kept = await keepStories({
     config,
     runtime,
@@ -267,8 +293,6 @@ export async function resolveDomainMonth({
     log,
   });
 
-  // Журнал донёс разговоры до тика и здесь же гасится: чистить его снаружи нельзя —
-  // там остаётся объект домена до резолва, и запись поверх стирает весь месяц.
   clearMonthLog(working);
 
   refreshChronicleDigest(working, config);
@@ -277,9 +301,12 @@ export async function resolveDomainMonth({
   log.info('month.done', {
     chronicle: chronicleAdds.length,
     plots: working.plotlines.length,
+    slotsUsed: used,
+    cap,
     seedChance: Number(seedChance.toFixed(2)),
     seeded: wantSeed,
     sequelOf: sequel?.id || null,
+    ordersPlanned: orderPlan.length,
     kept: kept ? { updated: kept.updated, surfaced: kept.surfaced } : null,
     statsScored: scored?.scored ?? 0,
     steward: steward?.act || null,

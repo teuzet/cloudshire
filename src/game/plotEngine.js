@@ -99,8 +99,9 @@ function statValue(domain, statId) {
 
 /**
  * План битов месяца.
- * Обязательные идут первыми и потолок пробивают: дело завершилось или сорвалось,
- * забытая нить выдохлась без дел и внимания. Добровольные добираются по вероятности.
+ * Процессы всегда занимают слоты (и могут забить весь потолок).
+ * Случайные тики живых историй — только в остаток. Сход слот не занимает.
+ * Нити указов сюда не входят.
  */
 export function planBeats({ domain, config, processOutcomes = [], rng = Math.random }) {
   const cfg = plotConfig(config || {});
@@ -110,7 +111,7 @@ export function planBeats({ domain, config, processOutcomes = [], rng = Math.ran
   const taken = new Set();
 
   const addBeat = (plot, { mandatory, reason, tint, finale = false, fade = false, outcome = null }) => {
-    if (!plot || taken.has(plot.id)) return;
+    if (!plot || taken.has(plot.id)) return false;
     taken.add(plot.id);
     const rolled =
       tint ||
@@ -133,9 +134,10 @@ export function planBeats({ domain, config, processOutcomes = [], rng = Math.ran
       chance: typeof rolled === 'string' ? null : rolled.chance ?? null,
       processOutcome: outcome,
     });
+    return true;
   };
 
-  // 1. Обязательные от дел: окраску не кидаем, она уже в броске дела.
+  // 1. Процессы — всегда, даже сверх потолка.
   for (const outcome of processOutcomes) {
     if (!outcome?.mustNarrate) continue;
     for (const plot of plotsForProcess(domain, outcome.processId)) {
@@ -149,25 +151,27 @@ export function planBeats({ domain, config, processOutcomes = [], rng = Math.ran
     }
   }
 
-  // 2. Срок вышел, дел нет, интереса нет — тихий сход, не выдуманная развязка.
+  // 2. Сход забытой нити — служебное закрытие, слот не занимает.
   for (const plot of domain.plotlines) {
+    if (plot.kind === 'order') continue;
     if (!plotCanFade(domain, plot, cfg)) continue;
     addBeat(plot, { mandatory: true, reason: 'fade', fade: true, tint: 'dual' });
   }
 
-  // 3. Добровольные — до потолка.
   const cap = cfg.beats.maxPerTick;
-  let voluntary = 0;
+  let slotsUsed = beats.filter((b) => !b.fade).length;
+
+  // 3. Случайные тики живых историй — только в остаток.
   for (const plot of domain.plotlines) {
+    if (plot.kind !== 'story') continue;
     if (taken.has(plot.id)) continue;
-    if (voluntary >= cap) break;
+    if (slotsUsed >= cap) break;
     const chance = beatChance(plot, cfg);
     if (rng() >= chance) continue;
-    voluntary += 1;
-    addBeat(plot, { mandatory: false, reason: 'roll' });
+    if (addBeat(plot, { mandatory: false, reason: 'roll' })) slotsUsed += 1;
   }
 
-  return beats;
+  return { beats, slotsUsed, cap };
 }
 
 /**
