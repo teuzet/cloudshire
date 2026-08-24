@@ -12,7 +12,7 @@
     "tokens": "node scripts/token-report.js",
     "report": "node scripts/world-report.js",
     "seed-sample": "node scripts/sample-plot-seeds.mjs",
-    "test": "node --test tests"
+    "test": "node --test tests/*.js"
   },
   "engines": {
     "node": ">=20"

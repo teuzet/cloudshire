@@ -56,30 +56,146 @@ const NAME_CLICHE_SUBSTR = [
   'жернов',
 ];
 
+export const ONBOARDING_MODES = ['quick', 'brief', 'questions', 'dossier'];
+/** Потолок для генезиса: подробное ТЗ влезает, стенограмма чата — нет. */
+export const BRIEF_CITY_MAX = 24000;
+export const BRIEF_RULER_MAX = 4000;
+export const BRIEF_FREEFORM_MAX = 12000;
+export const BRIEF_TOTAL_MAX = 32000;
+/** Сколько brief видит онбординг-агент в карточке хода (не генезис). */
+export const BRIEF_PROMPT_CITY_MAX = 16000;
+export const BRIEF_PROMPT_RULER_MAX = 2500;
+export const LONG_USER_MESSAGE_MIN = 500;
+export const DOSSIER_SWITCH_MIN = 800;
+export const ONBOARDING_HISTORY_MESSAGES = 12;
+export const FALSE_START_STRIP_MAX = 400;
+
 export function emptyOnboardingDraft() {
   return {
     messages: [],
     cityName: null,
     cityNameApproved: false,
     tagChoices: {}, // groupId -> tagId | freeform label
-    /** quick | brief | questions | null */
+    /** quick | brief | questions | dossier | null */
     mode: null,
-    /** Саммари пожеланий игрока для генезиса */
+    /** intro | collecting | pitched | named | generating */
+    phase: 'intro',
+    /** Бриф пожеланий игрока для генезиса — не стенограмма чата, но может быть подробным. */
     playerBrief: {
       city: '',
       ruler: '',
       freeform: '',
     },
     pitched: false,
-    /** Последнее имя, которое агент уже назвал игроку (ещё без set_city_name). */
+    /** Последнее имя, которое агент или игрок уже назвал (ещё без set_city_name). */
     pitchedName: null,
     /** Теги на момент этого питча — чтобы не потерять их, если агент рандомит снова. */
     pitchedTagChoices: {},
   };
 }
 
-export const ONBOARDING_FALSE_START_REPLY =
-  'Остров ещё не начал создаваться: имя города не зафиксировано. Подтверди название из последнего описания — или скажи, как назвать город.';
+export function deriveOnboardingPhase(draft, { generating = false } = {}) {
+  if (generating) return 'generating';
+  if (draft?.cityNameApproved && draft?.cityName) return 'named';
+  if (draft?.pitchedName || draft?.pitched) return 'pitched';
+  if (draft?.mode || (draft?.messages || []).length > 0) return 'collecting';
+  return 'intro';
+}
+
+export function normalizeOnboardingDraft(draft) {
+  const d = draft && typeof draft === 'object' ? draft : emptyOnboardingDraft();
+  if (!Array.isArray(d.messages)) d.messages = [];
+  if (!d.tagChoices || typeof d.tagChoices !== 'object') d.tagChoices = {};
+  if (!d.pitchedTagChoices || typeof d.pitchedTagChoices !== 'object') d.pitchedTagChoices = {};
+  if (!d.playerBrief || typeof d.playerBrief !== 'object') {
+    d.playerBrief = { city: '', ruler: '', freeform: '' };
+  } else {
+    d.playerBrief.city = d.playerBrief.city || '';
+    d.playerBrief.ruler = d.playerBrief.ruler || '';
+    d.playerBrief.freeform = d.playerBrief.freeform || '';
+  }
+  if (!('mode' in d)) d.mode = null;
+  if (!('pitchedName' in d)) d.pitchedName = null;
+  if (!('pitched' in d)) d.pitched = false;
+  if (!('cityName' in d)) d.cityName = null;
+  if (!('cityNameApproved' in d)) d.cityNameApproved = false;
+  clipOnboardingBrief(d.playerBrief);
+  d.phase = deriveOnboardingPhase(d);
+  return d;
+}
+
+export function clipOnboardingBrief(brief = {}) {
+  if (!brief || typeof brief !== 'object') return brief;
+  if (brief.city) brief.city = String(brief.city).slice(0, BRIEF_CITY_MAX);
+  if (brief.ruler) brief.ruler = String(brief.ruler).slice(0, BRIEF_RULER_MAX);
+  if (brief.freeform) brief.freeform = String(brief.freeform).slice(0, BRIEF_FREEFORM_MAX);
+  const total =
+    String(brief.city || '').length +
+    String(brief.ruler || '').length +
+    String(brief.freeform || '').length;
+  if (total > BRIEF_TOTAL_MAX && brief.freeform) {
+    const keep = Math.max(0, BRIEF_TOTAL_MAX - String(brief.city || '').length - String(brief.ruler || '').length);
+    brief.freeform = String(brief.freeform).slice(0, keep);
+  }
+  return brief;
+}
+
+export function hasPitchedCity(draft) {
+  return Boolean(draft?.pitchedName || draft?.cityName || draft?.pitched);
+}
+
+export function formatOnboardingStatusCard(draft, config, { generating = false } = {}) {
+  const d = draft || emptyOnboardingDraft();
+  const phase = deriveOnboardingPhase(d, { generating });
+  const tagCount = Object.keys(d.tagChoices || {}).length;
+  const tagTotal = (config?.genesis?.tagGroups || []).length;
+  const pitched = hasPitchedCity(d);
+  const brief = d.playerBrief || {};
+  const cityPreview = String(brief.city || '').trim().slice(0, BRIEF_PROMPT_CITY_MAX);
+  const rulerPreview = String(brief.ruler || '').trim().slice(0, BRIEF_PROMPT_RULER_MAX);
+  const freeformPreview = String(brief.freeform || '').trim().slice(0, 4000);
+  const lines = [
+    `фаза=${phase}; режим=${d.mode || 'не выбран'};`,
+    `питч=${d.pitchedName || '—'}; имя=${d.cityName || '—'} approved=${Boolean(d.cityNameApproved)};`,
+    `черты=${tagCount}/${tagTotal}${pitched ? '' : ' (это не питч)'}; ждатьСтарта=${pitched ? 'да, только после явного согласия' : 'нет'}.`,
+  ];
+  if (cityPreview) lines.push(`бриф города для генезиса:\n${cityPreview}`);
+  if (rulerPreview) lines.push(`правитель:\n${rulerPreview}`);
+  if (freeformPreview) lines.push(`ещё к брифу:\n${freeformPreview}`);
+  if (phase === 'intro' || !pitched) {
+    lines.push('Город ещё не предложен. Не пиши «город уже предложен» и не вызывай start_new_game.');
+  } else {
+    lines.push(
+      'Имя уже названо. НЕ вызывай randomize_all_tags и не выдумывай новый город. ' +
+        'Согласие («да/начинаем/создавай/готов») → set_city_name(это имя) и start_new_game. ' +
+        'Новый набор — только если игрок просит другой город.',
+    );
+  }
+  if (d.mode === 'quick' && !pitched) {
+    lines.push('Режим quick: один раз randomize_all_tags, опиши город с именем и спроси согласия.');
+  }
+  if (d.mode === 'dossier') {
+    lines.push(
+      'Режим dossier: игрок несёт своё ТЗ. Перескажи, лови дыры, не финализируй. ' +
+        'Длинный текст → set_player_brief: подробный бриф для генезиса (формулировки игрока сохрани). ' +
+        'Сжимай только болтовню и повторы, не выкидывай канон в абзац. ' +
+        'Старт только после имени и явного «создавай/готов».',
+    );
+  }
+  if (d.mode === 'questions') {
+    lines.push('Режим questions: 1–2 живых вопроса за ход. Имя предложи сам, когда картина сложилась.');
+  }
+  return lines.join('\n');
+}
+
+/** Отбивка, которая сама не выглядит как «остров создаётся». */
+export const ONBOARDING_NEED_NAME_NOTE =
+  'Имя города ещё не зафиксировано. Назови его или подтверди последнее предложенное — и скажи «создавай», когда будешь готов.';
+
+export const ONBOARDING_FALSE_START_REPLY = ONBOARDING_NEED_NAME_NOTE;
+
+export const ONBOARDING_BUSY_REPLY =
+  'Ещё обдумываю предыдущее сообщение — напиши следом, когда отвечу.';
 
 export function formatOnboardingStartReply(cityName) {
   return `Отлично. Поднимаю остров «${cityName}» — обычно минута-две. Правитель напишет сам.`;
@@ -377,20 +493,47 @@ export function collectOnboardingPreferenceText(draft) {
   for (const key of ['city', 'ruler', 'freeform']) {
     if (brief[key]) parts.push(String(brief[key]));
   }
-  for (const m of draft?.messages || []) {
-    if (m.role === 'user' && m.content) parts.push(String(m.content));
+  const userMsgs = (draft?.messages || []).filter((m) => m.role === 'user' && m.content);
+  for (const m of userMsgs.slice(-4)) {
+    parts.push(String(m.content).slice(0, 2000));
   }
   return parts.join('\n');
 }
 
-export function claimsOnboardingGenerating(text) {
-  return /созда(ёт|ется|ётся|ю)|начинается\s+процесс|поднимаю\s+остров|остров.{0,30}созда|правитель.{0,50}(напиш|свяж)|жди.{0,30}минут/i.test(
+function hasNegatedGenerationClaim(text) {
+  return /(?:ещё|еще|пока|не)\s+(?:не\s+)?(?:начал[аи]?\s+)?созда|не\s+создаю|не\s+финализ|не\s+начинаю\s+(?:созда|финализ|остров)/i.test(
     String(text || ''),
   );
 }
 
+/** Претензия, что ЭТОТ игровой остров уже создаётся — не лор «Нокс создаёт тварей». */
+export function claimsOnboardingGenerating(text) {
+  const raw = String(text || '');
+  if (!raw.trim()) return false;
+  if (
+    /поднимаю\s+остров/i.test(raw) ||
+    /начинается\s+процесс\s+создан/i.test(raw) ||
+    /остров\s+начинает\s+создаваться/i.test(raw) ||
+    /правитель\s+напишет\s+сам/i.test(raw)
+  ) {
+    return !hasNegatedGenerationClaim(raw) || /поднимаю\s+остров/i.test(raw);
+  }
+  if (/остров\s+(?:сейчас\s+|уже\s+)?созда(?:ёт|ет|ё)ся/i.test(raw)) {
+    return !hasNegatedGenerationClaim(raw);
+  }
+  if (/жди(?:те)?\s+(?:чуть\s+)?(?:минуту|минут[уы]?|письма)/i.test(raw) && /остров|созда/i.test(raw)) {
+    return !hasNegatedGenerationClaim(raw);
+  }
+  return false;
+}
+
 export function claimsOnboardingAlreadyCreated(text) {
-  return /успешно\s+создан|уже\s+создан|остров.{0,20}готов|был\s+создан/i.test(String(text || ''));
+  const raw = String(text || '');
+  if (!raw.trim()) return false;
+  if (/ещё\s+не|еще\s+не|не\s+создан|не\s+готов/i.test(raw) && !/успешно\s+создан/i.test(raw)) {
+    return false;
+  }
+  return /успешно\s+создан|уже\s+создан|остров\s+(?:уже\s+)?готов(?!\p{L})|был\s+создан/i.test(raw);
 }
 
 function looksLikeToponym(raw) {
@@ -401,7 +544,7 @@ function looksLikeToponym(raw) {
     .trim()
     .replace(/\s+/g, ' ');
   const words = name.split(/\s+/).filter(Boolean);
-  if (!words.length || words.length > 2) return null;
+  if (!words.length || words.length > 3) return null;
   if (!/^\p{Lu}/u.test(words[0])) return null;
   const v = validateCityName(name);
   return v.ok ? v.name : null;
@@ -410,11 +553,20 @@ function looksLikeToponym(raw) {
 const PITCHED_NAME_RES = [
   /(?:твой\s+)?город\s+[—–-]\s+\*{0,2}([\p{L}][\p{L}\p{M}\s'-]{1,39})/iu,
   /город\s+будет\s+называться\s+\*{0,2}([\p{L}][\p{L}\p{M}\s'-]{1,39})/iu,
+  /город\s+называется\s+\*{0,2}([\p{L}][\p{L}\p{M}\s'-]{1,39})/iu,
   /называться\s+\*{0,2}([\p{L}][\p{L}\p{M}\s'-]{1,39})/iu,
   /будет\s+город\s+\*{0,2}([\p{L}][\p{L}\p{M}\s'-]{1,39})/iu,
   /город\s+[«"*]{1,2}([\p{L}][\p{L}\p{M}\s'-]{1,39})/iu,
   /остров\s+[«"]([\p{L}][\p{L}\p{M}\s'-]{1,39})/iu,
   /поднимаю\s+остров\s+[«"]([\p{L}][\p{L}\p{M}\s'-]{1,39})/iu,
+];
+
+const USER_NAME_RES = [
+  /(?:столица|город|остров)(?:\s+\([^)]+\))?(?:\s+(?:как\s+и\s+сам\s+остров))?\s+называется\s+[«"]?([\p{Lu}][\p{L}\p{M}\s'-]{0,39})/u,
+  /город\s+называется\s+[«"]?([\p{Lu}][\p{L}\p{M}\s'-]{0,39})/u,
+  /называется\s+[«"]?([\p{Lu}][\p{L}\p{M}']*(?:\s+[\p{Lu}][\p{L}\p{M}']*){0,2})/u,
+  /назов[её]м\s+(?:город\s+|его\s+|остров\s+)?[«"]?([\p{Lu}][\p{L}\p{M}\s'-]{0,39})/u,
+  /имя\s+(?:города|острова)\s*[—–:-]\s*[«"]?([\p{Lu}][\p{L}\p{M}\s'-]{0,39})/u,
 ];
 
 /** Имя города из речи агента, не имя правителя. */
@@ -431,6 +583,30 @@ export function extractPitchedCityName(text) {
   return null;
 }
 
+/** Имя, которое игрок сам назвал («город называется X»). */
+export function extractUserCityName(text) {
+  const raw = String(text || '');
+  if (!raw.trim()) return null;
+  for (const re of USER_NAME_RES) {
+    re.lastIndex = 0;
+    const m = re.exec(raw);
+    if (!m) continue;
+    const name = looksLikeToponym(m[1]);
+    if (name) return name;
+  }
+  return null;
+}
+
+export function applyUserNamedCity(draft, text) {
+  if (!draft || draft.cityNameApproved) return null;
+  const name = extractUserCityName(text);
+  if (!name) return null;
+  draft.pitchedName = name;
+  draft.pitched = true;
+  draft.phase = deriveOnboardingPhase(draft);
+  return name;
+}
+
 export function lastPitchedCityName(draft) {
   if (draft?.cityName) {
     const v = validateCityName(draft.cityName);
@@ -443,9 +619,14 @@ export function lastPitchedCityName(draft) {
   const messages = draft?.messages || [];
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const m = messages[i];
-    if (m?.role !== 'assistant' || !m.content) continue;
-    const name = extractPitchedCityName(m.content);
-    if (name) return name;
+    if (!m?.content) continue;
+    if (m.role === 'assistant') {
+      const name = extractPitchedCityName(m.content);
+      if (name) return name;
+    } else if (m.role === 'user') {
+      const name = extractUserCityName(m.content);
+      if (name) return name;
+    }
   }
   return null;
 }
@@ -462,16 +643,18 @@ export function playerConsentsToStart(text, { pitched = false } = {}) {
   if (/быстр(ый|о).{0,12}старт|с\s+вопрос|опишу|хочу\s+примерно|через\s+вопрос/i.test(raw)) {
     return false;
   }
+  if (/полное\s+описание|представь|покажи\s+концеп/i.test(raw)) return false;
   if (/,\s*но(?!\p{L})|(?<!\p{L})но\s+(измени|другой|другое|имя|не\s+)/iu.test(raw)) {
     return false;
   }
   if (
-    /^(да|ок|окей|хорошо|ладно|этот|выбираю|начинаем|начинай|создавай|создаём|создаем|поехали|старт|вперёд|вперед|берём|берем|согласен|подходит|идёт|идет|давай)(?!\p{L})/iu.test(
+    /^(да|ок|окей|хорошо|ладно|этот|выбираю|начинаем|начинай|создавай|создаём|создаем|поехали|старт|вперёд|вперед|берём|берем|согласен|подходит|идёт|идет|давай|готов)(?!\p{L})/iu.test(
       raw,
     )
   ) {
     return true;
   }
+  if (/^(я\s+)?готов(?!\s+ли)/iu.test(raw)) return true;
   if (/(?<!\p{L})(начинаем|создавай|поехали|поднимай\s+остров)(?!\p{L})/iu.test(raw)) return true;
   return false;
 }
@@ -486,9 +669,17 @@ export function playerAsksReroll(text) {
   );
 }
 
+function withNeedNameFlags(reply, reason) {
+  const len = String(reply || '').trim().length;
+  if (len > 0 && len <= FALSE_START_STRIP_MAX) {
+    return { start: false, name: null, stripFalseStart: true, appendNeedName: false, reason };
+  }
+  return { start: false, name: null, stripFalseStart: false, appendNeedName: true, reason };
+}
+
 /**
  * Нужно ли самим запустить генезис, если агент не вызвал start_new_game.
- * При согласии берём имя из уже сделанного питча, не из новой выдумки в этом ходе.
+ * Старт только при явном согласии и имени уже в драфте (не из новой выдумки в этом ходе).
  */
 export function planOnboardingAutoStart({
   userText,
@@ -498,7 +689,7 @@ export function planOnboardingAutoStart({
   generating = false,
 } = {}) {
   if (usedStart || generating) {
-    return { start: false, name: null, stripFalseStart: false, reason: null };
+    return { start: false, name: null, stripFalseStart: false, appendNeedName: false, reason: null };
   }
   const historyName = lastPitchedCityName(draft);
   const replyName = extractPitchedCityName(reply);
@@ -507,21 +698,48 @@ export function planOnboardingAutoStart({
   const claimed =
     claimsOnboardingGenerating(reply) || claimsOnboardingAlreadyCreated(reply);
 
-  let name = null;
-  let reason = null;
   if (consented) {
-    name = historyName || replyName;
-    reason = 'player_consent';
-  } else if (claimed) {
-    name = historyName || replyName;
-    reason = 'reply_claimed_start';
-  }
-  if (name) {
-    const v = validateCityName(name);
-    if (v.ok) return { start: true, name: v.name, stripFalseStart: false, reason };
+    const name = historyName || replyName;
+    const v = name ? validateCityName(name) : { ok: false };
+    if (v.ok) {
+      return { start: true, name: v.name, stripFalseStart: false, appendNeedName: false, reason: 'player_consent' };
+    }
+    return withNeedNameFlags(reply, 'consent_without_name');
   }
   if (claimed) {
-    return { start: false, name: null, stripFalseStart: true, reason: 'false_start_claim' };
+    return withNeedNameFlags(reply, 'false_start_claim');
   }
-  return { start: false, name: null, stripFalseStart: false, reason: null };
+  return { start: false, name: null, stripFalseStart: false, appendNeedName: false, reason: null };
+}
+
+export function maybeSwitchToDossier(draft, userText) {
+  const raw = String(userText || '').trim();
+  if (!draft || raw.length < DOSSIER_SWITCH_MIN) return false;
+  if (draft.mode === 'quick' || draft.cityNameApproved) return false;
+  if (draft.mode === 'dossier') return false;
+  draft.mode = 'dossier';
+  draft.phase = deriveOnboardingPhase(draft);
+  return true;
+}
+
+export function rememberLongUserBrief(draft, userText, { usedBriefTool = false } = {}) {
+  if (!draft) return;
+  if (usedBriefTool) return;
+  const chunk = String(userText || '').trim();
+  if (chunk.length < LONG_USER_MESSAGE_MIN) return;
+  if (!draft.playerBrief) draft.playerBrief = { city: '', ruler: '', freeform: '' };
+  const city = String(draft.playerBrief.city || '');
+  if (!city) {
+    draft.playerBrief.city = chunk.slice(0, BRIEF_CITY_MAX);
+  } else if (!city.includes(chunk.slice(0, 80))) {
+    draft.playerBrief.city = `${city}\n\n${chunk}`.slice(0, BRIEF_CITY_MAX);
+  }
+  clipOnboardingBrief(draft.playerBrief);
+}
+
+export function appendNeedNameNote(reply) {
+  const text = String(reply || '').trim();
+  if (!text) return ONBOARDING_NEED_NAME_NOTE;
+  if (text.includes(ONBOARDING_NEED_NAME_NOTE)) return text;
+  return `${text}\n\n${ONBOARDING_NEED_NAME_NOTE}`;
 }

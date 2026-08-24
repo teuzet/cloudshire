@@ -20,6 +20,7 @@ import { newId } from './ids.js';
 import { assertsIslandsParted, monthsUntilDock, findActiveConfluxForDomain } from './conflux.js';
 import {
   emptyOnboardingDraft,
+  normalizeOnboardingDraft,
   validateCityName,
   listTagCatalog,
   formatPlayerBrief,
@@ -27,15 +28,27 @@ import {
   inferTagChoicesFromText,
   collectOnboardingPreferenceText,
   randomizeAllTags,
-  formatTagChoicesForPlayer,
-  claimsOnboardingGenerating,
   claimsOnboardingAlreadyCreated,
   extractPitchedCityName,
   lastPitchedCityName,
   playerAsksReroll,
   planOnboardingAutoStart,
   formatOnboardingStartReply,
-  ONBOARDING_FALSE_START_REPLY,
+  formatOnboardingStatusCard,
+  deriveOnboardingPhase,
+  hasPitchedCity,
+  applyUserNamedCity,
+  maybeSwitchToDossier,
+  rememberLongUserBrief,
+  clipOnboardingBrief,
+  appendNeedNameNote,
+  ONBOARDING_NEED_NAME_NOTE,
+  ONBOARDING_BUSY_REPLY,
+  ONBOARDING_HISTORY_MESSAGES,
+  LONG_USER_MESSAGE_MIN,
+  BRIEF_CITY_MAX,
+  BRIEF_RULER_MAX,
+  BRIEF_FREEFORM_MAX,
 } from './onboarding.js';
 import {
   normalizeDomainProcesses,
@@ -861,6 +874,8 @@ export class GameApp {
     this.runtime = runtime;
     this.outboundHandlers = new Set();
     this.generatingUsers = new Set();
+    /** Пока обрабатывается сообщение пользователя — второй апдейт не стартует параллельный ход. */
+    this.busyUsers = new Set();
     /** Текст прогресса генезиса (для Telegram edit и баннера /play). */
     this.generatingProgress = new Map();
     /** Пока идёт world tick — чат с доменом отвечает системно. */
@@ -924,48 +939,64 @@ export class GameApp {
   }
 
   async handleUserMessage(userId, text, { channel = 'web', bootstrap = false } = {}) {
-    const log = getLogger().child({ userId: String(userId), channel, scope: 'chat' });
-    const world = await this.storage.getWorld();
-    const domain = await this.storage.getDomainForUser(userId, world.id);
-
-    log.info('chat.inbound', {
-      bootstrap,
-      text: truncate(text, 400),
-      hasDomain: Boolean(domain),
-      domainId: domain?.id || null,
-      generating: this.isGenerating(userId),
-      worldTicking: this.isWorldTicking(),
-    });
-
-    if (domain && this.isWorldTicking()) {
-      const label = world.gameDate?.label || 'новый месяц';
-      log.info('chat.busy_ticking');
+    const uid = String(userId);
+    const log = getLogger().child({ userId: uid, channel, scope: 'chat' });
+    if (this.busyUsers.has(uid)) {
+      log.info('chat.busy_turn');
       return {
-        reply:
-          `Сейчас идёт шаг времени (${label}). Правитель занят делами острова — ` +
-          'напишет сам, когда месяц закроется. Твоё сообщение я увидел; повтори его после новостей, если нужно.',
+        reply: ONBOARDING_BUSY_REPLY,
         agent: 'system',
-        generating: false,
-        ticking: true,
-        domainId: domain.id,
+        busy: true,
+        generating: this.isGenerating(uid),
+        domainId: null,
       };
     }
+    this.busyUsers.add(uid);
+    try {
+      const world = await this.storage.getWorld();
+      const domain = await this.storage.getDomainForUser(uid, world.id);
 
-    if (!domain) {
-      if (this.isGenerating(userId)) {
-        log.info('chat.busy_generating');
+      log.info('chat.inbound', {
+        bootstrap,
+        text: truncate(text, 400),
+        hasDomain: Boolean(domain),
+        domainId: domain?.id || null,
+        generating: this.isGenerating(uid),
+        worldTicking: this.isWorldTicking(),
+      });
+
+      if (domain && this.isWorldTicking()) {
+        const label = world.gameDate?.label || 'новый месяц';
+        log.info('chat.busy_ticking');
         return {
           reply:
-            'Остров ещё создаётся — обычно минута-две. Правитель напишет сам, как будет готов. Подожди немного.',
-          agent: 'onboarding',
-          generating: true,
-          domainId: null,
+            `Сейчас идёт шаг времени (${label}). Правитель занят делами острова — ` +
+            'напишет сам, когда месяц закроется. Твоё сообщение я увидел; повтори его после новостей, если нужно.',
+          agent: 'system',
+          generating: false,
+          ticking: true,
+          domainId: domain.id,
         };
       }
-      return this.runOnboarding(userId, text, { channel, bootstrap, log });
-    }
 
-    return this.runRuler(domain, text, { channel, log, world });
+      if (!domain) {
+        if (this.isGenerating(uid)) {
+          log.info('chat.busy_generating');
+          return {
+            reply:
+              'Остров ещё создаётся — обычно минута-две. Правитель напишет сам, как будет готов. Подожди немного.',
+            agent: 'onboarding',
+            generating: true,
+            domainId: null,
+          };
+        }
+        return await this.runOnboarding(uid, text, { channel, bootstrap, log });
+      }
+
+      return await this.runRuler(domain, text, { channel, log, world });
+    } finally {
+      this.busyUsers.delete(uid);
+    }
   }
 
   startDomainGeneration(userId, { channel, forcedName, forcedTagChoices, playerBrief }) {
@@ -1094,12 +1125,7 @@ export class GameApp {
       };
     }
     if (!binding.onboarding) binding.onboarding = emptyOnboardingDraft();
-    if (!binding.onboarding.playerBrief) {
-      binding.onboarding.playerBrief = { city: '', ruler: '', freeform: '' };
-    }
-    if (!('mode' in binding.onboarding)) binding.onboarding.mode = null;
-    if (!('pitchedName' in binding.onboarding)) binding.onboarding.pitchedName = null;
-    if (!binding.onboarding.pitchedTagChoices) binding.onboarding.pitchedTagChoices = {};
+    binding.onboarding = normalizeOnboardingDraft(binding.onboarding);
     return binding;
   }
 
@@ -1109,11 +1135,21 @@ export class GameApp {
     const draft = binding.onboarding;
     let startedGenerating = false;
 
+    const rawUser = String(text || '').trim();
+    if (!bootstrap && rawUser) {
+      maybeSwitchToDossier(draft, rawUser);
+      applyUserNamedCity(draft, rawUser);
+    }
+    draft.phase = deriveOnboardingPhase(draft, { generating: this.isGenerating(userId) });
+
     log.info('onboarding.turn', {
       bootstrap,
       historyLen: (draft.messages || []).length,
       cityName: draft.cityName,
       approved: draft.cityNameApproved,
+      pitchedName: draft.pitchedName,
+      mode: draft.mode,
+      phase: draft.phase,
       tags: draft.tagChoices,
     });
 
@@ -1132,36 +1168,44 @@ export class GameApp {
         handler: async () => ({
           ok: true,
           mode: draft.mode || null,
+          phase: deriveOnboardingPhase(draft, { generating: this.isGenerating(userId) }),
           tagChoices: draft.tagChoices,
-          playerBrief: draft.playerBrief,
+          playerBrief: {
+            city: String(draft.playerBrief?.city || '').slice(0, BRIEF_CITY_MAX),
+            ruler: String(draft.playerBrief?.ruler || '').slice(0, BRIEF_RULER_MAX),
+            freeform: String(draft.playerBrief?.freeform || '').slice(0, BRIEF_FREEFORM_MAX),
+          },
           cityName: draft.cityName,
           cityNameApproved: draft.cityNameApproved,
           canStart: Boolean(draft.cityNameApproved && draft.cityName),
           pitchedName: draft.pitchedName || null,
+          pitched: hasPitchedCity(draft),
           modes: {
             quick: 'Рандом черт → предложить имя+атмосферу+все черты → аппрув/правки → старт',
             brief: 'Игрок дал краткое описание → додумать → аппрув → старт',
             questions: 'Наводящие вопросы по ходу, tools по ответам',
+            dossier: 'Игрок несёт длинное ТЗ: пересказ, дыры, противоречия; старт только по «создавай»',
           },
         }),
       },
       {
         name: 'set_onboarding_mode',
-        description: 'Зафиксировать режим онбординга: quick | brief | questions',
+        description: 'Зафиксировать режим онбординга: quick | brief | questions | dossier',
         parameters: {
           type: 'object',
           required: ['mode'],
           properties: {
             mode: {
               type: 'string',
-              enum: ['quick', 'brief', 'questions'],
+              enum: ['quick', 'brief', 'questions', 'dossier'],
             },
           },
         },
         handler: async ({ mode }) => {
           draft.mode = mode;
+          draft.phase = deriveOnboardingPhase(draft);
           await saveDraft();
-          return { ok: true, mode: draft.mode };
+          return { ok: true, mode: draft.mode, phase: draft.phase };
         },
       },
       {
@@ -1170,11 +1214,7 @@ export class GameApp {
           'Быстрый режим: ОДИН раз заполнить все группы черт. Повторять только если игрок просит другой город. После питча forPlayer перескажи целиком.',
         parameters: { type: 'object', properties: {} },
         handler: async () => {
-          const alreadyPitched = Boolean(
-            draft.pitchedName ||
-              draft.cityName ||
-              Object.keys(draft.tagChoices || {}).length,
-          );
+          const alreadyPitched = hasPitchedCity(draft);
           if (alreadyPitched && !playerAsksReroll(text)) {
             const held = draft.pitchedName || draft.cityName || lastPitchedCityName(draft);
             return toolFail(
@@ -1191,6 +1231,7 @@ export class GameApp {
           draft.cityName = null;
           draft.cityNameApproved = false;
           draft.pitchedTagChoices = { ...chosen };
+          draft.phase = deriveOnboardingPhase(draft);
           await saveDraft();
           return {
             ok: true,
@@ -1207,7 +1248,7 @@ export class GameApp {
       {
         name: 'set_player_brief',
         description:
-          'Записать/обновить саммари пожеланий игрока для генезиса (город и правитель-связной). Можно вызывать несколько раз.',
+          'Записать/обновить бриф пожеланий для генезиса (город и правитель-связной). Для длинного ТЗ пиши подробно: детали игрока важнее краткости. Можно вызывать несколько раз.',
         parameters: {
           type: 'object',
           properties: {
@@ -1244,6 +1285,8 @@ export class GameApp {
             if (ruler) draft.playerBrief.ruler = ruler;
             if (freeform) draft.playerBrief.freeform = freeform;
           }
+          clipOnboardingBrief(draft.playerBrief);
+          draft.phase = deriveOnboardingPhase(draft);
           await saveDraft();
           return { ok: true, playerBrief: draft.playerBrief };
         },
@@ -1268,6 +1311,9 @@ export class GameApp {
           }
           draft.cityName = v.name;
           draft.cityNameApproved = true;
+          draft.pitchedName = v.name;
+          draft.pitched = true;
+          draft.phase = deriveOnboardingPhase(draft);
           await saveDraft();
           return { ok: true, cityName: v.name };
         },
@@ -1491,12 +1537,14 @@ export class GameApp {
       },
     ];
 
-    const history = (draft.messages || []).slice(-16).map((m) => ({
+    const history = (draft.messages || []).slice(-ONBOARDING_HISTORY_MESSAGES).map((m) => ({
       role: m.role === 'assistant' ? 'assistant' : 'user',
       content: m.content,
     }));
 
-    const isFirst = history.length === 0;
+    const isIntroPitch =
+      history.length === 0 &&
+      (bootstrap || !String(text || '').trim() || String(text || '').trim().length < 80);
     const userContent = bootstrap || !String(text || '').trim()
       ? '[Игрок только что открыл чат. Это первый контакт — нужна вступительная речь.]'
       : text;
@@ -1505,25 +1553,17 @@ export class GameApp {
       'КАТАЛОГ ТЕГОВ (базис для random / быстрой генерации; группы не выдумывай):',
       formatTagCatalogForPrompt(this.config),
       '',
-      isFirst
+      isIntroPitch
         ? [
             'ПЕРВЫЙ КОНТАКТ — только речь, без tools (кроме set_onboarding_mode после явного выбора — можно отложить).',
             'Расскажи: игрок — бог-покровитель; город-государство на изолированном летающем острове;',
             'правитель — НПС-связной; дальше диалог с ним; месяц сдвигает мир.',
-            'Предложи ТРИ пути (своими словами, без нумерации 1.2.3.):',
-            'быстрая генерация; краткое описание «чего хочу»; наводящие вопросы.',
+            'Предложи пути (своими словами, без нумерации 1.2.3.):',
+            'быстрая генерация; краткое описание «чего хочу»; наводящие вопросы;',
+            'или пусть пришлёт готовое подробное описание — тогда не стартуй, а разбери его.',
             'Не вызывай start_new_game и не рандомь теги в питче.',
           ].join(' ')
-        : [
-            `Режим=${draft.mode || 'не выбран'};`,
-            `черты=${formatTagChoicesForPlayer(this.config, draft.tagChoices)};`,
-            `brief=${JSON.stringify(draft.playerBrief || {})};`,
-            `питч=${draft.pitchedName || lastPitchedCityName(draft) || '—'};`,
-            `имя=${draft.cityName || '—'} approved=${draft.cityNameApproved}.`,
-            draft.pitchedName || Object.keys(draft.tagChoices || {}).length
-              ? 'Город уже предложен. НЕ вызывай randomize_all_tags и не выдумывай новый. Согласие («да/начинаем/создавай») → set_city_name(питч) и start_new_game. Новый набор — только если игрок просит другой город. Вопрос «создаётся?» — не рандомь, либо стартуй уже предложенный, либо честно скажи что ждёшь подтверждения имени.'
-              : 'Питча ещё нет. В quick один раз вызови randomize_all_tags, опиши город и спроси согласия.',
-          ].join(' '),
+        : formatOnboardingStatusCard(draft, this.config, { generating: this.isGenerating(userId) }),
     ].join('\n');
     const result = await this.runtime.run({
       agentId: 'onboarding',
@@ -1534,24 +1574,25 @@ export class GameApp {
       scene: 'onboarding',
     });
 
-    // Страховка: агент сказал «записал», но не вызвал tools — сохраняем freeform сами.
+    // Страховка: агент сказал «записал», но не вызвал tools.
     const usedTools = new Set((result.toolTrace || []).map((t) => t.name));
     const userSaidSomething =
       !bootstrap && String(text || '').trim().length >= 8 && !/^\[Игрок/.test(String(text));
+    const chunk = String(text || '').trim();
     if (userSaidSomething && !usedTools.has('set_player_brief') && !usedTools.has('start_new_game')) {
       const looksLikeNameOnly =
         draft.cityNameApproved ||
-        /^(давай|ок|хорошо|ладно|этот|выбираю)\b/i.test(String(text).trim()) ||
-        (String(text).trim().length < 40 &&
-          /^[\p{L}\p{M}\d\s\-']+$/u.test(String(text).trim()));
-      if (!looksLikeNameOnly) {
+        /^(давай|ок|хорошо|ладно|этот|выбираю|создавай|начинаем|готов)\b/i.test(chunk) ||
+        (chunk.length < 40 && /^[\p{L}\p{M}\d\s\-']+$/u.test(chunk));
+      if (!looksLikeNameOnly && chunk.length < LONG_USER_MESSAGE_MIN) {
         if (!draft.playerBrief) draft.playerBrief = { city: '', ruler: '', freeform: '' };
         const prev = draft.playerBrief.freeform || '';
-        const chunk = String(text).trim();
         if (!prev.includes(chunk.slice(0, 40))) {
           draft.playerBrief.freeform = prev ? `${prev}\n${chunk}` : chunk;
+          clipOnboardingBrief(draft.playerBrief);
         }
       }
+      rememberLongUserBrief(draft, chunk, { usedBriefTool: usedTools.has('set_player_brief') });
     }
     if (
       userSaidSomething &&
@@ -1559,18 +1600,13 @@ export class GameApp {
       !usedTools.has('set_tag_choice') &&
       !usedTools.has('start_new_game')
     ) {
-      const prefText = [
-        draft.playerBrief?.city,
-        draft.playerBrief?.freeform,
-        text,
-      ]
-        .filter(Boolean)
-        .join('\n');
+      const prefText = collectOnboardingPreferenceText(draft);
       draft.tagChoices = inferTagChoicesFromText(this.config, prefText, draft.tagChoices || {});
     }
 
     let reply = result.text;
-    if (startedGenerating && !String(reply || '').trim()) {
+    const rawReply = String(reply || '');
+    if (startedGenerating && !rawReply.trim()) {
       reply = formatOnboardingStartReply(draft.cityName);
     }
 
@@ -1588,6 +1624,7 @@ export class GameApp {
       draft.cityName = auto.name;
       draft.cityNameApproved = true;
       draft.pitchedName = auto.name;
+      draft.pitched = true;
       const prefText = collectOnboardingPreferenceText(draft);
       draft.tagChoices = inferTagChoicesFromText(
         this.config,
@@ -1607,8 +1644,18 @@ export class GameApp {
       startedGenerating = true;
       reply = formatOnboardingStartReply(draft.cityName);
     } else if (auto.stripFalseStart) {
-      log.warn('onboarding.false_start_claim', { replyPreview: truncate(reply, 200) });
-      reply = ONBOARDING_FALSE_START_REPLY;
+      log.warn('onboarding.false_start_claim', {
+        reason: auto.reason,
+        replyPreview: truncate(rawReply, 400),
+      });
+      reply = ONBOARDING_NEED_NAME_NOTE;
+    } else if (auto.appendNeedName) {
+      log.warn('onboarding.false_start_claim', {
+        reason: auto.reason,
+        keptReply: true,
+        replyPreview: truncate(rawReply, 400),
+      });
+      reply = appendNeedNameNote(rawReply);
     }
 
     // Нельзя говорить «уже создан», пока генезис только стартовал.
@@ -1625,13 +1672,16 @@ export class GameApp {
     draft.messages.push({ role: 'assistant', content: reply, at: new Date().toISOString() });
     if (draft.messages.length > 40) draft.messages = draft.messages.slice(-30);
     const nameInReply = extractPitchedCityName(reply);
-    if (nameInReply) {
+    if (nameInReply && !draft.cityNameApproved) {
       draft.pitchedName = nameInReply;
       draft.pitched = true;
       if (Object.keys(draft.tagChoices || {}).length) {
         draft.pitchedTagChoices = { ...draft.tagChoices };
       }
     }
+    draft.phase = deriveOnboardingPhase(draft, {
+      generating: startedGenerating || this.isGenerating(userId),
+    });
     await saveDraft();
 
     log.info('onboarding.reply', {
