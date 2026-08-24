@@ -27,6 +27,8 @@ import {
   formatPlotTagsForPrompt,
   clipPlotText,
   pickPlotTags,
+  pickOpeningPlotTags,
+  openingPlotCount,
   judgePlotSeed,
   warmPlotlines,
   PLOT_SUMMARY_MAX,
@@ -174,14 +176,28 @@ function pushChronicle(domain, { text, importance, world, plotIds = [], processI
 }
 
 /** Завязка новой нити по жребию тегов. */
-export async function seedPlot({ config, runtime, domain, world, tags = null, fromClosed = null, log: parentLog }) {
+export async function seedPlot({
+  config,
+  runtime,
+  domain,
+  world,
+  tags = null,
+  fromClosed = null,
+  opening = false,
+  log: parentLog,
+}) {
   const log = (parentLog || getLogger()).child({ scope: 'storyteller.seed', domainId: domain.id });
   const cfg = plotConfig(config);
   const maxChars = chronicleMaxChars(config);
   const statIds = (config.stats || []).map((s) => s.id).join(', ');
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const roll = attempt === 0 && tags?.length ? tags : pickPlotTags(cfg);
+    const roll =
+      attempt === 0 && tags?.length
+        ? tags
+        : opening
+          ? pickOpeningPlotTags(cfg)
+          : pickPlotTags(cfg);
     const draft = { data: null };
     const asked = await askPlotSeed({
       runtime,
@@ -193,6 +209,7 @@ export async function seedPlot({ config, runtime, domain, world, tags = null, fr
       statIds,
       draft,
       fromClosed,
+      opening,
     });
     if (!asked) {
       log.warn('storyteller.seed_failed', { attempt });
@@ -208,6 +225,11 @@ export async function seedPlot({ config, runtime, domain, world, tags = null, fr
         tags: roll.map((t) => t.tagId),
       });
       continue;
+    }
+
+    if (opening) {
+      asked.importance = Math.min(40, Math.max(15, Number(asked.importance) || 25));
+      asked.maxAgeMonths = Math.min(5, Math.max(2, Number(asked.maxAgeMonths) || 4));
     }
 
     const plot = createPlotline({
@@ -251,7 +273,47 @@ export async function seedPlot({ config, runtime, domain, world, tags = null, fr
   return null;
 }
 
-async function askPlotSeed({ runtime, domain, world, tags, log, maxChars, statIds, draft, fromClosed = null }) {
+/** 1–2 коротких истории сразу после генезиса. Ошибка посева город не ломает. */
+export async function seedOpeningPlots({ config, runtime, domain, world, log: parentLog, rng = Math.random }) {
+  const log = (parentLog || getLogger()).child({ scope: 'storyteller.opening', domainId: domain.id });
+  const want = openingPlotCount(config, rng);
+  if (want <= 0) return [];
+  const seeded = [];
+  for (let i = 0; i < want; i += 1) {
+    try {
+      const one = await seedPlot({
+        config,
+        runtime,
+        domain,
+        world,
+        opening: true,
+        log,
+      });
+      if (one?.plot) seeded.push(one);
+    } catch (err) {
+      log.warn('storyteller.opening_failed', { error: err.message, index: i });
+    }
+  }
+  log.info('storyteller.opening_done', {
+    wanted: want,
+    got: seeded.length,
+    titles: seeded.map((s) => s.plot.title),
+  });
+  return seeded;
+}
+
+async function askPlotSeed({
+  runtime,
+  domain,
+  world,
+  tags,
+  log,
+  maxChars,
+  statIds,
+  draft,
+  fromClosed = null,
+  opening = false,
+}) {
   const tools = [
     {
       name: 'submit_plot_seed',
@@ -339,7 +401,14 @@ async function askPlotSeed({ runtime, domain, world, tags, log, maxChars, statId
               ]
                 .filter(Boolean)
                 .join('\n')
-            : 'Завязка должна быть оригинальной и интересной — такой, чтобы захотелось узнать, что будет дальше.',
+            : opening
+              ? [
+                  'Это СТАРТ нового города: короткая живая завязка, не катастрофа и не тайна мироздания.',
+                  'Масштаб — соседство или несколько человек. Важность 15–35, срок 2–5 месяцев.',
+                  'Игрок сразу должен понять, куда можно вмешаться: решение, поручение или вопрос правителю.',
+                  'Не делай проклятие всего острова, войну, мор и конец света.',
+                ].join(' ')
+              : 'Завязка должна быть оригинальной и интересной — такой, чтобы захотелось узнать, что будет дальше.',
           '',
           `Направление: ${formatPlotTagsForPrompt(tags)}`,
           '',

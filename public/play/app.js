@@ -91,10 +91,24 @@ async function refresh({ force = false } = {}) {
         ? `${state.domain.ruler.name}, ${state.domain.ruler.title || 'правитель'}`
         : '';
       renderStats(state.domain.stats);
+      const img = $('cityImage');
+      if (state.domain.imageUrl) {
+        if (img.getAttribute('src') !== state.domain.imageUrl) img.src = state.domain.imageUrl;
+        img.alt = state.domain.name;
+        img.classList.remove('hidden');
+      } else {
+        img.removeAttribute('src');
+        img.alt = '';
+        img.classList.add('hidden');
+      }
     } else {
       $('cityName').textContent = 'Города пока нет';
       $('rulerName').textContent = '';
       $('statsRow').innerHTML = '';
+      const img = $('cityImage');
+      img.removeAttribute('src');
+      img.alt = '';
+      img.classList.add('hidden');
     }
 
     if (force || state.history.length !== renderedCount) {
@@ -108,8 +122,9 @@ async function refresh({ force = false } = {}) {
     $('wipeNote').hidden = !state.canWipe;
     $('btnWipe').disabled = Boolean(state.ticking);
 
-    if (state.generating) setBanner('Остров создаётся — правитель напишет сам, это минута-две.');
-    else if (state.ticking) setBanner('Идёт шаг времени: правитель занят делами месяца.');
+    if (state.generating) {
+      setBanner(state.generatingProgress || 'Остров создаётся — правитель напишет сам, это минута-две.');
+    } else if (state.ticking) setBanner('Идёт шаг времени: правитель занят делами месяца.');
     else setBanner('');
 
     await refreshInspector();

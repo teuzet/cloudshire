@@ -14,6 +14,7 @@ import {
   assembleDescription,
 } from './models.js';
 import { formatPlayerBrief } from './onboarding.js';
+import { seedOpeningPlots } from './storyteller.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 
@@ -91,7 +92,7 @@ function fallbackCore(lockedName, playerBrief) {
       'Главная площадь открыта к небу.',
       'Питьевую воду собирают и хранят в цистернах.',
       'Рынок собирается трижды в неделю.',
-      'Стража несёт вахту у небесной пристани.',
+      'Стража несёт вахту у края острова.',
       'Совет старейшин собирается при храме.',
       'Дети учат предания у края обрыва, но не подходят близко.',
       'Чужаков встречают осторожно, но с угощением.',
@@ -213,7 +214,7 @@ async function generateCore({
     },
   ];
 
-  onProgress?.('Шаг 1/2: ядро города…');
+  await onProgress?.('ядро города');
   log.info('genesis.core.begin', {
     lockedName,
     briefPreview: truncate(briefText, 400),
@@ -380,7 +381,7 @@ async function generateAspectBatch({
     .map(([id, text]) => `### уже есть ${id}\n${String(text).slice(0, 200)}…`)
     .join('\n');
 
-  onProgress?.(`Аспекты: ${batch.map((b) => b.title).join(', ')}`);
+  await onProgress?.(`аспекты: ${batch.map((b) => b.title).join(', ')}`);
   log.info('genesis.aspects.begin', { titles: batch.map((b) => b.title) });
 
   const result = await runtime.run({
@@ -473,7 +474,7 @@ export async function generateDomain({
 
   const aspects = {};
   const batches = chunk(aspectsConfig, batchSize);
-  onProgress?.(`Шаг 2/2: описание (${batches.length} пачек)…`);
+  await onProgress?.(`описание города, ${batches.length} части`);
 
   for (const batch of batches) {
     const part = await generateAspectBatch({
@@ -567,7 +568,10 @@ export async function generateDomain({
       ? core.greeting
       : defaultGreeting(domain.name);
 
-  onProgress?.(`Остров «${domain.name}» готов.`);
+  await onProgress?.(`остров «${domain.name}» собран`);
+  await onProgress?.('первые истории');
+  await seedOpeningPlots({ config, runtime, domain, world, log });
+  await storage.saveDomain(domain);
   log.info('genesis.saved', {
     domainId: domain.id,
     name: domain.name,
@@ -575,6 +579,7 @@ export async function generateDomain({
     aspectChars: Object.fromEntries(
       Object.entries(aspects).map(([k, v]) => [k, String(v).length]),
     ),
+    openingPlots: (domain.plotlines || []).map((p) => p.title),
   });
   return domain;
 }

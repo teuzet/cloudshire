@@ -1,5 +1,25 @@
 import OpenAI from 'openai';
 
+/** DALL·E снят в мае 2026: response_format больше нельзя слать, модель — gpt-image-*. */
+export function normalizeImageParams({ model, prompt, size, quality } = {}) {
+  const requested = String(model || '').trim();
+  const gptImage = !requested || /^dall-e/i.test(requested) ? 'gpt-image-2' : requested;
+  let q = quality || undefined;
+  if (!q || /^(standard|hd)$/i.test(q)) {
+    q = /^hd$/i.test(q) ? 'high' : 'medium';
+  }
+  let s = size || '1536x1024';
+  if (/^gpt-image-1(?!-2)/i.test(gptImage) && s === '1792x1024') s = '1536x1024';
+  if (/^gpt-image-1(?!-2)/i.test(gptImage) && s === '1024x1792') s = '1024x1536';
+  return {
+    model: gptImage,
+    prompt,
+    n: 1,
+    size: s,
+    quality: q,
+  };
+}
+
 export class LlmError extends Error {
   constructor(message, cause) {
     super(message);
@@ -77,6 +97,30 @@ export class OpenAiProvider {
     } catch (err) {
       if (err instanceof LlmError) throw err;
       throw new LlmError(err.message || 'OpenAI request failed', err);
+    }
+  }
+
+  /**
+   * Картинка через Images API. Возвращает буфер PNG/JPEG.
+   */
+  async image({ model, prompt, size, quality }) {
+    this.ensureClient();
+    try {
+      const body = normalizeImageParams({ model, prompt, size, quality });
+      const result = await this.client.images.generate(body);
+      const item = result.data?.[0];
+      if (item?.b64_json) {
+        return { buffer: Buffer.from(item.b64_json, 'base64'), raw: result };
+      }
+      if (item?.url) {
+        const fetched = await fetch(item.url);
+        if (!fetched.ok) throw new LlmError(`Image download failed: ${fetched.status}`);
+        return { buffer: Buffer.from(await fetched.arrayBuffer()), raw: result };
+      }
+      throw new LlmError('Empty image from OpenAI');
+    } catch (err) {
+      if (err instanceof LlmError) throw err;
+      throw new LlmError(err.message || 'OpenAI image request failed', err);
     }
   }
 }

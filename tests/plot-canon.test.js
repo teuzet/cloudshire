@@ -7,6 +7,8 @@ import {
   plotConfig,
   plotHasActiveProcess,
   pickPlotTags,
+  pickOpeningPlotTags,
+  openingPlotCount,
   pickSequelSeed,
   plotSeedChance,
   liveStoryImportance,
@@ -286,6 +288,32 @@ test('жребий масштаба уважает вес: город чаще �
   });
   const picks = [0.1, 0.4, 0.7, 0.9].map((r) => pickPlotTags(cfg, () => r)[0].tagId);
   assert.deepEqual(picks, ['quarter', 'city', 'city', 'city']);
+});
+
+test('стартовый посев держит мелкий масштаб и считает 1–2 истории', () => {
+  const cfg = plotConfig({
+    tick: {
+      plot: {
+        tagGroups: [
+          {
+            id: 'scale',
+            name: 'Масштаб',
+            tags: [
+              { id: 'city', name: 'Город', weight: 10 },
+              { id: 'neighborhood', name: 'Соседство', weight: 1 },
+              { id: 'person', name: 'Человек', weight: 1 },
+            ],
+          },
+        ],
+      },
+    },
+  });
+  for (const r of [0.01, 0.4, 0.8, 0.99]) {
+    const tag = pickOpeningPlotTags(cfg, () => r).find((t) => t.groupId === 'scale');
+    assert.ok(['neighborhood', 'person'].includes(tag.tagId));
+  }
+  assert.equal(openingPlotCount({ genesis: { openingPlots: { min: 1, max: 1 } } }), 1);
+  assert.equal(openingPlotCount({ genesis: { openingPlots: { min: 2, max: 2 } } }), 2);
 });
 
 test('продолжение сеется только с крючком, пустой доской и по шансу', () => {

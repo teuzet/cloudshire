@@ -31,6 +31,25 @@ async function sendChunks(bot, chatId, text) {
   }
 }
 
+async function syncBotMenu(bot, commands) {
+  const list = (commands || [])
+    .map((c) => ({
+      command: String(c.command || '')
+        .replace(/^\//, '')
+        .trim()
+        .toLowerCase(),
+      description: String(c.description || '').trim().slice(0, 256),
+    }))
+    .filter((c) => c.command && c.description);
+  if (!list.length) return;
+  try {
+    await bot.setMyCommands(list);
+    console.log(`[telegram] menu: ${list.map((c) => `/${c.command}`).join(' ')}`);
+  } catch (err) {
+    console.warn('[telegram] setMyCommands failed:', err.message);
+  }
+}
+
 function deleteAskText(name) {
   return (
     `Чтобы удалить остров «${name}», напиши его имя точно так. ` +
@@ -72,10 +91,13 @@ export function startTelegramBot({ config, app, storage }) {
   }
 
   const bot = new TelegramBot(token, { polling: true });
+  void syncBotMenu(bot, tg.commands);
   /** @type {Map<string, number|string>} */
   const chatByUser = new Map();
   /** @type {Map<string, { name: string }>} */
   const pendingDelete = new Map();
+  /** @type {Map<string, { chatId: number|string, messageId: number }>} */
+  const editable = new Map();
 
   async function rememberChat(userId, chatId) {
     const uid = String(userId);
@@ -121,14 +143,55 @@ export function startTelegramBot({ config, app, storage }) {
 
   void loadPersistedChats();
 
-  app.onOutbound(async ({ userId, message, channel }) => {
+  app.onOutbound(async ({ userId, message, channel, photoPath, edit, kind }) => {
     if (channel && channel !== 'telegram') return;
     const chatId = chatByUser.get(String(userId));
-    if (!chatId) return;
+    if (!chatId) {
+      console.warn(`[telegram] no chatId for ${userId}, drop ${kind || 'message'}`);
+      return;
+    }
     try {
-      await sendChunks(bot, chatId, message);
+      if (edit && message) {
+        const prev = editable.get(userId);
+        if (prev) {
+          try {
+            await bot.editMessageText(message, {
+              chat_id: prev.chatId,
+              message_id: prev.messageId,
+            });
+          } catch (err) {
+            if (!/message is not modified/i.test(err.message || '')) {
+              const sent = await bot.sendMessage(chatId, message);
+              editable.set(userId, { chatId, messageId: sent.message_id });
+            }
+          }
+        } else {
+          const sent = await bot.sendMessage(chatId, message);
+          editable.set(userId, { chatId, messageId: sent.message_id });
+        }
+        if (kind === 'game_start' || kind === 'generating_error' || kind === 'island_reveal') {
+          editable.delete(userId);
+        }
+        return;
+      }
+      if (kind === 'game_start' || kind === 'generating_error' || kind === 'island_reveal') {
+        editable.delete(userId);
+      }
+      if (photoPath) {
+        if (message) await sendChunks(bot, chatId, message);
+        await bot.sendPhoto(chatId, photoPath);
+        return;
+      }
+      if (message) await sendChunks(bot, chatId, message);
     } catch (err) {
       console.error('[telegram] outbound failed:', err.message);
+      if (photoPath && message) {
+        try {
+          await sendChunks(bot, chatId, message);
+        } catch {
+          /* already logged */
+        }
+      }
     }
   });
 

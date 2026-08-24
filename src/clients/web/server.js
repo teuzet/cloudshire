@@ -13,6 +13,8 @@ import { getLogger, requestLogger, truncate } from '../../log.js';
 import { statEpithet } from '../../game/stats.js';
 import { chronicleEntries, castRecords } from '../../game/models.js';
 import { FINISH_SHORT } from '../../game/rolls.js';
+import { islandImageFile } from '../../game/islandImage.js';
+import fs from 'node:fs/promises';
 
 /** Заголовки нитей и дел для карточек хроники в тестовом клиенте. */
 function chronicleRelations(entry, domain) {
@@ -124,13 +126,15 @@ export function createWebServer({ config, app, runtime, storage }) {
 
   const pushLogs = new Map(); // userId -> messages[]
 
-  app.onOutbound(async ({ userId, message, kind, domainId }) => {
+  app.onOutbound(async ({ userId, message, kind, domainId, photoPath }) => {
     getLogger().info('outbound', {
       userId,
       kind,
       domainId,
       preview: truncate(message, 300),
+      photoPath: photoPath || null,
     });
+    if (!message) return;
     const list = pushLogs.get(String(userId)) || [];
     list.push({
       role: 'assistant',
@@ -169,6 +173,7 @@ export function createWebServer({ config, app, runtime, storage }) {
           gameDate: world.gameDate,
           scheduler: world.scheduler || null,
           generating: app.isGenerating(userId),
+          generatingProgress: app.generatingProgress.get(String(userId)) || null,
           ticking: app.isWorldTicking(),
           canForceTick: playDevEnabled,
           canWipe: playDevEnabled,
@@ -182,12 +187,31 @@ export function createWebServer({ config, app, runtime, storage }) {
                   ? { name: character.name, title: character.title }
                   : null,
                 stats: statsWithEpithets(domain.stats, config),
+                imageUrl: domain.imagePath
+                  ? `/api/play/island-image?userId=${encodeURIComponent(userId)}`
+                  : null,
               }
             : null,
           history,
           pushes: (pushLogs.get(userId) || []).slice(-10),
         });
       } catch (err) {
+        req.log?.error('http.error', { error: err.message });
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    server.get('/api/play/island-image', async (req, res) => {
+      try {
+        const userId = String(req.query.userId || 'local-user');
+        const world = await storage.getWorld();
+        const domain = await storage.getDomainForUser(userId, world.id);
+        if (!domain?.imagePath) return res.status(404).end();
+        const abs = islandImageFile(config, domain.id);
+        await fs.access(abs);
+        res.type('png').sendFile(abs);
+      } catch (err) {
+        if (err.code === 'ENOENT') return res.status(404).end();
         req.log?.error('http.error', { error: err.message });
         res.status(500).json({ error: err.message });
       }

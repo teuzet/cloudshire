@@ -29,6 +29,14 @@ import {
   collectOnboardingPreferenceText,
   randomizeAllTags,
   formatTagChoicesForPlayer,
+  claimsOnboardingGenerating,
+  claimsOnboardingAlreadyCreated,
+  extractPitchedCityName,
+  lastPitchedCityName,
+  playerAsksReroll,
+  planOnboardingAutoStart,
+  formatOnboardingStartReply,
+  ONBOARDING_FALSE_START_REPLY,
 } from './onboarding.js';
 import {
   normalizeDomainProcesses,
@@ -50,6 +58,9 @@ import {
 } from './processes.js';
 import { formatBoardForSpeech, warmPlotlines, plotConfig, findPlotline, clipPlotText, PLOT_TITLE_MAX, PLOT_SUMMARY_MAX } from './plotlines.js';
 import { islandDeleteCheck } from '../clients/telegram/access.js';
+import { generateIslandImage, removeIslandImage } from './islandImage.js';
+import { formatIslandReveal } from './islandReveal.js';
+import { formatProgressBar } from './progressBar.js';
 import { estimateProcessDuration } from './durationJudge.js';
 import { ensureErrandForProcess, linkProcessToPlotline } from './plotEngine.js';
 import { dialogHistoryForPrompt } from './memory.js';
@@ -86,16 +97,6 @@ function looksLikeToolDump(text) {
   }
   if (/"summary"\s*:/.test(t) && (/"durationMonths"\s*:/.test(t) || /"expectedMonths"\s*:/.test(t))) return true;
   return false;
-}
-
-function claimsOnboardingGenerating(text) {
-  return /созда(ёт|ется|ётся|ю)|начинается\s+процесс|поднимаю\s+остров|остров.{0,30}созда|правитель.{0,50}(напиш|свяж)|жди.{0,30}минут/i.test(
-    String(text || ''),
-  );
-}
-
-function claimsOnboardingAlreadyCreated(text) {
-  return /успешно\s+создан|уже\s+создан|остров.{0,20}готов|был\s+создан/i.test(String(text || ''));
 }
 
 function processPaceFeel(process) {
@@ -895,6 +896,8 @@ export class GameApp {
     this.runtime = runtime;
     this.outboundHandlers = new Set();
     this.generatingUsers = new Set();
+    /** Текст прогресса генезиса (для Telegram edit и баннера /play). */
+    this.generatingProgress = new Map();
     /** Пока идёт world tick — чат с доменом отвечает системно. */
     this.worldTicking = false;
   }
@@ -917,8 +920,13 @@ export class GameApp {
   }
 
   async emitOutbound(userId, message, meta = {}) {
+    const uid = String(userId);
+    if (meta.kind === 'progress') this.generatingProgress.set(uid, message);
+    if (meta.kind === 'game_start' || meta.kind === 'generating_error' || meta.kind === 'island_reveal') {
+      this.generatingProgress.delete(uid);
+    }
     for (const handler of this.outboundHandlers) {
-      await handler({ userId: String(userId), message, ...meta });
+      await handler({ userId: uid, message, ...meta });
     }
   }
 
@@ -1011,11 +1019,19 @@ export class GameApp {
           tagChoices: forcedTagChoices || {},
           playerBrief: truncate(playerBrief, 500),
         });
-        await this.emitOutbound(uid, 'Создаю твой летающий остров… Это займёт около минуты-двух.', {
-          channel,
-          agent: 'onboarding',
-          kind: 'generating',
-        });
+        const total = 5;
+        const pushProgress = async (step, label) => {
+          const text = formatProgressBar(step, total, label);
+          log.info('genesis.progress', { step, total, label });
+          await this.emitOutbound(uid, text, {
+            channel,
+            agent: 'onboarding',
+            kind: 'progress',
+            edit: 'genesis',
+          });
+        };
+
+        await pushProgress(0, 'начинаю…');
 
         const domain = await generateDomain({
           config: this.config,
@@ -1027,13 +1043,38 @@ export class GameApp {
           forcedTagChoices: forcedTagChoices || {},
           playerBrief: playerBrief || null,
           log,
-          onProgress: (msg) => log.info('genesis.progress', { message: msg }),
+          onProgress: async (msg) => {
+            const label = String(msg || '').trim();
+            let step = 2;
+            if (/ядро/i.test(label)) step = 1;
+            else if (/описание|аспект/i.test(label)) step = 2;
+            else if (/истори/i.test(label)) step = 3;
+            else if (/собран|готов/i.test(label)) step = 3;
+            await pushProgress(step, label);
+          },
         });
 
         const intro = domain._greeting.startsWith(domain.characters[0].name)
           ? domain._greeting
           : `${domain.characters[0].name}: ${domain._greeting}`;
 
+        await pushProgress(4, 'рисую вид острова…');
+        const picture = await generateIslandImage({ config: this.config, domain, log });
+        if (picture?.path) {
+          domain.imagePath = picture.path;
+          await this.storage.saveDomain(domain);
+        }
+
+        await pushProgress(5, 'остров готов');
+        const reveal = formatIslandReveal(domain);
+        await this.persistDialog(domain, 'assistant', reveal, { kind: 'island_reveal' });
+        await this.emitOutbound(uid, reveal, {
+          channel,
+          agent: 'onboarding',
+          domainId: domain.id,
+          kind: 'island_reveal',
+          photoPath: picture?.abs || null,
+        });
         await this.persistDialog(domain, 'assistant', intro);
         await this.emitOutbound(uid, intro, {
           channel,
@@ -1045,6 +1086,7 @@ export class GameApp {
           domainId: domain.id,
           name: domain.name,
           greetingPreview: truncate(intro, 300),
+          imagePath: domain.imagePath || null,
         });
       } catch (err) {
         log.error('genesis.failed', {
@@ -1054,7 +1096,7 @@ export class GameApp {
         await this.emitOutbound(
           uid,
           `Не удалось создать остров: ${err.message || err}. Можно поправить имя/теги и снова попросить старт.`,
-          { channel, agent: 'onboarding', kind: 'generating_error' },
+          { channel, agent: 'onboarding', kind: 'generating_error', edit: 'genesis' },
         );
       } finally {
         this.generatingUsers.delete(uid);
@@ -1085,6 +1127,8 @@ export class GameApp {
       binding.onboarding.playerBrief = { city: '', ruler: '', freeform: '' };
     }
     if (!('mode' in binding.onboarding)) binding.onboarding.mode = null;
+    if (!('pitchedName' in binding.onboarding)) binding.onboarding.pitchedName = null;
+    if (!binding.onboarding.pitchedTagChoices) binding.onboarding.pitchedTagChoices = {};
     return binding;
   }
 
@@ -1122,6 +1166,7 @@ export class GameApp {
           cityName: draft.cityName,
           cityNameApproved: draft.cityNameApproved,
           canStart: Boolean(draft.cityNameApproved && draft.cityName),
+          pitchedName: draft.pitchedName || null,
           modes: {
             quick: 'Рандом черт → предложить имя+атмосферу+все черты → аппрув/правки → старт',
             brief: 'Игрок дал краткое описание → додумать → аппрув → старт',
@@ -1151,11 +1196,30 @@ export class GameApp {
       {
         name: 'randomize_all_tags',
         description:
-          'Быстрый режим: случайно заполнить ВСЕ группы черт из каталога. В ответе forPlayer — текст, который ОБЯЗАТЕЛЬНО перескажи игроку вместе с именем и атмосферой.',
+          'Быстрый режим: ОДИН раз заполнить все группы черт. Повторять только если игрок просит другой город. После питча forPlayer перескажи целиком.',
         parameters: { type: 'object', properties: {} },
         handler: async () => {
+          const alreadyPitched = Boolean(
+            draft.pitchedName ||
+              draft.cityName ||
+              Object.keys(draft.tagChoices || {}).length,
+          );
+          if (alreadyPitched && !playerAsksReroll(text)) {
+            const held = draft.pitchedName || draft.cityName || lastPitchedCityName(draft);
+            return toolFail(
+              'already_pitched',
+              `Город уже предложен${held ? ` («${held}»)` : ''}. Не бросай теги заново. ` +
+                'Если игрок согласен — set_city_name(это имя) и start_new_game. ' +
+                'randomize_all_tags — только после явной просьбы «другой город / заново».',
+            );
+          }
           const { chosen, applied, forPlayer } = randomizeAllTags(this.config);
           draft.tagChoices = chosen;
+          draft.pitchedName = null;
+          draft.pitched = false;
+          draft.cityName = null;
+          draft.cityNameApproved = false;
+          draft.pitchedTagChoices = { ...chosen };
           await saveDraft();
           return {
             ok: true,
@@ -1165,7 +1229,7 @@ export class GameApp {
             next:
               'Запиши атмосферу и правителя в set_player_brief. Сам придумай звучный топоним (не из списка — списка нет). ' +
               'В речи игроку: имя + ВСЕ черты из forPlayer своими словами + атмосфера + правитель. ' +
-              'Без слов «теги/изюминка/пакет/рандом».',
+              'Без слов «теги/изюминка/пакет/рандом». Этот набор держи, пока игрок не попросит другой город.',
           };
         },
       },
@@ -1405,10 +1469,18 @@ export class GameApp {
             );
           }
           if (!draft.cityNameApproved || !draft.cityName) {
-            return toolFail(
-              'city_name_required',
-              'Сначала утверди имя города через set_city_name (с согласия игрока), затем start_new_game.',
-            );
+            const fallback = lastPitchedCityName(draft);
+            const v = fallback ? validateCityName(fallback) : { ok: false };
+            if (v.ok) {
+              draft.cityName = v.name;
+              draft.cityNameApproved = true;
+              await saveDraft();
+            } else {
+              return toolFail(
+                'city_name_required',
+                'Сначала утверди имя города через set_city_name (с согласия игрока), затем start_new_game.',
+              );
+            }
           }
           if (this.isGenerating(userId)) {
             return { ok: true, status: 'generating' };
@@ -1475,7 +1547,11 @@ export class GameApp {
             `Режим=${draft.mode || 'не выбран'};`,
             `черты=${formatTagChoicesForPlayer(this.config, draft.tagChoices)};`,
             `brief=${JSON.stringify(draft.playerBrief || {})};`,
-            `имя=${draft.cityName || '—'} approved=${draft.cityNameApproved}`,
+            `питч=${draft.pitchedName || lastPitchedCityName(draft) || '—'};`,
+            `имя=${draft.cityName || '—'} approved=${draft.cityNameApproved}.`,
+            draft.pitchedName || Object.keys(draft.tagChoices || {}).length
+              ? 'Город уже предложен. НЕ вызывай randomize_all_tags и не выдумывай новый. Согласие («да/начинаем/создавай») → set_city_name(питч) и start_new_game. Новый набор — только если игрок просит другой город. Вопрос «создаётся?» — не рандомь, либо стартуй уже предложенный, либо честно скажи что ждёшь подтверждения имени.'
+              : 'Питча ещё нет. В quick один раз вызови randomize_all_tags, опиши город и спроси согласия.',
           ].join(' '),
     ].join('\n');
     const result = await this.runtime.run({
@@ -1524,27 +1600,33 @@ export class GameApp {
 
     let reply = result.text;
     if (startedGenerating && !String(reply || '').trim()) {
-      reply = `Отлично. Поднимаю остров «${draft.cityName}» — обычно минута-две. Правитель напишет сам.`;
+      reply = formatOnboardingStartReply(draft.cityName);
     }
 
-    // Страховка: агент написал «создаётся», но не вызвал start_new_game.
-    if (
-      draft.cityNameApproved &&
-      draft.cityName &&
-      !usedTools.has('start_new_game') &&
-      !this.isGenerating(userId) &&
-      (claimsOnboardingGenerating(reply) || claimsOnboardingAlreadyCreated(reply))
-    ) {
-      log.warn('onboarding.auto_start_new_game', {
-        cityName: draft.cityName,
-        reason: 'reply claimed generating without tool',
-      });
+    const auto = planOnboardingAutoStart({
+      userText: text,
+      reply,
+      draft,
+      usedStart: usedTools.has('start_new_game'),
+      generating: this.isGenerating(userId),
+    });
+    if (auto.start) {
+      if (usedTools.has('randomize_all_tags') && Object.keys(draft.pitchedTagChoices || {}).length) {
+        draft.tagChoices = { ...draft.pitchedTagChoices };
+      }
+      draft.cityName = auto.name;
+      draft.cityNameApproved = true;
+      draft.pitchedName = auto.name;
       const prefText = collectOnboardingPreferenceText(draft);
       draft.tagChoices = inferTagChoicesFromText(
         this.config,
         prefText,
         draft.tagChoices || {},
       );
+      log.warn('onboarding.auto_start_new_game', {
+        cityName: draft.cityName,
+        reason: auto.reason,
+      });
       this.startDomainGeneration(userId, {
         channel,
         forcedName: draft.cityName,
@@ -1552,13 +1634,16 @@ export class GameApp {
         playerBrief: { ...(draft.playerBrief || {}) },
       });
       startedGenerating = true;
-      reply = `Отлично. Поднимаю остров «${draft.cityName}» — обычно минута-две. Правитель напишет сам.`;
+      reply = formatOnboardingStartReply(draft.cityName);
+    } else if (auto.stripFalseStart) {
+      log.warn('onboarding.false_start_claim', { replyPreview: truncate(reply, 200) });
+      reply = ONBOARDING_FALSE_START_REPLY;
     }
 
     // Нельзя говорить «уже создан», пока генезис только стартовал.
     if (startedGenerating || this.isGenerating(userId)) {
       if (claimsOnboardingAlreadyCreated(reply) || !String(reply || '').trim()) {
-        reply = `Отлично. Поднимаю остров «${draft.cityName}» — обычно минута-две. Правитель напишет сам.`;
+        reply = formatOnboardingStartReply(draft.cityName);
       }
     }
 
@@ -1568,7 +1653,14 @@ export class GameApp {
     }
     draft.messages.push({ role: 'assistant', content: reply, at: new Date().toISOString() });
     if (draft.messages.length > 40) draft.messages = draft.messages.slice(-30);
-    draft.pitched = true;
+    const nameInReply = extractPitchedCityName(reply);
+    if (nameInReply) {
+      draft.pitchedName = nameInReply;
+      draft.pitched = true;
+      if (Object.keys(draft.tagChoices || {}).length) {
+        draft.pitchedTagChoices = { ...draft.tagChoices };
+      }
+    }
     await saveDraft();
 
     log.info('onboarding.reply', {
@@ -2142,6 +2234,7 @@ export class GameApp {
     if (this.generatingUsers?.has(uid)) {
       return { ok: false, reason: 'generating', name: domain.name };
     }
+    await removeIslandImage(this.config, domain);
     await this.storage.deleteDomain(domain.id);
     const binding = await this.storage.getUserBinding(uid);
     if (binding) {

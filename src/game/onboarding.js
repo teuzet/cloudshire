@@ -71,7 +71,18 @@ export function emptyOnboardingDraft() {
       freeform: '',
     },
     pitched: false,
+    /** Последнее имя, которое агент уже назвал игроку (ещё без set_city_name). */
+    pitchedName: null,
+    /** Теги на момент этого питча — чтобы не потерять их, если агент рандомит снова. */
+    pitchedTagChoices: {},
   };
+}
+
+export const ONBOARDING_FALSE_START_REPLY =
+  'Остров ещё не начал создаваться: имя города не зафиксировано. Подтверди название из последнего описания — или скажи, как назвать город.';
+
+export function formatOnboardingStartReply(cityName) {
+  return `Отлично. Поднимаю остров «${cityName}» — обычно минута-две. Правитель напишет сам.`;
 }
 
 export function formatPlayerBrief(brief = {}) {
@@ -234,10 +245,10 @@ export function inferTagChoicesFromText(config, text, existing = {}) {
       { label: 'земледелие и сады', re: /земледел|сад[ыа]|пашн|ферм/ },
       { label: 'скотоводство', re: /скот|пастбищ/ },
       { label: 'храмовые сборы на острове', re: /паломнич|храмов.*сбор/ },
-      { label: 'охота и промысел в облаках', re: /охот.*облак|промысел.*неб/ },
+      { label: 'промысел у края / лов с обрыва', re: /охот.*облак|промысел.*неб|лов.*обрыв|промысел.*кра/ },
       { label: 'вино / брага / дистиллят', re: /винодел|браг|дистиллят|винокур/ },
       { label: 'ткани и красильни', re: /ткан|красильн|пряж/ },
-      { label: 'постройка небесных судов', re: /судостро|верф.*стро/ },
+      { label: 'канаты, леса и подъёмники', re: /судостро|верф.*стро|канат|такелаж|лес.*подъём/ },
       { label: 'лекарства и травы', re: /лекарств|травник|аптек/ },
       { label: 'книги, чернила, перепись', re: /книгопечат|чернил|скриптор|перепис/ },
       { label: 'огранка камней', re: /огранк|ювелир/ },
@@ -259,7 +270,7 @@ export function inferTagChoicesFromText(config, text, existing = {}) {
       { label: 'опыты и риск', re: /эксперимент|опытн.*школ/ },
       { label: 'запретные архивы', re: /запретн.*архив/ },
       { label: 'мастера-наставники', re: /мастер.?настав|ученичеств/ },
-      { label: 'навигация по ветрам и звёздам', re: /навигац|зв[её]здн.*карт/ },
+      { label: 'чтение ветров и звёзд', re: /навигац|зв[её]здн.*карт|чтени.*ветр/ },
     ],
     temper: [
       { label: 'учёные', re: /учёны|научн|академи/ },
@@ -283,7 +294,7 @@ export function inferTagChoicesFromText(config, text, existing = {}) {
       { label: 'вросший в скалу', re: /вросш.*скал|в\s+скал|высечен/ },
       { label: 'башни и шпили', re: /башн|шпил/ },
       { label: 'крепостные кольца', re: /крепост|стены|кольц.*стен/ },
-      { label: 'верфи небесных судов', re: /верф|небесн.*суд/ },
+      { label: 'сторожевые выступы у края', re: /верф|небесн.*суд|сторож.*выступ|караул.*кра/ },
       { label: 'сады и висячие дворы', re: /висяч.*сад|сады\s+и/ },
       { label: 'лабиринты рынков', re: /базар|лабиринт.*рынк/ },
       { label: 'мосты и галереи над пропастью', re: /галере.*пропаст|мост.*обрыв/ },
@@ -370,4 +381,147 @@ export function collectOnboardingPreferenceText(draft) {
     if (m.role === 'user' && m.content) parts.push(String(m.content));
   }
   return parts.join('\n');
+}
+
+export function claimsOnboardingGenerating(text) {
+  return /созда(ёт|ется|ётся|ю)|начинается\s+процесс|поднимаю\s+остров|остров.{0,30}созда|правитель.{0,50}(напиш|свяж)|жди.{0,30}минут/i.test(
+    String(text || ''),
+  );
+}
+
+export function claimsOnboardingAlreadyCreated(text) {
+  return /успешно\s+создан|уже\s+создан|остров.{0,20}готов|был\s+создан/i.test(String(text || ''));
+}
+
+function looksLikeToponym(raw) {
+  const name = String(raw || '')
+    .replace(/\*+/g, '')
+    .replace(/[«»""]/g, '')
+    .replace(/[:.,!?…]+$/g, '')
+    .trim()
+    .replace(/\s+/g, ' ');
+  const words = name.split(/\s+/).filter(Boolean);
+  if (!words.length || words.length > 2) return null;
+  if (!/^\p{Lu}/u.test(words[0])) return null;
+  const v = validateCityName(name);
+  return v.ok ? v.name : null;
+}
+
+const PITCHED_NAME_RES = [
+  /(?:твой\s+)?город\s+[—–-]\s+\*{0,2}([\p{L}][\p{L}\p{M}\s'-]{1,39})/iu,
+  /город\s+будет\s+называться\s+\*{0,2}([\p{L}][\p{L}\p{M}\s'-]{1,39})/iu,
+  /называться\s+\*{0,2}([\p{L}][\p{L}\p{M}\s'-]{1,39})/iu,
+  /будет\s+город\s+\*{0,2}([\p{L}][\p{L}\p{M}\s'-]{1,39})/iu,
+  /город\s+[«"*]{1,2}([\p{L}][\p{L}\p{M}\s'-]{1,39})/iu,
+  /остров\s+[«"]([\p{L}][\p{L}\p{M}\s'-]{1,39})/iu,
+  /поднимаю\s+остров\s+[«"]([\p{L}][\p{L}\p{M}\s'-]{1,39})/iu,
+];
+
+/** Имя города из речи агента, не имя правителя. */
+export function extractPitchedCityName(text) {
+  const raw = String(text || '');
+  if (!raw.trim()) return null;
+  for (const re of PITCHED_NAME_RES) {
+    re.lastIndex = 0;
+    const m = re.exec(raw);
+    if (!m) continue;
+    const name = looksLikeToponym(m[1]);
+    if (name) return name;
+  }
+  return null;
+}
+
+export function lastPitchedCityName(draft) {
+  if (draft?.cityName) {
+    const v = validateCityName(draft.cityName);
+    if (v.ok) return v.name;
+  }
+  if (draft?.pitchedName) {
+    const v = validateCityName(draft.pitchedName);
+    if (v.ok) return v.name;
+  }
+  const messages = draft?.messages || [];
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (m?.role !== 'assistant' || !m.content) continue;
+    const name = extractPitchedCityName(m.content);
+    if (name) return name;
+  }
+  return null;
+}
+
+/**
+ * Игрок явно соглашается на уже предложенный город.
+ * Не путать с выбором режима («давай быстрый старт») и вопросом «создаётся?».
+ */
+export function playerConsentsToStart(text, { pitched = false } = {}) {
+  const raw = String(text || '').trim();
+  if (!pitched || raw.length < 2 || raw.length > 80) return false;
+  if (/[?]/.test(raw)) return false;
+  if (/созда(е|ё)тся|уже\s+созда|готов\s+ли/i.test(raw)) return false;
+  if (/быстр(ый|о).{0,12}старт|с\s+вопрос|опишу|хочу\s+примерно|через\s+вопрос/i.test(raw)) {
+    return false;
+  }
+  if (/,\s*но(?!\p{L})|(?<!\p{L})но\s+(измени|другой|другое|имя|не\s+)/iu.test(raw)) {
+    return false;
+  }
+  if (
+    /^(да|ок|окей|хорошо|ладно|этот|выбираю|начинаем|начинай|создавай|создаём|создаем|поехали|старт|вперёд|вперед|берём|берем|согласен|подходит|идёт|идет|давай)(?!\p{L})/iu.test(
+      raw,
+    )
+  ) {
+    return true;
+  }
+  if (/(?<!\p{L})(начинаем|создавай|поехали|поднимай\s+остров)(?!\p{L})/iu.test(raw)) return true;
+  return false;
+}
+
+/** Игрок явно просит другой город, а не правку одной черты и не старт. */
+export function playerAsksReroll(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  if (playerConsentsToStart(raw, { pitched: true })) return false;
+  return /друг(ой|ая|ое|ие)|не\s+тот|не\s+такой|не\s+нравит|заново|ещё\s+вариант|еще\s+вариант|передел|переброс|новый\s+город|другую\s+атмосфер/i.test(
+    raw,
+  );
+}
+
+/**
+ * Нужно ли самим запустить генезис, если агент не вызвал start_new_game.
+ * При согласии берём имя из уже сделанного питча, не из новой выдумки в этом ходе.
+ */
+export function planOnboardingAutoStart({
+  userText,
+  reply,
+  draft,
+  usedStart = false,
+  generating = false,
+} = {}) {
+  if (usedStart || generating) {
+    return { start: false, name: null, stripFalseStart: false, reason: null };
+  }
+  const historyName = lastPitchedCityName(draft);
+  const replyName = extractPitchedCityName(reply);
+  const pitched = Boolean(historyName || draft?.pitched || draft?.pitchedName);
+  const consented = playerConsentsToStart(userText, { pitched });
+  const claimed =
+    claimsOnboardingGenerating(reply) || claimsOnboardingAlreadyCreated(reply);
+
+  let name = null;
+  let reason = null;
+  if (consented) {
+    name = historyName || replyName;
+    reason = 'player_consent';
+  } else if (claimed) {
+    name = historyName || replyName;
+    reason = 'reply_claimed_start';
+  }
+  if (name) {
+    const v = validateCityName(name);
+    if (v.ok) return { start: true, name: v.name, stripFalseStart: false, reason };
+  }
+  if (claimed) {
+    return { start: false, name: null, stripFalseStart: true, reason: 'false_start_claim' };
+  }
+  return { start: false, name: null, stripFalseStart: false, reason: null };
 }

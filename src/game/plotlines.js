@@ -419,6 +419,30 @@ export function pickPlotTags(cfg, rng = Math.random) {
     .filter(Boolean);
 }
 
+const OPENING_SCALES = new Set(['neighborhood', 'person']);
+
+/** Стартовый посев: тот же жребий, но масштаб только соседство или несколько человек. */
+export function pickOpeningPlotTags(cfg, rng = Math.random) {
+  const tags = pickPlotTags(cfg, rng);
+  const scaleGroup = (cfg?.tagGroups || []).find((g) => g.id === 'scale');
+  const small = (scaleGroup?.tags || []).filter((t) => OPENING_SCALES.has(t.id));
+  if (!small.length) return tags;
+  const pick = pickWeightedTag(small, rng);
+  return tags.map((t) =>
+    t.groupId === 'scale' && pick
+      ? { ...t, tagId: pick.id, tagName: pick.name }
+      : t,
+  );
+}
+
+export function openingPlotCount(config, rng = Math.random) {
+  const raw = config?.genesis?.openingPlots || {};
+  const min = Math.max(0, Math.min(4, Number(raw.min ?? 1)));
+  const max = Math.max(min, Math.min(4, Number(raw.max ?? 2)));
+  if (max === 0) return 0;
+  return min + Math.floor(rng() * (max - min + 1));
+}
+
 const SEED_HOOK_MIN = 220;
 
 /**

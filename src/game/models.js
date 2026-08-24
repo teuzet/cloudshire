@@ -40,6 +40,7 @@ export function normalizeDomain(domain) {
   if (!domain.confluxPartners || typeof domain.confluxPartners !== 'object') {
     domain.confluxPartners = {};
   }
+  if (typeof domain.imagePath !== 'string') domain.imagePath = domain.imagePath || null;
   // pendingActions = длительные процессы; нормализация полей — в processes.normalizeDomainProcesses
   if (Array.isArray(domain.characters)) {
     for (const ch of domain.characters) {
@@ -160,6 +161,7 @@ export function createDomainRecord({
     confluxPartners: {},
     createdAt: now,
     updatedAt: now,
+    imagePath: null,
   };
 }
 

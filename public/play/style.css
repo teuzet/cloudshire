@@ -51,6 +51,16 @@ body {
 
 .when { display: flex; align-items: center; gap: 0.6rem; font-size: 0.85rem; }
 
+.city-image {
+  display: block;
+  width: calc(100% - 2rem);
+  margin: 0 1rem 0.6rem;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
 .stats {
   display: flex;
   flex-wrap: wrap;
