@@ -2,6 +2,15 @@ import { newId } from './ids.js';
 import { createLoreFact, normalizeDomain } from './models.js';
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
+import {
+  normalizeConfluxBoard,
+  takeDomainBoardIntoConflux,
+  createMainConfluxPlot,
+  pushInternalChronicle,
+  approachingAnnounceText,
+  approachMonthText,
+  returnBoardsOnUndock,
+} from './confluxBoard.js';
 
 /** Ширина прохода: ГСЧ выбирает kind; LLM только описывает. */
 export const CONTACT_KINDS = {
@@ -160,6 +169,13 @@ export function createConfluxRecord({
     contact: null,
     sharedLore: [],
     sharedState: { events: [] },
+    awareness: Object.fromEntries(domainIds.map((id) => [String(id), 0])),
+    knownLoreIds: Object.fromEntries(domainIds.map((id) => [String(id), []])),
+    plotlines: [],
+    closedPlotlines: [],
+    processes: [],
+    lore: [],
+    mainPlotId: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -168,6 +184,35 @@ export function createConfluxRecord({
 export function monthsUntilDock(conflux, world) {
   const at = conflux.dockAtTick ?? (conflux.createdTick || 0) + (conflux.etaMonths || 1);
   return Math.max(0, at - (world.tickIndex || 0));
+}
+
+/** Забрать нити (кроме указов), завести главную нить стыка, записать канон сближения. */
+export function beginConfluxOwnership({ a, b, conflux, world, config }) {
+  normalizeConfluxBoard(conflux);
+  takeDomainBoardIntoConflux(a, conflux);
+  takeDomainBoardIntoConflux(b, conflux);
+  const main = createMainConfluxPlot({ a, b, conflux, world, config });
+  conflux.plotlines.push(main);
+  conflux.mainPlotId = main.id;
+
+  const remaining = monthsUntilDock(conflux, world);
+  const textA = approachingAnnounceText(a, b, remaining, conflux.rematch);
+  const textB = approachingAnnounceText(b, a, remaining, conflux.rematch);
+  const tags = conflux.rematch
+    ? ['approaching', 'seed', 'rematch']
+    : ['approaching', 'seed'];
+  const fa = pushPublicChronicle(a, world, textA, conflux, tags);
+  const fb = pushPublicChronicle(b, world, textB, conflux, tags);
+  mirrorToShared(conflux, fa);
+  void fb;
+  pushInternalChronicle(conflux, {
+    text: textA,
+    world,
+    plotIds: [main.id],
+    tags,
+    author: 'conflux',
+  });
+  return { main, textA, textB };
 }
 
 function pushPublicChronicle(domain, world, text, conflux, extraTags = []) {
@@ -216,6 +261,7 @@ export async function forceCreateConflux({
   domainIdB,
   etaMonths = 3,
   durationMonths = 3,
+  config = null,
 }) {
   const log = getLogger().child({ scope: 'conflux' });
   const world = await storage.getWorld();
@@ -251,16 +297,13 @@ export async function forceCreateConflux({
     rematch,
   });
 
-  const remaining = monthsUntilDock(conflux, world);
-  const { textA, textB } = approachingSeedTexts(a, b, remaining, rematch);
-  const tags = rematch
-    ? ['approaching', 'seed', 'rematch']
-    : ['approaching', 'seed'];
-
-  const fa = pushPublicChronicle(a, world, textA, conflux, tags);
-  const fb = pushPublicChronicle(b, world, textB, conflux, tags);
-  mirrorToShared(conflux, fa);
-  void fb;
+  const { textA, textB } = beginConfluxOwnership({
+    a,
+    b,
+    conflux,
+    world,
+    config: config || storage.config,
+  });
 
   await storage.saveDomain(a);
   await storage.saveDomain(b);
@@ -274,7 +317,11 @@ export async function forceCreateConflux({
     rematch,
   });
 
-  return { conflux, domains: [a, b] };
+  return {
+    conflux,
+    domains: [a, b],
+    announce: { [a.id]: textA, [b.id]: textB },
+  };
 }
 
 /**
@@ -392,15 +439,13 @@ export async function maybeMatchmakeConfluxes({ config, storage, world, rng = Ma
       world,
       rematch,
     });
-    const remaining = monthsUntilDock(conflux, world);
-    const { textA, textB } = approachingSeedTexts(pick.a, pick.b, remaining, rematch);
-    const tags = rematch
-      ? ['approaching', 'seed', 'rematch', 'matchmake']
-      : ['approaching', 'seed', 'matchmake'];
-    const fa = pushPublicChronicle(pick.a, world, textA, conflux, tags);
-    const fb = pushPublicChronicle(pick.b, world, textB, conflux, tags);
-    mirrorToShared(conflux, fa);
-    void fb;
+    const { textA, textB } = beginConfluxOwnership({
+      a: pick.a,
+      b: pick.b,
+      conflux,
+      world,
+      config,
+    });
 
     await storage.saveDomain(pick.a);
     await storage.saveDomain(pick.b);
@@ -418,6 +463,10 @@ export async function maybeMatchmakeConfluxes({ config, storage, world, rng = Ma
       rematch,
       etaMonths,
       durationMonths,
+      announce: {
+        [pick.a.id]: textA,
+        [pick.b.id]: textB,
+      },
     });
     log.info('conflux.matchmake', {
       id: conflux.id,
@@ -509,15 +558,8 @@ export async function processConfluxApproachingPhase({
         continue;
       }
       const [a, b] = domains;
-      const rematchHint = conflux.rematch
-        ? ' (повторный конфлюкс — острова уже сходились.)'
-        : '';
-      const textA =
-        `Остров соседа («${b.name}») ближе: в разрывах тумана уже угадывают край чужой земли. ` +
-        `До стыковки по приметам осталось около ${remaining} мес.${rematchHint}`;
-      const textB =
-        `Остров соседа («${a.name}») ближе: в разрывах тумана уже угадывают край чужой земли. ` +
-        `До стыковки по приметам осталось около ${remaining} мес.${rematchHint}`;
+      const textA = approachMonthText(b.name, remaining, conflux.rematch);
+      const textB = approachMonthText(a.name, remaining, conflux.rematch);
       const fa = pushPublicChronicle(a, world, textA, conflux, [
         'approaching',
         ...(conflux.rematch ? ['rematch'] : []),
@@ -529,11 +571,24 @@ export async function processConfluxApproachingPhase({
       mirrorToShared(conflux, fa);
       trackChronicleAdd(chronicleAddsByDomain, a.id, fa);
       trackChronicleAdd(chronicleAddsByDomain, b.id, fb);
+      if (conflux.mainPlotId) {
+        pushInternalChronicle(conflux, {
+          text: textA,
+          world,
+          plotIds: [conflux.mainPlotId],
+          tags: ['approaching'],
+        });
+      }
       await storage.saveDomain(a);
       await storage.saveDomain(b);
       await storage.saveConflux(conflux);
-      notes.push({ confluxId: conflux.id, phase: 'approaching', monthsUntilDock: remaining });
-      log.info('conflux.prelude', { id: conflux.id, remaining });
+      notes.push({
+        confluxId: conflux.id,
+        phase: 'approaching',
+        monthsUntilDock: remaining,
+        photoSoon: remaining === 1,
+      });
+      log.info('conflux.prelude', { id: conflux.id, remaining, photoSoon: remaining === 1 });
       continue;
     }
 
@@ -582,6 +637,15 @@ export async function processConfluxApproachingPhase({
       trackChronicleAdd(chronicleAddsByDomain, d.id, f);
       dockedDomainIds.add(d.id);
       await storage.saveDomain(d);
+    }
+    if (conflux.mainPlotId) {
+      pushInternalChronicle(conflux, {
+        text: contactText,
+        world,
+        plotIds: [conflux.mainPlotId],
+        tags: ['docked', 'contact'],
+        author: 'conflux-resolver',
+      });
     }
     await storage.saveConflux(conflux);
     dockedConfluxes.push(conflux);
@@ -652,6 +716,19 @@ export async function advanceDockedConfluxes({ storage, runtime, world }, docked
         }
         if (!undockAddsByDomain.has(d.id)) undockAddsByDomain.set(d.id, []);
         undockAddsByDomain.get(d.id).push(f);
+      }
+      if (conflux.mainPlotId) {
+        pushInternalChronicle(conflux, {
+          text: endText,
+          world,
+          plotIds: [conflux.mainPlotId],
+          tags: ['ended', 'undock'],
+          author: 'conflux-resolver',
+        });
+      }
+      const byId = new Map(domains.map((d) => [d.id, d]));
+      returnBoardsOnUndock(conflux, byId);
+      for (const d of byId.values()) {
         await storage.saveDomain(d);
       }
       notes.push({

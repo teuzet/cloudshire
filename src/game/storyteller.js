@@ -439,7 +439,7 @@ async function askPlotSeed({
   return draft.data;
 }
 
-const PRIOR_CHRONICLE_LIMIT = 4;
+const PRIOR_CHRONICLE_LIMIT = 30;
 const WATCH_RE = /розыск|задерж|пойм|арест|угроз|подозрева|разыск/i;
 
 /** Уже записанное по этой нити — иначе следующий бит сочиняет поиск заново. */
@@ -448,6 +448,7 @@ export function priorPlotChronicle(domain, plot, limit = PRIOR_CHRONICLE_LIMIT) 
   const ids = new Set((plot.chronicleIds || []).map(String));
   return chronicleEntries(domain?.lore)
     .filter((e) => ids.has(String(e.id)) || (e.relatedPlotlineIds || []).includes(plot.id))
+    .sort((a, b) => (Number(a.tick) || 0) - (Number(b.tick) || 0))
     .slice(-limit)
     .map((e) => `- ${e.gameDateLabel || '?'}: ${e.text}`);
 }

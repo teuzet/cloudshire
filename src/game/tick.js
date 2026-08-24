@@ -6,6 +6,14 @@ import {
   advanceConfluxLifetimeCounters,
 } from './conflux.js';
 import { resolveDomainMonth } from './monthResolve.js';
+import { scoreConfluxAwareness } from './confluxAwareness.js';
+import { resolveConfluxSharedMonth } from './confluxMonth.js';
+import {
+  normalizeConfluxBoard,
+  revealKnownLore,
+  otherDomainId,
+} from './confluxBoard.js';
+import { resolveIslandImage } from './islandImage.js';
 import { getLogger } from '../log.js';
 
 /** Игровая дата шапкой у письма месяца (только в отправке, не в dialogHistory). */
@@ -13,6 +21,10 @@ function withDateHeader(text, world) {
   const label = world?.gameDate?.label;
   if (!label) return text;
   return `— ${label} —\n\n${text}`;
+}
+
+function withoutSeed(entries) {
+  return (entries || []).filter((f) => !(f.tags || []).includes('seed'));
 }
 
 export async function runWorldTick({ config, runtime, storage, app }) {
@@ -24,93 +36,167 @@ export async function runWorldTick({ config, runtime, storage, app }) {
   }
 }
 
+export async function emitConfluxAnnouncements({ app, storage, items }) {
+  for (const item of items || []) {
+    const announce = item?.announce;
+    if (!announce) continue;
+    for (const [domainId, text] of Object.entries(announce)) {
+      const domain = await storage.getDomain(domainId);
+      if (!domain?.ownerUserId || !text) continue;
+      await app.persistDialog(domain, 'assistant', text, { kind: 'conflux_announce' });
+      await app.emitOutbound(domain.ownerUserId, text, {
+        agent: 'conflux',
+        domainId: domain.id,
+        kind: 'conflux_announce',
+      });
+    }
+  }
+}
+
+async function emitApproachPhotos({ app, storage, config, notes }) {
+  for (const note of notes || []) {
+    if (!note?.photoSoon || !note.confluxId) continue;
+    const conflux = await storage.getConflux(note.confluxId);
+    if (!conflux) continue;
+    for (const domainId of conflux.domainIds || []) {
+      const domain = await storage.getDomain(domainId);
+      const partnerId = otherDomainId(conflux, domainId);
+      const partner = partnerId ? await storage.getDomain(partnerId) : null;
+      if (!domain?.ownerUserId || !partner) continue;
+      const text =
+        `Чужой остров «${partner.name}» уже близко — до стыковки около месяца.`;
+      const picture = await resolveIslandImage({ domain: partner, config });
+      await app.persistDialog(domain, 'assistant', text, { kind: 'conflux_approach' });
+      await app.emitOutbound(domain.ownerUserId, text, {
+        agent: 'conflux',
+        domainId: domain.id,
+        kind: 'conflux_approach',
+        photoPath: picture?.abs || null,
+        photoBuffer: picture?.buffer || null,
+      });
+    }
+  }
+}
+
 async function runWorldTickInner({ config, runtime, storage, app }) {
   const world = await storage.getWorld();
   advanceGameDate(world);
   await storage.saveWorld(world);
 
   const matchmake = await maybeMatchmakeConfluxes({ config, storage, world });
+  await emitConfluxAnnouncements({ app, storage, items: matchmake.notes });
+
   const confluxPhase = await processConfluxApproachingPhase({
     config,
     runtime,
     storage,
     world,
   });
-  // После стыка/прелюдии: docked = конфлюкс, approaching+solo = соло (~50/50 цель).
+  await emitApproachPhotos({
+    app,
+    storage,
+    config,
+    notes: confluxPhase.notes,
+  });
   await advanceConfluxLifetimeCounters({ storage, world });
 
   const domains = await storage.listDomains();
+  const byId = new Map(domains.map((d) => [d.id, d]));
   const results = [];
-  const handled = new Set();
   const confluxNotes = [...(matchmake.notes || []), ...(confluxPhase.notes || [])];
+  const sharedAdds = new Map();
 
-  // Стыкованные пары: у каждого города свой месяц, но поворот, задевший соседа,
-  // разносится в обе хроники и заводит зеркальную нить (docs/PIVOT_PLOTLINES.md).
-  const pairBatches = [];
-  for (const conflux of confluxPhase.dockedConfluxes || []) {
-    const ids = (conflux.domainIds || []).slice(0, 2);
-    const loaded = [];
-    for (const id of ids) {
-      const d = await storage.getDomain(id);
-      if (d) {
-        normalizeDomain(d);
-        loaded.push(d);
-      }
-    }
-    if (loaded.length < 2) continue;
+  const active = await storage.listConfluxes({ status: ['approaching', 'docked'] });
+  for (const conflux of active) {
+    normalizeConfluxBoard(conflux);
+    const pair = (conflux.domainIds || []).map((id) => byId.get(id)).filter(Boolean);
+    if (pair.length < 2) continue;
+    for (const d of pair) normalizeDomain(d);
 
-    // Последовательно: второй город должен увидеть зеркала от первого.
-    const resolvedDomains = [];
-    for (let i = 0; i < loaded.length; i += 1) {
-      const self = resolvedDomains[i] || loaded[i];
-      const other = resolvedDomains[1 - i] || loaded[1 - i];
-      const month = await resolveDomainMonth({
+    if (conflux.status === 'docked') {
+      await scoreConfluxAwareness({
         config,
         runtime,
-        domain: self,
-        world,
-        partner: other,
-        confluxId: conflux.id,
-      });
-      resolvedDomains[i] = month.domain;
-      // Зеркала писались в объект партнёра — переносим их в его актуальную копию.
-      if (resolvedDomains[1 - i] && other !== resolvedDomains[1 - i]) {
-        resolvedDomains[1 - i].lore = other.lore;
-        resolvedDomains[1 - i].plotlines = other.plotlines;
-      }
-      pairBatches.push({
         conflux,
-        domain: month.domain,
-        chronicleAdds: month.chronicleAdds,
-        highlight: month.highlight,
-        stewardActs: month.stewardActs || [],
+        domains: pair,
+        world,
       });
+      for (const d of pair) {
+        const other = pair.find((x) => x.id !== d.id);
+        revealKnownLore({ conflux, viewerId: d.id, partner: other });
+      }
+    }
+
+    const shared = await resolveConfluxSharedMonth({
+      config,
+      runtime,
+      conflux,
+      domains: pair,
+      world,
+    });
+    for (const [id, adds] of shared.chronicleAddsByDomain || []) {
+      sharedAdds.set(id, [...(sharedAdds.get(id) || []), ...(adds || [])]);
+    }
+    await storage.saveConflux(conflux);
+    for (const d of pair) {
+      await storage.saveDomain(d);
+      byId.set(d.id, d);
     }
   }
 
-  const advanced = await advanceDockedConfluxes(
-    { storage, runtime, world },
-    confluxPhase.dockedConfluxes,
-  );
+  const monthById = new Map();
+  for (const domain of domains) {
+    if (domain.status && domain.status !== 'playing') {
+      results.push({ domainId: domain.id, skipped: true, reason: domain.status });
+    }
+  }
+
+  const playing = domains.filter((d) => !d.status || d.status === 'playing');
+  for (const domain of playing) {
+    normalizeDomain(domain);
+    const live = byId.get(domain.id) || domain;
+    const conflux = active.find((c) => (c.domainIds || []).includes(live.id)) || null;
+    const resolved = await resolveDomainMonth({
+      config,
+      runtime,
+      domain: live,
+      world,
+      conflux,
+      confluxId: conflux?.id || null,
+      skipPlotClocks: Boolean(conflux),
+    });
+    monthById.set(live.id, resolved);
+    byId.set(live.id, resolved.domain);
+    await storage.saveDomain(resolved.domain);
+    if (conflux) await storage.saveConflux(conflux);
+  }
+
+  const dockedNow = (await storage.listConfluxes({ status: ['docked'] })) || [];
+  const advanced = await advanceDockedConfluxes({ storage, runtime, world }, dockedNow);
   confluxNotes.push(...(advanced.notes || []));
 
-  for (const { conflux, domain, chronicleAdds, highlight, stewardActs } of pairBatches) {
-    handled.add(domain.id);
-    await storage.saveDomain(domain);
-
+  for (const resolved of monthById.values()) {
+    let domain = resolved.domain;
     const prelude = confluxPhase.chronicleAddsByDomain.get(domain.id) || [];
     const undockAdds = advanced.undockAddsByDomain?.get(domain.id) || [];
+    const shared = sharedAdds.get(domain.id) || [];
+    if (undockAdds.length) {
+      const fresh = await storage.getDomain(domain.id);
+      if (fresh) domain = fresh;
+    }
+
     const newsAdds = filterChronicleForDomain(
-      [...prelude, ...chronicleAdds, ...undockAdds],
+      withoutSeed([...prelude, ...shared, ...resolved.chronicleAdds, ...undockAdds]),
       domain.id,
     );
-    const partnerId = (conflux.domainIds || []).find((id) => id !== domain.id);
-    const partner = pairBatches.find((b) => b.domain.id === partnerId)?.domain || null;
+    const conflux = active.find((c) => (c.domainIds || []).includes(domain.id)) || null;
+    const partnerId = conflux ? otherDomainId(conflux, domain.id) : null;
+    const partner = partnerId ? byId.get(partnerId) : null;
     const news = await app.narrateTickNews(domain, newsAdds, world.gameDate, {
       undock: undockAdds.length > 0,
       partnerName: partner?.name || null,
-      highlight,
-      stewardActs,
+      highlight: resolved.highlight,
+      stewardActs: resolved.stewardActs || [],
     });
     await app.persistDialog(domain, 'assistant', news, { kind: 'tick_news' });
     await app.emitOutbound(domain.ownerUserId, withDateHeader(news, world), {
@@ -124,9 +210,9 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
       name: domain.name,
       chronicleCount: newsAdds.length,
       status: domain.status,
-      inConfluxDocked: undockAdds.length === 0,
+      inConfluxDocked: Boolean(conflux && conflux.status === 'docked' && undockAdds.length === 0),
       confluxEnded: undockAdds.length > 0,
-      confluxId: conflux.id,
+      confluxId: conflux?.id || null,
       plotlines: (domain.plotlines || []).map((p) => ({
         id: p.id,
         title: p.title,
@@ -138,67 +224,6 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
         .map((c) => ({ id: c.id, changes: c.statChanges })),
     });
   }
-
-  // Solo — параллельно по доменам
-  const soloDomains = domains.filter(
-    (d) => !handled.has(d.id) && (!d.status || d.status === 'playing'),
-  );
-  for (const domain of domains) {
-    if (handled.has(domain.id)) continue;
-    if (domain.status && domain.status !== 'playing') {
-      results.push({ domainId: domain.id, skipped: true, reason: domain.status });
-    }
-  }
-
-  const soloResults = await Promise.all(
-    soloDomains.map(async (domain) => {
-      normalizeDomain(domain);
-
-      // Месяц города целиком на нитях: движок считает, рассказчик описывает.
-      const resolved = await resolveDomainMonth({
-        config,
-        runtime,
-        domain,
-        world,
-      });
-
-      await storage.saveDomain(resolved.domain);
-
-      const prelude = confluxPhase.chronicleAddsByDomain.get(domain.id) || [];
-      const newsAdds = filterChronicleForDomain(
-        [...prelude, ...resolved.chronicleAdds],
-        domain.id,
-      );
-      const news = await app.narrateTickNews(resolved.domain, newsAdds, world.gameDate, {
-        highlight: resolved.highlight,
-        stewardActs: resolved.stewardActs || [],
-      });
-      await app.persistDialog(resolved.domain, 'assistant', news, { kind: 'tick_news' });
-      await app.emitOutbound(resolved.domain.ownerUserId, withDateHeader(news, world), {
-        agent: 'ruler',
-        domainId: resolved.domain.id,
-        kind: 'tick_news',
-      });
-
-      return {
-        domainId: resolved.domain.id,
-        name: resolved.domain.name,
-        chronicleCount: newsAdds.length,
-        status: resolved.domain.status,
-        inConfluxDocked: false,
-        plotlines: (resolved.domain.plotlines || []).map((p) => ({
-          id: p.id,
-          title: p.title,
-          temperature: p.temperature,
-        })),
-        news,
-        statChanges: newsAdds
-          .filter((c) => c.statChanges)
-          .map((c) => ({ id: c.id, changes: c.statChanges })),
-      };
-    }),
-  );
-  results.push(...soloResults);
 
   return {
     world: {

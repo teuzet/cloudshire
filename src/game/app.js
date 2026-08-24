@@ -20,6 +20,13 @@ import { askLoremaster } from './loremaster.js';
 import { newId } from './ids.js';
 import { assertsIslandsParted, monthsUntilDock, findActiveConfluxForDomain } from './conflux.js';
 import {
+  hydrateDomainFromConflux,
+  dehydrateDomainToConflux,
+  sharePlotWithDomain,
+  plotConcerns,
+} from './confluxBoard.js';
+import { askInformant } from './informant.js';
+import {
   emptyOnboardingDraft,
   normalizeOnboardingDraft,
   validateCityName,
@@ -73,7 +80,7 @@ import {
   processIsFresh,
   processPaceRatio,
 } from './processes.js';
-import { formatBoardForSpeech, warmPlotlines, plotConfig, findPlotline, clipPlotText, PLOT_TITLE_MAX, PLOT_SUMMARY_MAX } from './plotlines.js';
+import { formatBoardForSpeech, warmPlotlines, plotConfig, findPlotline, clipPlotText, PLOT_TITLE_MAX, PLOT_SUMMARY_MAX, isOrderPlot } from './plotlines.js';
 import { queueOrderRequest, listStandingOrders } from './orders.js';
 import { islandDeleteCheck } from '../clients/telegram/access.js';
 import { generateIslandImage, removeIslandImage } from './islandImage.js';
@@ -110,7 +117,7 @@ function looksLikeToolDump(text) {
   if (!t.trim()) return false;
   if (/tools\.\w+/i.test(t)) return true;
   if (/天天送json|комментary|commentary\s+json/i.test(t)) return true;
-  if (/declare_action|declare_process|consult_loremaster|set_patron_name|read_domain_brief/i.test(t) && /\{/.test(t)) {
+  if (/declare_action|declare_process|consult_loremaster|consult_informant|set_patron_name|read_domain_brief/i.test(t) && /\{/.test(t)) {
     return true;
   }
   if (/"summary"\s*:/.test(t) && (/"durationMonths"\s*:/.test(t) || /"expectedMonths"\s*:/.test(t))) return true;
@@ -285,7 +292,16 @@ function submitReplyTool(turn, character) {
 }
 
 function characterTools(domain, storage, character, ctx) {
-  const save = async () => storage.saveDomain(domain);
+  const save = async () => {
+    if (ctx.conflux) {
+      dehydrateDomainToConflux(domain, ctx.conflux);
+      await storage.saveDomain(domain);
+      await storage.saveConflux(ctx.conflux);
+      hydrateDomainFromConflux(domain, ctx.conflux, { mode: 'ruler' });
+      return;
+    }
+    await storage.saveDomain(domain);
+  };
   normalizeRulerAttitudes(character);
   normalizeDomainProcesses(domain, ctx.config);
 
@@ -340,6 +356,13 @@ function characterTools(domain, storage, character, ctx) {
           title: p.title,
           kind: p.kind === 'errand' ? 'errand' : p.kind === 'order' ? 'order' : 'story',
           hasProcess: Boolean((p.relatedProcessIds || []).length),
+          shared: Boolean(p.shared || p.isMainConflux),
+          foreign: Boolean(
+            ctx.conflux &&
+              !isOrderPlot(p) &&
+              !p.isMainConflux &&
+              !plotConcerns(p, domain.id),
+          ),
         })),
         guidanceProcesses:
           'processes[].progress — как дело шло в прошлом месяце: так и отвечай, если спрашивают. ' +
@@ -355,6 +378,8 @@ function characterTools(domain, storage, character, ctx) {
           'initiative=ruler — это дело ты завёл сам, пока покровитель молчал; на вопрос «что ты решал» называй их.',
         guidancePlots:
           'plots[] — живые нити. kind=errand уже привязана к делу; kind=story может быть без поручения; kind=order — постоянный порядок, дело на него не заводи. ' +
+          'foreign=true — история СОСЕДА, ещё не общая: если покровитель в неё вмешивается, declare_process с её plotId — тогда она станет общей. ' +
+          'shared=true — общая история стыка, дело можно заводить с обеих сторон. ' +
           'Приказ по истории без дела — declare_process с plotId этой истории. ' +
           'Не бери id соседней нити из-за общего места или общих людей.',
       }),
@@ -476,6 +501,40 @@ function characterTools(domain, storage, character, ctx) {
           hint:
             'Перескажи суть своими словами и своим тоном, не цитируя карточки фактов. ' +
             'Если answers заполнены, «неизвестно» покровителю не говори.',
+        };
+      },
+    },
+    ctx.conflux && ctx.partner && {
+      name: 'consult_informant',
+      description:
+        'Спросить информатора о соседнем острове на стыке. Он знает только уже известные вам факты и честно говорит «неизвестно».',
+      parameters: {
+        type: 'object',
+        required: ['questions'],
+        properties: {
+          questions: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '1–5 вопросов о соседнем городе',
+          },
+        },
+      },
+      handler: async ({ questions }) => {
+        const result = await askInformant({
+          config: ctx.config,
+          runtime: ctx.runtime,
+          conflux: ctx.conflux,
+          viewer: domain,
+          partner: ctx.partner,
+          questions: questions || [],
+        });
+        return {
+          ok: true,
+          answers: result.answers,
+          summary: result.summary,
+          hint:
+            'Перескажи своими словами. Если informant сказал «неизвестно» — так и скажи покровителю. ' +
+            'Предположение помечай как догадку, не как факт.',
         };
       },
     },
@@ -629,6 +688,13 @@ function characterTools(domain, storage, character, ctx) {
           }).plot;
         }
         action.plotlineId = plot?.id || null;
+        if (ctx.conflux && plot && !isOrderPlot(plot)) {
+          action.confluxId = ctx.conflux.id;
+          action.ownerDomainId = domain.id;
+          if (!plotConcerns(plot, domain.id) && !plot.isMainConflux) {
+            sharePlotWithDomain(plot, domain.id, { reason: 'process' });
+          }
+        }
         await save();
         return {
           ok: true,
@@ -1070,6 +1136,7 @@ export class GameApp {
         });
         if (picture?.path) {
           domain.imagePath = picture.path;
+          if (picture.base64) domain.imageBase64 = picture.base64;
           await this.storage.saveDomain(domain);
         }
 
@@ -1801,6 +1868,7 @@ export class GameApp {
           ? 'Это ПОВТОРНАЯ стыковка: острова уже сходились раньше, город это помнит.'
           : 'Такого сближения город прежде не знал (с этим соседом).',
         'Если покровитель спрашивает про чужой остров — отвечай прямо: имя, срок, что это значит.',
+        'Факты внутренней жизни соседа — только через consult_informant, не через лормастера.',
         'ЗАПРЕЩЕНО говорить «не готов называть имя», «лишь слухи», «не знаю о чужих островах».',
         'Этот канон СИЛЬНЕЕ ответов лормастера: если он скажет «не подтверждено» — верь канону.',
       ]
@@ -1818,6 +1886,7 @@ export class GameApp {
       `Стык длится ${conflux.monthsDocked || 0} мес. из ожидаемых ${conflux.durationMonths || '?'}.`,
       conflux.rematch ? 'Это повторная стыковка с этим соседом.' : '',
       'ЗАПРЕЩЕНО отрицать существование соседа или отказываться называть его имя.',
+      'Факты внутренней жизни соседа — только через consult_informant.',
     ]
       .filter(Boolean)
       .join('\n');
@@ -1832,6 +1901,13 @@ export class GameApp {
     const world = worldArg || (await this.storage.getWorld());
     log.info('ruler.turn', { text: truncate(text, 400) });
     normalizeDomain(domain);
+    const conflux = await findActiveConfluxForDomain(this.storage, domain.id);
+    let partner = null;
+    if (conflux) {
+      const partnerId = (conflux.domainIds || []).find((id) => id !== domain.id);
+      if (partnerId) partner = await this.storage.getDomain(partnerId);
+      hydrateDomainFromConflux(domain, conflux, { mode: 'ruler' });
+    }
     const character = domain.characters[0];
     normalizeRulerAttitudes(character);
     const history = dialogHistoryForPrompt(character.dialogHistory || [], this.config);
@@ -1853,6 +1929,7 @@ export class GameApp {
     const confluxCanon = await this.buildConfluxCanon(domain, world);
     const plotBrief = formatBoardForSpeech(domain, {
       statsFeel: (ids) => statEpithetsShort(domain.stats || {}, this.config, ids),
+      viewerId: domain.id,
     });
 
     // Здесь только данные хода. Правила поведения живут в instructions агента.
@@ -1874,7 +1951,18 @@ export class GameApp {
             plotBrief,
             'Каждая нить сама по себе. Общее место или общие люди не делают их одним делом.',
             'Приказ по истории без поручения — новое дело с plotId этой истории, не правка соседнего.',
-          ].join('\n')
+            conflux
+              ? 'Чужая нить соседа, ещё не общая: если покровитель в неё вмешивается — declare_process с её plotId, и она станет общей.'
+              : '',
+          ]
+            .filter(Boolean)
+            .join('\n')
+        : '',
+      conflux
+        ? [
+            'ИНФОРМАТОР: факты и хроника соседнего острова — только через consult_informant.',
+            'Он не выдумывает: если не знает, так и скажи покровителю. Ломастер про соседа не спрашивай.',
+          ].join(' ')
         : '',
     ]
       .filter(Boolean)
@@ -1885,6 +1973,9 @@ export class GameApp {
       config: this.config,
       runtime: this.runtime,
       world,
+      conflux,
+      partner,
+      log,
     });
     const tools = [
       ...baseTools.map((tool) => ({
@@ -1944,9 +2035,16 @@ export class GameApp {
     reply = stripSpeakerPrefix(reply, character.name);
 
     const fresh = await this.storage.getDomain(domain.id);
-    // Внимание игрока → температура нитей числом; сцена дня → журнал месяца.
     const plotCfg = plotConfig(this.config);
     const warmed = warmPlotlines(fresh, turn.meta?.touchedPlotIds || [], plotCfg);
+    let warmedConflux = [];
+    const liveConflux = conflux
+      ? (await this.storage.getConflux(conflux.id)) || conflux
+      : null;
+    if (liveConflux) {
+      warmedConflux = warmPlotlines(liveConflux, turn.meta?.touchedPlotIds || [], plotCfg);
+      if (warmedConflux.length) await this.storage.saveConflux(liveConflux);
+    }
     if (turn.meta?.dayNote) {
       fresh.state.monthLog = Array.isArray(fresh.state.monthLog) ? fresh.state.monthLog : [];
       fresh.state.monthLog.push({
@@ -1964,7 +2062,7 @@ export class GameApp {
 
     log.info('ruler.reply', {
       replyPreview: truncate(reply, 400),
-      touchedPlots: warmed.map((w) => `${w.id}:${w.from}→${w.to}`),
+      touchedPlots: [...warmed, ...warmedConflux].map((w) => `${w.id}:${w.from}→${w.to}`),
       dayNote: turn.meta?.dayNote || null,
       requestKind: turn.meta?.requestKind || null,
       commitment: turn.meta?.commitment || null,

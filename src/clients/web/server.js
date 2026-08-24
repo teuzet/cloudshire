@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'node:path';
 import { projectRoot, hasAdminCredentials } from '../../config.js';
-import { runWorldTick } from '../../game/tick.js';
+import { runWorldTick, emitConfluxAnnouncements } from '../../game/tick.js';
 import { recordTickCompleted } from '../../scheduler/ticks.js';
 import { domainSummary } from '../../game/genesis.js';
 import {
@@ -13,7 +13,7 @@ import { getLogger, requestLogger, truncate } from '../../log.js';
 import { statEpithet } from '../../game/stats.js';
 import { chronicleEntries, castRecords } from '../../game/models.js';
 import { FINISH_SHORT } from '../../game/rolls.js';
-import { islandImageFile } from '../../game/islandImage.js';
+import { resolveIslandImage } from '../../game/islandImage.js';
 import fs from 'node:fs/promises';
 
 /** Заголовки нитей и дел для карточек хроники в тестовом клиенте. */
@@ -187,7 +187,7 @@ export function createWebServer({ config, app, runtime, storage }) {
                   ? { name: character.name, title: character.title }
                   : null,
                 stats: statsWithEpithets(domain.stats, config),
-                imageUrl: domain.imagePath
+                imageUrl: domain.imagePath || domain.imageBase64
                   ? `/api/play/island-image?userId=${encodeURIComponent(userId)}`
                   : null,
               }
@@ -206,10 +206,10 @@ export function createWebServer({ config, app, runtime, storage }) {
         const userId = String(req.query.userId || 'local-user');
         const world = await storage.getWorld();
         const domain = await storage.getDomainForUser(userId, world.id);
-        if (!domain?.imagePath) return res.status(404).end();
-        const abs = islandImageFile(config, domain.id);
-        await fs.access(abs);
-        res.type('png').sendFile(abs);
+        if (!domain?.imagePath && !domain?.imageBase64) return res.status(404).end();
+        const picture = await resolveIslandImage({ domain, config });
+        if (!picture?.abs) return res.status(404).end();
+        res.type('png').sendFile(picture.abs);
       } catch (err) {
         if (err.code === 'ENOENT') return res.status(404).end();
         req.log?.error('http.error', { error: err.message });
@@ -531,13 +531,18 @@ export function createWebServer({ config, app, runtime, storage }) {
       if (!domainIdA || !domainIdB) {
         return res.status(400).json({ error: 'domainIdA and domainIdB required' });
       }
-      const { conflux, domains } = await forceCreateConflux({
+      const created = await forceCreateConflux({
         storage,
         domainIdA,
         domainIdB,
         etaMonths,
         durationMonths,
+        config,
       });
+      const { conflux, domains, announce } = created;
+      if (announce) {
+        await emitConfluxAnnouncements({ app, storage, items: [{ announce }] });
+      }
       const world = await storage.getWorld();
       const byId = Object.fromEntries(domains.map((d) => [d.id, d]));
       getLogger().info('dev.conflux', {

@@ -103,9 +103,16 @@ function statValue(domain, statId) {
  * Случайные тики живых историй — только в остаток. Сход слот не занимает.
  * Нити указов сюда не входят.
  */
-export function planBeats({ domain, config, processOutcomes = [], rng = Math.random }) {
+export function planBeats({
+  domain,
+  config,
+  processOutcomes = [],
+  rng = Math.random,
+  piercePlotIds = [],
+} = {}) {
   const cfg = plotConfig(config || {});
   normalizePlotlines(domain, config);
+  const pierce = new Set((piercePlotIds || []).map(String));
 
   const beats = [];
   const taken = new Set();
@@ -160,6 +167,15 @@ export function planBeats({ domain, config, processOutcomes = [], rng = Math.ran
 
   const cap = cfg.beats.maxPerTick;
   let slotsUsed = beats.filter((b) => !b.fade).length;
+
+  // Главная нить стыка: случайный тик пробивает потолок.
+  for (const plot of domain.plotlines) {
+    if (plot.kind !== 'story') continue;
+    if (!pierce.has(plot.id) || taken.has(plot.id)) continue;
+    const chance = beatChance(plot, cfg);
+    if (rng() >= chance) continue;
+    if (addBeat(plot, { mandatory: false, reason: 'pierce' })) slotsUsed += 1;
+  }
 
   // 3. Случайные тики живых историй — только в остаток.
   for (const plot of domain.plotlines) {

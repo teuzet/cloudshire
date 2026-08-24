@@ -41,6 +41,13 @@ import { seedPlot, beatPlot, tickOrder, quietMonth, keepStories, fadeQuietPlot }
 import { scoreMonthStats, factsForStatJudge } from './statJudge.js';
 import { runSteward } from './steward.js';
 import { getLogger } from '../log.js';
+import {
+  hydrateDomainFromConflux,
+  dehydrateDomainToConflux,
+  maybeLeakPlot,
+  otherDomainId,
+  isSharedPlot,
+} from './confluxBoard.js';
 
 /**
  * Один месяц одного города.
@@ -53,6 +60,8 @@ export async function resolveDomainMonth({
   world,
   partner = null,
   confluxId = null,
+  conflux = null,
+  skipPlotClocks = false,
   log: parentLog,
 }) {
   const log = (parentLog || getLogger()).child({
@@ -62,6 +71,7 @@ export async function resolveDomainMonth({
   });
   const working = structuredClone(domain);
   normalizeDomain(working);
+  if (conflux) hydrateDomainFromConflux(working, conflux, { mode: 'month' });
   normalizePlotlines(working, config);
   normalizeDomainProcesses(working, config);
   if (typeof working.population !== 'number') working.population = config.genesis.population.min;
@@ -109,8 +119,8 @@ export async function resolveDomainMonth({
     config,
   });
 
-  // 2. Часы доски (нити указов не стареют).
-  advancePlotMonth(working, cfg);
+  // 2. Часы доски (нити указов не стареют). На конфлюксе часы shared/локальных уже тикнули.
+  if (!skipPlotClocks) advancePlotMonth(working, cfg);
 
   // 3. План битов: процессы всегда, истории — в остаток.
   const { beats, slotsUsed, cap } = planBeats({ domain: working, config, processOutcomes });
@@ -157,6 +167,12 @@ export async function resolveDomainMonth({
       log,
     });
     if (result?.mirror?.fact) mirrorAdds.push(result.mirror.fact);
+    if (conflux && result?.fact && plot && !isSharedPlot(plot)) {
+      const other = otherDomainId(conflux, working.id);
+      if (other && maybeLeakPlot(plot, conflux, other)) {
+        log.info('conflux.plot_leaked', { plotId: plot.id, title: plot.title, to: other });
+      }
+    }
     if (result?.fact) {
       chronicleAdds.push(result.fact);
       if (result.closed) {
@@ -317,6 +333,8 @@ export async function resolveDomainMonth({
     budgetSpent: { world: budget.spentWorld, player: budget.spentPlayer },
     stats: working.stats,
   });
+
+  if (conflux) dehydrateDomainToConflux(working, conflux);
 
   return { domain: working, chronicleAdds, mirrorAdds, highlight, stewardActs: steward?.act ? [steward.act] : [] };
 }
