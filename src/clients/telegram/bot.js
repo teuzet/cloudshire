@@ -1,7 +1,9 @@
 import TelegramBot from 'node-telegram-bot-api';
 import {
   closedTestReply,
+  isForceTickCommand,
   isTelegramAllowed,
+  isTelegramForceTickAllowed,
   islandNamesMatch,
   parseSlashCommand,
 } from './access.js';
@@ -50,6 +52,31 @@ async function syncBotMenu(bot, commands) {
   }
 }
 
+async function syncForceTickMenu(bot, commands, forceTickIds) {
+  const extra = [
+    ...(commands || []),
+    { command: 'forcetick', description: 'Прокрутить месяц' },
+  ];
+  for (const id of forceTickIds || []) {
+    try {
+      await bot.setMyCommands(
+        extra
+          .map((c) => ({
+            command: String(c.command || '')
+              .replace(/^\//, '')
+              .trim()
+              .toLowerCase(),
+            description: String(c.description || '').trim().slice(0, 256),
+          }))
+          .filter((c) => c.command && c.description),
+        { scope: { type: 'chat', chat_id: Number(id) || id } },
+      );
+    } catch (err) {
+      console.warn(`[telegram] setMyCommands(forcetick) failed for ${id}:`, err.message);
+    }
+  }
+}
+
 function deleteAskText(name) {
   return (
     `Чтобы удалить остров «${name}», напиши его имя точно так. ` +
@@ -76,7 +103,7 @@ function deleteFailText(result) {
 /**
  * @param {{ config: object, app: object, storage: object }} opts
  */
-export function startTelegramBot({ config, app, storage }) {
+export function startTelegramBot({ config, app, storage, runTick }) {
   const tg = config.telegram || {};
   if (!tg.enabled) {
     console.log('[telegram] disabled');
@@ -91,7 +118,9 @@ export function startTelegramBot({ config, app, storage }) {
   }
 
   const bot = new TelegramBot(token, { polling: true });
-  void syncBotMenu(bot, tg.commands);
+  void syncBotMenu(bot, tg.commands).then(() =>
+    syncForceTickMenu(bot, tg.commands, tg.forceTickIds),
+  );
   /** @type {Map<string, number|string>} */
   const chatByUser = new Map();
   /** @type {Map<string, { name: string }>} */
@@ -228,6 +257,23 @@ export function startTelegramBot({ config, app, storage }) {
       return formatIslandPlotlines(domain);
     }
 
+    if (isForceTickCommand(command)) {
+      if (!isTelegramForceTickAllowed(config, userId)) return null;
+      if (typeof runTick !== 'function') return 'Форс-тик сейчас недоступен.';
+      if (app.isWorldTicking?.()) return 'Месяц уже крутится — подожди.';
+      setImmediate(() => {
+        Promise.resolve(runTick('telegram-force'))
+          .then(() => {
+            console.log('[telegram] forcetick done');
+          })
+          .catch((err) => {
+            console.error('[telegram] forcetick failed:', err.message);
+            bot.sendMessage(chatId, `Тик не вышел: ${err.message || err}`).catch(() => {});
+          });
+      });
+      return 'Кручу месяц. Письмо придёт само, когда мир сдвинется.';
+    }
+
     return null;
   }
 
@@ -244,7 +290,11 @@ export function startTelegramBot({ config, app, storage }) {
     await rememberChat(userId, msg.chat.id);
 
     const command = parseSlashCommand(raw);
-    if (command && ['delete', 'stats', 'plotlines'].includes(command.name)) {
+    if (
+      command &&
+      (['delete', 'stats', 'plotlines'].includes(command.name) ||
+        (isForceTickCommand(command) && isTelegramForceTickAllowed(config, userId)))
+    ) {
       try {
         await bot.sendChatAction(msg.chat.id, 'typing');
         const reply = await handleCommand(userId, msg.chat.id, command);

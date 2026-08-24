@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildIslandImagePrompt } from '../src/game/islandImage.js';
+import {
+  buildIslandImagePrompt,
+  composeIslandImagePrompt,
+  formatPlayerVisualWish,
+} from '../src/game/islandImage.js';
 import { formatIslandReveal } from '../src/game/islandReveal.js';
 import { normalizeImageParams } from '../src/llm/openai.js';
 
@@ -26,6 +30,21 @@ test('промпт картины берёт описание города и о
   assert.match(prompt, /16:9/);
   assert.match(prompt, /CENTER/i);
   assert.match(prompt, /countryside/i);
+});
+
+test('промпт картины: контент агента и желание игрока, стиль из конфига', () => {
+  const prompt = composeIslandImagePrompt({
+    name: 'Варшена',
+    content: 'Glasshouse roofs crowd a temple hill; vine nets dry on windy streets.',
+    style: 'Mineral pigments only. Overcast daylight.',
+    playerWish: 'Хочу висячие оранжереи и запах сусла.',
+  });
+  assert.match(prompt, /Glasshouse roofs/);
+  assert.match(prompt, /висячие оранжереи/);
+  assert.match(prompt, /MUST be visible/);
+  assert.match(prompt, /Mineral pigments only/);
+  assert.match(prompt, /CENTER/i);
+  assert.equal(formatPlayerVisualWish({ city: 'Стекло и вино', ruler: 'строгий жрец', freeform: '' }), 'Стекло и вино');
 });
 
 test('после DALL·E не шлёт response_format и меняет модель', () => {
@@ -54,8 +73,7 @@ test('после генезиса коротко называет фишки о�
   });
   assert.match(text, /Сарвел/);
   assert.match(text, /Последнее предложение остаётся/);
-  assert.doesNotMatch(text, /Солёные ветры|Кальдера/);
-  assert.match(text, /Сусло на ветру/);
+  assert.doesNotMatch(text, /Солёные ветры|Кальдера|Сейчас в городе|Сусло на ветру/);
   assert.match(text, /Таврен/);
   assert.doesNotMatch(text, /…/);
 });

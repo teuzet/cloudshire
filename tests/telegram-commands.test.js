@@ -5,6 +5,8 @@ import {
   islandDeleteCheck,
   islandNamesMatch,
   isTelegramAllowed,
+  isTelegramForceTickAllowed,
+  isForceTickCommand,
   parseSlashCommand,
 } from '../src/clients/telegram/access.js';
 import { formatIslandPlotlines, formatIslandStats } from '../src/clients/telegram/views.js';
@@ -14,6 +16,16 @@ test('закрытый тест пускает только список, пус
   assert.equal(isTelegramAllowed({ telegram: { allowIds: ['10', '20'] } }, '10'), true);
   assert.equal(isTelegramAllowed({ telegram: { allowIds: ['10', '20'] } }, '99'), false);
   assert.match(closedTestReply({}), /закрытый тест/);
+});
+
+test('forcetick только из своего списка, пустой список — никому', () => {
+  const cfg = { telegram: { forceTickIds: ['518815155'] } };
+  assert.equal(isTelegramForceTickAllowed(cfg, '518815155'), true);
+  assert.equal(isTelegramForceTickAllowed(cfg, '99'), false);
+  assert.equal(isTelegramForceTickAllowed({ telegram: { forceTickIds: [] } }, '518815155'), false);
+  assert.equal(isForceTickCommand({ name: 'forcetick' }), true);
+  assert.equal(isForceTickCommand({ name: 'force_tick' }), true);
+  assert.equal(isForceTickCommand({ name: 'stats' }), false);
 });
 
 test('команды с аргументом и хвостом бота', () => {

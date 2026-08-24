@@ -4,6 +4,17 @@ export function isTelegramAllowed(config, telegramId) {
   return ids.map(String).includes(String(telegramId));
 }
 
+export function isTelegramForceTickAllowed(config, telegramId) {
+  const ids = config?.telegram?.forceTickIds;
+  if (!Array.isArray(ids) || !ids.length) return false;
+  return ids.map(String).includes(String(telegramId));
+}
+
+export function isForceTickCommand(command) {
+  const name = command?.name || command;
+  return name === 'forcetick' || name === 'force_tick';
+}
+
 export function closedTestReply(config) {
   return (
     config?.telegram?.closedTestReply ||

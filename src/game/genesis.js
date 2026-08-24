@@ -549,6 +549,7 @@ export async function generateDomain({
     character,
     lore,
     createdTick: world.tickIndex || 0,
+    playerBrief,
   });
 
   await storage.saveDomain(domain);

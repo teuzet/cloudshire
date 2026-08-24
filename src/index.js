@@ -49,7 +49,12 @@ async function main() {
     });
   });
 
-  const telegram = startTelegramBot({ config, app, storage });
+  const telegram = startTelegramBot({
+    config,
+    app,
+    storage,
+    runTick: (reason = 'telegram-force') => web.get('runTick')(reason),
+  });
   log.info('telegram.status', {
     enabled: Boolean(config.telegram?.enabled),
     running: Boolean(telegram.enabled),

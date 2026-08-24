@@ -1059,7 +1059,13 @@ export class GameApp {
           : `${domain.characters[0].name}: ${domain._greeting}`;
 
         await pushProgress(4, 'рисую вид острова…');
-        const picture = await generateIslandImage({ config: this.config, domain, log });
+        const picture = await generateIslandImage({
+          config: this.config,
+          domain,
+          runtime: this.runtime,
+          playerBrief: playerBrief || domain.playerBrief || null,
+          log,
+        });
         if (picture?.path) {
           domain.imagePath = picture.path;
           await this.storage.saveDomain(domain);

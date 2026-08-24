@@ -31,14 +31,6 @@ export function formatIslandReveal(domain) {
   const body = overviewText(domain);
   const lines = [`Остров «${name}» готов.`];
   if (body) lines.push('', body);
-  const plots = (domain?.plotlines || []).filter((p) => p && p.kind !== 'errand');
-  if (plots.length) {
-    lines.push('', 'Сейчас в городе:');
-    for (const p of plots.slice(0, 3)) {
-      const hook = clipProse(p.synopsis || p.title, 220);
-      lines.push(hook && p.title ? `«${p.title}» — ${hook}` : `«${p.title}»`);
-    }
-  }
   if (ruler?.name) {
     const title = ruler.title || 'Правитель';
     lines.push('', `С тобой будет говорить ${title} ${ruler.name}.`);

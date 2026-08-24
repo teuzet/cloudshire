@@ -127,6 +127,7 @@ export function createDomainRecord({
   character,
   lore = [],
   createdTick = 0,
+  playerBrief = null,
 }) {
   const now = new Date().toISOString();
   return {
@@ -162,6 +163,13 @@ export function createDomainRecord({
     createdAt: now,
     updatedAt: now,
     imagePath: null,
+    playerBrief: playerBrief
+      ? {
+          city: String(playerBrief.city || ''),
+          ruler: String(playerBrief.ruler || ''),
+          freeform: String(playerBrief.freeform || ''),
+        }
+      : null,
   };
 }
 

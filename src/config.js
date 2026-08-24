@@ -94,6 +94,10 @@ export function loadConfig(configPath = process.env.CLOUDSHIRE_CONFIG || 'config
   config.telegram = config.telegram || {};
   config.telegram.enabled = resolveTelegramEnabled(config.telegram);
   config.telegram.allowIds = parseTelegramAllowIds(config.telegram.allowIds);
+  config.telegram.forceTickIds = parseTelegramIdList(
+    config.telegram.forceTickIds,
+    'TELEGRAM_FORCE_TICK_IDS',
+  );
   if (!config.telegram.closedTestReply) {
     config.telegram.closedTestReply =
       'Сейчас идёт закрытый тест. Если тебя ждали — напиши тому, кто пригласил.';
@@ -117,7 +121,11 @@ function resolveTelegramEnabled(telegram) {
 }
 
 function parseTelegramAllowIds(raw) {
-  const fromEnv = process.env.TELEGRAM_ALLOW_IDS;
+  return parseTelegramIdList(raw, 'TELEGRAM_ALLOW_IDS');
+}
+
+function parseTelegramIdList(raw, envName) {
+  const fromEnv = process.env[envName];
   const source = fromEnv != null && String(fromEnv).trim() !== '' ? fromEnv : raw;
   if (source == null || source === '') return [];
   const list = Array.isArray(source) ? source : String(source).split(/[,\s]+/);
