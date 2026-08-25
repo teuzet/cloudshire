@@ -6,8 +6,10 @@ import { textsLookSame } from './processes.js';
  * Здесь только модель и формат; отбор битов, окраска и часы — в движке тика.
  *
  * Механика (см. docs/PIVOT_PLOTLINES.md):
- *   temperature — интерес к нити (растёт от внимания игрока, падает со временем)
- *   importance  — судьбоносность для города, задаёт масштаб последствий
+ *   gravity     — масштаб (бывшая importance) у трёхтактных историй
+ *   urgency     — шанс, что история сама стрельнет в месяц без дела
+ *   temperature — интерес (старые нити, указы, сопряжение)
+ *   importance  — судьбоносность; у трёхтактных зеркало gravity
  *   maxAgeMonths / ageMonths — сколько месяцев история живёт без внимания;
  *     срок сам по себе не развязка: выдохшаяся нить гаснет, только если нет дел и упоминаний
  *   closeWhen — что должно случиться, чтобы историю закрыть по существу, не «что писать в последний месяц»
@@ -36,9 +38,65 @@ export const PLOT_TITLE_MAX = 120;
 export { clipText as clipPlotText };
 
 export const PLOT_KINDS = ['story', 'errand', 'order'];
+export const THREE_ACT_TYPES = ['suspense', 'mystery'];
+export const STORY_TYPES = ['suspense', 'mystery', 'default'];
 
 export function isStoryPlot(plot) {
   return plot?.kind === 'story';
+}
+
+/** Только для посева городской истории. Поручения, указы и сопряжение движок ставит в default. */
+export function pickStoryType(rng = Math.random) {
+  return rng() < 0.5 ? 'mystery' : 'suspense';
+}
+
+/**
+ * Тип, который выставил движок: suspense | mystery | default.
+ * Default — старые рельсы (поручение, указ, сопряжение, наследие без типа).
+ */
+export function storyTypeOf(plot) {
+  if (!plot || plot.kind !== 'story' || plot.isMainConflux || plot.shared || plot.confluxId) {
+    return 'default';
+  }
+  if (THREE_ACT_TYPES.includes(plot.storyType)) return plot.storyType;
+  return 'default';
+}
+
+export function isThreeActPlot(plot) {
+  const t = storyTypeOf(plot);
+  return t === 'suspense' || t === 'mystery';
+}
+
+export function plotBeatAgentId(plot) {
+  const t = storyTypeOf(plot);
+  if (t === 'mystery') return 'mysteryBeat';
+  if (t === 'suspense') return 'suspenseBeat';
+  return 'storyBeat';
+}
+
+function clampStakes(n, fallback = 40) {
+  const v = Math.round(Number(n));
+  if (!Number.isFinite(v)) return fallback;
+  return Math.max(0, Math.min(200, v));
+}
+
+function storyActState(p = {}) {
+  const type = storyTypeOf(p);
+  if (type === 'default') {
+    return { storyType: 'default', act: null, urgency: null, gravity: null, urgency0: null, gravity0: null, truth: '', ending: null };
+  }
+  const urgency = clampStakes(p.urgency, 40);
+  const gravity = clampStakes(p.gravity, 40);
+  return {
+    storyType: type,
+    act: Number(p.act) === 2 ? 2 : 1,
+    urgency,
+    gravity,
+    urgency0: clampStakes(p.urgency0 ?? urgency, urgency),
+    gravity0: clampStakes(p.gravity0 ?? gravity, gravity),
+    truth: type === 'mystery' ? String(p.truth || '') : '',
+    ending: ['crit', 'ok', 'fail'].includes(p.ending) ? p.ending : null,
+  };
 }
 
 export function isOrderPlot(plot) {
@@ -127,6 +185,13 @@ export function plotConfig(config) {
     orders: {
       defaultChance: Math.max(0, Math.min(1, Number(p.orders?.defaultChance ?? 0.2))),
     },
+    acts: {
+      failMultiplier: Math.max(1, Number(p.acts?.failMultiplier ?? 2)),
+      worsenMin: Number(p.acts?.worsenMin ?? 1),
+      worsenMax: Number(p.acts?.worsenMax ?? 1.5),
+      dampMin: Number(p.acts?.dampMin ?? 0.8),
+      dampMax: Number(p.acts?.dampMax ?? 1),
+    },
   };
 }
 
@@ -175,6 +240,7 @@ export function normalizePlotlines(domain, config = null) {
       createdTick: p.createdTick == null ? null : Number(p.createdTick),
       lastBeatTick: p.lastBeatTick == null ? null : Number(p.lastBeatTick),
       beatCount: Math.max(0, Math.round(Number(p.beatCount) || 0)),
+      ...storyActState(p),
       ...(p.kind === 'order' ? orderCadence(p, config) : {}),
     }));
   return domain;
@@ -204,6 +270,14 @@ export function createPlotline({
   fireChance = null,
   scheduleEveryMonths = null,
   nextDueTick = null,
+  storyType = null,
+  act = 1,
+  urgency = null,
+  gravity = null,
+  urgency0 = null,
+  gravity0 = null,
+  truth = '',
+  ending = null,
   config = null,
 }) {
   const resolvedKind = PLOT_KINDS.includes(kind) ? kind : 'story';
@@ -242,6 +316,20 @@ export function createPlotline({
           config,
         )
       : {}),
+    ...storyActState({
+      storyType,
+      act,
+      urgency,
+      gravity,
+      urgency0,
+      gravity0,
+      truth,
+      ending,
+      kind: resolvedKind,
+      isMainConflux,
+      shared,
+      confluxId,
+    }),
   };
 }
 
@@ -277,6 +365,7 @@ export function isOverdue(plotline) {
  */
 export function plotCanFade(domain, plot, cfg) {
   if (isOrderPlot(plot)) return false;
+  if (isThreeActPlot(plot)) return false;
   if (!isOverdue(plot)) return false;
   if (plotHasActiveProcess(domain, plot)) return false;
   const floor = Number(cfg?.temperature?.fadeBelow ?? 18);
@@ -351,6 +440,7 @@ function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } =
     shared: Boolean(plot.shared),
     isMainConflux: Boolean(plot.isMainConflux),
     sharedReason: plot.sharedReason || null,
+    ...storyActState(plot),
     ...(plot.kind === 'order'
       ? {
           modifierId: plot.modifierId || null,
@@ -415,6 +505,7 @@ export function reopenClosedPlotline(domain, closedOrId) {
     createdTick: closed.createdTick == null ? null : Number(closed.createdTick),
     lastBeatTick: closed.lastBeatTick == null ? null : Number(closed.lastBeatTick),
     beatCount: Math.max(0, Math.round(Number(closed.beatCount) || 0)),
+    ...storyActState(closed),
     ...(closed.kind === 'order' ? orderCadence(closed) : {}),
   };
   domain.plotlines = domain.plotlines || [];
@@ -445,7 +536,7 @@ export function advancePlotClocks(domain, cfg) {
   for (const p of domain.plotlines) {
     if (p.kind === 'order') continue;
     p.ageMonths += 1;
-    p.temperature = clamp100(p.temperature - decay);
+    if (!isThreeActPlot(p)) p.temperature = clamp100(p.temperature - decay);
   }
   return domain.plotlines;
 }
@@ -538,12 +629,13 @@ const SEED_HOOK_MIN = 220;
 /**
  * Отсев пустышки и близнеца. Форму «кто хочет / что мешает» не проверяем.
  */
-export function judgePlotSeed(domain, draft) {
+export function judgePlotSeed(domain, draft, { storyType } = {}) {
   if (!draft) return 'empty';
   const title = String(draft.title || '').trim();
   const entry = String(draft.entry || '').trim();
   const synopsis = String(draft.synopsis || '').trim();
   if (!title || !entry || !synopsis) return 'empty';
+  if (storyType === 'mystery' && !String(draft.truth || '').trim()) return 'missing_truth';
   if (synopsis.length < SEED_HOOK_MIN) return 'thin_hook';
   const twin = (domain.plotlines || []).find((p) =>
     textsLookSame(`${p.title} ${p.synopsis}`, `${title} ${synopsis}`, { minShared: 7 }),
@@ -552,11 +644,18 @@ export function judgePlotSeed(domain, draft) {
   return null;
 }
 
+/** Разгадка тайны не для доски, речи и инспектора. */
+export function stripPlotSecrets(plot) {
+  if (!plot || typeof plot !== 'object') return plot;
+  const { truth: _truth, ...rest } = plot;
+  return rest;
+}
+
 /** Сумма важности живых историй. Дела не считаются. */
 export function liveStoryImportance(domain) {
   return (domain?.plotlines || [])
     .filter((p) => p && p.kind === 'story')
-    .reduce((sum, p) => sum + clamp100(p.importance, 0), 0);
+    .reduce((sum, p) => sum + clamp100(isThreeActPlot(p) ? p.gravity : p.importance, 0), 0);
 }
 
 /**
@@ -617,9 +716,12 @@ export function formatBoardForPrompt(domain) {
       const stats = p.relatedStats.length ? ` | в игре: ${p.relatedStats.join('+')}` : '';
       const proc = p.relatedProcessIds.length ? ` | дела: ${p.relatedProcessIds.join(', ')}` : '';
       const kindLabel = p.kind === 'errand' ? '(дело)' : p.kind === 'order' ? '(порядок)' : '';
+      const three = isThreeActPlot(p);
+      const meters = three
+        ? `urgency=${p.urgency} gravity=${p.gravity} такт=${p.act} тип=${p.storyType}`
+        : `T=${p.temperature} важность=${p.importance} тип=${p.storyType || 'default'}`;
       return (
-        `- [${p.id}] «${p.title}» ${kindLabel} ` +
-        `T=${p.temperature} важность=${p.importance} возраст=${p.ageMonths}/${p.maxAgeMonths}` +
+        `- [${p.id}] «${p.title}» ${kindLabel} ${meters} возраст=${p.ageMonths}/${p.maxAgeMonths}` +
         stats +
         proc +
         (p.synopsis ? `\n  ${p.synopsis}` : '')

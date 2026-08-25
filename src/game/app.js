@@ -87,7 +87,7 @@ import {
   resumeProcess,
   pausedProcesses,
 } from './processes.js';
-import { formatBoardForSpeech, warmPlotlines, plotConfig, findPlotline, clipPlotText, PLOT_TITLE_MAX, PLOT_SUMMARY_MAX, isOrderPlot } from './plotlines.js';
+import { formatBoardForSpeech, warmPlotlines, plotConfig, findPlotline, clipPlotText, PLOT_TITLE_MAX, PLOT_SUMMARY_MAX, isOrderPlot, isThreeActPlot } from './plotlines.js';
 import { queueOrderRequest, listStandingOrders } from './orders.js';
 import { islandDeleteCheck } from '../clients/telegram/access.js';
 import { generateIslandImage, removeIslandImage } from './islandImage.js';
@@ -95,6 +95,7 @@ import { formatIslandReveal } from './islandReveal.js';
 import { formatProgressBar } from './progressBar.js';
 import { estimateProcessDuration } from './durationJudge.js';
 import { ensureErrandForProcess, linkProcessToPlotline } from './plotEngine.js';
+import { judgeProcessAlignment } from './plotAlign.js';
 import { dialogHistoryForPrompt } from './memory.js';
 import {
   newsScheduleOf,
@@ -726,6 +727,15 @@ function characterTools(domain, storage, character, ctx) {
           }).plot;
         }
         action.plotlineId = plot?.id || null;
+        if (plot && isThreeActPlot(plot)) {
+          await judgeProcessAlignment({
+            runtime: ctx.runtime,
+            domain,
+            process: action,
+            plot,
+            log: ctx.log,
+          });
+        }
         if (ctx.conflux && plot && !isOrderPlot(plot)) {
           action.confluxId = ctx.conflux.id;
           action.ownerDomainId = domain.id;

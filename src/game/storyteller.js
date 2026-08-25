@@ -1,10 +1,14 @@
 /**
  * Авторы хроники. Движок решает, когда писать.
- *   storyStart  — новая история (посев или воля покровителя)
- *   storyBeat   — следующая запись хроники уже идущей истории
- *   orderBeat   — тик постоянного порядка: хроника на нити указа или завязка истории про него
- *   storyKeep   — синопсис по свежей хронике; «история всплыла» → температуру поднимает система
- *   fillerNews  — быт, когда сюжета не было
+ *   storyStart    — завязка саспенса
+ *   mysteryStart  — завязка тайны: сначала truth, в хронику он не идёт
+ *   storyBeat     — default: поручения, старые нити, зеркала (агент как был)
+ *   suspenseBeat  — бит саспенса
+ *   mysteryBeat   — бит тайны (канон truth только у этого агента)
+ *   orderBeat     — тик постоянного порядка
+ *   storyKeep     — синопсис по свежей хронике
+ *   fillerNews    — быт, когда сюжета не было
+ * Главная линия сопряжения — confluxBeat, не этот модуль.
  * След в статах города ставит отдельный агент (statJudge), не они.
  */
 
@@ -32,12 +36,17 @@ import {
   openingPlotCount,
   judgePlotSeed,
   warmPlotlines,
+  pickStoryType,
+  isThreeActPlot,
+  plotBeatAgentId,
   PLOT_SUMMARY_MAX,
   PLOT_HOOK_MAX,
 } from './plotlines.js';
 import { pickOrderOutcome, markOrderFired } from './orders.js';
 import { TINT_LABELS, pickRollStat, rollTint, formatFinishForPrompt } from './rolls.js';
 import { offerNames, formatOfferedNamesForPrompt, bindCharacterNames } from './names.js';
+import { assignPlotStakes } from './plotStakes.js';
+import { formatActMoveForPrompt } from './storyActs.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 
@@ -46,9 +55,8 @@ function chronicleMaxChars(config) {
   return Number.isFinite(n) && n >= 80 ? Math.round(n) : 260;
 }
 
-function cityBrief(domain, max = 900) {
-  const text = String(domain.description || '').trim();
-  return text.length > max ? `${text.slice(0, max)}…` : text || '(описание пусто)';
+function cityBrief(domain) {
+  return String(domain.description || '').trim() || '(описание пусто)';
 }
 
 /** Контекст города для завязки: генезис, свежая хроника, дела, люди. */
@@ -168,9 +176,12 @@ export async function seedPlot({
   tags = null,
   fromClosed = null,
   opening = false,
+  storyType: forcedType = null,
   log: parentLog,
 }) {
-  const log = (parentLog || getLogger()).child({ scope: 'storyteller.seed', domainId: domain.id });
+  const storyType =
+    forcedType === 'mystery' || forcedType === 'suspense' ? forcedType : pickStoryType();
+  const log = (parentLog || getLogger()).child({ scope: 'storyteller.seed', domainId: domain.id, storyType });
   const cfg = plotConfig(config);
   const maxChars = chronicleMaxChars(config);
   const statIds = (config.stats || []).map((s) => s.id).join(', ');
@@ -194,13 +205,14 @@ export async function seedPlot({
       draft,
       fromClosed,
       opening,
+      storyType,
     });
     if (!asked) {
       log.warn('storyteller.seed_failed', { attempt });
       continue;
     }
 
-    const reason = judgePlotSeed(domain, asked);
+    const reason = judgePlotSeed(domain, asked, { storyType });
     if (reason) {
       log.info('storyteller.seed_rejected', {
         reason,
@@ -227,9 +239,13 @@ export async function seedPlot({
       tags: roll,
       tick: world.tickIndex,
       relatedPlotlineIds: fromClosed?.id ? [fromClosed.id] : [],
+      storyType,
+      act: 1,
+      truth: storyType === 'mystery' ? String(asked.truth || '').trim() : '',
       config,
     });
     domain.plotlines.push(plot);
+    await assignPlotStakes({ runtime, domain, plot, world, log });
 
     const fact = pushChronicle(domain, {
       text: asked.entry,
@@ -256,6 +272,9 @@ export async function seedPlot({
       attempt,
       sequelOf: fromClosed?.id || null,
       importance: plot.importance,
+      storyType: plot.storyType,
+      urgency: plot.urgency,
+      gravity: plot.gravity,
       maxAgeMonths: plot.maxAgeMonths,
       relatedStats: plot.relatedStats,
       cast: cast.map((c) => c.name),
@@ -307,38 +326,43 @@ async function askPlotSeed({
   draft,
   fromClosed = null,
   opening = false,
+  storyType = 'suspense',
 }) {
+  const mystery = storyType === 'mystery';
+  const required = ['title', 'synopsis', 'closeWhen', 'importance', 'maxAgeMonths', 'relatedStats', 'entry'];
+  if (mystery) required.push('truth');
   const tools = [
     {
       name: 'submit_plot_seed',
-      description: 'Новая история: завязка, как она начинается в этом месяце, и карточка для продолжения.',
+      description: mystery
+        ? 'Новая тайна: сначала канон разгадки (truth), потом экспозиция, из которой разгадки не следует.'
+        : 'Новая история-саспенс: завязка, как она начинается в этом месяце, и карточка для продолжения.',
       parameters: {
         type: 'object',
-        required: ['title', 'synopsis', 'closeWhen', 'importance', 'maxAgeMonths', 'relatedStats', 'entry'],
+        required,
         properties: {
           title: { type: 'string', description: 'Название, 1–4 слова' },
           synopsis: {
             type: 'string',
-            description:
-              `Как сейчас обстоят дела и куда это может пойти, до ${PLOT_SUMMARY_MAX} символов. ` +
-              'По этому тексту историю будут продолжать.',
+            description: mystery
+              ? `Как сейчас обстоят дела и куда это может пойти, до ${PLOT_SUMMARY_MAX} символов. ` +
+                'По этому тексту историю будут продолжать. Разгадку тайны сюда не пиши.'
+              : `Как сейчас обстоят дела и куда это может пойти, до ${PLOT_SUMMARY_MAX} символов. ` +
+                'По этому тексту историю будут продолжать.',
           },
           closeWhen: {
             type: 'string',
-            description:
-              `Что должно произойти, чтобы историю закрыть по существу — не срок и не «что писать в последний месяц». ` +
-              `Одна фраза, до ${PLOT_HOOK_MAX} символов. Пример: «Иару нашли или узнали, что с ней стало».`,
+            description: mystery
+              ? `Что должно произойти, чтобы тайну считали разгаданной. Одна фраза, до ${PLOT_HOOK_MAX} символов.`
+              : `Что должно произойти, чтобы историю закрыть по существу. Одна фраза, до ${PLOT_HOOK_MAX} символов.`,
           },
           importance: {
             type: 'number',
-            description:
-              '0–100. Держись масштаба жребия: город ≈ 55, остров ≈ 75.',
+            description: '0–100. Держись масштаба жребия: город ≈ 55, остров ≈ 75.',
           },
           maxAgeMonths: {
             type: 'number',
-            description:
-              'Сколько месяцев история живёт без внимания (1–12). Срок сам по себе развязку не требует ' +
-              'и историю не закрывает, пока ею занимаются или о ней говорят.',
+            description: 'Сколько месяцев история живёт без внимания (1–12).',
           },
           relatedStats: {
             type: 'array',
@@ -347,8 +371,17 @@ async function askPlotSeed({
           },
           entry: {
             type: 'string',
-            description: `Что случилось в этом месяце, до ${maxChars} символов. Сухой факт.`,
+            description: mystery
+              ? `Экспозиция этого месяца, до ${maxChars} символов. Разгадку не называй и не намекай впрямую.`
+              : `Что случилось в этом месяце, до ${maxChars} символов. Сухой факт.`,
           },
+          truth: mystery
+            ? {
+                type: 'string',
+                description:
+                  'Полная разгадка тайны: что на самом деле было. Не попадёт в хронику и не будет видно правителю. Только движок и агент бита.',
+              }
+            : undefined,
           newCharacters: CHARACTERS_SCHEMA,
         },
       },
@@ -356,11 +389,15 @@ async function askPlotSeed({
         if (!String(args.title || '').trim() || !String(args.entry || '').trim() || !String(args.synopsis || '').trim()) {
           return toolFail('empty', 'Нужны название, синопсис и запись хроники.');
         }
+        if (mystery && !String(args.truth || '').trim()) {
+          return toolFail('empty', 'Нужна разгадка тайны в поле truth.');
+        }
         draft.data = args;
         return { ok: true };
       },
     },
   ];
+  if (!mystery) delete tools[0].parameters.properties.truth;
 
   const city = cityStoryContext(domain);
   const open = (domain.plotlines || [])
@@ -374,7 +411,7 @@ async function askPlotSeed({
   draft.offered = names.offered;
 
   await runtime.run({
-    agentId: 'storyStart',
+    agentId: mystery ? 'mysteryStart' : 'storyStart',
     tools,
     maxTurns: 3,
     toolChoice: { type: 'function', function: { name: 'submit_plot_seed' } },
@@ -386,7 +423,21 @@ async function askPlotSeed({
       {
         role: 'user',
         content: [
-          `Придумай новую историю города (${world.gameDate.label}).`,
+          mystery
+            ? `Придумай новую ТАЙНУ города (${world.gameDate.label}). Тип уже выбран движком.`
+            : `Придумай новую историю-саспенс города (${world.gameDate.label}). Тип уже выбран движком.`,
+          mystery
+            ? [
+                'Сначала придумай разгадку (`truth`) — что на самом деле происходит.',
+                'Потом напиши завязку (`entry`, `synopsis`), из которой правда ещё не читается.',
+                '`closeWhen` — когда тайна считается разгаданной, без самой разгадки.',
+                '`truth` никуда больше не копируй: не в entry, не в synopsis, не в closeWhen.',
+              ].join('\n')
+            : [
+                'Фокусируйся на саспенсе — развитии истории.',
+                'Отдавай приоритет продвижению сюжета вперёд, развитию конфликтов, сюжетным поворотам, а не открытию неизвестной информации.',
+                'Это не поручение правителя и не сопряжение — сюжет, который остров проживает сам.',
+              ].join('\n'),
           fromClosed
             ? [
                 `Только что закрылась история «${fromClosed.title}».`,
@@ -424,12 +475,16 @@ async function askPlotSeed({
           '',
           names.block,
           '',
-          'Напиши первую запись: что увидели в этом месяце.',
+          mystery
+            ? 'Напиши экспозицию этого месяца: что увидели, без разгадки.'
+            : 'Напиши первую запись: что увидели в этом месяце.',
           'Синопсис — как обстоят дела сейчас, чтобы по нему можно было продолжить.',
           'closeWhen — условие настоящей развязки, не инструкция на последний месяц. ' +
             'Если это условие выполнится раньше срока (нашли пропавшую на шестом месяце из двенадцати) — историю можно закрыть сразу.',
           'Вызови submit_plot_seed.',
-        ].join('\n'),
+        ]
+          .filter(Boolean)
+          .join('\n'),
       },
     ],
   });
@@ -502,7 +557,10 @@ export async function beatPlot({
   const statIds = (config.stats || []).map((s) => s.id).join(', ');
   const draft = { data: null };
 
-  const finale = Boolean(beat.finale);
+  const threeAct = isThreeActPlot(plot);
+  const mystery = threeAct && plot.storyType === 'mystery';
+  const engineEnding = beat.actMove?.ending || plot.ending || null;
+  const finale = Boolean(beat.finale || engineEnding);
   // У финала своя длина и свой контракт: развязка не влезает в сухую строку.
   const entryMax = finale ? Math.round(maxChars * 1.6) : maxChars;
 
@@ -528,16 +586,19 @@ export async function beatPlot({
           newCharacters: CHARACTERS_SCHEMA,
           closes: {
             type: 'boolean',
-            description:
-              'true только если в ЭТОМ месяце случилось условие закрытия истории. ' +
-              'Срок нити сам по себе не повод. Не выдумывай развязку, потому что «пора кончать».',
+            description: threeAct
+              ? 'Игнорируется: закрытие трёхтактной истории решает движок, не ты.'
+              : 'true только если в ЭТОМ месяце случилось условие закрытия истории. ' +
+                'Срок нити сам по себе не повод. Не выдумывай развязку, потому что «пора кончать».',
           },
           closeReason: { type: 'string' },
           sequelHook: {
             type: 'string',
-            description:
-              'Только при closes=true: если развязка сама оставила новый нерешённый узел — одна фраза, что осталось. ' +
-              'Нет узла — оставь пустым. Это не пересказ конца и не готовая следующая история.',
+            description: threeAct
+              ? 'Только если история закрывается: если развязка сама оставила новый нерешённый узел — одна фраза, что осталось. ' +
+                'Нет узла — оставь пустым. Это не пересказ конца и не готовая следующая история.'
+              : 'Только при closes=true: если развязка сама оставила новый нерешённый узел — одна фраза, что осталось. ' +
+                'Нет узла — оставь пустым. Это не пересказ конца и не готовая следующая история.',
           },
           touchesNeighbor: {
             type: 'boolean',
@@ -571,17 +632,32 @@ export async function beatPlot({
           .filter(Boolean)
           .join(' ')
       : outcome.kind === 'stall'
-        ? `Связанное дело «${outcome.summary}» встало: месяц без сдвига — расскажи, что помешало.`
-        : `Связанное дело «${outcome.summary}» пошло быстрее обычного — расскажи, что позволило.`
+        ? threeAct
+          ? `Связанное дело «${outcome.summary}» встало: месяц без сдвига — расскажи, что помешало. Такт и ставки не меняй.`
+          : `Связанное дело «${outcome.summary}» встало: месяц без сдвига — расскажи, что помешало.`
+        : threeAct
+          ? `Связанное дело «${outcome.summary}» пошло быстрее обычного — расскажи, что позволило. Такт и ставки не меняй.`
+          : `Связанное дело «${outcome.summary}» пошло быстрее обычного — расскажи, что позволило.`
     : null;
 
   const prior = priorPlotChronicle(domain, plot);
   const watched = peopleUnderWatch(domain);
   const names = peopleNamesBlock(world);
   const ruler = rulerName(domain);
+  const actBlock = threeAct ? formatActMoveForPrompt(plot, beat.actMove) : '';
+
+  const closeHint = threeAct
+    ? engineEnding
+      ? 'Движок уже закрывает историю. closes не выбирай. Если развязка оставила новый нерешённый узел — sequelHook одной фразой, иначе пусто.'
+      : 'Историю этим месяцем не закрывай. closes не выбирай.'
+    : finale
+      ? 'Проходное дело закончилось: покажи итог. closes=true.'
+      : outcome?.finished
+        ? 'Дело закончилось. Напиши его итог, не отменяя уже записанную хронику: если человека нашли — не пиши, что его всё ещё ищут. closes=true, только если этим исполнилось условие закрытия самой истории.'
+        : 'Сдвинь историю по исходу броска. closes=true — только если в этом месяце случилось условие закрытия, даже если до срока ещё далеко. Не закрывай и не выдумывай развязку просто потому что нить старая. Если закрываешь и после развязки остался новый нерешённый узел — sequelHook одной фразой, иначе пусто.';
 
   await runtime.run({
-    agentId: 'storyBeat',
+    agentId: plotBeatAgentId(plot),
     tools,
     maxTurns: 3,
     toolChoice: { type: 'function', function: { name: 'submit_plot_beat' } },
@@ -589,9 +665,12 @@ export async function beatPlot({
     scene: 'plot_beat',
     domainId: domain.id,
     extraSystem: [
-      `Город «${domain.name}». ${cityBrief(domain, 600)}`,
+      `Город «${domain.name}». ${cityBrief(domain)}`,
       ruler ? `Правитель города — ${ruler}. Этого человека в newCharacters не заводи, второго с тем же именем тоже.` : null,
       `Известные люди города:\n${formatCastForPrompt(domain.lore, { limit: 12 })}`,
+      mystery && plot.truth
+        ? `ТАЙНА (канон, не в хронику пока движок не велел):\n${plot.truth}`
+        : null,
     ]
       .filter(Boolean)
       .join('\n\n'),
@@ -610,14 +689,11 @@ export async function beatPlot({
               'Им нельзя отдавать бумаги, ключи и доверие города, пока запись сама не скажет, что их поймали или сняли подозрение.'
             : null,
           '',
-          `ИСХОД ЭТОГО МЕСЯЦА (решено броском, не спорь): ${TINT_LABELS[beat.tint]}.`,
-          beat.statId ? `Решала сторона города: ${beat.statId}.` : null,
+          actBlock || null,
+          !threeAct && !beat.skipTint ? `ИСХОД ЭТОГО МЕСЯЦА (решено броском, не спорь): ${TINT_LABELS[beat.tint]}.` : null,
+          !threeAct && beat.statId ? `Решала сторона города: ${beat.statId}.` : null,
           processLine,
-          finale
-            ? 'Проходное дело закончилось: покажи итог. closes=true.'
-            : outcome?.finished
-              ? 'Дело закончилось. Напиши его итог, не отменяя уже записанную хронику: если человека нашли — не пиши, что его всё ещё ищут. closes=true, только если этим исполнилось условие закрытия самой истории.'
-              : 'Сдвинь историю по исходу броска. closes=true — только если в этом месяце случилось условие закрытия, даже если до срока ещё далеко. Не закрывай и не выдумывай развязку просто потому что нить старая. Если закрываешь и после развязки остался новый нерешённый узел — sequelHook одной фразой, иначе пусто.',
+          closeHint,
           partner
             ? `Города сейчас в сопряжении с «${partner.name}». Если поворот реально задел соседа — ` +
               'touchesNeighbor=true и одна фраза в neighborNote. Внутренние дела соседа не касаются.'
@@ -640,14 +716,19 @@ export async function beatPlot({
   }
 
   const d = draft.data;
+  const finishToken = engineEnding || (outcome?.finished ? outcome.finish || null : null);
+  const major =
+    Boolean(engineEnding) ||
+    (!threeAct && (beat.finale || d.closes)) ||
+    plot.importance >= 70;
 
   const fact = pushChronicle(domain, {
     text: d.entry,
-    importance: beat.finale || d.closes || plot.importance >= 70 ? 'major' : 'minor',
+    importance: major ? 'major' : 'minor',
     world,
     plotIds: [plot.id],
     processId: outcome?.processId || null,
-    processFinish: outcome?.finished ? outcome.finish || null : null,
+    processFinish: finishToken,
     author: 'storyteller:beat',
   });
 
@@ -670,9 +751,15 @@ export async function beatPlot({
   plot.lastBeatTick = world.tickIndex;
   plot.beatCount += 1;
 
-  const wantClose = Boolean(d.closes || beat.finale);
+  const wantClose = threeAct ? Boolean(engineEnding) : Boolean(d.closes || beat.finale);
   const closed = wantClose && !plotHasActiveProcess(domain, plot);
-  const closeReason = d.closeReason || (beat.finale ? 'дело закончилось' : 'условие закрытия исполнилось');
+  const closeReason = threeAct
+    ? engineEnding === 'crit'
+      ? 'критический успех'
+      : engineEnding === 'fail'
+        ? 'провал'
+        : 'успех'
+    : d.closeReason || (beat.finale ? 'дело закончилось' : 'условие закрытия исполнилось');
   const sequelHook =
     closed && plot.kind !== 'errand' ? clipPlotText(String(d.sequelHook || '').trim(), PLOT_HOOK_MAX) : '';
   if (closed) {
@@ -829,7 +916,7 @@ export async function tickOrder({
     scene: resolvedMode === 'story' ? 'order_story' : 'order_chronicle',
     domainId: domain.id,
     extraSystem: [
-      `Город «${domain.name}». ${cityBrief(domain, 600)}`,
+      `Город «${domain.name}». ${cityBrief(domain)}`,
       ruler ? `Правитель города — ${ruler}. Этого человека в newCharacters не заводи.` : null,
       `Известные люди города:\n${formatCastForPrompt(domain.lore, { limit: 12 })}`,
     ]
@@ -1139,7 +1226,7 @@ export async function quietMonth({ config, runtime, domain, world, log: parentLo
     log,
     scene: 'quiet_month',
     domainId: domain.id,
-    extraSystem: `Город «${domain.name}». ${cityBrief(domain, 500)}`,
+    extraSystem: `Город «${domain.name}». ${cityBrief(domain)}`,
     userMessages: [
       {
         role: 'user',

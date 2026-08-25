@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sourceForFact, applyFallbackStatDrift, factsForStatJudge } from '../src/game/statJudge.js';
+import { sourceForFact, applyFallbackStatDrift, factsForStatJudge, enforceFinishPolarity } from '../src/game/statJudge.js';
 
 const STAT_CONFIG = {
   stats: [
@@ -54,4 +54,10 @@ test('тихий месяц оценщику не отдаём', () => {
     { id: 'b', author: 'storyteller:beat' },
   ]);
   assert.deepEqual(scored.map((f) => f.id), ['b']);
+});
+
+test('крит без минусов, провал без плюсов', () => {
+  assert.deepEqual(enforceFinishPolarity({ prosperity: 3, faith: -2 }, 'crit'), { prosperity: 3 });
+  assert.deepEqual(enforceFinishPolarity({ prosperity: 3, faith: -2 }, 'fail'), { faith: -2 });
+  assert.deepEqual(enforceFinishPolarity({ prosperity: 3, faith: -2 }, 'ok'), { prosperity: 3, faith: -2 });
 });

@@ -13,9 +13,8 @@ function chronicleMaxChars(config) {
   return Math.max(80, Number(config?.tick?.chronicleEntryMaxChars) || 260);
 }
 
-function cityBrief(domain, max = 500) {
-  const text = String(domain?.description || '').trim();
-  return text.length > max ? `${text.slice(0, max)}…` : text || '(описание пусто)';
+function cityBrief(domain) {
+  return String(domain?.description || '').trim() || '(описание пусто)';
 }
 
 function rulerName(domain) {

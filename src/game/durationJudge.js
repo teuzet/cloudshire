@@ -8,9 +8,8 @@ import { guessProcessDuration } from './processes.js';
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 
-function cityBrief(domain, max = 500) {
-  const text = String(domain.description || '').trim();
-  return text.length > max ? `${text.slice(0, max)}…` : text || '(описание пусто)';
+function cityBrief(domain) {
+  return String(domain.description || '').trim() || '(описание пусто)';
 }
 
 /**

@@ -17,9 +17,8 @@ import {
 } from './plotlines.js';
 import { closeOrderPair, normalizeOrders } from './orders.js';
 
-function cityBrief(domain, max = 600) {
-  const text = String(domain.description || '').trim();
-  return text.length > max ? `${text.slice(0, max)}…` : text || '(описание пусто)';
+function cityBrief(domain) {
+  return String(domain.description || '').trim() || '(описание пусто)';
 }
 
 function titleFromText(text) {

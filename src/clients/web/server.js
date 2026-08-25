@@ -13,6 +13,7 @@ import {
 import { getLogger, requestLogger, truncate } from '../../log.js';
 import { statEpithet } from '../../game/stats.js';
 import { chronicleEntries, castRecords } from '../../game/models.js';
+import { stripPlotSecrets } from '../../game/plotlines.js';
 import { FINISH_SHORT } from '../../game/rolls.js';
 import { resolveIslandImage } from '../../game/islandImage.js';
 import { knownPartnerLore } from '../../game/confluxBoard.js';
@@ -72,8 +73,8 @@ function inspectConfluxBoard(conflux, domain, partner, world) {
       theyPublicCount: publicLore(domain).length,
       theyKnow: [...theyKnow].sort(byTick).map(slimLore),
     },
-    plotlines: conflux.plotlines || [],
-    closedPlotlines: (conflux.closedPlotlines || []).slice(-20),
+    plotlines: (conflux.plotlines || []).map(stripPlotSecrets),
+    closedPlotlines: (conflux.closedPlotlines || []).slice(-20).map(stripPlotSecrets),
     processes: conflux.processes || [],
     lore: [...(conflux.lore || [])].slice(-40).map(slimLore),
     domainNames: names,
@@ -411,8 +412,8 @@ export function createWebServer({ config, app, runtime, storage }) {
             processes: domain.state?.pendingActions || [],
             standingOrders: domain.state?.modifiers || [],
             monthLog: domain.state?.monthLog || [],
-            plotlines: domain.plotlines || [],
-            closedPlotlines: (domain.closedPlotlines || []).slice(-20),
+            plotlines: (domain.plotlines || []).map(stripPlotSecrets),
+            closedPlotlines: (domain.closedPlotlines || []).slice(-20).map(stripPlotSecrets),
             cast: castRecords(lore),
             facts: lore
               .filter((f) => (f.tags || []).includes('fact'))
