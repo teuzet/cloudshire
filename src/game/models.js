@@ -1,5 +1,7 @@
 import { newId } from './ids.js';
+import { seedWorldNamePool, normalizeNamePool } from './names.js';
 import { normalizeOrders } from './orders.js';
+import { stampPersonAge } from './ages.js';
 
 export function emptyState() {
   return {
@@ -63,7 +65,7 @@ export function normalizeDomain(domain) {
 
 export function createWorldFromConfig(config) {
   const now = new Date().toISOString();
-  return {
+  const world = {
     // Уникальный id экземпляра (один запуск / жизнь мира до wipe).
     id: newId('world'),
     // Ключ сезона/шаблона из конфига (не уникален между запусками).
@@ -91,6 +93,8 @@ export function createWorldFromConfig(config) {
     createdAt: now,
     updatedAt: now,
   };
+  seedWorldNamePool(world, config);
+  return world;
 }
 
 /** Подтянуть поля у старых world.yaml (до уникальных id). */
@@ -117,6 +121,8 @@ export function normalizeWorld(world, config = null) {
     if (!('tickInProgress' in world.scheduler)) world.scheduler.tickInProgress = false;
     if (!('tickStartedAt' in world.scheduler)) world.scheduler.tickStartedAt = null;
   }
+  seedWorldNamePool(world, config);
+  normalizeNamePool(world);
   return world;
 }
 
@@ -181,8 +187,16 @@ export function createDomainRecord({
   };
 }
 
-export function createCharacter({ id, name, description, role = 'ruler', title = 'Правитель' }) {
-  return {
+export function createCharacter({
+  id,
+  name,
+  description,
+  role = 'ruler',
+  title = 'Правитель',
+  ageYears = null,
+  world = null,
+}) {
+  const person = {
     id,
     name,
     title,
@@ -195,6 +209,8 @@ export function createCharacter({ id, name, description, role = 'ruler', title =
     /** Священный ужас / благоговение перед покровителем 0–100 */
     terror: 50,
   };
+  stampPersonAge(person, world, { ageYears });
+  return person;
 }
 
 /**
@@ -208,14 +224,16 @@ export function createCharacterRecord({
   about = '',
   gender = 'unknown',
   status = 'alive',
+  ageYears = null,
   tick = null,
   gameDateLabel = null,
   author = 'system',
   relatedPlotlineIds = [],
+  world = null,
 }) {
   const sex = ['male', 'female'].includes(gender) ? gender : 'unknown';
   const state = ['alive', 'dead', 'gone'].includes(status) ? status : 'alive';
-  return {
+  const record = {
     id,
     tags: ['character'],
     name: String(name || '').trim().slice(0, 80),
@@ -230,6 +248,60 @@ export function createCharacterRecord({
     author,
     relatedPlotlineIds: (relatedPlotlineIds || []).map(String),
     createdAt: new Date().toISOString(),
+  };
+  stampPersonAge(record, world, { ageYears });
+  return record;
+}
+
+/** Схема newCharacters для рассказчика: имя, пол, возраст в годах. */
+export function newCharactersSchema({ withCity = false } = {}) {
+  const properties = {
+    name: { type: 'string' },
+    gender: {
+      type: 'string',
+      enum: ['male', 'female'],
+      description: 'Мужчина или женщина: без этого город будет путать род человека.',
+    },
+    ageYears: {
+      type: 'integer',
+      description: 'Возраст в полных годах сейчас. Месяц рождения ставит движок и сам сдвигает возраст.',
+    },
+    role: {
+      type: 'string',
+      description: 'Должность или занятие: ткачиха, страж у края, старший рынка.',
+    },
+    about: {
+      type: 'string',
+      description:
+        'Одна фраза: чем занят, где его найти. ТОЛЬКО кто он есть — не события. ' +
+        'Смерть, пропажа, отъезд, находка тела — это событие месяца, его место в записи хроники, ' +
+        'а не здесь: карточку читают немногие, хронику — весь город.',
+    },
+    status: {
+      type: 'string',
+      enum: ['alive', 'dead', 'gone'],
+      description:
+        'Жив, мёртв или пропал без вести. dead/gone — только если это УЖЕ сказано в записи. ' +
+        'Если пропавшего нашли живым — alive.',
+    },
+  };
+  if (withCity) {
+    properties.city = {
+      type: 'string',
+      description: 'Имя города, к которому человек принадлежит.',
+    };
+  }
+  return {
+    type: 'array',
+    description:
+      'Люди, названные по имени ВПЕРВЫЕ. Уже известных из каста сюда не добавляй — просто используй. ' +
+      'Назвал в записи новое имя — обязан внести его сюда, иначе город о нём забудет. ' +
+      'Возраст (ageYears) обязателен: сколько человеку полных лет.',
+    items: {
+      type: 'object',
+      required: ['name', 'gender', 'ageYears'],
+      properties,
+    },
   };
 }
 
@@ -248,9 +320,27 @@ export function formatCastForPrompt(lore = [], { limit = 20 } = {}) {
       const state = stateWord[c.status] ? ` [${stateWord[c.status]}]` : '';
       const role = c.role ? `, ${c.role}` : '';
       const sex = sexWord[c.gender] ? ` (${sexWord[c.gender]})` : '';
-      return `- ${c.name}${sex}${role}${state}${c.about ? `: ${c.about}` : ''}`;
+      const age = Number.isFinite(Number(c.ageYears)) ? `, ${c.ageYears} лет` : '';
+      return `- ${c.name}${sex}${age}${role}${state}${c.about ? `: ${c.about}` : ''}`;
     })
     .join('\n');
+}
+
+/** Покровитель не знает каст наизусть: первое имя в этом тексте — с должностью. */
+export function firstMentionHintForSpeech() {
+  return [
+    'ПЕРВОЕ УПОМИНАНИЕ ЧЕЛОВЕКА В ЭТОМ ТЕКСТЕ:',
+    'Покровитель не знает всех по имени. Когда в этой реплике имя встречается впервые — назови его вместе с должностью или кто это («ткачиха Айра», «страж у края Кален»).',
+    'Дальше в том же тексте можно говорить просто по имени.',
+    'Себя (правителя) так представлять не надо.',
+  ].join('\n');
+}
+
+/** Люди каста, чьи имена звучат в данных текстах. */
+export function peopleNamedInTexts(lore = [], texts = []) {
+  const blob = (texts || []).map((t) => String(t || '')).join('\n');
+  if (!blob.trim()) return [];
+  return castRecords(lore).filter((c) => c.name && blob.includes(c.name));
 }
 
 /** Найти персонажа по имени (без учёта регистра) — чтобы не плодить дубли. */

@@ -11,6 +11,8 @@ import {
   findDuplicateProcess,
   resolveLinkedStats,
   applyObjectiveSchedule,
+  pausedProcesses,
+  resumeProcess,
 } from './processes.js';
 import { estimateProcessDuration } from './durationJudge.js';
 import { formatBoardForPrompt } from './plotlines.js';
@@ -179,7 +181,7 @@ export async function runSteward({ config, runtime, domain, world, log: parentLo
         type: 'object',
         required: ['action'],
         properties: {
-          action: { type: 'string', enum: ['none', 'process', 'standing_order'] },
+          action: { type: 'string', enum: ['none', 'process', 'standing_order', 'resume'] },
           summary: { type: 'string', description: 'Название дела, 1–8 слов' },
           detail: { type: 'string', description: 'Что именно поручено и кому' },
           goal: {
@@ -195,6 +197,10 @@ export async function runSteward({ config, runtime, domain, world, log: parentLo
             type: 'string',
             description:
               'id истории без поручения, если дело про неё. Не подставляй соседнюю нить.',
+          },
+          processId: {
+            type: 'string',
+            description: 'Для resume — id дела на паузе.',
           },
           text: { type: 'string', description: 'Формулировка постоянного порядка' },
           note: { type: 'string' },
@@ -219,13 +225,38 @@ export async function runSteward({ config, runtime, domain, world, log: parentLo
           draft.data = { kind: 'process', summary: applied.action.summary, id: applied.action.id };
           return { ok: true };
         }
+        if (kind === 'resume') {
+          const paused = pausedProcesses(domain, config);
+          const raw = String(args.processId || args.summary || '').trim().toLowerCase();
+          const action =
+            paused.find((a) => a.id === args.processId) ||
+            paused.find((a) => String(a.summary || '').toLowerCase().includes(raw));
+          if (!action) return toolFail('not_paused', 'Нет такого дела на паузе.');
+          const applied = resumeProcess(action, domain, config);
+          if (!applied.ok) {
+            return toolFail(
+              applied.error,
+              applied.error === 'too_many_processes'
+                ? `Уже ${applied.active}/${applied.max} дел, слота нет.`
+                : applied.error,
+            );
+          }
+          rememberFact(domain, {
+            world,
+            character,
+            chronicleAdds,
+            text: `Правитель ${character?.name || ''} сам возобновил дело: ${action.summary}.`,
+          });
+          draft.data = { kind: 'resume', summary: action.summary, id: action.id };
+          return { ok: true };
+        }
         if (kind === 'standing_order') {
           const applied = applyOrder(domain, args.text, { world, character });
           if (applied.error) return toolFail(applied.error, applied.message);
           draft.data = { kind: 'standing_order', text: applied.request.text, id: applied.request.id };
           return { ok: true };
         }
-        return toolFail('bad_action', 'action: none, process или standing_order.');
+        return toolFail('bad_action', 'action: none, process, resume или standing_order.');
       },
     },
   ];
@@ -258,6 +289,12 @@ export async function runSteward({ config, runtime, domain, world, log: parentLo
           `Покровитель молчит уже ${gate.silent} месяца. Письмо ему пишет другой — ты только одно поручение.`,
           'По сводке ниже заведи дело, объяви порядок — или ничего. Это ТВОЁ решение, не воля бога.',
           'Одно действие. Если город и так занят и ничего не горит — action=none.',
+          'Дела на паузе можно возобновить (action=resume), если слот свободен.',
+          pausedProcesses(domain, config).length
+            ? `На паузе:\n${pausedProcesses(domain, config)
+                .map((p) => `- [${p.id}] ${p.summary} (ещё ~${p.monthsLeft} мес.)`)
+                .join('\n')}`
+            : null,
           openStories.length
             ? `Истории без поручения (если действовать — plotId одной из них):\n${openStories
                 .map((p) => `- [${p.id}] «${p.title}»: ${p.synopsis || ''}`)

@@ -317,10 +317,10 @@ export function createMainConfluxPlot({ a, b, conflux, world, config }) {
   const eta = Math.max(1, Number(conflux.etaMonths) || 1);
   const dur = Math.max(1, Number(conflux.durationMonths) || 1);
   const plot = createPlotline({
-    title: `Стык «${a.name}» и «${b.name}»`,
+    title: `Сопряжение «${a.name}» и «${b.name}»`,
     synopsis:
       `Летающие острова городов «${a.name}» и «${b.name}» сближаются. ` +
-      `Стыковка неизбежна; встреча будет длиться, пока края снова не разойдутся.`,
+      `Сопряжение неизбежно; встреча будет длиться, пока края снова не разойдутся.`,
     closeWhen: 'Острова разошлись в небе, пути между ними больше нет.',
     kind: 'story',
     importance: 85,
@@ -465,13 +465,13 @@ export function approachingAnnounceText(domain, partner, remaining, rematch) {
   const months = Math.max(0, Math.round(Number(remaining) || 0));
   const when =
     months <= 0
-      ? 'Стыковка уже в этом месяце.'
+      ? 'Сопряжение уже в этом месяце.'
       : months === 1
-        ? 'До стыковки около месяца.'
-        : `До стыковки по приметам — примерно ${months} мес.`;
+        ? 'До сопряжения около месяца.'
+        : `До сопряжения по приметам — примерно ${months} мес.`;
   return [
     `На горизонте чужой летающий остров — город «${partner.name}».`,
-    'Стыковка уже неизбежна.',
+    'Сопряжение уже неизбежно.',
     when,
     rematch ? 'Это повторный конфлюкс: острова уже сходились раньше.' : '',
   ]
@@ -483,7 +483,7 @@ export function approachMonthText(partnerName, remaining, rematch) {
   const rematchHint = rematch ? ' Это повторный конфлюкс — острова уже сходились.' : '';
   return (
     `Остров соседа («${partnerName}») ближе: в разрывах тумана уже угадывают край чужой земли. ` +
-    `До стыковки по приметам осталось около ${remaining} мес.${rematchHint}`
+    `До сопряжения по приметам осталось около ${remaining} мес.${rematchHint}`
   );
 }
 

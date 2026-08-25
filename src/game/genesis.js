@@ -16,6 +16,7 @@ import {
 } from './models.js';
 import { formatPlayerBrief } from './onboarding.js';
 import { seedOpeningPlots } from './storyteller.js';
+import { takeName } from './names.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 
@@ -42,9 +43,27 @@ function cosmologyBlock() {
 }
 
 function fallbackName() {
-  // Кириллица, но не русские топонимы: имена этого мира, а не земные.
   const names = ['Ирмала', 'Кальдра', 'Тавронь', 'Сатрея', 'Улдин', 'Веналь', 'Мардон', 'Оренга'];
   return names[Math.floor(Math.random() * names.length)];
+}
+
+function bindRulerName(world, core, config) {
+  if (!core) return core;
+  const gender =
+    /жриц|правительниц|хозяйк|матушк|госпож/i.test(String(core.rulerTitle || '')) ||
+    /[ая]$/i.test(String(core.rulerName || '').trim())
+      ? 'female'
+      : 'male';
+  const old = String(core.rulerName || '').trim();
+  const next = takeName(world, gender, config);
+  core.rulerName = next;
+  if (old && old !== next) {
+    const swap = (s) => String(s || '').split(old).join(next);
+    core.rulerDescription = swap(core.rulerDescription);
+    core.greeting = swap(core.greeting);
+    core.openingLore = (core.openingLore || []).map(swap);
+  }
+  return core;
 }
 
 function looksLikeTouristGreeting(text) {
@@ -92,6 +111,7 @@ function fallbackCore(lockedName, playerBrief, patronName = null) {
     domainName: name,
     rulerName: /жриц/i.test(rulerWish) ? 'Ицка' : 'Кайрен',
     rulerTitle: /жриц/i.test(rulerWish) ? 'Верховная жрица' : 'Правитель',
+    rulerAge: 40,
     rulerDescription: rulerWish,
     greeting: defaultGreeting(name, patronName),
     openingLore: [
@@ -159,6 +179,10 @@ async function generateCore({
             type: 'string',
             description: 'Одно придуманное имя кириллицей, без фамилии и отчества',
           },
+          rulerAge: {
+            type: 'integer',
+            description: 'Возраст правителя в полных годах (примерно 20–70).',
+          },
           rulerTitle: { type: 'string' },
           rulerDescription: {
             type: 'string',
@@ -219,6 +243,8 @@ async function generateCore({
         }
         if (!fixed.rulerName) fixed.rulerName = 'Кайрен';
         if (!fixed.rulerTitle) fixed.rulerTitle = 'Правитель';
+        const age = Math.round(Number(fixed.rulerAge));
+        fixed.rulerAge = Number.isFinite(age) ? Math.max(18, Math.min(80, age)) : 32 + Math.floor(Math.random() * 20);
         if (!fixed.rulerDescription) {
           fixed.rulerDescription = playerBrief?.ruler || 'Внимательный к знамениям глава города.';
         }
@@ -502,6 +528,8 @@ export async function generateDomain({
     onProgress,
     log,
   });
+  bindRulerName(world, core, config);
+  await storage.saveWorld(world);
 
   const aspects = {};
   const batches = chunk(aspectsConfig, batchSize);
@@ -540,6 +568,8 @@ export async function generateDomain({
     title: core.rulerTitle || 'Правитель',
     description: core.rulerDescription,
     role: 'ruler',
+    ageYears: core.rulerAge,
+    world,
   });
 
   const lore = (core.openingLore || []).map((text) =>

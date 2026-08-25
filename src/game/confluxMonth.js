@@ -76,16 +76,16 @@ export async function resolveConfluxSharedMonth({
 }) {
   const log = (parentLog || getLogger()).child({ scope: 'conflux.month', confluxId: conflux.id });
   normalizeConfluxBoard(conflux);
+  const cfg = plotConfig(config);
+  // Часы всех нитей сопряжения (локальных и shared) — всегда, даже если shared ещё нет.
+  advancePlotMonth(conflux, cfg);
   const plots = sharedPlots(conflux);
   const addsByDomain = new Map((domains || []).map((d) => [d.id, []]));
   if (!plots.length) {
     return { conflux, domains, chronicleAddsByDomain: addsByDomain };
   }
 
-  const cfg = plotConfig(config);
   const domainsById = new Map(domains.map((d) => [d.id, d]));
-  // Часы всех нитей конфлюкса (локальных и shared) — один раз за мировой тик.
-  advancePlotMonth({ plotlines: conflux.plotlines }, cfg);
   const board = boardFromShared(conflux, domains);
 
   const processOutcomes = applyEngineProgress(board, rollSharedProcesses(conflux, plots, domainsById, config), {

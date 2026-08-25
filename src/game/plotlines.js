@@ -650,7 +650,7 @@ export function formatBoardForSpeech(domain, { statsFeel = null, max = 8, viewer
         : p.kind === 'order'
           ? 'порядок'
           : p.isMainConflux
-            ? 'стык'
+            ? 'сопряжение'
             : p.shared
               ? 'общая история'
               : foreign

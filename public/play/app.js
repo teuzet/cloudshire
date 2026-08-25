@@ -62,7 +62,7 @@ function renderHistory(history) {
     } else if (m.kind === 'tick_news') {
       box.appendChild(bubble('news', m.content, 'письмо о месяце'));
     } else if (m.kind === 'conflux_announce') {
-      box.appendChild(bubble('news', m.content, 'стык на горизонте'));
+      box.appendChild(bubble('news', m.content, 'сопряжение на горизонте'));
     } else if (m.kind === 'conflux_approach') {
       box.appendChild(bubble('news', m.content, 'остров близко'));
     } else if (m.kind === 'onboarding') {
@@ -77,7 +77,7 @@ function renderHistory(history) {
 function confluxMark(island) {
   const c = island?.conflux;
   if (!c) return island?.draft ? 'черновик' : '';
-  if (c.status === 'docked') return c.partnerName ? `стык · ${c.partnerName}` : 'стык';
+  if (c.status === 'docked') return c.partnerName ? `сопряжение · ${c.partnerName}` : 'сопряжение';
   if (c.status === 'approaching') {
     const left = c.monthsUntilDock;
     const when = left == null ? '' : left <= 0 ? 'скоро' : `${left} мес.`;
@@ -292,6 +292,7 @@ function renderCityTab(d) {
         keyVals(
           d.characters.flatMap((ch) => [
             ['имя', `${ch.name}${ch.title ? `, ${ch.title}` : ''}`],
+            ...(ch.ageYears != null ? [['возраст', `${ch.ageYears} лет`]] : []),
             ['верность / страх', `${ch.loyalty ?? '—'} / ${ch.terror ?? '—'}`],
           ]),
         ),
@@ -303,13 +304,13 @@ function renderCityTab(d) {
   const c = d.conflux;
   out.push(
     block(
-      'Стыковка',
+      'Сопряжение',
       c
         ? keyVals([
             ['статус', c.status],
             ['партнёр', c.partnerName],
-            ['до стыковки, мес.', c.monthsUntilDock],
-            ['состыкованы, мес.', `${c.monthsDocked}/${c.durationMonths}`],
+            ['до сопряжения, мес.', c.monthsUntilDock],
+            ['в сопряжении, мес.', `${c.monthsDocked}/${c.durationMonths}`],
             ['повторная', c.rematch ? 'да' : 'нет'],
             ['проход', c.contact ? `${c.contact.kind || '?'} — ${c.contact.description || ''}` : null],
             ['контроль прохода', c.contact?.control || null],
@@ -318,10 +319,10 @@ function renderCityTab(d) {
         : `<p class="muted">сейчас остров идёт один</p>`,
     ) +
       block(
-        'Счёт стыковок',
+        'Счёт сопряжений',
         keyVals([
           ['месяцев в соло', d.confluxHistory?.monthsSolo],
-          ['месяцев в стыковке', d.confluxHistory?.monthsDocked],
+          ['месяцев в сопряжении', d.confluxHistory?.monthsDocked],
           ['прежние партнёры', Object.keys(d.confluxHistory?.partners || {}).length || '—'],
         ]),
       ),
@@ -344,7 +345,7 @@ function plotCard(p, names = {}) {
   const host = p.hostDomainId ? names[p.hostDomainId] || p.hostDomainId : null;
   const meta = [
     p.kind,
-    p.isMainConflux ? 'главная нить стыка' : null,
+    p.isMainConflux ? 'главная нить сопряжения' : null,
     p.shared ? 'общая' : concerns.length ? 'локальная' : null,
     p.sharedReason ? `стала общей: ${p.sharedReason}` : null,
     host ? `хозяин: ${host}` : null,
@@ -402,7 +403,7 @@ function awarenessMeter(label, value) {
 function renderPlotsTab(d) {
   const plots = d.plotlines || [];
   const note = d.conflux?.plotlines?.length
-    ? '<p class="muted small">Сюжетные нити стыка — во вкладке «стык». Здесь остаются указы города.</p>'
+    ? '<p class="muted small">Сюжетные нити сопряжения — во вкладке «сопряжение». Здесь остаются указы города.</p>'
     : '';
   const body = plots.length
     ? plots.map((p) => plotCard(p)).join('')
@@ -423,15 +424,15 @@ function renderPlotsTab(d) {
 function renderConfluxTab(d) {
   const c = d.conflux;
   const hist = block(
-    'Счёт стыковок',
+    'Счёт сопряжений',
     keyVals([
       ['месяцев в соло', d.confluxHistory?.monthsSolo],
-      ['месяцев в стыковке', d.confluxHistory?.monthsDocked],
+      ['месяцев в сопряжении', d.confluxHistory?.monthsDocked],
       ['прежние партнёры', Object.keys(d.confluxHistory?.partners || {}).length || '—'],
     ]),
   );
   if (!c) {
-    return block('Стык', '<p class="muted">сейчас остров идёт один</p>') + hist;
+    return block('Сопряжение', '<p class="muted">сейчас остров идёт один</p>') + hist;
   }
 
   const names = c.domainNames || {};
@@ -442,12 +443,12 @@ function renderConfluxTab(d) {
 
   out.push(
     block(
-      'Стык',
+      'Сопряжение',
       keyVals([
         ['статус', c.status],
         ['партнёр', c.partnerName],
-        ['до стыковки, мес.', c.monthsUntilDock],
-        ['состыкованы, мес.', `${c.monthsDocked}/${c.durationMonths}`],
+        ['до сопряжения, мес.', c.monthsUntilDock],
+        ['в сопряжении, мес.', `${c.monthsDocked}/${c.durationMonths}`],
         ['повторная', c.rematch ? 'да' : 'нет'],
         ['проход', c.contact ? `${c.contact.kind || '?'} — ${c.contact.description || ''}` : null],
         ['контроль прохода', c.contact?.control || null],
@@ -463,8 +464,8 @@ function renderConfluxTab(d) {
         awarenessMeter('они знают о нас', c.awareness?.theirs) +
         `<p class="muted small">${
           c.status === 'docked'
-            ? 'Информированность растёт только в стыковке. Информатор отвечает лишь из известных записей; секреты соседа сюда не попадают.'
-            : 'Пока острова только сближаются, информированность не растёт. Информатор заработает после стыка.'
+            ? 'Информированность растёт только в сопряжении. Информатор отвечает лишь из известных записей; секреты соседа сюда не попадают.'
+            : 'Пока острова только сближаются, информированность не растёт. Информатор заработает после сопряжения.'
         }</p>`,
     ),
   );
@@ -493,15 +494,15 @@ function renderConfluxTab(d) {
 
   out.push(
     block(
-      `Нити стыка (${plots.length})`,
-      plots.length ? plots.map((p) => plotCard(p, names)).join('') : '<p class="muted">нитей на стыке нет</p>',
+      `Нити сопряжения (${plots.length})`,
+      plots.length ? plots.map((p) => plotCard(p, names)).join('') : '<p class="muted">нитей на сопряжении нет</p>',
     ),
   );
 
   if (c.closedPlotlines?.length) {
     out.push(
       block(
-        'Закрытые нити стыка',
+        'Закрытые нити сопряжения',
         `<ul>${c.closedPlotlines
           .map((p) => `<li>${esc(p.title)} <span class="muted small">${esc(p.reason || p.closeReason || '')}</span></li>`)
           .join('')}</ul>`,
@@ -509,22 +510,22 @@ function renderConfluxTab(d) {
     );
   }
 
-  const active = procs.filter((p) => !p.status || p.status === 'active');
-  const done = procs.filter((p) => p.status && p.status !== 'active');
+  const active = procs.filter((p) => !p.status || p.status === 'active' || p.status === 'paused');
+  const done = procs.filter((p) => p.status && p.status !== 'active' && p.status !== 'paused');
   out.push(
     block(
-      `Дела стыка (${active.length})`,
-      active.length ? active.map((p) => processCard(p, { viewerId: d.id })).join('') : '<p class="muted">дел на стыке нет</p>',
+      `Дела сопряжения (${active.length})`,
+      active.length ? active.map((p) => processCard(p, { viewerId: d.id })).join('') : '<p class="muted">дел на сопряжении нет</p>',
     ),
   );
   if (done.length) {
     out.push(
-      block(`Закрытые дела стыка (${done.length})`, done.map((p) => processCard(p, { viewerId: d.id })).join('')),
+      block(`Закрытые дела сопряжения (${done.length})`, done.map((p) => processCard(p, { viewerId: d.id })).join('')),
     );
   }
 
   if (c.lore?.length) {
-    out.push(block(`Внутренняя хроника стыка (${c.lore.length})`, loreCards([...c.lore].reverse())));
+    out.push(block(`Внутренняя хроника сопряжения (${c.lore.length})`, loreCards([...c.lore].reverse())));
   }
 
   out.push(hist);
@@ -553,10 +554,13 @@ function processCard(p, opts = {}) {
   const objective = p.objectiveMonths;
   const left = p.monthsLeft;
   const active = !p.status || p.status === 'active';
+  const paused = p.status === 'paused';
   const own = !p.ownerDomainId || p.ownerDomainId === opts.viewerId;
-  const clock = active
-    ? `осталось ${left ?? '?'} из ${total} мес.`
-    : `${p.status}${p.resolvedTick != null ? ` · тик ${p.resolvedTick}` : ''} · шло ${total} мес.`;
+  const clock = paused
+    ? `пауза · осталось ${left ?? '?'} из ${total} мес.`
+    : active
+      ? `осталось ${left ?? '?'} из ${total} мес.`
+      : `${p.status}${p.resolvedTick != null ? ` · тик ${p.resolvedTick}` : ''} · шло ${total} мес.`;
   const pace =
     objective && Number(objective) !== Number(total)
       ? `оценка ${objective} мес.`
@@ -602,10 +606,10 @@ function processCard(p, opts = {}) {
 function renderProcessesTab(d) {
   const list = d.processes || [];
   const note = d.conflux?.processes?.length
-    ? '<p class="muted small">Дела стыка — во вкладке «стык». Здесь остаются городские.</p>'
+    ? '<p class="muted small">Дела сопряжения — во вкладке «сопряжение». Здесь остаются городские.</p>'
     : '';
-  const active = list.filter((p) => !p.status || p.status === 'active');
-  const done = list.filter((p) => p.status && p.status !== 'active');
+  const active = list.filter((p) => !p.status || p.status === 'active' || p.status === 'paused');
+  const done = list.filter((p) => p.status && p.status !== 'active' && p.status !== 'paused');
   const activeBlock = block(
     `Дела (${active.length})`,
     active.length ? active.map((p) => processCard(p, { viewerId: d.id })).join('') : '<p class="muted">активных дел нет</p>',
@@ -673,7 +677,9 @@ function renderCastTab(d) {
       .map(
         (c) =>
           `<article class="ins-card"><h4>${esc(c.name)}${c.status && c.status !== 'alive' ? ` <span class="muted small">${esc(c.status)}</span>` : ''}</h4>` +
-          (c.role ? `<div class="muted small">${esc(c.role)}</div>` : '') +
+          `<div class="muted small">${esc(
+            [Number.isFinite(Number(c.ageYears)) ? `${c.ageYears} лет` : null, c.role].filter(Boolean).join(' · '),
+          )}</div>` +
           (c.about ? `<p class="pre">${esc(c.about)}</p>` : '') +
           `</article>`,
       )

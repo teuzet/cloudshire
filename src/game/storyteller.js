@@ -16,6 +16,7 @@ import {
   findCharacterByName,
   chronicleEntries,
   castRecords,
+  newCharactersSchema,
 } from './models.js';
 import {
   createPlotline,
@@ -36,6 +37,7 @@ import {
 } from './plotlines.js';
 import { pickOrderOutcome, markOrderFired } from './orders.js';
 import { TINT_LABELS, pickRollStat, rollTint, formatFinishForPrompt } from './rolls.js';
+import { offerNames, formatOfferedNamesForPrompt, bindCharacterNames } from './names.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 
@@ -78,39 +80,18 @@ function recentPlayerTalk(domain, limit = 8) {
     .join('\n');
 }
 
-const CHARACTERS_SCHEMA = {
-  type: 'array',
-  description:
-    'Люди, названные по имени ВПЕРВЫЕ. Уже известных из каста сюда не добавляй — просто используй. ' +
-    'Назвал в записи новое имя — обязан внести его сюда, иначе город о нём забудет.',
-  items: {
-    type: 'object',
-    required: ['name', 'gender'],
-    properties: {
-      name: { type: 'string' },
-      gender: {
-        type: 'string',
-        enum: ['male', 'female'],
-        description: 'Мужчина или женщина: без этого город будет путать род человека.',
-      },
-      role: { type: 'string' },
-      about: {
-        type: 'string',
-        description:
-          'Одна фраза: чем занят, где его найти. ТОЛЬКО кто он есть — не события. ' +
-          'Смерть, пропажа, отъезд, находка тела — это событие месяца, его место в записи хроники, ' +
-          'а не здесь: карточку читают немногие, хронику — весь город.',
-      },
-      status: {
-        type: 'string',
-        enum: ['alive', 'dead', 'gone'],
-        description:
-          'Жив, мёртв или пропал без вести. dead/gone — только если это УЖЕ сказано в записи. ' +
-          'Если пропавшего нашли живым — alive.',
-      },
-    },
-  },
-};
+const CHARACTERS_SCHEMA = newCharactersSchema();
+
+function adoptPeople(domain, list, { world, plotId = null, author = 'storyteller', config = null, texts = [], offered = null }) {
+  const bound = bindCharacterNames(world, list, { offered, texts, config });
+  const cast = registerCharacters(domain, bound.list, { world, plotId, author });
+  return { cast, texts: bound.texts };
+}
+
+function peopleNamesBlock(world, config) {
+  const offered = offerNames(world, { female: 4, male: 4 }, config);
+  return { offered, block: formatOfferedNamesForPrompt(offered) };
+}
 
 function rulerName(domain) {
   return String(domain?.characters?.[0]?.name || '').trim();
@@ -146,10 +127,12 @@ function registerCharacters(domain, list, { world, plotId = null, author = 'stor
       about: c.about,
       gender: c.gender,
       status: c.status,
+      ageYears: c.ageYears,
       tick: world.tickIndex,
       gameDateLabel: world.gameDate?.label || null,
       author,
       relatedPlotlineIds: plotId ? [plotId] : [],
+      world,
     });
     domain.lore.push(record);
     added.push(record);
@@ -255,7 +238,17 @@ export async function seedPlot({
       plotIds: [plot.id],
       author: 'storyteller:seed',
     });
-    const cast = registerCharacters(domain, asked.newCharacters, { world, plotId: plot.id });
+    const adopted = adoptPeople(domain, asked.newCharacters, {
+      world,
+      plotId: plot.id,
+      author: 'storyteller:seed',
+      texts: [asked.entry],
+      offered: draft.offered,
+    });
+    if (adopted.texts[0] && adopted.texts[0] !== fact.text) {
+      fact.text = adopted.texts[0];
+    }
+    const cast = adopted.cast;
 
     log.info('storyteller.seed', {
       plotId: plot.id,
@@ -377,6 +370,9 @@ async function askPlotSeed({
     })
     .join('\n');
 
+  const names = peopleNamesBlock(world);
+  draft.offered = names.offered;
+
   await runtime.run({
     agentId: 'storyStart',
     tools,
@@ -425,6 +421,8 @@ async function askPlotSeed({
           'Уже идут другие истории и дела — не продолжай их и не делай вторую сторону того же случая:',
           open || '- (нет)',
           'Новый случай: свой предмет, не срыв и не тайна того, что уже делают.',
+          '',
+          names.block,
           '',
           'Напиши первую запись: что увидели в этом месяце.',
           'Синопсис — как обстоят дела сейчас, чтобы по нему можно было продолжить.',
@@ -544,7 +542,7 @@ export async function beatPlot({
           touchesNeighbor: {
             type: 'boolean',
             description:
-              'Только при стыковке: правда ли этот поворот задел соседний город ' +
+              'Только при сопряжении: правда ли этот поворот задел соседний город ' +
               '(люди перешли, спор у прохода, слухи, общий вред). Обычные внутренние дела — нет.',
           },
           neighborNote: {
@@ -579,6 +577,7 @@ export async function beatPlot({
 
   const prior = priorPlotChronicle(domain, plot);
   const watched = peopleUnderWatch(domain);
+  const names = peopleNamesBlock(world);
   const ruler = rulerName(domain);
 
   await runtime.run({
@@ -620,10 +619,12 @@ export async function beatPlot({
               ? 'Дело закончилось. Напиши его итог, не отменяя уже записанную хронику: если человека нашли — не пиши, что его всё ещё ищут. closes=true, только если этим исполнилось условие закрытия самой истории.'
               : 'Сдвинь историю по исходу броска. closes=true — только если в этом месяце случилось условие закрытия, даже если до срока ещё далеко. Не закрывай и не выдумывай развязку просто потому что нить старая. Если закрываешь и после развязки остался новый нерешённый узел — sequelHook одной фразой, иначе пусто.',
           partner
-            ? `Города сейчас состыкованы с «${partner.name}». Если поворот реально задел соседа — ` +
+            ? `Города сейчас в сопряжении с «${partner.name}». Если поворот реально задел соседа — ` +
               'touchesNeighbor=true и одна фраза в neighborNote. Внутренние дела соседа не касаются.'
             : null,
           logLine ? `В городе этим месяцем: ${logLine}` : null,
+          '',
+          names.block,
           '',
           'Вызови submit_plot_beat. Только запись этого месяца; карточку истории не переписывай.',
         ]
@@ -650,7 +651,16 @@ export async function beatPlot({
     author: 'storyteller:beat',
   });
 
-  const cast = registerCharacters(domain, d.newCharacters, { world, plotId: plot.id });
+  const adopted = adoptPeople(domain, d.newCharacters, {
+    world,
+    plotId: plot.id,
+    author: 'storyteller:beat',
+    texts: [d.entry, d.synopsis],
+    offered: names.offered,
+  });
+  if (adopted.texts[0]) fact.text = adopted.texts[0];
+  if (adopted.texts[1]) d.synopsis = adopted.texts[1];
+  const cast = adopted.cast;
 
   if (Array.isArray(d.relatedStats) && d.relatedStats.length) {
     const allowed = new Set((config.stats || []).map((s) => s.id));

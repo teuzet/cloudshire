@@ -75,7 +75,7 @@ export async function askLoremaster({
     {
       name: 'read_lore',
       description: conflux
-        ? 'Прочитать описание города, факты, хронику и (если стык) контакт/соседа'
+        ? 'Прочитать описание города, факты, хронику и (если сопряжение) контакт/соседа'
         : 'Прочитать описание города, факты и хронику',
       parameters: { type: 'object', properties: {} },
       handler: async () => {
@@ -131,13 +131,13 @@ export async function askLoremaster({
             if (partner) {
               payload.partner = partnerBrief(partner, working.id);
               payload.reminder +=
-                ' Соседний остров на стыке — реальный; чужие secret тебе не видны. Не выдумывай третий остров.';
+                ' Соседний остров при сопряжении — реальный; чужие secret тебе не видны. Не выдумывай третий остров.';
             }
           } else {
             payload.conflux.monthsUntilDock = monthsUntilDock(conflux, world);
             payload.reminder +=
               ` СБЛИЖЕНИЕ ПОДТВЕРЖДЕНО: чужой остров${partner?.name ? ` «${partner.name}»` : ''}` +
-              ` реально приближается, стыковка примерно через ${monthsUntilDock(conflux, world)} мес.` +
+              ` реально приближается, сопряжение примерно через ${monthsUntilDock(conflux, world)} мес.` +
               ' Это факт мира, а не слух. Отвечать «не подтверждено» ЗАПРЕЩЕНО.' +
               ' Про внутреннюю жизнь соседа сведений пока нет — только сам факт и срок.';
           }
@@ -306,14 +306,14 @@ export async function askLoremaster({
     : docked
       ? [
           '',
-          `Сейчас стык (conflux ${conflux.id}) с соседом` +
+          `Сейчас сопряжение (conflux ${conflux.id}) с соседом` +
             (partner ? ` «${partner.name}»` : '') +
             '. В read_lore есть contact и краткий partner brief без чужих тайн.',
         ].join('\n')
       : [
           '',
           `К острову ПОДТВЕРЖДЁННО приближается чужой остров${partner ? ` «${partner.name}»` : ''}; ` +
-            `стыковка примерно через ${monthsUntilDock(conflux, world)} мес. Это факт мира.`,
+            `сопряжение примерно через ${monthsUntilDock(conflux, world)} мес. Это факт мира.`,
           'Отвечать «сближение не подтверждено» или «таких сведений нет» ЗАПРЕЩЕНО.',
           'О внутренней жизни соседа сведений пока нет — только факт сближения и срок.',
         ].join('\n');

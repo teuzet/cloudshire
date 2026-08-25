@@ -1,4 +1,5 @@
 import { advanceGameDate, filterChronicleForDomain, normalizeDomain } from './models.js';
+import { ageDomainPeople } from './ages.js';
 import {
   processConfluxApproachingPhase,
   advanceDockedConfluxes,
@@ -16,6 +17,7 @@ import {
 } from './confluxBoard.js';
 import { resolveIslandImage } from './islandImage.js';
 import { getLogger } from '../log.js';
+import { shouldSendTickNews, splitTickNews } from './newsSchedule.js';
 
 /** Игровая дата шапкой у письма месяца (только в отправке, не в dialogHistory). */
 function withDateHeader(text, world) {
@@ -83,7 +85,7 @@ async function emitApproachPhotos({ app, storage, config, notes }) {
       const partner = partnerId ? await storage.getDomain(partnerId) : null;
       if (!domain?.ownerUserId || !partner) continue;
       const remaining = monthsUntilDock(conflux, world);
-      const fact = `Чужой остров «${partner.name}» уже близко — до стыковки около месяца.`;
+      const fact = `Чужой остров «${partner.name}» уже близко — до сопряжения около месяца.`;
       const letter = await app.narrateConfluxSighting(domain, {
         kind: 'approach',
         fact,
@@ -127,6 +129,9 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
   await advanceConfluxLifetimeCounters({ storage, world });
 
   const domains = await storage.listDomains();
+  for (const domain of domains) {
+    ageDomainPeople(domain, world);
+  }
   const byId = new Map(domains.map((d) => [d.id, d]));
   const results = [];
   const confluxNotes = [...(matchmake.notes || []), ...(confluxPhase.notes || [])];
@@ -221,18 +226,26 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
     const conflux = active.find((c) => (c.domainIds || []).includes(domain.id)) || null;
     const partnerId = conflux ? otherDomainId(conflux, domain.id) : null;
     const partner = partnerId ? byId.get(partnerId) : null;
-    const news = await app.narrateTickNews(domain, newsAdds, world.gameDate, {
-      undock: undockAdds.length > 0,
-      partnerName: partner?.name || null,
-      highlight: resolved.highlight,
-      stewardActs: resolved.stewardActs || [],
-    });
-    await app.persistDialog(domain, 'assistant', news, { kind: 'tick_news' });
-    await app.emitOutbound(domain.ownerUserId, withDateHeader(news, world), {
-      agent: 'ruler',
-      domainId: domain.id,
-      kind: 'tick_news',
-    });
+    const undocked = undockAdds.length > 0;
+    const sendNews = undocked || shouldSendTickNews(domain, world.gameDate, newsAdds);
+    let news = null;
+    if (sendNews) {
+      news = await app.narrateTickNews(domain, newsAdds, world.gameDate, {
+        undock: undocked,
+        partnerName: partner?.name || null,
+        highlight: resolved.highlight,
+        stewardActs: resolved.stewardActs || [],
+      });
+      const parts = splitTickNews(news);
+      for (const part of parts) {
+        await app.persistDialog(domain, 'assistant', part, { kind: 'tick_news' });
+        await app.emitOutbound(domain.ownerUserId, withDateHeader(part, world), {
+          agent: 'ruler',
+          domainId: domain.id,
+          kind: 'tick_news',
+        });
+      }
+    }
 
     results.push({
       domainId: domain.id,
@@ -253,6 +266,8 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
         .map((c) => ({ id: c.id, changes: c.statChanges })),
     });
   }
+
+  await storage.saveWorld(world);
 
   return {
     world: {

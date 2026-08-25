@@ -7,6 +7,8 @@ import {
   normalizeDomain,
   formatCastForPrompt,
   applyPatronName,
+  firstMentionHintForSpeech,
+  peopleNamedInTexts,
 } from './models.js';
 import {
   qualitativePopulation,
@@ -81,6 +83,9 @@ import {
   processPaceRatio,
   blessProcess,
   processOwnedBy,
+  pauseProcess,
+  resumeProcess,
+  pausedProcesses,
 } from './processes.js';
 import { formatBoardForSpeech, warmPlotlines, plotConfig, findPlotline, clipPlotText, PLOT_TITLE_MAX, PLOT_SUMMARY_MAX, isOrderPlot } from './plotlines.js';
 import { queueOrderRequest, listStandingOrders } from './orders.js';
@@ -91,6 +96,19 @@ import { formatProgressBar } from './progressBar.js';
 import { estimateProcessDuration } from './durationJudge.js';
 import { ensureErrandForProcess, linkProcessToPlotline } from './plotEngine.js';
 import { dialogHistoryForPrompt } from './memory.js';
+import {
+  newsScheduleOf,
+  setNewsSchedule,
+  shouldSendTickNews,
+  tickNewsStyleHint,
+} from './newsSchedule.js';
+import {
+  formatRulerMemoryForPrompt,
+  writeRulerMemory,
+  forgetRulerMemory,
+  shouldRulerAskPatron,
+  markRulerAsked,
+} from './rulerMemory.js';
 import {
   shouldAskPatronPresence,
   markPatronPresenceAsked,
@@ -353,6 +371,12 @@ function characterTools(domain, storage, character, ctx) {
           progress: processProgressFeel(a),
           blessed: Boolean(a.blessed),
         })),
+        pausedProcesses: pausedProcesses(domain, ctx.config).map((a) => ({
+          id: a.id,
+          summary: a.summary,
+          monthsLeft: a.monthsLeft,
+          detail: a.detail,
+        })),
         recentlyClosed: recentlyClosedProcesses(domain, world?.tickIndex),
         processSlots: canStartProcess(domain, ctx.config),
         plots: (domain.plotlines || []).map((p) => ({
@@ -376,6 +400,7 @@ function characterTools(domain, storage, character, ctx) {
           'fresh=false — только дополни поручение и при нужде поменяй оставшийся срок (не меньше 1 мес.). ' +
           'goal — одной фразой, что считается достигнутой целью; можно не заполнять. ' +
           'blessed=true — покровитель уже благословил это дело; исход будет [КРИТИЧЕСКИЙ УСПЕХ], так и помни. ' +
+          'pausedProcesses — на паузе: прогресс жив, слот свободен, тик не идёт. Снять паузу — resume_process, если есть слот. ' +
           'recentlyClosed[].outcome — итог [ПРОВАЛ] / [УСПЕХ] / [КРИТИЧЕСКИЙ УСПЕХ]; про них не говори «не знаю». ' +
           'Для update_process / revoke_process бери id из processes[].id. ' +
           'Если id не помнишь — передай краткий смысл дела в processId (например «университет»), система найдёт. ' +
@@ -385,7 +410,7 @@ function characterTools(domain, storage, character, ctx) {
         guidancePlots:
           'plots[] — живые нити. kind=errand уже привязана к делу; kind=story может быть без поручения; kind=order — постоянный порядок, дело на него не заводи. ' +
           'foreign=true — история СОСЕДА, ещё не общая: если покровитель в неё вмешивается, declare_process с её plotId — тогда она станет общей. ' +
-          'shared=true — общая история стыка, дело можно заводить с обеих сторон. ' +
+          'shared=true — общая история сопряжения, дело можно заводить с обеих сторон. ' +
           'Приказ по истории без дела — declare_process с plotId этой истории. ' +
           'Не бери id соседней нити из-за общего места или общих людей.',
       }),
@@ -513,7 +538,7 @@ function characterTools(domain, storage, character, ctx) {
     ctx.conflux && ctx.partner && {
       name: 'consult_informant',
       description:
-        'Спросить информатора о соседнем острове на стыке. Он знает только уже известные вам факты и честно говорит «неизвестно».',
+        'Спросить информатора о соседнем острове при сопряжении. Он знает только уже известные вам факты и честно говорит «неизвестно».',
       parameters: {
         type: 'object',
         required: ['questions'],
@@ -949,6 +974,163 @@ function characterTools(domain, storage, character, ctx) {
           revokedId: action.id,
           summary: action.summary,
           hint: 'В речи: дело свёрнуто/отложено по воле покровителя. Без id/process.',
+        };
+      },
+    },
+    {
+      name: 'pause_process',
+      description:
+        'Поставить дело на паузу: прогресс не теряется, тик не идёт, слот освобождается. Не отмена.',
+      parameters: {
+        type: 'object',
+        required: ['processId'],
+        properties: {
+          processId: { type: 'string', description: 'Id дела или слова из названия' },
+        },
+      },
+      handler: async ({ processId }) => {
+        const { process: action, candidates } = resolveActiveProcess(domain, processId, ctx.config);
+        if (!action) {
+          return {
+            ok: false,
+            error: 'process not found',
+            activeProcesses: candidates.map((a) => ({ id: a.id, summary: a.summary })),
+          };
+        }
+        const result = pauseProcess(action);
+        if (!result.ok) return { ok: false, error: result.error };
+        await save();
+        return {
+          ok: true,
+          pausedId: action.id,
+          summary: action.summary,
+          hint: 'Дело на паузе. В речи: работы остановили, к ним можно вернуться. Слот свободен.',
+        };
+      },
+    },
+    {
+      name: 'resume_process',
+      description:
+        'Снять дело с паузы, если есть свободный слот (не больше лимита параллельных дел).',
+      parameters: {
+        type: 'object',
+        required: ['processId'],
+        properties: {
+          processId: { type: 'string', description: 'Id паузы из pausedProcesses или слова из названия' },
+        },
+      },
+      handler: async ({ processId }) => {
+        const paused = pausedProcesses(domain, ctx.config);
+        const raw = String(processId || '').trim().toLowerCase();
+        const action =
+          paused.find((a) => a.id === processId) ||
+          paused.find((a) => String(a.summary || '').toLowerCase().includes(raw));
+        if (!action) {
+          return {
+            ok: false,
+            error: 'not_paused',
+            pausedProcesses: paused.map((a) => ({ id: a.id, summary: a.summary })),
+          };
+        }
+        const result = resumeProcess(action, domain, ctx.config);
+        if (!result.ok) {
+          return {
+            ok: false,
+            error: result.error,
+            active: result.active,
+            max: result.max,
+            agentMessage:
+              result.error === 'too_many_processes'
+                ? `Слот занят (${result.active}/${result.max}). Сначала сверни или поставь на паузу другое дело.`
+                : result.error,
+          };
+        }
+        await save();
+        return {
+          ok: true,
+          resumedId: action.id,
+          summary: action.summary,
+          hint: 'Дело снова идёт. В речи без id.',
+        };
+      },
+    },
+    {
+      name: 'write_memory',
+      description:
+        'Записать себе на память короткую заметку: как звать покровителя, чего не делать, о чём не будить. Не дневник.',
+      parameters: {
+        type: 'object',
+        required: ['text'],
+        properties: {
+          text: { type: 'string', description: 'Одна фраза, до 280 знаков.' },
+        },
+      },
+      handler: async ({ text }) => {
+        const result = writeRulerMemory(domain, text, { tick: ctx.world?.tickIndex ?? null });
+        if (!result.ok) return { ok: false, error: result.error };
+        await save();
+        return { ok: true, memory: result.note, hint: 'Держись этой заметки в дальнейшем.' };
+      },
+    },
+    {
+      name: 'forget_memory',
+      description: 'Стереть заметку памяти по id из списка памяти.',
+      parameters: {
+        type: 'object',
+        required: ['memoryId'],
+        properties: { memoryId: { type: 'string' } },
+      },
+      handler: async ({ memoryId }) => {
+        const result = forgetRulerMemory(domain, memoryId);
+        if (!result.ok) return { ok: false, error: result.error };
+        await save();
+        return { ok: true };
+      },
+    },
+    {
+      name: 'set_news_schedule',
+      description:
+        'Настроить письма о месяце покровителю. Движок сам решает, слать ли письмо. ' +
+        'Сближение островов этими настройками не глушится.',
+      parameters: {
+        type: 'object',
+        properties: {
+          months: {
+            type: 'array',
+            items: { type: 'number' },
+            description:
+              'Месяцы года (1–12), в которые писать. Пустой массив — не писать по календарю. ' +
+              '«Каждый месяц» — [1,2,3,4,5,6,7,8,9,10,11,12]. «В 1, 4 и 8» — [1,4,8].',
+          },
+          alsoOnCritical: {
+            type: 'boolean',
+            description:
+              'Писать также, если в месяце есть хроника с важностью critical — даже если месяц не в списке.',
+          },
+          detail: {
+            type: 'string',
+            enum: ['full', 'brief', 'essence'],
+            description: 'full — подробный отчёт; brief — выжимка; essence — супер-кратко, только суть.',
+          },
+          clickbait: { type: 'boolean', description: 'Кликбейтный зачин.' },
+          ask: { type: 'boolean', description: 'Заканчивать вопросом, что делать.' },
+        },
+      },
+      handler: async (args) => {
+        const patch = {};
+        if (args.months) patch.months = args.months;
+        if (args.alsoOnCritical != null) patch.alsoOnCritical = args.alsoOnCritical;
+        if (args.detail) patch.detail = args.detail;
+        if (args.clickbait != null) patch.clickbait = args.clickbait;
+        if (args.ask != null) patch.ask = args.ask;
+        const schedule = setNewsSchedule(domain, patch);
+        await save();
+        return {
+          ok: true,
+          schedule,
+          hint:
+            'В речи: как теперь будешь писать о месяце. Не называй поля движка. ' +
+            'Сближение островов всё равно доложишь, это не письмо месяца.',
         };
       },
     },
@@ -1879,11 +2061,11 @@ export class GameApp {
     if (conflux.status === 'approaching') {
       const left = monthsUntilDock(conflux, world);
       return [
-        'КАНОН СТЫКОВКИ (реальность, не слух — говори об этом открыто и по имени):',
+        'КАНОН СОПРЯЖЕНИЯ (реальность, не слух — говори об этом открыто и по имени):',
         `К острову приближается чужой летающий остров — город ${partnerName}.`,
-        `До стыковки примерно ${left} мес. Событие неизбежно, это крупнейшая новость города.`,
+        `До сопряжения примерно ${left} мес. Событие неизбежно, это крупнейшая новость города.`,
         conflux.rematch
-          ? 'Это ПОВТОРНАЯ стыковка: острова уже сходились раньше, город это помнит.'
+          ? 'Это ПОВТОРНОЕ сопряжение: острова уже сходились раньше, город это помнит.'
           : 'Такого сближения город прежде не знал (с этим соседом).',
         'Если покровитель спрашивает про чужой остров — отвечай прямо: имя, срок, что это значит.',
         'Факты внутренней жизни соседа — только через consult_informant, не через лормастера.',
@@ -1896,11 +2078,11 @@ export class GameApp {
 
     const contact = conflux.contact ? formatContactForPrompt(conflux.contact) : '';
     return [
-      'КАНОН СТЫКОВКИ (идёт СЕЙЧАС — говори открыто и по имени):',
-      `Остров состыкован с чужим островом — городом ${partnerName}.`,
+      'КАНОН СОПРЯЖЕНИЯ (идёт СЕЙЧАС — говори открыто и по имени):',
+      `Остров в сопряжении с чужим островом — городом ${partnerName}.`,
       contact,
-      `Стык длится ${conflux.monthsDocked || 0} мес. из ожидаемых ${conflux.durationMonths || '?'}.`,
-      conflux.rematch ? 'Это повторная стыковка с этим соседом.' : '',
+      `Сопряжение длится ${conflux.monthsDocked || 0} мес. из ожидаемых ${conflux.durationMonths || '?'}.`,
+      conflux.rematch ? 'Это повторное сопряжение с этим соседом.' : '',
       'ЗАПРЕЩЕНО отрицать существование соседа или отказываться называть его имя.',
       'Факты внутренней жизни соседа — только через consult_informant.',
     ]
@@ -1948,6 +2130,15 @@ export class GameApp {
       viewerId: domain.id,
     });
 
+    const askNow = shouldRulerAskPatron(domain, world);
+    const newsSched = newsScheduleOf(domain);
+    const newsMonths =
+      newsSched.months.length === 12
+        ? 'каждый месяц'
+        : newsSched.months.length
+          ? `в месяцы ${newsSched.months.join(', ')}`
+          : 'не по календарю';
+
     // Здесь только данные хода. Правила поведения живут в instructions агента.
     const extraSystem = [
       `Ты ${character.name}, ${character.title || 'правитель'} города «${domain.name}».`,
@@ -1956,6 +2147,13 @@ export class GameApp {
       patronLine,
       confluxCanon,
       undockCanon,
+      formatRulerMemoryForPrompt(domain),
+      `Письма о месяце (движок шлёт сам): ${newsMonths}` +
+        `${newsSched.alsoOnCritical ? '; также если случится совсем важное' : ''}. ` +
+        'Покровитель просит иначе — set_news_schedule. Сближение островов не глуши.',
+      askNow
+        ? 'В ЭТОЙ реплике задай покровителю один короткий живой вопрос: о его воле, о страхе за нынешнее или о том, как жить. Не лекцию и не каждый раз — сейчас как раз тот случай.'
+        : '',
       'ОБСТОЯТЕЛЬСТВА ГОРОДА (внутренняя правда):',
       `Население: ${qualitativePopulation(domain.population || 0)}`,
       conditionFeel,
@@ -1974,6 +2172,8 @@ export class GameApp {
             .filter(Boolean)
             .join('\n')
         : '',
+      `Известные люди города:\n${formatCastForPrompt(domain.lore, { limit: 16 })}`,
+      firstMentionHintForSpeech(),
       conflux
         ? [
             'ИНФОРМАТОР: факты и хроника соседнего острова — только через consult_informant.',
@@ -2073,6 +2273,7 @@ export class GameApp {
         fresh.state.monthLog = fresh.state.monthLog.slice(-12);
       }
     }
+    if (askNow) markRulerAsked(fresh, world);
     await this.persistDialog(fresh, 'user', text);
     await this.persistDialog(fresh, 'assistant', reply, { meta: turn.meta });
 
@@ -2119,7 +2320,23 @@ export class GameApp {
     const mine = forNews.filter((c) => !isForeign(c));
     const foreign = forNews.filter(isForeign);
     const quietOnly = mine.length > 0 && mine.every((c) => c.author === 'storyteller:quiet');
+    const schedule = newsScheduleOf(domain);
+    const styleHint = tickNewsStyleHint(schedule);
 
+    const named = peopleNamedInTexts(
+      domain.lore,
+      (mine.length ? mine : forNews).map((c) => c.text),
+    );
+    const peopleHint = named.length
+      ? [
+          'ЛЮДИ ЭТОГО МЕСЯЦА (первое имя в письме — с должностью, покровитель их не помнит наизусть):',
+          ...named.map((c) => {
+            const bits = [c.name, Number.isFinite(Number(c.ageYears)) ? `${c.ageYears} лет` : null, c.role, c.about]
+              .filter(Boolean);
+            return `- ${bits.join(', ')}`;
+          }),
+        ].join('\n')
+      : '';
     const facts = (mine.length ? mine : forNews)
       .map((c) => `- [${c.importance || 'event'}] ${formatChronicleScope(c)}${c.text}`)
       .join('\n');
@@ -2211,8 +2428,8 @@ export class GameApp {
     const confluxAdds = forNews.filter((c) => (c.tags || []).includes('conflux'));
     const confluxLead = confluxAdds.length && !opts.undock
       ? [
-          'ГЛАВНОЕ СОБЫТИЕ МЕСЯЦА — чужой летающий остров (сближение или стык).',
-          'Начни письмо с него и говори прямо: назови город соседа, срок или характер стыка.',
+          'ГЛАВНОЕ СОБЫТИЕ МЕСЯЦА — чужой летающий остров (сближение или сопряжение).',
+          'Начни письмо с него и говори прямо: назови город соседа, срок или характер сопряжения.',
           'Это не примета и не слух — покровитель должен понять масштаб.',
           'Прочие дела — коротко, после.',
         ].join(' ')
@@ -2243,7 +2460,7 @@ export class GameApp {
     const partner = opts.partnerName ? `«${opts.partnerName}»` : 'чужой город';
     const undockHint = opts.undock
       ? [
-          'ГЛАВНОЕ СОБЫТИЕ МЕСЯЦА — расстыковка летающих островов.',
+          'ГЛАВНОЕ СОБЫТИЕ МЕСЯЦА — острова разошлись: сопряжение кончилось.',
           `Чужой остров (${partner}) УЛЕТЕЛ / ушёл в небо: пути между вами больше нет.`,
           'В письме ОБЯЗАТЕЛЬНО скажи прямо: острова разошлись в небе; силуэт чужого края ушёл в даль.',
           'Мост/переход можно упомянуть только как следствие: он исчез, ПОТОМУ ЧТО острова разъехались.',
@@ -2254,7 +2471,7 @@ export class GameApp {
 
     const undockSystem = opts.undock
       ? [
-          'Этот месяц — конец стыковки: два летающих острова РАЗОШЛИСЬ.',
+          'Этот месяц — конец сопряжения: два летающих острова РАЗОШЛИСЬ.',
           'Письмо покровителю должно сделать это очевидным с первого абзаца.',
           'Нельзя звучать так, будто рухнул только мост, а соседний остров всё ещё рядом.',
         ].join(' ')
@@ -2270,7 +2487,8 @@ export class GameApp {
               `Прошёл месяц (${gameDate.label}). Ниже — ЧТО ДЕЙСТВИТЕЛЬНО СЛУЧИЛОСЬ в городе за этот месяц.`,
               'Это не слухи и не донесения, ждущие проверки: так было. Не сомневайся в записях, ' +
                 'не проси подтверждений и не отказывайся о них говорить — просто расскажи об этом покровителю.',
-              'Напиши покровителю письмо о месяце — вольный пересказ, НЕ дайджест и НЕ отчёт.',
+              'Напиши покровителю письмо о месяце — живую речь, НЕ сводку и НЕ отчёт.',
+              styleHint,
               undockHint
                 ? 'Сделай уход чужого острова в небо центральной нитью письма.'
                 : confluxLead
@@ -2279,9 +2497,14 @@ export class GameApp {
                     ? 'Главное событие месяца веди первым и подробнее прочего.'
                     : seedLead
                       ? 'Новую историю представь так, чтобы покровитель понял её без прошлого письма.'
-                      : 'Бюджет письма: одна-две нити (дело, прорыв, беда) и при желании штрих. Мелочь опусти.',
+                      : 'Только самое важное. Мелочь опусти.',
               'ОБЯЗАТЕЛЬНО упомяни каждую [critical] запись СВОЕГО города — такое не заметить нельзя.',
-              'Связная проза от первого лица, 1–3 коротких абзаца. Без списков, markdown, нумерации, канцелярита.',
+              schedule.detail === 'essence'
+                ? 'Один короткий абзац, лучше два-три предложения. Можно два крошечных абзаца, как пишет человек.'
+                : schedule.detail === 'brief'
+                  ? 'Коротко: один абзац о главном, второй только если нужно.'
+                  : 'Связная проза от первого лица, 1–3 коротких абзаца.',
+              'Без списков, markdown, нумерации, канцелярита.',
               `Не начинай с «${character.name}:» — сразу текст письма.`,
               'Хроника нарочно сухая — это заметки, а не письмо. Оживи их своей речью, ' +
                 'но не додумывай событий и не копируй формулировки. Статы и механики не упоминай.',
@@ -2313,6 +2536,8 @@ export class GameApp {
           addressHint,
           undockSystem,
           'Ты пишешь покровителю новости месяца живой речью, как человек, а не сводку событий.',
+          firstMentionHintForSpeech(),
+          peopleHint,
           `Не начинай письмо с «${character.name}:».`,
           (() => {
             const board = formatBoardForSpeech(domain, {
@@ -2374,10 +2599,10 @@ export class GameApp {
     const months = Math.max(0, Math.round(Number(remaining) || 0));
     const when =
       months <= 0
-        ? 'стыковка уже в этом месяце'
+        ? 'сопряжение уже в этом месяце'
         : months === 1
-          ? 'до стыковки около месяца'
-          : `до стыковки по приметам примерно ${months} мес.`;
+          ? 'до сопряжения около месяца'
+          : `до сопряжения по приметам примерно ${months} мес.`;
     const partner = partnerName ? `«${partnerName}»` : 'чужой город';
     const firstSight = kind !== 'approach';
     try {
@@ -2401,8 +2626,8 @@ export class GameApp {
             role: 'user',
             content: [
               firstSight
-                ? 'Это не письмо месяца. Срочное слово покровителю: на горизонте впервые виден чужой летающий остров, стыковка неизбежна.'
-                : 'Это не письмо месяца. Срочное слово покровителю: чужой остров уже близко, до стыка около месяца. Край чужой земли уже различим.',
+                ? 'Это не письмо месяца. Срочное слово покровителю: на горизонте впервые виден чужой летающий остров, сопряжение неизбежно.'
+                : 'Это не письмо месяца. Срочное слово покровителю: чужой остров уже близко, до сопряжения около месяца. Край чужой земли уже различим.',
               `Соседний город зовут ${partner}.`,
               `Срок: ${when}.`,
               rematch ? 'Острова уже сходились с этим соседом раньше — город это помнит.' : '',

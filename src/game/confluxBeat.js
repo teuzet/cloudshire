@@ -1,5 +1,5 @@
 import { newId } from './ids.js';
-import { createLoreFact, createCharacterRecord, formatCastForPrompt, findCharacterByName } from './models.js';
+import { createLoreFact, createCharacterRecord, formatCastForPrompt, findCharacterByName, newCharactersSchema } from './models.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { attachChronicleToPlotlines, clipPlotText, PLOT_SUMMARY_MAX, PLOT_HOOK_MAX } from './plotlines.js';
@@ -7,6 +7,7 @@ import { mixedChronicleForPrompt, knownPartnerLore, pushInternalChronicle, chron
 import { priorPlotChronicle } from './storyteller.js';
 import { TINT_LABELS, formatFinishForPrompt } from './rolls.js';
 import { formatContactForPrompt } from './conflux.js';
+import { offerNames, formatOfferedNamesForPrompt, bindCharacterNames } from './names.js';
 
 function chronicleMaxChars(config) {
   return Math.max(80, Number(config?.tick?.chronicleEntryMaxChars) || 260);
@@ -34,37 +35,7 @@ function domainByCityName(domains, raw) {
   );
 }
 
-const CHARACTERS_SCHEMA = {
-  type: 'array',
-  description:
-    'Люди, названные по имени ВПЕРВЫЕ. Уже известных сюда не добавляй — просто используй. ' +
-    'Назвал в записи новое имя — обязан внести его сюда, иначе город о нём забудет.',
-  items: {
-    type: 'object',
-    required: ['name', 'gender'],
-    properties: {
-      name: { type: 'string' },
-      gender: {
-        type: 'string',
-        enum: ['male', 'female'],
-        description: 'Мужчина или женщина: без этого город будет путать род человека.',
-      },
-      city: {
-        type: 'string',
-        description: 'Имя города, к которому человек принадлежит.',
-      },
-      role: { type: 'string' },
-      about: {
-        type: 'string',
-        description: 'Одна фраза: чем занят, где его найти. Только кто он есть — не события месяца.',
-      },
-      status: {
-        type: 'string',
-        enum: ['alive', 'dead', 'gone'],
-      },
-    },
-  },
-};
+const CHARACTERS_SCHEMA = newCharactersSchema({ withCity: true });
 
 function registerCharacters(domain, list, { world, plotId = null, author = 'storyteller:conflux' }) {
   if (!domain) return [];
@@ -97,10 +68,12 @@ function registerCharacters(domain, list, { world, plotId = null, author = 'stor
       about: c.about,
       gender: c.gender,
       status: c.status,
+      ageYears: c.ageYears,
       tick: world.tickIndex,
       gameDateLabel: world.gameDate?.label || null,
       author,
       relatedPlotlineIds: plotId ? [plotId] : [],
+      world,
     });
     domain.lore.push(record);
     added.push(record);
@@ -233,6 +206,8 @@ export async function beatSharedPlot({
         : `Связанное дело «${outcome.summary}» пошло быстрее обычного — расскажи, что позволило.`
     : null;
 
+  const nameOffer = offerNames(world, { female: 4, male: 4 });
+
   try {
     await runtime.run({
       agentId: 'confluxBeat',
@@ -253,7 +228,7 @@ export async function beatSharedPlot({
               ? plot.isMainConflux
                 ? 'Это главная история встречи двух островов.'
                 : 'Эта история касается обоих городов.'
-              : 'Острова ещё не состыковались: внутренней жизни соседнего города не видно, в запись её не пиши.',
+              : 'Острова ещё не сошлись: внутренней жизни соседнего города не видно, в запись её не пиши.',
             `Сейчас: ${plot.synopsis || 'только началась'}`,
             plot.closeWhen
               ? `Историю можно закрыть, когда случится: ${plot.closeWhen}. Это условие развязки, не срок.`
@@ -279,6 +254,8 @@ export async function beatSharedPlot({
                 : 'Прямого прохода между островами ещё нет.',
             logLine ? `Этим месяцем: ${logLine}` : null,
             '',
+            formatOfferedNamesForPrompt(nameOffer),
+            '',
             'Вызови submit_plot_beat. Только запись этого месяца; карточку истории не переписывай, кроме синопсиса.',
           ]
             .filter(Boolean)
@@ -296,9 +273,16 @@ export async function beatSharedPlot({
   plot.lastBeatTick = world.tickIndex;
   plot.beatCount = Number(plot.beatCount || 0) + 1;
 
+  const boundPeople = bindCharacterNames(world, d?.newCharacters || [], {
+    offered: nameOffer,
+    texts: [entry, d?.synopsis || ''],
+  });
+  const entryBound = boundPeople.texts[0] || entry;
+  if (boundPeople.texts[1] && d?.synopsis) plot.synopsis = clipPlotText(boundPeople.texts[1], PLOT_SUMMARY_MAX);
+
   const hiddenFrom = d?.hiddenFromOther ? domainByCityName(domains, d.hiddenFromCity) : null;
   const secretOwner = hiddenFrom ? (domains || []).find((x) => x.id !== hiddenFrom.id) || null : null;
-  for (const person of d?.newCharacters || []) {
+  for (const person of boundPeople.list || []) {
     const home =
       domainByCityName(visibleCities, person.city) ||
       domainByCityName(domains, person.city) ||
@@ -309,7 +293,7 @@ export async function beatSharedPlot({
   }
 
   const internal = pushInternalChronicle(conflux, {
-    text: entry,
+    text: entryBound,
     world,
     plotIds: [plot.id],
     tags: plot.isMainConflux ? ['conflux-main'] : ['conflux-shared'],
@@ -378,8 +362,8 @@ export async function beatSharedPlot({
 function fallbackSharedEntry(plot, beat, domains) {
   const names = (domains || []).map((d) => `«${d.name}»`).join(' и ');
   return beat?.finale
-    ? `История «${plot.title}» на стыке ${names} подошла к концу.`
-    : `На стыке ${names} история «${plot.title}» сдвинулась.`;
+    ? `История «${plot.title}» на сопряжении ${names} подошла к концу.`
+    : `На сопряжении ${names} история «${plot.title}» сдвинулась.`;
 }
 
 async function subjectifyEntry({
@@ -400,7 +384,7 @@ async function subjectifyEntry({
   const tools = [
     {
       name: 'submit_chronicle',
-      description: `Запись в летопись «${domain.name}» о том, что увидели на стыке.`,
+      description: `Запись в летопись «${domain.name}» о том, что увидели при сопряжении.`,
       parameters: {
         type: 'object',
         required: ['text'],
@@ -430,12 +414,16 @@ async function subjectifyEntry({
       log,
       scene: 'conflux_subjectify',
       domainId: domain.id,
-      extraSystem: packCity(domain),
+      extraSystem: [
+        packCity(domain),
+        `Ты пишешь летопись ТОЛЬКО города «${domain.name}». Сосед — «${partner?.name || '?'}». Не путай берега.`,
+      ].join('\n'),
       userMessages: [
         {
           role: 'user',
           content: [
-            `Город летописи: «${domain.name}». Сосед: «${partner?.name || '?'}».`,
+            `ЭТО ЛЕТОПИСЬ ГОРОДА «${domain.name}». Не летопись соседа «${partner?.name || '?'}».`,
+            `Пиши, как увидели и записали ЗДЕСЬ, в «${domain.name}».`,
             conflux.contact?.kind ? formatContactForPrompt(conflux.contact) : null,
             `История: «${plot.title}».`,
             `Что случилось (это правда; берег меняет только вид и пробелы, не кто напал): ${internal.text}`,
@@ -456,7 +444,7 @@ async function subjectifyEntry({
     String(draft.text || '').trim() ||
     (plotConcernsFallback(plot, domain.id)
       ? internal.text
-      : `Слышали об истории «${plot.title}» на стыке, но подробностей мало.`);
+      : `Слышали об истории «${plot.title}» на сопряжении, но подробностей мало.`);
 
   const fact = createLoreFact({
     id: newId('lore'),

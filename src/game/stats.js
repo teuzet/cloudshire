@@ -170,8 +170,10 @@ export function formatStatsForPrompt(stats, config) {
       const key = nearestScaleKey(v, scale);
       const hint = scale[key] || scale[String(key)] || '';
       const about = def.about ? ` ${def.about}` : '';
+      const covers = def.covers ? ` Сферы: ${def.covers}` : '';
+      const when = def.changeWhen ? ` Менять, когда: ${def.changeWhen}` : '';
       const orient = hint ? ` Ориентир: ${hint}` : '';
-      return `${def.name} (${def.id}): ${formatStatValue(v, config)}.${about}${orient}`;
+      return `${def.name} (${def.id}): ${formatStatValue(v, config)}.${about}${covers}${when}${orient}`;
     })
     .join('\n');
 }
@@ -209,7 +211,9 @@ export function qualitativeStatsBrief(stats, config, { only = null } = {}) {
       const key = floorScaleKey(v, scale);
       const hint = scale[key] || scale[String(key)] || 'неясно';
       const about = def.about ? ` ${def.about}` : '';
-      return `- ${def.name} (${epithet}).${about} Ориентир: ${hint}`;
+      const covers = def.covers ? ` Сферы: ${def.covers}` : '';
+      const when = def.changeWhen ? ` Менять, когда: ${def.changeWhen}` : '';
+      return `- ${def.name} (${epithet}).${about}${covers}${when} Ориентир: ${hint}`;
     })
     .join('\n');
 }

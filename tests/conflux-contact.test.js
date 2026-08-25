@@ -37,6 +37,7 @@ test('у каждого вида прохода сказано, можно ли 
     kind: 'landmass',
     description: 'Края лежат вплотную, как одна земля.',
   });
+  assert.match(prompt, /сопряжен/i);
   assert.match(prompt, /Контроль прохода/);
   assert.match(prompt, /нельзя/i);
   const already = formatContactForPrompt({

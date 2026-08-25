@@ -65,11 +65,28 @@ export const CONTACT_KINDS = {
       'Ходят толпами, где хотят.',
     control:
       'Прохода как двери нет: края лежат вплотную. Закрыть, запереть, опустить створы нельзя. ' +
-      'Стража видит людей на стыке, но не отрезает берег от берега.',
+      'Стража видит людей на сопряжении, но не отрезает берег от берега.',
   },
 };
 
-/** Можно ли закрыть этот проход — из сохранённого стыка или из вида. */
+export const RELIEF_KINDS = {
+  level: {
+    label: 'ровная земля',
+    hint:
+      'Края почти на одной высоте: ступают без спуска. Не делай лестниц в пропасть между берегами.',
+  },
+  drop: {
+    label: 'перепад высот',
+    hint:
+      'Один край заметно выше другого: спуск и подъём, лестницы, осыпь или уступ. Не делай ровную площадь вровень.',
+  },
+};
+
+function rollRelief(rng = Math.random) {
+  return rng() < 0.55 ? 'level' : 'drop';
+}
+
+/** Можно ли закрыть этот проход — из сохранённого сопряжения или из вида. */
 export function contactControlRule(contact) {
   if (!contact) return '';
   const stored = String(contact.control || '').trim();
@@ -88,12 +105,14 @@ export function formatContactForPrompt(contact) {
   const desc = String(contact.description || '').trim();
   const control = contactControlRule(contact);
   const named = [kind, label && label !== kind ? `«${label}»` : ''].filter(Boolean).join(' ');
+  const relief = RELIEF_KINDS[contact.relief];
+  const reliefBit = relief ? `Рельеф: ${relief.label}.` : '';
   const head = named
-    ? `Как острова сошлись: ${named}${desc ? ` — ${desc}` : '.'}`
+    ? `Как острова сошлись в сопряжении: ${named}${desc ? ` — ${desc}` : '.'}`
     : desc;
-  if (!head) return control ? `Контроль прохода: ${control}` : '';
-  if (!control || desc.includes(control)) return head;
-  return `${head}\nКонтроль прохода: ${control}`;
+  const bits = [head, reliefBit, control && !desc.includes(control) ? `Контроль прохода: ${control}` : '']
+    .filter(Boolean);
+  return bits.join('\n');
 }
 
 function withCanonicalControl(kind, description) {
@@ -967,7 +986,7 @@ function fallbackContactDescription(kind, nameA, nameB) {
       geo =
         `Между краями островов «${nameA}» и «${nameB}» легла узкая каменная перемычка: ` +
         'по ней можно пройти цепочкой из одного города в другой, но обозы и тяжёлые грузы не пройдут, ' +
-        'пока не укрепят стык.';
+        'пока не укрепят перемычку.';
       break;
   }
   return withCanonicalControl(kind, geo);
@@ -979,8 +998,10 @@ async function generateContact({ config, runtime, conflux, domains, world, log }
   const cfg = confluxCfg(config);
   const kind = rollContactKind(cfg.contactWeights, Math.random);
   const meta = CONTACT_KINDS[kind] || CONTACT_KINDS.bridge;
+  const reliefId = rollRelief(Math.random);
+  const relief = RELIEF_KINDS[reliefId];
   const rematchLine = conflux.rematch
-    ? 'Это повторный конфлюкс — острова уже сходились; упомяни это коротко, если уместно.'
+    ? 'Это повторное сопряжение — острова уже сходились; упомяни это коротко, если уместно.'
     : '';
   const draft = { contact: null };
 
@@ -988,7 +1009,7 @@ async function generateContact({ config, runtime, conflux, domains, world, log }
     {
       name: 'submit_contact',
       description:
-        'Внеочередное событие стыка: опиши переход ЗАДАННОЙ ширины (пойдёт в хронику обоих дословно). Kind уже выбран системой.',
+        'Опиши переход ЗАДАННОЙ ширины и рельефа (пойдёт в хронику обоих дословно). Kind и рельеф уже выбраны системой.',
       parameters: {
         type: 'object',
         required: ['description'],
@@ -998,7 +1019,9 @@ async function generateContact({ config, runtime, conflux, domains, world, log }
             description:
               `2–4 предложения по-русски. ОБЯЗАТЕЛЬНО назови оба города «${nameA}» и «${nameB}». ` +
               `Геометрия уже задана (${kind} — ${meta.label}): ${meta.hint} ` +
-              `Можно ли закрыть проход: ${meta.control} Впиши это в описание, не противореча.`,
+              `Рельеф: ${relief.label} — ${relief.hint} ` +
+              `Можно ли закрыть проход: ${meta.control} Впиши это в описание, не противореча. ` +
+              `Встречу называй сопряжением, не стыком.`,
           },
         },
       },
@@ -1018,6 +1041,7 @@ async function generateContact({ config, runtime, conflux, domains, world, log }
         }
         draft.contact = {
           kind,
+          relief: reliefId,
           description: withCanonicalControl(kind, text),
           control: meta.control,
           atTick: world.tickIndex,
@@ -1041,14 +1065,15 @@ async function generateContact({ config, runtime, conflux, domains, world, log }
         {
           role: 'user',
           content: [
-            `Внеочередное событие стыка. Дата: ${world.gameDate?.label || ''}.`,
-            `Острова городов «${nameA}» и «${nameB}» сошлись.`,
+            `Внеочередное событие сопряжения. Дата: ${world.gameDate?.label || ''}.`,
+            `Острова городов «${nameA}» и «${nameB}» сошлись краями.`,
             '',
             `Ширина прохода УЖЕ ВЫБРАНА системой: kind=${kind} («${meta.label}»).`,
             `Опиши именно это: ${meta.hint}`,
+            `Рельеф УЖЕ ВЫБРАН: ${relief.label} — ${relief.hint}`,
             `Можно ли закрыть или перекрыть этот проход: ${meta.control}`,
             'Это правда геометрии — впиши в описание своими словами и не противоречь. Не выдумывай ворота, створы и засовы, если их здесь быть не может.',
-            'НЕ меняй ширину на другую (не делай из волоска сплошной берег и наоборот).',
+            'НЕ меняй ширину и рельеф на другие. Встречу называй сопряжением, не стыком.',
             rematchLine,
             '',
             'Вызови submit_contact только с description.',
@@ -1068,6 +1093,7 @@ async function generateContact({ config, runtime, conflux, domains, world, log }
 
   return {
     kind,
+    relief: reliefId,
     description: fallbackContactDescription(kind, nameA, nameB),
     control: meta.control,
     atTick: world.tickIndex,

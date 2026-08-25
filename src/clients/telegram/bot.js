@@ -91,8 +91,8 @@ function deleteFailText(result) {
   }
   if (result.reason === 'conflux') {
     return result.status === 'approaching'
-      ? `Остров «${result.name}» уже идёт на стык. Удалить его сейчас нельзя.`
-      : `Остров «${result.name}» сейчас в стыке. Удалить его нельзя, пока острова не разойдутся.`;
+      ? `Остров «${result.name}» уже идёт на сопряжение. Удалить его сейчас нельзя.`
+      : `Остров «${result.name}» сейчас в сопряжении. Удалить его нельзя, пока острова не разойдутся.`;
   }
   if (result.reason === 'name_mismatch') {
     return `Имя не совпало с «${result.name}». Удаление отменено.`;

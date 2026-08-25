@@ -85,7 +85,8 @@ function statsBrief(domain, config) {
       const raw = Number(domain.stats?.[def.id]);
       const v = Number.isFinite(raw) ? raw : 50;
       const about = def.about ? ` ${def.about}` : '';
-      return `- ${def.name} (${def.id}): сейчас «${statEpithet(v, config)}».${about}`;
+      const when = def.changeWhen ? ` Менять, когда: ${def.changeWhen}` : '';
+      return `- ${def.name} (${def.id}): сейчас «${statEpithet(v, config)}».${about}${when}`;
     })
     .join('\n');
 }

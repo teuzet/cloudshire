@@ -24,7 +24,7 @@
     <div id="islandBar" class="island-bar">
       <div id="islandList" class="island-list"></div>
       <button type="button" id="btnNeighbor" class="ghost hidden">к соседу</button>
-      <button type="button" id="btnNewIsland" class="ghost" title="Новый слот — второй город для стыка">+ город</button>
+      <button type="button" id="btnNewIsland" class="ghost" title="Новый слот — второй город для сопряжения">+ город</button>
     </div>
 
     <img id="cityImage" class="city-image hidden" alt="" />
@@ -40,7 +40,7 @@
         <button type="button" id="btnNew">Новый слот</button>
         <button type="button" id="btnWipe" class="danger hidden">Вайп мира</button>
       </div>
-      <p class="muted small">Выбери остров в полоске сверху — так удобно ходить между городами на стыке. Новый слот = ещё один город.</p>
+      <p class="muted small">Выбери остров в полоске сверху — так удобно ходить между городами на сопряжении. Новый слот = ещё один город.</p>
       <p class="muted small" id="wipeNote" hidden>
         Вайп сносит все города и заводит новый мир: прежний уходит в архив.
       </p>
@@ -61,7 +61,7 @@
       <strong>Данные города</strong>
       <div class="row tabs" id="inspectTabs">
         <button type="button" class="ghost tab" data-tab="city">город</button>
-        <button type="button" class="ghost tab" data-tab="conflux">стык</button>
+        <button type="button" class="ghost tab" data-tab="conflux">сопряжение</button>
         <button type="button" class="ghost tab" data-tab="plots">нити</button>
         <button type="button" class="ghost tab" data-tab="processes">дела</button>
         <button type="button" class="ghost tab" data-tab="chronicle">хроника</button>

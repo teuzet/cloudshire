@@ -404,6 +404,7 @@ export function createWebServer({ config, app, runtime, storage }) {
               title: ch.title,
               loyalty: ch.loyalty,
               terror: ch.terror,
+              ageYears: ch.ageYears ?? null,
             })),
             stats: statsWithEpithets(domain.stats, config),
             tags: (domain.tags || []).map((t) => t.tagName || t.tagId),

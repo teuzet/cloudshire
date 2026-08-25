@@ -97,6 +97,36 @@ export function blessProcess(process, { tick = null } = {}) {
   return { ok: true, process };
 }
 
+export function pausedProcesses(domain, config = null) {
+  normalizeDomainProcesses(domain, config);
+  return (domain.state?.pendingActions || []).filter((a) => a.status === 'paused');
+}
+
+export function pauseProcess(process) {
+  if (!process || typeof process !== 'object') return { ok: false, error: 'not_found' };
+  normalizeProcess(process);
+  if (process.status && process.status !== 'active') {
+    return { ok: false, error: 'not_active', process };
+  }
+  process.status = 'paused';
+  process.pausedAt = new Date().toISOString();
+  process.updatedAt = process.pausedAt;
+  return { ok: true, process };
+}
+
+export function resumeProcess(process, domain, config = null) {
+  if (!process || typeof process !== 'object') return { ok: false, error: 'not_found' };
+  normalizeProcess(process, config);
+  if (process.status !== 'paused') return { ok: false, error: 'not_paused', process };
+  const slots = canStartProcess(domain, config);
+  if (!slots.ok) {
+    return { ok: false, error: 'too_many_processes', active: slots.active, max: slots.max, process };
+  }
+  process.status = 'active';
+  process.updatedAt = new Date().toISOString();
+  return { ok: true, process };
+}
+
 /** Назначенный срок к честной оценке: <1 спешка, >1 обстоятельность. */
 export function processPaceRatio(process) {
   const objective = Math.max(1, Number(process?.objectiveMonths || process?.expectedMonths || 1));
@@ -344,6 +374,7 @@ export function formatProcessLine(process, config = null) {
     (process.goal ? `| цель: ${process.goal} ` : '') +
     `| ожидание ~${process.monthsLeft} мес. (оценка ${process.expectedMonths}) ` +
     `| статы: ${stats} (от ${process.onBehalfOf || process.characterName || '?'})` +
+    (process.status === 'paused' ? ' | на паузе, слот свободен' : '') +
     (process.blessed ? ' | благословлено: исход будет [КРИТИЧЕСКИЙ УСПЕХ]' : '')
   );
 }
