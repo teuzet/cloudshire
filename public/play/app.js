@@ -61,6 +61,10 @@ function renderHistory(history) {
       box.appendChild(bubble('user', m.content));
     } else if (m.kind === 'tick_news') {
       box.appendChild(bubble('news', m.content, 'письмо о месяце'));
+    } else if (m.kind === 'conflux_announce') {
+      box.appendChild(bubble('news', m.content, 'стык на горизонте'));
+    } else if (m.kind === 'conflux_approach') {
+      box.appendChild(bubble('news', m.content, 'остров близко'));
     } else if (m.kind === 'onboarding') {
       box.appendChild(bubble('ruler', m.content, 'проводник'));
     } else {
@@ -68,6 +72,76 @@ function renderHistory(history) {
     }
   }
   box.scrollTop = box.scrollHeight;
+}
+
+function confluxMark(island) {
+  const c = island?.conflux;
+  if (!c) return island?.draft ? 'черновик' : '';
+  if (c.status === 'docked') return c.partnerName ? `стык · ${c.partnerName}` : 'стык';
+  if (c.status === 'approaching') {
+    const left = c.monthsUntilDock;
+    const when = left == null ? '' : left <= 0 ? 'скоро' : `${left} мес.`;
+    return c.partnerName ? `близко · ${c.partnerName}${when ? ` · ${when}` : ''}` : 'близко';
+  }
+  return '';
+}
+
+function renderIslands(islands) {
+  const box = $('islandList');
+  box.innerHTML = '';
+  const list = islands || [];
+  if (!list.length) {
+    const empty = document.createElement('span');
+    empty.className = 'muted small';
+    empty.textContent = 'Островов пока нет — «+ город» заведёт второй слот.';
+    box.appendChild(empty);
+  }
+  for (const island of list) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `island-chip${island.userId === userId ? ' active' : ''}`;
+    btn.dataset.userId = island.userId;
+    const mark = confluxMark(island);
+    const name = document.createElement('span');
+    name.textContent = island.name;
+    btn.appendChild(name);
+    if (mark) {
+      const extra = document.createElement('span');
+      extra.className = 'mark';
+      extra.textContent = mark;
+      btn.appendChild(extra);
+    }
+    btn.title = island.ruler ? `${island.name} · ${island.ruler}` : island.name;
+    btn.addEventListener('click', () => void switchTo(island.userId));
+    box.appendChild(btn);
+  }
+
+  const current = list.find((i) => i.userId === userId);
+  const neighborId = current?.conflux?.partnerUserId;
+  const btnN = $('btnNeighbor');
+  if (neighborId && neighborId !== userId) {
+    btnN.classList.remove('hidden');
+    btnN.textContent = current.conflux.partnerName
+      ? `к соседу «${current.conflux.partnerName}»`
+      : 'к соседу';
+    btnN.dataset.userId = neighborId;
+  } else {
+    btnN.classList.add('hidden');
+    btnN.dataset.userId = '';
+  }
+}
+
+async function switchTo(nextId) {
+  const next = String(nextId || '').trim() || 'local-user';
+  if (next === userId) return;
+  userId = next;
+  $('userId').value = next;
+  localStorage.setItem(STORE_KEY, next);
+  renderedCount = -1;
+  lastStats = {};
+  inspectData = null;
+  await refresh({ force: true });
+  await refreshInspector();
 }
 
 function setBanner(text) {
@@ -121,6 +195,7 @@ async function refresh({ force = false } = {}) {
     $('btnWipe').classList.toggle('hidden', !state.canWipe);
     $('wipeNote').hidden = !state.canWipe;
     $('btnWipe').disabled = Boolean(state.ticking);
+    renderIslands(state.islands || []);
 
     if (state.generating) {
       setBanner(state.generatingProgress || 'Остров создаётся — правитель напишет сам, это минута-две.');
@@ -237,6 +312,8 @@ function renderCityTab(d) {
             ['состыкованы, мес.', `${c.monthsDocked}/${c.durationMonths}`],
             ['повторная', c.rematch ? 'да' : 'нет'],
             ['проход', c.contact ? `${c.contact.kind || '?'} — ${c.contact.description || ''}` : null],
+            ['контроль прохода', c.contact?.control || null],
+            ['наша информированность', c.awareness ? `${c.awareness.ours}/100` : null],
           ])
         : `<p class="muted">сейчас остров идёт один</p>`,
     ) +
@@ -260,37 +337,75 @@ function renderCityTab(d) {
   return out.join('');
 }
 
+function plotCard(p, names = {}) {
+  const concerns = (p.concernsDomainIds || [])
+    .map((id) => names[id] || id)
+    .filter(Boolean);
+  const host = p.hostDomainId ? names[p.hostDomainId] || p.hostDomainId : null;
+  const meta = [
+    p.kind,
+    p.isMainConflux ? 'главная нить стыка' : null,
+    p.shared ? 'общая' : concerns.length ? 'локальная' : null,
+    p.sharedReason ? `стала общей: ${p.sharedReason}` : null,
+    host ? `хозяин: ${host}` : null,
+    concerns.length ? `касается: ${concerns.join(', ')}` : null,
+    `важность ${p.importance}`,
+    `жар ${p.temperature}`,
+    `возраст ${p.ageMonths}/${p.maxAgeMonths}`,
+    `битов ${p.beatCount}`,
+    p.mirrorOf ? 'зеркало' : null,
+    p.partnerGone ? 'партнёр ушёл' : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  return (
+    `<article class="ins-card"><h4>${esc(p.title)}</h4>` +
+    `<div class="muted small">${esc(meta)}</div>` +
+    (p.synopsis ? `<p class="pre">${esc(p.synopsis)}</p>` : '') +
+    (p.closeWhen ? `<p class="small muted">закроется, когда: ${esc(p.closeWhen)}</p>` : '') +
+    (p.relatedStats?.length
+      ? `<p class="small muted">статы: ${esc(p.relatedStats.join(', '))}</p>`
+      : '') +
+    (p.relatedProcessIds?.length
+      ? `<p class="small muted">дела: ${esc(p.relatedProcessIds.join(', '))}</p>`
+      : '') +
+    `<p class="small muted">${esc(p.id)}</p></article>`
+  );
+}
+
+function loreCards(list, empty = 'пусто') {
+  if (!list?.length) return `<p class="muted">${esc(empty)}</p>`;
+  return list
+    .map((f) => {
+      const meta = [f.gameDateLabel, f.importance, f.author, (f.tags || []).join(', ')]
+        .filter(Boolean)
+        .join(' · ');
+      return (
+        `<article class="ins-card">` +
+        (meta ? `<div class="muted small">${esc(meta)}</div>` : '') +
+        `<p class="pre">${esc(f.text)}</p></article>`
+      );
+    })
+    .join('');
+}
+
+function awarenessMeter(label, value) {
+  const n = Math.max(0, Math.min(100, Number(value) || 0));
+  return (
+    `<div>` +
+    `<div class="kv"><span class="muted">${esc(label)}</span><span>${n}/100</span></div>` +
+    `<div class="meter" title="${n} из 100"><span style="width:${n}%"></span></div>` +
+    `</div>`
+  );
+}
+
 function renderPlotsTab(d) {
   const plots = d.plotlines || [];
+  const note = d.conflux?.plotlines?.length
+    ? '<p class="muted small">Сюжетные нити стыка — во вкладке «стык». Здесь остаются указы города.</p>'
+    : '';
   const body = plots.length
-    ? plots
-        .map((p) => {
-          const meta = [
-            p.kind,
-            `важность ${p.importance}`,
-            `жар ${p.temperature}`,
-            `возраст ${p.ageMonths}/${p.maxAgeMonths}`,
-            `битов ${p.beatCount}`,
-            p.mirrorOf ? 'зеркало' : null,
-            p.partnerGone ? 'партнёр ушёл' : null,
-          ]
-            .filter(Boolean)
-            .join(' · ');
-          return (
-            `<article class="ins-card"><h4>${esc(p.title)}</h4>` +
-            `<div class="muted small">${esc(meta)}</div>` +
-            (p.synopsis ? `<p class="pre">${esc(p.synopsis)}</p>` : '') +
-            (p.closeWhen ? `<p class="small muted">закроется, когда: ${esc(p.closeWhen)}</p>` : '') +
-            (p.relatedStats?.length
-              ? `<p class="small muted">статы: ${esc(p.relatedStats.join(', '))}</p>`
-              : '') +
-            (p.relatedProcessIds?.length
-              ? `<p class="small muted">дела: ${esc(p.relatedProcessIds.join(', '))}</p>`
-              : '') +
-            `<p class="small muted">${esc(p.id)}</p></article>`
-          );
-        })
-        .join('')
+    ? plots.map((p) => plotCard(p)).join('')
     : '<p class="muted">открытых нитей нет</p>';
 
   const closed = (d.closedPlotlines || []).length
@@ -302,7 +417,118 @@ function renderPlotsTab(d) {
       )
     : '';
 
-  return block(`Нити (${plots.length})`, body) + closed;
+  return note + block(`Нити города (${plots.length})`, body) + closed;
+}
+
+function renderConfluxTab(d) {
+  const c = d.conflux;
+  const hist = block(
+    'Счёт стыковок',
+    keyVals([
+      ['месяцев в соло', d.confluxHistory?.monthsSolo],
+      ['месяцев в стыковке', d.confluxHistory?.monthsDocked],
+      ['прежние партнёры', Object.keys(d.confluxHistory?.partners || {}).length || '—'],
+    ]),
+  );
+  if (!c) {
+    return block('Стык', '<p class="muted">сейчас остров идёт один</p>') + hist;
+  }
+
+  const names = c.domainNames || {};
+  const info = c.informant || {};
+  const plots = c.plotlines || [];
+  const procs = c.processes || [];
+  const out = [];
+
+  out.push(
+    block(
+      'Стык',
+      keyVals([
+        ['статус', c.status],
+        ['партнёр', c.partnerName],
+        ['до стыковки, мес.', c.monthsUntilDock],
+        ['состыкованы, мес.', `${c.monthsDocked}/${c.durationMonths}`],
+        ['повторная', c.rematch ? 'да' : 'нет'],
+        ['проход', c.contact ? `${c.contact.kind || '?'} — ${c.contact.description || ''}` : null],
+        ['контроль прохода', c.contact?.control || null],
+        ['главная нить', c.mainPlotId],
+      ]),
+    ),
+  );
+
+  out.push(
+    block(
+      'Информатор',
+      awarenessMeter('мы знаем о них', c.awareness?.ours) +
+        awarenessMeter('они знают о нас', c.awareness?.theirs) +
+        `<p class="muted small">${
+          c.status === 'docked'
+            ? 'Информированность растёт только в стыковке. Информатор отвечает лишь из известных записей; секреты соседа сюда не попадают.'
+            : 'Пока острова только сближаются, информированность не растёт. Информатор заработает после стыка.'
+        }</p>`,
+    ),
+  );
+
+  const knownNote =
+    info.publicCount != null
+      ? `известно ${info.knownCount || 0} из ${info.publicCount} публичных записей соседа`
+      : `известно ${info.knownCount || 0}`;
+  out.push(
+    block(
+      `Что знает наш информатор (${knownNote})`,
+      loreCards(info.known, 'ещё ничего не известно'),
+    ),
+  );
+
+  const theyNote =
+    info.theyPublicCount != null
+      ? `известно ${info.theyKnowCount || 0} из ${info.theyPublicCount} наших публичных`
+      : `известно ${info.theyKnowCount || 0}`;
+  out.push(
+    block(
+      `Что знает их информатор (${theyNote})`,
+      loreCards(info.theyKnow, 'они ещё ничего не знают'),
+    ),
+  );
+
+  out.push(
+    block(
+      `Нити стыка (${plots.length})`,
+      plots.length ? plots.map((p) => plotCard(p, names)).join('') : '<p class="muted">нитей на стыке нет</p>',
+    ),
+  );
+
+  if (c.closedPlotlines?.length) {
+    out.push(
+      block(
+        'Закрытые нити стыка',
+        `<ul>${c.closedPlotlines
+          .map((p) => `<li>${esc(p.title)} <span class="muted small">${esc(p.reason || p.closeReason || '')}</span></li>`)
+          .join('')}</ul>`,
+      ),
+    );
+  }
+
+  const active = procs.filter((p) => !p.status || p.status === 'active');
+  const done = procs.filter((p) => p.status && p.status !== 'active');
+  out.push(
+    block(
+      `Дела стыка (${active.length})`,
+      active.length ? active.map((p) => processCard(p, { viewerId: d.id })).join('') : '<p class="muted">дел на стыке нет</p>',
+    ),
+  );
+  if (done.length) {
+    out.push(
+      block(`Закрытые дела стыка (${done.length})`, done.map((p) => processCard(p, { viewerId: d.id })).join('')),
+    );
+  }
+
+  if (c.lore?.length) {
+    out.push(block(`Внутренняя хроника стыка (${c.lore.length})`, loreCards([...c.lore].reverse())));
+  }
+
+  out.push(hist);
+  return out.join('');
 }
 
 function renderOrdersBlocks(d) {
@@ -322,11 +548,12 @@ function renderOrdersBlocks(d) {
   );
 }
 
-function processCard(p) {
+function processCard(p, opts = {}) {
   const total = p.expectedMonths ?? p.durationMonths ?? '?';
   const objective = p.objectiveMonths;
   const left = p.monthsLeft;
   const active = !p.status || p.status === 'active';
+  const own = !p.ownerDomainId || p.ownerDomainId === opts.viewerId;
   const clock = active
     ? `осталось ${left ?? '?'} из ${total} мес.`
     : `${p.status}${p.resolvedTick != null ? ` · тик ${p.resolvedTick}` : ''} · шло ${total} мес.`;
@@ -337,43 +564,56 @@ function processCard(p) {
         ? `оценка ${objective} мес.`
         : null;
   const finish =
-    p.finishKind === 'fail'
-      ? 'исход: провал'
-      : p.finishKind === 'crit'
-        ? 'исход: критический успех'
-        : p.finishKind === 'ok'
-          ? 'исход: нейтральный успех'
-          : null;
+    p.finishBlessed || (p.blessed && p.finishKind === 'crit')
+      ? 'исход: [КРИТИЧЕСКИЙ УСПЕХ] (благословение)'
+      : p.finishKind === 'fail'
+        ? 'исход: [ПРОВАЛ]'
+        : p.finishKind === 'crit'
+          ? 'исход: [КРИТИЧЕСКИЙ УСПЕХ]'
+          : p.finishKind === 'ok'
+            ? 'исход: [УСПЕХ]'
+            : null;
   const meta = [
     clock,
     pace,
     finish,
+    p.blessed && active ? 'благословлено' : null,
     p.linkedStats?.length ? `статы: ${p.linkedStats.join(', ')}` : null,
     p.initiative === 'ruler' ? 'сам правитель' : null,
     p.lastAdvanceKind ? `последний ход: ${p.lastAdvanceKind}${p.lastAdvance != null ? ` (${p.lastAdvance})` : ''}` : null,
   ]
     .filter(Boolean)
     .join(' · ');
+  const blessBtn =
+    active && own && opts.viewerId && !p.blessed
+      ? `<button type="button" class="bless-btn" data-bless="${esc(p.id)}">благословить</button>`
+      : '';
   return (
     `<article class="ins-card${active ? '' : ' dim'}"><h4>${esc(p.summary || p.title || p.id)}</h4>` +
     `<div class="muted small">${esc(meta)}</div>` +
+    (p.goal ? `<p class="muted small">цель: ${esc(p.goal)}</p>` : '') +
     (p.detail ? `<p class="pre">${esc(p.detail)}</p>` : '') +
-    `<p class="small muted">${esc(p.id)}</p></article>`
+    `<p class="small muted">${esc(p.id)}</p>` +
+    (blessBtn ? `<div class="row-actions">${blessBtn}</div>` : '') +
+    `</article>`
   );
 }
 
 function renderProcessesTab(d) {
   const list = d.processes || [];
+  const note = d.conflux?.processes?.length
+    ? '<p class="muted small">Дела стыка — во вкладке «стык». Здесь остаются городские.</p>'
+    : '';
   const active = list.filter((p) => !p.status || p.status === 'active');
   const done = list.filter((p) => p.status && p.status !== 'active');
   const activeBlock = block(
     `Дела (${active.length})`,
-    active.length ? active.map(processCard).join('') : '<p class="muted">активных дел нет</p>',
+    active.length ? active.map((p) => processCard(p, { viewerId: d.id })).join('') : '<p class="muted">активных дел нет</p>',
   );
   const doneBlock = done.length
-    ? block(`Закрытые дела (${done.length})`, done.map(processCard).join(''))
+    ? block(`Закрытые дела (${done.length})`, done.map((p) => processCard(p, { viewerId: d.id })).join(''))
     : '';
-  return activeBlock + doneBlock + renderOrdersBlocks(d);
+  return note + activeBlock + doneBlock + renderOrdersBlocks(d);
 }
 
 function renderChronicleTab(d) {
@@ -461,6 +701,7 @@ function renderInspector() {
   }
   const render = {
     city: renderCityTab,
+    conflux: renderConfluxTab,
     plots: renderPlotsTab,
     processes: renderProcessesTab,
     chronicle: renderChronicleTab,
@@ -493,6 +734,27 @@ $('inspectTabs').addEventListener('click', (e) => {
   if (!tab) return;
   inspectTab = tab.dataset.tab;
   renderInspector();
+});
+
+$('inspectBody').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-bless]');
+  if (!btn) return;
+  const processId = btn.getAttribute('data-bless');
+  btn.disabled = true;
+  try {
+    await api('/api/play/bless', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, processId }),
+    });
+    await refreshInspector();
+  } catch (err) {
+    btn.disabled = false;
+    $('inspectBody').insertAdjacentHTML(
+      'afterbegin',
+      `<p class="banner">${esc(err.message)}</p>`,
+    );
+  }
 });
 
 $('btnTick').addEventListener('click', async () => {
@@ -534,26 +796,21 @@ $('btnWipe').addEventListener('click', async () => {
 
 $('btnSlots').addEventListener('click', () => $('slots').classList.toggle('hidden'));
 
-$('btnSwitch').addEventListener('click', async () => {
-  userId = $('userId').value.trim() || 'local-user';
-  localStorage.setItem(STORE_KEY, userId);
-  renderedCount = -1;
-  lastStats = {};
-  inspectData = null;
-  await refresh({ force: true });
+$('btnSwitch').addEventListener('click', () => void switchTo($('userId').value.trim()));
+
+$('btnNeighbor').addEventListener('click', () => {
+  const next = $('btnNeighbor').dataset.userId;
+  if (next) void switchTo(next);
 });
 
-$('btnNew').addEventListener('click', async () => {
+async function newIslandSlot() {
   const { userId: fresh } = await api('/api/play/slot', { method: 'POST' });
-  userId = fresh;
-  $('userId').value = fresh;
-  localStorage.setItem(STORE_KEY, fresh);
-  renderedCount = -1;
-  lastStats = {};
-  inspectData = null;
-  await refresh({ force: true });
+  await switchTo(fresh);
   $('text').focus();
-});
+}
+
+$('btnNew').addEventListener('click', () => void newIslandSlot());
+$('btnNewIsland').addEventListener('click', () => void newIslandSlot());
 
 void refresh({ force: true });
 setInterval(() => void refresh(), 8000);

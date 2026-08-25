@@ -172,7 +172,7 @@ export function startTelegramBot({ config, app, storage, runTick }) {
 
   void loadPersistedChats();
 
-  app.onOutbound(async ({ userId, message, channel, photoPath, edit, kind }) => {
+  app.onOutbound(async ({ userId, message, channel, photoPath, photoBuffer, edit, kind }) => {
     if (channel && channel !== 'telegram') return;
     const chatId = chatByUser.get(String(userId));
     if (!chatId) {
@@ -206,15 +206,15 @@ export function startTelegramBot({ config, app, storage, runTick }) {
       if (kind === 'game_start' || kind === 'generating_error' || kind === 'island_reveal') {
         editable.delete(userId);
       }
-      if (photoPath) {
+      if (photoPath || photoBuffer) {
         if (message) await sendChunks(bot, chatId, message);
-        await bot.sendPhoto(chatId, photoPath);
+        await bot.sendPhoto(chatId, photoPath || photoBuffer);
         return;
       }
       if (message) await sendChunks(bot, chatId, message);
     } catch (err) {
       console.error('[telegram] outbound failed:', err.message);
-      if (photoPath && message) {
+      if ((photoPath || photoBuffer) && message) {
         try {
           await sendChunks(bot, chatId, message);
         } catch {

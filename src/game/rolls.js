@@ -79,7 +79,6 @@ export function rollTint(statValue, rng = Math.random, cfg = {}) {
 
 /**
  * Исход завершения дела: провал / нейтральный успех / критический успех.
- * Провал не отменяет поручение — чаще тяжёлая цена при достигнутой цели.
  * paceRatio = назначенный срок / объективная оценка: <1 спешка, >1 обстоятельность.
  */
 export function rollProcessFinish(avgStat, paceRatio = 1, rng = Math.random, cfg = {}) {
@@ -122,16 +121,31 @@ export function rollProcessFinish(avgStat, paceRatio = 1, rng = Math.random, cfg
 }
 
 export const FINISH_SHORT = {
-  fail: 'провал',
-  ok: 'нейтральный успех',
-  crit: 'критический успех',
+  fail: '[ПРОВАЛ]',
+  ok: '[УСПЕХ]',
+  crit: '[КРИТИЧЕСКИЙ УСПЕХ]',
 };
 
 export const FINISH_LABELS = {
-  fail: 'провал: поручение могло исполниться, но с неприятной ценой или побочным вредом',
-  ok: 'нейтральный успех: сделали то, что велели, без особого блеска и без большой беды',
-  crit: 'критический успех: вышло лучше обычного, с явной удачей или лишней пользой',
+  fail: '[ПРОВАЛ]: цель не достигнута или достигнута только частично',
+  ok: '[УСПЕХ]: цель достигнута без побочных эффектов или с небольшими негативными',
+  crit: '[КРИТИЧЕСКИЙ УСПЕХ]: цель достигнута триумфально',
+  blessed:
+    '[КРИТИЧЕСКИЙ УСПЕХ] по благословению покровителя: цель достигнута триумфально, явно сверх смертных сил',
 };
+
+/** Токен исхода — тот же, что в инструкциях агентов. */
+export function finishTag(finish) {
+  return FINISH_SHORT[finish] || null;
+}
+
+/** Строка для промпта: сначала токен [ПРОВАЛ]/[УСПЕХ]/[КРИТИЧЕСКИЙ УСПЕХ], затем толкование. */
+export function formatFinishForPrompt(finish, { blessed = false } = {}) {
+  if (blessed) return `${FINISH_SHORT.crit}. ${FINISH_LABELS.blessed}`;
+  const tag = FINISH_SHORT[finish] || FINISH_SHORT.ok;
+  const gloss = FINISH_LABELS[finish] || FINISH_LABELS.ok;
+  return `${tag}. ${gloss}`;
+}
 
 /** Окраска бита, вызванного делом: темп дела уже брошен, второй раз не кидаем. */
 export function tintFromProcessOutcome(outcome) {

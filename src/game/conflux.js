@@ -2,31 +2,114 @@ import { newId } from './ids.js';
 import { createLoreFact, normalizeDomain } from './models.js';
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
+import {
+  normalizeConfluxBoard,
+  takeDomainBoardIntoConflux,
+  createMainConfluxPlot,
+  pushInternalChronicle,
+  approachingAnnounceText,
+  approachMonthText,
+  returnBoardsOnUndock,
+} from './confluxBoard.js';
 
-/** Ширина прохода: ГСЧ выбирает kind; LLM только описывает. */
+/** Ширина прохода: ГСЧ выбирает kind; LLM только описывает. control — можно ли закрыть. */
 export const CONTACT_KINDS = {
   hairline: {
     label: 'волосок',
     hint:
       'Очень узкий проход: один человек боком, почти нет места; обозы и группы невозможны.',
+    control:
+      'Концы волоска можно держать: стража не пускает или пропускает по одному. ' +
+      'Запереть как дверь нечем, но перегородить и отказать в проходе легко.',
   },
   bridge: {
     label: 'мостик',
     hint: 'Узкий мостик или каменная перемычка: пешком цепочкой, тяжёлые грузы — с трудом.',
+    control:
+      'Концы мостика можно держать и запереть. Створы, цепи, стража у края — один берег может не пустить на мост.',
   },
   gap_jump: {
-    label: 'щель с прыжком',
+    label: 'щель',
     hint: 'Между краями — щель; переходят прыжком или по шатким доскам, не всем и не с грузом.',
+    control:
+      'Запереть нечем: двери и створов нет. Можно снять доски, стеречь прыжок, отказать в переправе — но не закрыть проход засовом.',
+  },
+  gorge: {
+    label: 'ущелье',
+    hint: 'Между краями — узкое ущелье или расселина: спуск и подъём цепочкой, обозы не пройдут.',
+    control:
+      'Ущелье не запирают. Можно сторожить спуск, откатить лестницы, отказать в проходе — но створов и ворот здесь нет.',
+  },
+  wagon_pass: {
+    label: 'обозный разъезд',
+    hint:
+      'Проход шириной примерно в два обоза: телеги разъедутся, если одна посторонится; ' +
+      'пешие идут свободно, войско строем уже тесно.',
+    control:
+      'Разъезд можно перегородить повозкой, цепью или баррикадой — с усилием, не одним щелчком засова. ' +
+      'Поток остановить можно, запереть как ворота — нет.',
   },
   causeway: {
-    label: 'широкая насыпь',
-    hint: 'Широкая насыпь / стык значительной частью берега: пешие потоки и лёгкие обозы возможны.',
+    label: 'широкий проход',
+    hint:
+      'Проход, через который пройдёт много людей: от роты до целой армии. ' +
+      'Выбери конкретную ширину в этом диапазоне и держись её. Обозы идут колонной.',
+    control:
+      'Слишком широко, чтобы закрыть. Стража может считать проходящих и держать посты, ' +
+      'но не запереть ворота на толпу и не отрезать один берег от другого.',
   },
   landmass: {
-    label: 'стыковка берегом',
-    hint: 'Края срослись почти всем берегом: как один массив, свободный проход толпами и обозами.',
+    label: 'берег в берег',
+    hint:
+      'Острова сошлись берег в берег: края лежат вплотную, как одна земля, без моста и щели. ' +
+      'Ходят толпами, где хотят.',
+    control:
+      'Прохода как двери нет: края лежат вплотную. Закрыть, запереть, опустить створы нельзя. ' +
+      'Стража видит людей на стыке, но не отрезает берег от берега.',
   },
 };
+
+/** Можно ли закрыть этот проход — из сохранённого стыка или из вида. */
+export function contactControlRule(contact) {
+  if (!contact) return '';
+  const stored = String(contact.control || '').trim();
+  if (stored) return stored;
+  return String(CONTACT_KINDS[contact.kind]?.control || '').trim();
+}
+
+/**
+ * Геометрия + контроль прохода для агентов.
+ * control подставляется по kind, даже если в сохранённом стыке его ещё нет.
+ */
+export function formatContactForPrompt(contact) {
+  if (!contact) return '';
+  const kind = contact.kind || '';
+  const label = CONTACT_KINDS[kind]?.label || '';
+  const desc = String(contact.description || '').trim();
+  const control = contactControlRule(contact);
+  const named = [kind, label && label !== kind ? `«${label}»` : ''].filter(Boolean).join(' ');
+  const head = named
+    ? `Как острова сошлись: ${named}${desc ? ` — ${desc}` : '.'}`
+    : desc;
+  if (!head) return control ? `Контроль прохода: ${control}` : '';
+  if (!control || desc.includes(control)) return head;
+  return `${head}\nКонтроль прохода: ${control}`;
+}
+
+function withCanonicalControl(kind, description) {
+  const control = String(CONTACT_KINDS[kind]?.control || '').trim();
+  const text = String(description || '').trim();
+  if (!control) return text;
+  if (text.includes(control)) return text;
+  return `${text} ${control}`.trim();
+}
+
+function hydrateContact(contact) {
+  if (!contact) return contact;
+  const control = contactControlRule(contact);
+  if (!control || contact.control === control) return contact;
+  return { ...contact, control };
+}
 
 /**
  * Текст явно про разлёт/уход островов в небе, а не только «мостик обвалился».
@@ -62,7 +145,7 @@ export function rollContactKind(weights, rng = Math.random) {
   const entries = Object.entries(weights || {}).filter(
     ([k, w]) => CONTACT_KINDS[k] && Number(w) > 0,
   );
-  if (!entries.length) return 'bridge';
+  if (!entries.length) return 'causeway';
   const total = entries.reduce((s, [, w]) => s + Number(w), 0);
   let r = rng() * total;
   for (const [kind, w] of entries) {
@@ -160,6 +243,13 @@ export function createConfluxRecord({
     contact: null,
     sharedLore: [],
     sharedState: { events: [] },
+    awareness: Object.fromEntries(domainIds.map((id) => [String(id), 0])),
+    knownLoreIds: Object.fromEntries(domainIds.map((id) => [String(id), []])),
+    plotlines: [],
+    closedPlotlines: [],
+    processes: [],
+    lore: [],
+    mainPlotId: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -168,6 +258,35 @@ export function createConfluxRecord({
 export function monthsUntilDock(conflux, world) {
   const at = conflux.dockAtTick ?? (conflux.createdTick || 0) + (conflux.etaMonths || 1);
   return Math.max(0, at - (world.tickIndex || 0));
+}
+
+/** Забрать нити (кроме указов), завести главную нить стыка, записать канон сближения. */
+export function beginConfluxOwnership({ a, b, conflux, world, config }) {
+  normalizeConfluxBoard(conflux);
+  takeDomainBoardIntoConflux(a, conflux);
+  takeDomainBoardIntoConflux(b, conflux);
+  const main = createMainConfluxPlot({ a, b, conflux, world, config });
+  conflux.plotlines.push(main);
+  conflux.mainPlotId = main.id;
+
+  const remaining = monthsUntilDock(conflux, world);
+  const textA = approachingAnnounceText(a, b, remaining, conflux.rematch);
+  const textB = approachingAnnounceText(b, a, remaining, conflux.rematch);
+  const tags = conflux.rematch
+    ? ['approaching', 'seed', 'rematch']
+    : ['approaching', 'seed'];
+  const fa = pushPublicChronicle(a, world, textA, conflux, tags);
+  const fb = pushPublicChronicle(b, world, textB, conflux, tags);
+  mirrorToShared(conflux, fa);
+  void fb;
+  pushInternalChronicle(conflux, {
+    text: textA,
+    world,
+    plotIds: [main.id],
+    tags,
+    author: 'conflux',
+  });
+  return { main, textA, textB };
 }
 
 function pushPublicChronicle(domain, world, text, conflux, extraTags = []) {
@@ -216,6 +335,7 @@ export async function forceCreateConflux({
   domainIdB,
   etaMonths = 3,
   durationMonths = 3,
+  config = null,
 }) {
   const log = getLogger().child({ scope: 'conflux' });
   const world = await storage.getWorld();
@@ -251,16 +371,13 @@ export async function forceCreateConflux({
     rematch,
   });
 
-  const remaining = monthsUntilDock(conflux, world);
-  const { textA, textB } = approachingSeedTexts(a, b, remaining, rematch);
-  const tags = rematch
-    ? ['approaching', 'seed', 'rematch']
-    : ['approaching', 'seed'];
-
-  const fa = pushPublicChronicle(a, world, textA, conflux, tags);
-  const fb = pushPublicChronicle(b, world, textB, conflux, tags);
-  mirrorToShared(conflux, fa);
-  void fb;
+  const { textA, textB } = beginConfluxOwnership({
+    a,
+    b,
+    conflux,
+    world,
+    config: config || storage.config,
+  });
 
   await storage.saveDomain(a);
   await storage.saveDomain(b);
@@ -274,7 +391,11 @@ export async function forceCreateConflux({
     rematch,
   });
 
-  return { conflux, domains: [a, b] };
+  return {
+    conflux,
+    domains: [a, b],
+    announce: { [a.id]: textA, [b.id]: textB },
+  };
 }
 
 /**
@@ -392,15 +513,13 @@ export async function maybeMatchmakeConfluxes({ config, storage, world, rng = Ma
       world,
       rematch,
     });
-    const remaining = monthsUntilDock(conflux, world);
-    const { textA, textB } = approachingSeedTexts(pick.a, pick.b, remaining, rematch);
-    const tags = rematch
-      ? ['approaching', 'seed', 'rematch', 'matchmake']
-      : ['approaching', 'seed', 'matchmake'];
-    const fa = pushPublicChronicle(pick.a, world, textA, conflux, tags);
-    const fb = pushPublicChronicle(pick.b, world, textB, conflux, tags);
-    mirrorToShared(conflux, fa);
-    void fb;
+    const { textA, textB } = beginConfluxOwnership({
+      a: pick.a,
+      b: pick.b,
+      conflux,
+      world,
+      config,
+    });
 
     await storage.saveDomain(pick.a);
     await storage.saveDomain(pick.b);
@@ -418,6 +537,10 @@ export async function maybeMatchmakeConfluxes({ config, storage, world, rng = Ma
       rematch,
       etaMonths,
       durationMonths,
+      announce: {
+        [pick.a.id]: textA,
+        [pick.b.id]: textB,
+      },
     });
     log.info('conflux.matchmake', {
       id: conflux.id,
@@ -446,7 +569,7 @@ export function confluxSummary(c, world, domainsById = {}) {
     durationMonths: c.durationMonths,
     monthsDocked: c.monthsDocked || 0,
     rematch: Boolean(c.rematch),
-    contact: c.contact,
+    contact: hydrateContact(c.contact),
   };
 }
 
@@ -509,15 +632,8 @@ export async function processConfluxApproachingPhase({
         continue;
       }
       const [a, b] = domains;
-      const rematchHint = conflux.rematch
-        ? ' (повторный конфлюкс — острова уже сходились.)'
-        : '';
-      const textA =
-        `Остров соседа («${b.name}») ближе: в разрывах тумана уже угадывают край чужой земли. ` +
-        `До стыковки по приметам осталось около ${remaining} мес.${rematchHint}`;
-      const textB =
-        `Остров соседа («${a.name}») ближе: в разрывах тумана уже угадывают край чужой земли. ` +
-        `До стыковки по приметам осталось около ${remaining} мес.${rematchHint}`;
+      const textA = approachMonthText(b.name, remaining, conflux.rematch);
+      const textB = approachMonthText(a.name, remaining, conflux.rematch);
       const fa = pushPublicChronicle(a, world, textA, conflux, [
         'approaching',
         ...(conflux.rematch ? ['rematch'] : []),
@@ -529,11 +645,24 @@ export async function processConfluxApproachingPhase({
       mirrorToShared(conflux, fa);
       trackChronicleAdd(chronicleAddsByDomain, a.id, fa);
       trackChronicleAdd(chronicleAddsByDomain, b.id, fb);
+      if (conflux.mainPlotId) {
+        pushInternalChronicle(conflux, {
+          text: textA,
+          world,
+          plotIds: [conflux.mainPlotId],
+          tags: ['approaching'],
+        });
+      }
       await storage.saveDomain(a);
       await storage.saveDomain(b);
       await storage.saveConflux(conflux);
-      notes.push({ confluxId: conflux.id, phase: 'approaching', monthsUntilDock: remaining });
-      log.info('conflux.prelude', { id: conflux.id, remaining });
+      notes.push({
+        confluxId: conflux.id,
+        phase: 'approaching',
+        monthsUntilDock: remaining,
+        photoSoon: remaining === 1,
+      });
+      log.info('conflux.prelude', { id: conflux.id, remaining, photoSoon: remaining === 1 });
       continue;
     }
 
@@ -582,6 +711,15 @@ export async function processConfluxApproachingPhase({
       trackChronicleAdd(chronicleAddsByDomain, d.id, f);
       dockedDomainIds.add(d.id);
       await storage.saveDomain(d);
+    }
+    if (conflux.mainPlotId) {
+      pushInternalChronicle(conflux, {
+        text: contactText,
+        world,
+        plotIds: [conflux.mainPlotId],
+        tags: ['docked', 'contact'],
+        author: 'conflux-resolver',
+      });
     }
     await storage.saveConflux(conflux);
     dockedConfluxes.push(conflux);
@@ -652,6 +790,19 @@ export async function advanceDockedConfluxes({ storage, runtime, world }, docked
         }
         if (!undockAddsByDomain.has(d.id)) undockAddsByDomain.set(d.id, []);
         undockAddsByDomain.get(d.id).push(f);
+      }
+      if (conflux.mainPlotId) {
+        pushInternalChronicle(conflux, {
+          text: endText,
+          world,
+          plotIds: [conflux.mainPlotId],
+          tags: ['ended', 'undock'],
+          author: 'conflux-resolver',
+        });
+      }
+      const byId = new Map(domains.map((d) => [d.id, d]));
+      returnBoardsOnUndock(conflux, byId);
+      for (const d of byId.values()) {
         await storage.saveDomain(d);
       }
       notes.push({
@@ -735,8 +886,8 @@ async function generateUndockChronicle({ runtime, conflux, domains, world, log }
     },
   ];
 
-  const contactHint = conflux.contact?.description
-    ? `Бывший контакт: ${conflux.contact.description}`
+  const contactHint = conflux.contact
+    ? `Бывший контакт: ${formatContactForPrompt(conflux.contact)}`
     : '';
 
   try {
@@ -779,35 +930,47 @@ async function generateUndockChronicle({ runtime, conflux, domains, world, log }
 }
 
 function fallbackContactDescription(kind, nameA, nameB) {
+  let geo;
   switch (kind) {
     case 'hairline':
-      return (
+      geo =
         `Между краями «${nameA}» и «${nameB}» остался лишь волосок камня: ` +
-        'пройти можно по одному, боком, цепляясь за выступы; обозы и толпы здесь невозможны.'
-      );
+        'пройти можно по одному, боком, цепляясь за выступы; обозы и толпы здесь невозможны.';
+      break;
     case 'gap_jump':
-      return (
+      geo =
         `Между «${nameA}» и «${nameB}» — узкая щель над бездной: ` +
-        'переходят прыжком или по шатким доскам; с грузом почти никто не рискнёт.'
-      );
+        'переходят прыжком или по шатким доскам; с грузом почти никто не рискнёт.';
+      break;
+    case 'gorge':
+      geo =
+        `Между краями «${nameA}» и «${nameB}» легло узкое ущелье: ` +
+        'спускаются и поднимаются цепочкой, цепляясь за камень; обозы здесь не пройдут.';
+      break;
+    case 'wagon_pass':
+      geo =
+        `Между «${nameA}» и «${nameB}» легла тесная дорога: ` +
+        'два обоза разъедутся, только если один посторонится; пешие идут свободно, войско строем уже жмётся к краю.';
+      break;
     case 'causeway':
-      return (
-        `Края «${nameA}» и «${nameB}» сошлись широкой насыпью: ` +
-        'пешие потоки и лёгкие обозы идут свободно, хотя стык ещё сырой и не везде надёжен.'
-      );
+      geo =
+        `Края «${nameA}» и «${nameB}» сошлись широким проходом: ` +
+        'рота проходит свободно, при нужде пройдёт и целое войско колонной, обозы идут следом.';
+      break;
     case 'landmass':
-      return (
-        `Острова «${nameA}» и «${nameB}» срослись почти всем берегом: ` +
-        'между городами — сплошной проход, как по одной земле, без мостов и щелей.'
-      );
+      geo =
+        `Острова «${nameA}» и «${nameB}» сошлись берег в берег: ` +
+        'края лежат вплотную, как одна земля, — ходят толпами, где хотят, без мостов и щелей.';
+      break;
     case 'bridge':
     default:
-      return (
+      geo =
         `Между краями островов «${nameA}» и «${nameB}» легла узкая каменная перемычка: ` +
         'по ней можно пройти цепочкой из одного города в другой, но обозы и тяжёлые грузы не пройдут, ' +
-        'пока не укрепят стык.'
-      );
+        'пока не укрепят стык.';
+      break;
   }
+  return withCanonicalControl(kind, geo);
 }
 
 async function generateContact({ config, runtime, conflux, domains, world, log }) {
@@ -834,7 +997,8 @@ async function generateContact({ config, runtime, conflux, domains, world, log }
             type: 'string',
             description:
               `2–4 предложения по-русски. ОБЯЗАТЕЛЬНО назови оба города «${nameA}» и «${nameB}». ` +
-              `Геометрия уже задана (${kind} — ${meta.label}): ${meta.hint}`,
+              `Геометрия уже задана (${kind} — ${meta.label}): ${meta.hint} ` +
+              `Можно ли закрыть проход: ${meta.control} Впиши это в описание, не противореча.`,
           },
         },
       },
@@ -854,7 +1018,8 @@ async function generateContact({ config, runtime, conflux, domains, world, log }
         }
         draft.contact = {
           kind,
-          description: text,
+          description: withCanonicalControl(kind, text),
+          control: meta.control,
           atTick: world.tickIndex,
           rolled: true,
         };
@@ -881,6 +1046,8 @@ async function generateContact({ config, runtime, conflux, domains, world, log }
             '',
             `Ширина прохода УЖЕ ВЫБРАНА системой: kind=${kind} («${meta.label}»).`,
             `Опиши именно это: ${meta.hint}`,
+            `Можно ли закрыть или перекрыть этот проход: ${meta.control}`,
+            'Это правда геометрии — впиши в описание своими словами и не противоречь. Не выдумывай ворота, створы и засовы, если их здесь быть не может.',
             'НЕ меняй ширину на другую (не делай из волоска сплошной берег и наоборот).',
             rematchLine,
             '',
@@ -902,6 +1069,7 @@ async function generateContact({ config, runtime, conflux, domains, world, log }
   return {
     kind,
     description: fallbackContactDescription(kind, nameA, nameB),
+    control: meta.control,
     atTick: world.tickIndex,
     fallback: true,
     rolled: true,

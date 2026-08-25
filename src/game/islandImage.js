@@ -197,11 +197,32 @@ export async function generateIslandImage({ config, domain, runtime, playerBrief
     await fs.writeFile(abs, buffer);
     const rel = path.relative(projectRoot(), abs);
     log?.info('island_image.saved', { domainId: domain.id, path: rel, bytes: buffer.length });
-    return { path: rel, abs };
+    return { path: rel, abs, base64: buffer.toString('base64'), buffer };
   } catch (err) {
     log?.warn('island_image.failed', { domainId: domain.id, error: err.message });
     return null;
   }
+}
+
+export async function resolveIslandImage({ domain, config }) {
+  if (!domain) return null;
+  if (domain.imagePath) {
+    const abs = path.resolve(projectRoot(), domain.imagePath);
+    try {
+      const buffer = await fs.readFile(abs);
+      return { abs, buffer, path: domain.imagePath };
+    } catch {
+      /* fall through to base64 */
+    }
+  }
+  if (domain.imageBase64) {
+    const buffer = Buffer.from(domain.imageBase64, 'base64');
+    const abs = islandImageFile(config, domain.id);
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    await fs.writeFile(abs, buffer);
+    return { abs, buffer, path: path.relative(projectRoot(), abs) };
+  }
+  return null;
 }
 
 export async function removeIslandImage(config, domain) {

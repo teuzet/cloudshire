@@ -45,6 +45,7 @@ export function normalizeDomain(domain) {
     domain.confluxPartners = {};
   }
   if (typeof domain.imagePath !== 'string') domain.imagePath = domain.imagePath || null;
+  if (typeof domain.imageBase64 !== 'string') domain.imageBase64 = domain.imageBase64 || null;
   ensurePatronFact(domain);
   // pendingActions = длительные процессы; нормализация полей — в processes.normalizeDomainProcesses
   if (Array.isArray(domain.characters)) {
@@ -169,6 +170,7 @@ export function createDomainRecord({
     createdAt: now,
     updatedAt: now,
     imagePath: null,
+    imageBase64: null,
     playerBrief: playerBrief
       ? {
           city: String(playerBrief.city || ''),

@@ -164,6 +164,13 @@ export function normalizePlotlines(domain, config = null) {
       mirrorOf: p.mirrorOf ? String(p.mirrorOf) : null,
       confluxId: p.confluxId ? String(p.confluxId) : null,
       partnerGone: Boolean(p.partnerGone),
+      hostDomainId: p.hostDomainId ? String(p.hostDomainId) : null,
+      concernsDomainIds: Array.isArray(p.concernsDomainIds)
+        ? [...new Set(p.concernsDomainIds.map(String))]
+        : [],
+      shared: Boolean(p.shared),
+      isMainConflux: Boolean(p.isMainConflux),
+      sharedReason: p.sharedReason ? String(p.sharedReason) : null,
       status: 'open',
       createdTick: p.createdTick == null ? null : Number(p.createdTick),
       lastBeatTick: p.lastBeatTick == null ? null : Number(p.lastBeatTick),
@@ -189,6 +196,10 @@ export function createPlotline({
   relatedPlotlineIds = [],
   mirrorOf = null,
   confluxId = null,
+  hostDomainId = null,
+  concernsDomainIds = [],
+  shared = false,
+  isMainConflux = false,
   modifierId = null,
   fireChance = null,
   scheduleEveryMonths = null,
@@ -213,6 +224,13 @@ export function createPlotline({
     temperature: clamp100(temperature, 30),
     mirrorOf: mirrorOf ? String(mirrorOf) : null,
     confluxId: confluxId ? String(confluxId) : null,
+    hostDomainId: hostDomainId ? String(hostDomainId) : null,
+    concernsDomainIds: Array.isArray(concernsDomainIds)
+      ? [...new Set(concernsDomainIds.map(String))]
+      : [],
+    shared: Boolean(shared),
+    isMainConflux: Boolean(isMainConflux),
+    sharedReason: null,
     partnerGone: false,
     status: 'open',
     createdTick: tick,
@@ -328,6 +346,11 @@ function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } =
     mirrorOf: plot.mirrorOf || null,
     confluxId: plot.confluxId || null,
     partnerGone: Boolean(plot.partnerGone),
+    hostDomainId: plot.hostDomainId || null,
+    concernsDomainIds: Array.isArray(plot.concernsDomainIds) ? [...plot.concernsDomainIds] : [],
+    shared: Boolean(plot.shared),
+    isMainConflux: Boolean(plot.isMainConflux),
+    sharedReason: plot.sharedReason || null,
     ...(plot.kind === 'order'
       ? {
           modifierId: plot.modifierId || null,
@@ -381,6 +404,13 @@ export function reopenClosedPlotline(domain, closedOrId) {
     mirrorOf: closed.mirrorOf ? String(closed.mirrorOf) : null,
     confluxId: closed.confluxId ? String(closed.confluxId) : null,
     partnerGone: Boolean(closed.partnerGone),
+    hostDomainId: closed.hostDomainId ? String(closed.hostDomainId) : null,
+    concernsDomainIds: Array.isArray(closed.concernsDomainIds)
+      ? closed.concernsDomainIds.map(String)
+      : [],
+    shared: Boolean(closed.shared),
+    isMainConflux: Boolean(closed.isMainConflux),
+    sharedReason: closed.sharedReason || null,
     status: 'open',
     createdTick: closed.createdTick == null ? null : Number(closed.createdTick),
     lastBeatTick: closed.lastBeatTick == null ? null : Number(closed.lastBeatTick),
@@ -602,15 +632,30 @@ export function formatBoardForPrompt(domain) {
  * Компактная доска для речи: без id, температур и прочей механики.
  * @param {(ids: string[]) => string} statsFeel — качественное описание статов
  */
-export function formatBoardForSpeech(domain, { statsFeel = null, max = 5 } = {}) {
+export function formatBoardForSpeech(domain, { statsFeel = null, max = 8, viewerId = null } = {}) {
   normalizePlotlines(domain);
   const list = (domain.plotlines || []).slice(0, max);
   if (!list.length) return '';
+  const viewer = viewerId || domain.id;
   return list
     .map((p) => {
       const feel =
         statsFeel && p.relatedStats.length ? ` Упирается в: ${statsFeel(p.relatedStats)}.` : '';
-      const kind = p.kind === 'errand' ? 'поручение' : p.kind === 'order' ? 'порядок' : 'история';
+      const foreign =
+        (p.concernsDomainIds || []).length > 0 &&
+        !(p.concernsDomainIds || []).includes(viewer) &&
+        !p.isMainConflux;
+      const kind = p.kind === 'errand'
+        ? 'поручение'
+        : p.kind === 'order'
+          ? 'порядок'
+          : p.isMainConflux
+            ? 'стык'
+            : p.shared
+              ? 'общая история'
+              : foreign
+                ? 'история соседа'
+                : 'история';
       const duty = (p.relatedProcessIds || []).length
         ? 'дело уже идёт'
         : p.kind === 'order'

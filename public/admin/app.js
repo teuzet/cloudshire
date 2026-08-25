@@ -105,7 +105,9 @@ async function refreshConfluxUi() {
       if (c.status === 'approaching') {
         detail = `eta ${c.monthsUntilDock} мес. (dock@${c.dockAtTick})`;
       } else if (c.contact) {
-        detail = `${c.contact.kind || '?'} · ${String(c.contact.description || '').slice(0, 140)}`;
+        detail = `${c.contact.kind || '?'} · ${String(c.contact.description || '').slice(0, 140)}${
+          c.contact.control ? `\n  контроль: ${String(c.contact.control).slice(0, 160)}` : ''
+        }`;
       } else {
         detail = `docked ${c.monthsDocked}/${c.durationMonths}`;
       }
