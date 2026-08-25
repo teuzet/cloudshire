@@ -31,6 +31,29 @@ export function plotHostId(plot) {
   return plot?.hostDomainId ? String(plot.hostDomainId) : asIdList(plot?.concernsDomainIds)[0] || null;
 }
 
+/**
+ * Кому из городов писать хронику этого бита.
+ * До стыковки чужой берег не виден: запись только хозяину дела или нити.
+ */
+export function chronicleReceiversForBeat(conflux, plot, beat, domains) {
+  const list = domains || [];
+  const concerned = list.filter((d) => plot?.isMainConflux || plotConcerns(plot, d.id));
+  if (conflux?.status === 'docked') return concerned;
+
+  const processId = beat?.processOutcome?.processId;
+  const ownerId =
+    beat?.processOutcome?.ownerDomainId ||
+    (processId
+      ? (conflux?.processes || []).find((pr) => String(pr.id) === String(processId))?.ownerDomainId
+      : null);
+  if (ownerId) return list.filter((d) => String(d.id) === String(ownerId));
+  const host = plot?.hostDomainId ? String(plot.hostDomainId) : null;
+  if (host) return list.filter((d) => String(d.id) === String(host));
+  const concerns = asIdList(plot?.concernsDomainIds);
+  if (concerns.length === 1) return list.filter((d) => String(d.id) === concerns[0]);
+  return [];
+}
+
 export function leakChanceFromImportance(importance, avgAwareness) {
   const imp = Number(importance) || 0;
   const base = Math.max(0, Math.min(1, ((imp - 30) / 70) * 0.6));

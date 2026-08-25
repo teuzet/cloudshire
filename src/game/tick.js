@@ -4,6 +4,7 @@ import {
   advanceDockedConfluxes,
   maybeMatchmakeConfluxes,
   advanceConfluxLifetimeCounters,
+  monthsUntilDock,
 } from './conflux.js';
 import { resolveDomainMonth } from './monthResolve.js';
 import { scoreConfluxAwareness } from './confluxAwareness.js';
@@ -37,15 +38,32 @@ export async function runWorldTick({ config, runtime, storage, app }) {
 }
 
 export async function emitConfluxAnnouncements({ app, storage, items }) {
+  const world = await storage.getWorld();
   for (const item of items || []) {
     const announce = item?.announce;
     if (!announce) continue;
+    const conflux = item.confluxId ? await storage.getConflux(item.confluxId).catch(() => null) : null;
+    const otherIds = Object.keys(announce);
     for (const [domainId, text] of Object.entries(announce)) {
       const domain = await storage.getDomain(domainId);
       if (!domain?.ownerUserId || !text) continue;
-      await app.persistDialog(domain, 'assistant', text, { kind: 'conflux_announce' });
-      await app.emitOutbound(domain.ownerUserId, text, {
-        agent: 'conflux',
+      const partnerId =
+        (conflux ? otherDomainId(conflux, domainId) : null) ||
+        otherIds.find((id) => id !== domainId) ||
+        null;
+      const partner = partnerId ? await storage.getDomain(partnerId) : null;
+      const remaining =
+        conflux && world ? monthsUntilDock(conflux, world) : item.etaMonths;
+      const letter = await app.narrateConfluxSighting(domain, {
+        kind: 'announce',
+        fact: text,
+        partnerName: partner?.name || null,
+        remaining,
+        rematch: Boolean(item.rematch || conflux?.rematch),
+      });
+      await app.persistDialog(domain, 'assistant', letter, { kind: 'conflux_announce' });
+      await app.emitOutbound(domain.ownerUserId, withDateHeader(letter, world), {
+        agent: 'ruler',
         domainId: domain.id,
         kind: 'conflux_announce',
       });
@@ -54,6 +72,7 @@ export async function emitConfluxAnnouncements({ app, storage, items }) {
 }
 
 async function emitApproachPhotos({ app, storage, config, notes }) {
+  const world = await storage.getWorld();
   for (const note of notes || []) {
     if (!note?.photoSoon || !note.confluxId) continue;
     const conflux = await storage.getConflux(note.confluxId);
@@ -63,12 +82,19 @@ async function emitApproachPhotos({ app, storage, config, notes }) {
       const partnerId = otherDomainId(conflux, domainId);
       const partner = partnerId ? await storage.getDomain(partnerId) : null;
       if (!domain?.ownerUserId || !partner) continue;
-      const text =
-        `Чужой остров «${partner.name}» уже близко — до стыковки около месяца.`;
+      const remaining = monthsUntilDock(conflux, world);
+      const fact = `Чужой остров «${partner.name}» уже близко — до стыковки около месяца.`;
+      const letter = await app.narrateConfluxSighting(domain, {
+        kind: 'approach',
+        fact,
+        partnerName: partner.name,
+        remaining,
+        rematch: Boolean(conflux.rematch),
+      });
       const picture = await resolveIslandImage({ domain: partner, config });
-      await app.persistDialog(domain, 'assistant', text, { kind: 'conflux_approach' });
-      await app.emitOutbound(domain.ownerUserId, text, {
-        agent: 'conflux',
+      await app.persistDialog(domain, 'assistant', letter, { kind: 'conflux_approach' });
+      await app.emitOutbound(domain.ownerUserId, withDateHeader(letter, world), {
+        agent: 'ruler',
         domainId: domain.id,
         kind: 'conflux_approach',
         photoPath: picture?.abs || null,
@@ -156,11 +182,14 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
     normalizeDomain(domain);
     const live = byId.get(domain.id) || domain;
     const conflux = active.find((c) => (c.domainIds || []).includes(live.id)) || null;
+    const partnerId = conflux ? otherDomainId(conflux, live.id) : null;
+    const partner = conflux?.status === 'docked' && partnerId ? byId.get(partnerId) : null;
     const resolved = await resolveDomainMonth({
       config,
       runtime,
       domain: live,
       world,
+      partner,
       conflux,
       confluxId: conflux?.id || null,
       skipPlotClocks: Boolean(conflux),

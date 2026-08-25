@@ -51,6 +51,46 @@ body {
 
 .when { display: flex; align-items: center; gap: 0.6rem; font-size: 0.85rem; }
 
+.island-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.15rem 1rem 0.7rem;
+  flex-wrap: wrap;
+}
+
+.island-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  flex: 1;
+}
+
+.island-chip {
+  font: inherit;
+  font-size: 0.78rem;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  cursor: pointer;
+  max-width: 100%;
+}
+
+.island-chip:hover { border-color: var(--accent); }
+.island-chip.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(201, 169, 97, 0.12);
+}
+.island-chip .mark {
+  color: var(--muted);
+  font-size: 0.7rem;
+  margin-left: 0.35rem;
+}
+.island-chip.active .mark { color: var(--accent); }
+
 .city-image {
   display: block;
   width: calc(100% - 2rem);
@@ -258,6 +298,26 @@ button.danger:hover { border-color: #d98080; }
 .ins-card p { margin: 0.35rem 0 0; }
 .pre { white-space: pre-wrap; }
 
+.row-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  align-items: center;
+}
+
+.bless-btn {
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--accent);
+  background: rgba(201, 169, 97, 0.1);
+  border: 1px solid rgba(201, 169, 97, 0.45);
+  border-radius: 999px;
+  padding: 0.22rem 0.7rem;
+  cursor: pointer;
+}
+.bless-btn:hover { background: rgba(201, 169, 97, 0.2); }
+.bless-btn:disabled { opacity: 0.5; cursor: default; }
+
 .kvs { display: grid; gap: 0.2rem; }
 
 .kv {
@@ -269,6 +329,20 @@ button.danger:hover { border-color: #d98080; }
 }
 
 .kv span:last-child { text-align: right; }
+
+.meter {
+  height: 6px;
+  background: var(--line);
+  border-radius: 99px;
+  overflow: hidden;
+  margin: 0.25rem 0 0.15rem;
+}
+.meter > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: inherit;
+}
 
 .raw {
   margin: 0;

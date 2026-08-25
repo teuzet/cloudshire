@@ -8,6 +8,7 @@
 
 import { newId } from './ids.js';
 import { createLoreFact, normalizeDomain } from './models.js';
+import { FINISH_SHORT } from './rolls.js';
 import { refreshChronicleDigest } from './memory.js';
 import {
   normalizeDomainProcesses,
@@ -199,7 +200,7 @@ export async function resolveDomainMonth({
       const text = beat.finale
         ? `История «${beat.title}» закончилась.`
         : outcome?.finished
-          ? `Дело «${outcome.summary}» закончилось.`
+          ? `Дело «${outcome.summary}» закончилось. Исход: ${FINISH_SHORT[outcome.finish] || FINISH_SHORT.ok}.`
           : outcome
             ? `В деле «${outcome.summary}» произошёл сдвиг.`
             : `В истории «${beat.title}» произошёл сдвиг.`;

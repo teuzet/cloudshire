@@ -12,6 +12,7 @@ import {
   createMainConfluxPlot,
   approachingAnnounceText,
   isSharedPlot,
+  chronicleReceiversForBeat,
 } from '../src/game/confluxBoard.js';
 import { createPlotline, isOrderPlot } from '../src/game/plotlines.js';
 
@@ -160,4 +161,32 @@ test('сообщение о старте конфлюкса — отдельны
   assert.match(text, /Берил/);
   assert.match(text, /8 мес/);
   assert.doesNotMatch(text, /Покровитель/);
+});
+
+test('до стыковки хроника нити не идёт в чужой город', () => {
+  const a = domain('a');
+  const b = domain('b');
+  const main = {
+    isMainConflux: true,
+    concernsDomainIds: ['a', 'b'],
+    hostDomainId: null,
+  };
+  const approaching = conflux({ status: 'approaching' });
+  const fromProcess = chronicleReceiversForBeat(
+    approaching,
+    main,
+    { processOutcome: { ownerDomainId: 'a', processId: 'act_a' } },
+    [a, b],
+  );
+  assert.deepEqual(
+    fromProcess.map((d) => d.id),
+    ['a'],
+  );
+  const noProcess = chronicleReceiversForBeat(approaching, main, {}, [a, b]);
+  assert.equal(noProcess.length, 0);
+  const docked = chronicleReceiversForBeat(conflux({ status: 'docked' }), main, {}, [a, b]);
+  assert.deepEqual(
+    docked.map((d) => d.id).sort(),
+    ['a', 'b'],
+  );
 });

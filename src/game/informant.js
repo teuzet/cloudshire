@@ -1,7 +1,7 @@
 import { getLogger, truncate } from '../log.js';
-import { formatFactsForPrompt } from './memory.js';
 import { formatCastForPrompt } from './models.js';
 import { knownPartnerLore } from './confluxBoard.js';
+import { formatContactForPrompt } from './conflux.js';
 
 /**
  * Отвечает только из уже известных зрителю записей соседа. Не выдумывает.
@@ -84,25 +84,21 @@ export async function askInformant({
         {
           role: 'user',
           content: [
-            `Город-зритель: «${viewer.name}». Сосед: «${partner?.name || '?'}».`,
-            `Информированность зрителя: ${conflux.awareness?.[viewer.id] ?? 0} из 100.`,
-            `Стык: ${conflux.status}${conflux.contact?.kind ? `, контакт ${conflux.contact.kind}` : ''}.`,
+            `Город спрашивающего: «${viewer.name}». Сосед: «${partner?.name || '?'}».`,
+            conflux.contact?.kind
+              ? formatContactForPrompt(conflux.contact)
+              : 'Острова ещё только сближаются.',
             '',
-            'ИЗВЕСТНЫЕ записи о соседе (это ВСЁ, что можно считать известным):',
+            'Что этому городу уже известно о соседе:',
             knownBlock,
             '',
-            'Факты:',
-            formatFactsForPrompt(known, { limit: 30 }) || '(нет)',
-            '',
-            'Люди из известных записей:',
+            'Люди из этих сведений:',
             formatCastForPrompt(known, { limit: 20 }),
             '',
             'Вопросы:',
             ...qlist.map((q, i) => `${i + 1}. ${q}`),
             '',
-            'Отвечай только из этого корпуса. Если данных нет — known=false, answer «неизвестно».',
-            'Предположение допустимо только из известных записей и только с speculation=true и явной пометкой в тексте.',
-            'Вызови submit_informant.',
+            'Отвечай только из этих сведений. Вызови submit_informant.',
           ].join('\n'),
         },
       ],

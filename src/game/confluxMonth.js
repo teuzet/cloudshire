@@ -23,7 +23,7 @@ import {
   sharedPlots,
   processesForPlots,
 } from './confluxBoard.js';
-import { beatSharedPlot } from './confluxStoryteller.js';
+import { beatSharedPlot } from './confluxBeat.js';
 import { fadeQuietPlot } from './storyteller.js';
 import { scoreMonthStats, factsForStatJudge } from './statJudge.js';
 
@@ -146,6 +146,7 @@ export async function resolveConfluxSharedMonth({
       closePlotline(board, plot.id, {
         tick: world.tickIndex,
         reason: result.closeReason || 'условие закрытия исполнилось',
+        sequelHook: result.sequelHook || '',
       });
       conflux.plotlines = (conflux.plotlines || []).filter((p) => p.id !== plot.id);
       conflux.closedPlotlines = board.closedPlotlines;

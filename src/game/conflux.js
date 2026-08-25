@@ -12,30 +12,104 @@ import {
   returnBoardsOnUndock,
 } from './confluxBoard.js';
 
-/** Ширина прохода: ГСЧ выбирает kind; LLM только описывает. */
+/** Ширина прохода: ГСЧ выбирает kind; LLM только описывает. control — можно ли закрыть. */
 export const CONTACT_KINDS = {
   hairline: {
     label: 'волосок',
     hint:
       'Очень узкий проход: один человек боком, почти нет места; обозы и группы невозможны.',
+    control:
+      'Концы волоска можно держать: стража не пускает или пропускает по одному. ' +
+      'Запереть как дверь нечем, но перегородить и отказать в проходе легко.',
   },
   bridge: {
     label: 'мостик',
     hint: 'Узкий мостик или каменная перемычка: пешком цепочкой, тяжёлые грузы — с трудом.',
+    control:
+      'Концы мостика можно держать и запереть. Створы, цепи, стража у края — один берег может не пустить на мост.',
   },
   gap_jump: {
-    label: 'щель с прыжком',
+    label: 'щель',
     hint: 'Между краями — щель; переходят прыжком или по шатким доскам, не всем и не с грузом.',
+    control:
+      'Запереть нечем: двери и створов нет. Можно снять доски, стеречь прыжок, отказать в переправе — но не закрыть проход засовом.',
+  },
+  gorge: {
+    label: 'ущелье',
+    hint: 'Между краями — узкое ущелье или расселина: спуск и подъём цепочкой, обозы не пройдут.',
+    control:
+      'Ущелье не запирают. Можно сторожить спуск, откатить лестницы, отказать в проходе — но створов и ворот здесь нет.',
+  },
+  wagon_pass: {
+    label: 'обозный разъезд',
+    hint:
+      'Проход шириной примерно в два обоза: телеги разъедутся, если одна посторонится; ' +
+      'пешие идут свободно, войско строем уже тесно.',
+    control:
+      'Разъезд можно перегородить повозкой, цепью или баррикадой — с усилием, не одним щелчком засова. ' +
+      'Поток остановить можно, запереть как ворота — нет.',
   },
   causeway: {
-    label: 'широкая насыпь',
-    hint: 'Широкая насыпь / стык значительной частью берега: пешие потоки и лёгкие обозы возможны.',
+    label: 'широкий проход',
+    hint:
+      'Проход, через который пройдёт много людей: от роты до целой армии. ' +
+      'Выбери конкретную ширину в этом диапазоне и держись её. Обозы идут колонной.',
+    control:
+      'Слишком широко, чтобы закрыть. Стража может считать проходящих и держать посты, ' +
+      'но не запереть ворота на толпу и не отрезать один берег от другого.',
   },
   landmass: {
-    label: 'стыковка берегом',
-    hint: 'Края срослись почти всем берегом: как один массив, свободный проход толпами и обозами.',
+    label: 'берег в берег',
+    hint:
+      'Острова сошлись берег в берег: края лежат вплотную, как одна земля, без моста и щели. ' +
+      'Ходят толпами, где хотят.',
+    control:
+      'Прохода как двери нет: края лежат вплотную. Закрыть, запереть, опустить створы нельзя. ' +
+      'Стража видит людей на стыке, но не отрезает берег от берега.',
   },
 };
+
+/** Можно ли закрыть этот проход — из сохранённого стыка или из вида. */
+export function contactControlRule(contact) {
+  if (!contact) return '';
+  const stored = String(contact.control || '').trim();
+  if (stored) return stored;
+  return String(CONTACT_KINDS[contact.kind]?.control || '').trim();
+}
+
+/**
+ * Геометрия + контроль прохода для агентов.
+ * control подставляется по kind, даже если в сохранённом стыке его ещё нет.
+ */
+export function formatContactForPrompt(contact) {
+  if (!contact) return '';
+  const kind = contact.kind || '';
+  const label = CONTACT_KINDS[kind]?.label || '';
+  const desc = String(contact.description || '').trim();
+  const control = contactControlRule(contact);
+  const named = [kind, label && label !== kind ? `«${label}»` : ''].filter(Boolean).join(' ');
+  const head = named
+    ? `Как острова сошлись: ${named}${desc ? ` — ${desc}` : '.'}`
+    : desc;
+  if (!head) return control ? `Контроль прохода: ${control}` : '';
+  if (!control || desc.includes(control)) return head;
+  return `${head}\nКонтроль прохода: ${control}`;
+}
+
+function withCanonicalControl(kind, description) {
+  const control = String(CONTACT_KINDS[kind]?.control || '').trim();
+  const text = String(description || '').trim();
+  if (!control) return text;
+  if (text.includes(control)) return text;
+  return `${text} ${control}`.trim();
+}
+
+function hydrateContact(contact) {
+  if (!contact) return contact;
+  const control = contactControlRule(contact);
+  if (!control || contact.control === control) return contact;
+  return { ...contact, control };
+}
 
 /**
  * Текст явно про разлёт/уход островов в небе, а не только «мостик обвалился».
@@ -71,7 +145,7 @@ export function rollContactKind(weights, rng = Math.random) {
   const entries = Object.entries(weights || {}).filter(
     ([k, w]) => CONTACT_KINDS[k] && Number(w) > 0,
   );
-  if (!entries.length) return 'bridge';
+  if (!entries.length) return 'causeway';
   const total = entries.reduce((s, [, w]) => s + Number(w), 0);
   let r = rng() * total;
   for (const [kind, w] of entries) {
@@ -495,7 +569,7 @@ export function confluxSummary(c, world, domainsById = {}) {
     durationMonths: c.durationMonths,
     monthsDocked: c.monthsDocked || 0,
     rematch: Boolean(c.rematch),
-    contact: c.contact,
+    contact: hydrateContact(c.contact),
   };
 }
 
@@ -812,8 +886,8 @@ async function generateUndockChronicle({ runtime, conflux, domains, world, log }
     },
   ];
 
-  const contactHint = conflux.contact?.description
-    ? `Бывший контакт: ${conflux.contact.description}`
+  const contactHint = conflux.contact
+    ? `Бывший контакт: ${formatContactForPrompt(conflux.contact)}`
     : '';
 
   try {
@@ -856,35 +930,47 @@ async function generateUndockChronicle({ runtime, conflux, domains, world, log }
 }
 
 function fallbackContactDescription(kind, nameA, nameB) {
+  let geo;
   switch (kind) {
     case 'hairline':
-      return (
+      geo =
         `Между краями «${nameA}» и «${nameB}» остался лишь волосок камня: ` +
-        'пройти можно по одному, боком, цепляясь за выступы; обозы и толпы здесь невозможны.'
-      );
+        'пройти можно по одному, боком, цепляясь за выступы; обозы и толпы здесь невозможны.';
+      break;
     case 'gap_jump':
-      return (
+      geo =
         `Между «${nameA}» и «${nameB}» — узкая щель над бездной: ` +
-        'переходят прыжком или по шатким доскам; с грузом почти никто не рискнёт.'
-      );
+        'переходят прыжком или по шатким доскам; с грузом почти никто не рискнёт.';
+      break;
+    case 'gorge':
+      geo =
+        `Между краями «${nameA}» и «${nameB}» легло узкое ущелье: ` +
+        'спускаются и поднимаются цепочкой, цепляясь за камень; обозы здесь не пройдут.';
+      break;
+    case 'wagon_pass':
+      geo =
+        `Между «${nameA}» и «${nameB}» легла тесная дорога: ` +
+        'два обоза разъедутся, только если один посторонится; пешие идут свободно, войско строем уже жмётся к краю.';
+      break;
     case 'causeway':
-      return (
-        `Края «${nameA}» и «${nameB}» сошлись широкой насыпью: ` +
-        'пешие потоки и лёгкие обозы идут свободно, хотя стык ещё сырой и не везде надёжен.'
-      );
+      geo =
+        `Края «${nameA}» и «${nameB}» сошлись широким проходом: ` +
+        'рота проходит свободно, при нужде пройдёт и целое войско колонной, обозы идут следом.';
+      break;
     case 'landmass':
-      return (
-        `Острова «${nameA}» и «${nameB}» срослись почти всем берегом: ` +
-        'между городами — сплошной проход, как по одной земле, без мостов и щелей.'
-      );
+      geo =
+        `Острова «${nameA}» и «${nameB}» сошлись берег в берег: ` +
+        'края лежат вплотную, как одна земля, — ходят толпами, где хотят, без мостов и щелей.';
+      break;
     case 'bridge':
     default:
-      return (
+      geo =
         `Между краями островов «${nameA}» и «${nameB}» легла узкая каменная перемычка: ` +
         'по ней можно пройти цепочкой из одного города в другой, но обозы и тяжёлые грузы не пройдут, ' +
-        'пока не укрепят стык.'
-      );
+        'пока не укрепят стык.';
+      break;
   }
+  return withCanonicalControl(kind, geo);
 }
 
 async function generateContact({ config, runtime, conflux, domains, world, log }) {
@@ -911,7 +997,8 @@ async function generateContact({ config, runtime, conflux, domains, world, log }
             type: 'string',
             description:
               `2–4 предложения по-русски. ОБЯЗАТЕЛЬНО назови оба города «${nameA}» и «${nameB}». ` +
-              `Геометрия уже задана (${kind} — ${meta.label}): ${meta.hint}`,
+              `Геометрия уже задана (${kind} — ${meta.label}): ${meta.hint} ` +
+              `Можно ли закрыть проход: ${meta.control} Впиши это в описание, не противореча.`,
           },
         },
       },
@@ -931,7 +1018,8 @@ async function generateContact({ config, runtime, conflux, domains, world, log }
         }
         draft.contact = {
           kind,
-          description: text,
+          description: withCanonicalControl(kind, text),
+          control: meta.control,
           atTick: world.tickIndex,
           rolled: true,
         };
@@ -958,6 +1046,8 @@ async function generateContact({ config, runtime, conflux, domains, world, log }
             '',
             `Ширина прохода УЖЕ ВЫБРАНА системой: kind=${kind} («${meta.label}»).`,
             `Опиши именно это: ${meta.hint}`,
+            `Можно ли закрыть или перекрыть этот проход: ${meta.control}`,
+            'Это правда геометрии — впиши в описание своими словами и не противоречь. Не выдумывай ворота, створы и засовы, если их здесь быть не может.',
             'НЕ меняй ширину на другую (не делай из волоска сплошной берег и наоборот).',
             rematchLine,
             '',
@@ -979,6 +1069,7 @@ async function generateContact({ config, runtime, conflux, domains, world, log }
   return {
     kind,
     description: fallbackContactDescription(kind, nameA, nameB),
+    control: meta.control,
     atTick: world.tickIndex,
     fallback: true,
     rolled: true,

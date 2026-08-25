@@ -35,7 +35,7 @@ import {
   PLOT_HOOK_MAX,
 } from './plotlines.js';
 import { pickOrderOutcome, markOrderFired } from './orders.js';
-import { TINT_LABELS, pickRollStat, rollTint } from './rolls.js';
+import { TINT_LABELS, pickRollStat, rollTint, formatFinishForPrompt } from './rolls.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 
@@ -566,8 +566,8 @@ export async function beatPlot({
     ? outcome.finished
       ? [
           `Связанное дело «${outcome.summary}» ЗАВЕРШЕНО в этом месяце.`,
-          `Исход броска (не спорь): ${outcome.finishLabel || outcome.finish || 'нейтральный успех'}.`,
-          'Провал не значит, что цель не достигнута — чаще это тяжёлая цена или побочный вред при исполненном поручении.',
+          `Исход броска (не спорь): ${formatFinishForPrompt(outcome.finish, { blessed: outcome.blessed })}.`,
+          outcome.goal ? `Цель дела: ${outcome.goal}` : null,
           outcome.detail ? `Поручение было: ${outcome.detail}` : null,
         ]
           .filter(Boolean)

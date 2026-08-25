@@ -18,7 +18,7 @@ import {
 } from './stats.js';
 import { askLoremaster } from './loremaster.js';
 import { newId } from './ids.js';
-import { assertsIslandsParted, monthsUntilDock, findActiveConfluxForDomain } from './conflux.js';
+import { assertsIslandsParted, monthsUntilDock, findActiveConfluxForDomain, formatContactForPrompt } from './conflux.js';
 import {
   hydrateDomainFromConflux,
   dehydrateDomainToConflux,
@@ -79,6 +79,8 @@ import {
   applyObjectiveSchedule,
   processIsFresh,
   processPaceRatio,
+  blessProcess,
+  processOwnedBy,
 } from './processes.js';
 import { formatBoardForSpeech, warmPlotlines, plotConfig, findPlotline, clipPlotText, PLOT_TITLE_MAX, PLOT_SUMMARY_MAX, isOrderPlot } from './plotlines.js';
 import { queueOrderRequest, listStandingOrders } from './orders.js';
@@ -340,6 +342,7 @@ function characterTools(domain, storage, character, ctx) {
           id: a.id,
           summary: a.summary,
           detail: a.detail,
+          goal: a.goal || null,
           monthsLeft: a.monthsLeft,
           expectedMonths: a.expectedMonths,
           objectiveMonths: a.objectiveMonths || a.expectedMonths,
@@ -348,6 +351,7 @@ function characterTools(domain, storage, character, ctx) {
           initiative: a.initiative || 'patron',
           fresh: processIsFresh(a),
           progress: processProgressFeel(a),
+          blessed: Boolean(a.blessed),
         })),
         recentlyClosed: recentlyClosedProcesses(domain, world?.tickIndex),
         processSlots: canStartProcess(domain, ctx.config),
@@ -370,7 +374,9 @@ function characterTools(domain, storage, character, ctx) {
           'pace=hurried — покровитель торопит, предупреди о риске; pace=careful — не спорь. ' +
           'fresh=true — дело ещё не сдвинулось: update_process может переписать его целиком. ' +
           'fresh=false — только дополни поручение и при нужде поменяй оставшийся срок (не меньше 1 мес.). ' +
-          'recentlyClosed — недавно законченные дела: про них не говори «не знаю». ' +
+          'goal — одной фразой, что считается достигнутой целью; можно не заполнять. ' +
+          'blessed=true — покровитель уже благословил это дело; исход будет [КРИТИЧЕСКИЙ УСПЕХ], так и помни. ' +
+          'recentlyClosed[].outcome — итог [ПРОВАЛ] / [УСПЕХ] / [КРИТИЧЕСКИЙ УСПЕХ]; про них не говори «не знаю». ' +
           'Для update_process / revoke_process бери id из processes[].id. ' +
           'Если id не помнишь — передай краткий смысл дела в processId (например «университет»), система найдёт. ' +
           'Покровитель уточняет уже идущую ту же работу (новый вопрос к тому же дознанию, другой темп) — update_process, commitment=process. Не отказывай и не заводи второе. ' +
@@ -554,6 +560,11 @@ function characterTools(domain, storage, character, ctx) {
             description:
               'Если покровитель задал жёсткий срок («в этом месяце») — отрази это в detail дословно по смыслу.',
           },
+          goal: {
+            type: 'string',
+            description:
+              'Одной фразой: что считается достигнутой целью дела (для исхода в хронике). Не обязательно.',
+          },
           remainingMonths: {
             type: 'number',
             description:
@@ -594,6 +605,7 @@ function characterTools(domain, storage, character, ctx) {
         onBehalfOf = 'patron',
         characterNote,
         plotId,
+        goal,
       }) => {
         const slots = canStartProcess(domain, ctx.config);
         if (!slots.ok) {
@@ -654,6 +666,7 @@ function characterTools(domain, storage, character, ctx) {
           id: newId('act'),
           summary,
           detail,
+          goal: String(goal || '').trim() || null,
           expectedMonths: 1,
           durationMonths: 1,
           monthsLeft: 1,
@@ -832,6 +845,10 @@ function characterTools(domain, storage, character, ctx) {
           },
           summary: { type: 'string', description: 'На нулевом месяце заменяет название; иначе дописывается.' },
           detail: { type: 'string', description: 'На нулевом месяце заменяет поручение; иначе дописывается.' },
+          goal: {
+            type: 'string',
+            description: 'Одной фразой: что считается достигнутой целью. Можно уточнить в любой месяц.',
+          },
           addDetail: {
             type: 'string',
             description: 'Дополнить поручение новой оговоркой или вопросом, не затирая старое.',
@@ -853,6 +870,7 @@ function characterTools(domain, storage, character, ctx) {
         remainingMonths,
         linkedStats,
         characterNote,
+        goal,
       }) => {
         const { process: action, candidates } = resolveActiveProcess(domain, processId, ctx.config);
         if (!action) {
@@ -868,7 +886,7 @@ function characterTools(domain, storage, character, ctx) {
         }
         const revised = reviseProcess(
           action,
-          { summary, detail, addDetail, remainingMonths, linkedStats, characterNote },
+          { summary, detail, addDetail, remainingMonths, linkedStats, characterNote, goal },
           ctx.config,
         );
         if (revised.rewritten) {
@@ -1876,9 +1894,7 @@ export class GameApp {
         .join('\n');
     }
 
-    const contact = conflux.contact?.description
-      ? `Характер стыка: ${conflux.contact.description}`
-      : '';
+    const contact = conflux.contact ? formatContactForPrompt(conflux.contact) : '';
     return [
       'КАНОН СТЫКОВКИ (идёт СЕЙЧАС — говори открыто и по имени):',
       `Остров состыкован с чужим островом — городом ${partnerName}.`,
@@ -2343,6 +2359,78 @@ export class GameApp {
     return stripSpeakerPrefix(letter, character.name);
   }
 
+  /**
+   * Отдельное слово правителя покровителю: на горизонте чужой остров
+   * или он уже близко. Не письмо месяца — тот же голос.
+   */
+  async narrateConfluxSighting(domain, { kind, fact, partnerName, remaining, rematch } = {}) {
+    const character = domain.characters?.[0];
+    const fallback = String(fact || '').trim();
+    if (!character) return fallback;
+    const patronName = domain.state?.patronName || null;
+    const addressHint = patronName
+      ? `Обращайся к покровителю как «${patronName}». Не подменяй чужим именем бога.`
+      : 'Имя покровителя неизвестно — обратись «покровитель», без выдуманных имён.';
+    const months = Math.max(0, Math.round(Number(remaining) || 0));
+    const when =
+      months <= 0
+        ? 'стыковка уже в этом месяце'
+        : months === 1
+          ? 'до стыковки около месяца'
+          : `до стыковки по приметам примерно ${months} мес.`;
+    const partner = partnerName ? `«${partnerName}»` : 'чужой город';
+    const firstSight = kind !== 'approach';
+    try {
+      const result = await this.runtime.run({
+        agentId: 'tickNews',
+        tools: [],
+        maxTurns: 1,
+        scene: firstSight ? 'conflux_announce' : 'conflux_approach',
+        domainId: domain.id,
+        extraSystem: [
+          `Ты ${character.name}, ${character.title || 'правитель'} города «${domain.name}».`,
+          character.description || '',
+          addressHint,
+          'Ты пишешь покровителю живой речью, как человек, а не сводку.',
+          `Не начинай письмо с «${character.name}:».`,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        userMessages: [
+          {
+            role: 'user',
+            content: [
+              firstSight
+                ? 'Это не письмо месяца. Срочное слово покровителю: на горизонте впервые виден чужой летающий остров, стыковка неизбежна.'
+                : 'Это не письмо месяца. Срочное слово покровителю: чужой остров уже близко, до стыка около месяца. Край чужой земли уже различим.',
+              `Соседний город зовут ${partner}.`,
+              `Срок: ${when}.`,
+              rematch ? 'Острова уже сходились с этим соседом раньше — город это помнит.' : '',
+              'Факт (так было, не слух):',
+              fallback,
+              'Напиши короткое живое письмо от первого лица: 1–2 коротких абзаца.',
+              `Назови ${partner} и срок прямо. Это не примета и не слух — покровитель должен понять масштаб.`,
+              'Внутренней жизни соседа ещё не видно — не выдумывай, что у них там происходит.',
+              'Не заканчивай служебной формулой. Без списков, markdown, механики.',
+              addressHint,
+            ]
+              .filter(Boolean)
+              .join('\n'),
+          },
+        ],
+      });
+      return (
+        stripSpeakerPrefix(result.text || fallback, character.name) || fallback
+      );
+    } catch (err) {
+      getLogger().warn('conflux.sighting_letter_failed', {
+        domainId: domain.id,
+        error: err.message,
+      });
+      return fallback;
+    }
+  }
+
   async persistDialog(domain, role, content, { kind = null, meta = null } = {}) {
     const character = domain.characters[0];
     if (!character) return;
@@ -2422,6 +2510,64 @@ export class GameApp {
     }
     getLogger().info('island.deleted', { userId: uid, domainId: domain.id, name: domain.name });
     return { ok: true, name: domain.name };
+  }
+
+  /**
+   * Покровитель благословляет своё ещё идущее дело: при завершении исход будет критическим.
+   */
+  async blessOwnProcess(userId, processId) {
+    const uid = String(userId || '').trim();
+    const id = String(processId || '').trim();
+    if (!id) return { ok: false, error: 'not_found', message: 'не указано дело' };
+    if (this.isWorldTicking()) {
+      return { ok: false, error: 'ticking', message: 'сейчас идёт месяц' };
+    }
+    const world = await this.storage.getWorld();
+    const domain = await this.storage.getDomainForUser(uid, world.id);
+    if (!domain) return { ok: false, error: 'no_domain', message: 'города ещё нет' };
+    normalizeDomain(domain);
+    const conflux = await findActiveConfluxForDomain(this.storage, domain.id);
+    if (conflux) hydrateDomainFromConflux(domain, conflux, { mode: 'ruler' });
+
+    const process = (domain.state?.pendingActions || []).find((p) => String(p.id) === id);
+    if (!process) return { ok: false, error: 'not_found', message: 'такого дела нет' };
+    if (!processOwnedBy(process, domain.id)) {
+      return { ok: false, error: 'not_own', message: 'благословить можно только своё дело' };
+    }
+    const result = blessProcess(process, { tick: world.tickIndex });
+    if (!result.ok) {
+      const message =
+        result.error === 'already_blessed'
+          ? 'это дело уже благословлено'
+          : result.error === 'not_active'
+            ? 'дело уже закрыто'
+            : 'не удалось благословить';
+      return { ok: false, error: result.error, message };
+    }
+
+    domain.state.monthLog = Array.isArray(domain.state.monthLog) ? domain.state.monthLog : [];
+    domain.state.monthLog.push({
+      tick: world.tickIndex ?? null,
+      at: new Date().toISOString(),
+      text: `Покровитель благословил дело «${process.summary}».`,
+      plotIds: process.plotlineId ? [process.plotlineId] : [],
+    });
+    if (domain.state.monthLog.length > 12) {
+      domain.state.monthLog = domain.state.monthLog.slice(-12);
+    }
+
+    if (conflux) {
+      dehydrateDomainToConflux(domain, conflux);
+      await this.storage.saveConflux(conflux);
+    }
+    await this.storage.saveDomain(domain);
+    getLogger().info('process.blessed', {
+      userId: uid,
+      domainId: domain.id,
+      processId: process.id,
+      summary: process.summary,
+    });
+    return { ok: true, process };
   }
 
   async getChronicle(domainId) {

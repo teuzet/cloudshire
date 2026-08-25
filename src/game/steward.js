@@ -101,6 +101,7 @@ async function applyProcess(domain, args, { config, runtime, world, character, l
     id: newId('act'),
     summary,
     detail,
+    goal: String(args.goal || '').trim() || null,
     expectedMonths: 1,
     durationMonths: 1,
     monthsLeft: 1,
@@ -181,6 +182,10 @@ export async function runSteward({ config, runtime, domain, world, log: parentLo
           action: { type: 'string', enum: ['none', 'process', 'standing_order'] },
           summary: { type: 'string', description: 'Название дела, 1–8 слов' },
           detail: { type: 'string', description: 'Что именно поручено и кому' },
+          goal: {
+            type: 'string',
+            description: 'Одной фразой: что считается достигнутой целью. Не обязательно.',
+          },
           linkedStats: {
             type: 'array',
             items: { type: 'string' },

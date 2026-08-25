@@ -31,6 +31,11 @@ export function normalizeProcess(action, config = null) {
 
   action.monthsDone = Math.max(0, action.expectedMonths - action.monthsLeft);
 
+  if (action.goal != null) {
+    const goal = String(action.goal).trim().replace(/\s+/g, ' ');
+    action.goal = goal ? goal.slice(0, 240) : null;
+  }
+
   if (!Array.isArray(action.linkedStats)) action.linkedStats = [];
   const allowed = new Set(listStatIds(config));
   if (allowed.size) {
@@ -41,6 +46,7 @@ export function normalizeProcess(action, config = null) {
 
   if (!action.status) action.status = 'active';
   if (!action.initiative) action.initiative = 'patron';
+  action.blessed = Boolean(action.blessed);
   if (action.objectiveMonths == null) {
     action.objectiveMonths = action.expectedMonths;
   } else {
@@ -66,6 +72,29 @@ function appendText(old, extra) {
 
 export function processIsFresh(action) {
   return Math.max(0, Number(action?.monthsDone) || 0) === 0;
+}
+
+/** Дело этого города, а не соседа. */
+export function processOwnedBy(process, domainId) {
+  if (!process || !domainId) return false;
+  if (process.ownerDomainId) return String(process.ownerDomainId) === String(domainId);
+  return true;
+}
+
+/**
+ * Покровитель благословляет своё ещё идущее дело: при завершении исход будет критическим.
+ */
+export function blessProcess(process, { tick = null } = {}) {
+  if (!process || typeof process !== 'object') return { ok: false, error: 'not_found' };
+  normalizeProcess(process);
+  if (process.status && process.status !== 'active') {
+    return { ok: false, error: 'not_active', process };
+  }
+  if (process.blessed) return { ok: false, error: 'already_blessed', process };
+  process.blessed = true;
+  if (tick != null) process.blessedTick = tick;
+  process.updatedAt = new Date().toISOString();
+  return { ok: true, process };
 }
 
 /** Назначенный срок к честной оценке: <1 спешка, >1 обстоятельность. */
@@ -105,7 +134,7 @@ export function applyObjectiveSchedule(action, objectiveMonths, remainingMonths 
  */
 export function reviseProcess(
   action,
-  { summary, detail, addDetail, remainingMonths, linkedStats, characterNote } = {},
+  { summary, detail, addDetail, remainingMonths, linkedStats, characterNote, goal } = {},
   config = null,
 ) {
   normalizeProcess(action, config);
@@ -130,6 +159,10 @@ export function reviseProcess(
         action.linkedStats = [...new Set([...(action.linkedStats || []), ...linked])];
       }
     }
+  }
+  if (goal !== undefined) {
+    const g = String(goal || '').trim().replace(/\s+/g, ' ');
+    action.goal = g ? g.slice(0, 240) : null;
   }
   if (remainingMonths != null && Number.isFinite(Number(remainingMonths))) {
     setRemainingMonths(action, remainingMonths);
@@ -167,9 +200,15 @@ export function processStatAverage(domain, process, config = null) {
 }
 
 // Бросок хода дела живёт в едином модуле бросков.
-import { rollProcessAdvance, rollProcessFinish, FINISH_LABELS } from './rolls.js';
+import {
+  rollProcessAdvance,
+  rollProcessFinish,
+  FINISH_LABELS,
+  FINISH_SHORT,
+  formatFinishForPrompt,
+} from './rolls.js';
 
-export { rollProcessAdvance, rollProcessFinish, FINISH_LABELS };
+export { rollProcessAdvance, rollProcessFinish, FINISH_LABELS, FINISH_SHORT, formatFinishForPrompt };
 
 /** Броски для всех active процессов домена (до резолва). */
 export function rollAllProcessAdvances(domain, config = null, rng = Math.random) {
@@ -224,19 +263,30 @@ export function applyEngineProgress(domain, rolls, { tick = null, config = null,
     process.lastAdvanceTick = tick;
     let finish = null;
     let finishLabel = null;
+    let blessed = Boolean(process.blessed);
     if (finished) {
-      const avg = processStatAverage(domain, process, config);
-      const rolled = rollProcessFinish(avg, processPaceRatio(process), rng);
-      finish = rolled.finish;
-      finishLabel = FINISH_LABELS[finish];
-      process.finishKind = finish;
-      process.finishRoll = rolled.roll;
-      process.finishWeights = rolled.weights;
+      if (blessed) {
+        finish = 'crit';
+        finishLabel = FINISH_LABELS.blessed;
+        process.finishKind = 'crit';
+        process.finishBlessed = true;
+        process.finishRoll = null;
+        process.finishWeights = { fail: 0, ok: 0, crit: 100 };
+      } else {
+        const avg = processStatAverage(domain, process, config);
+        const rolled = rollProcessFinish(avg, processPaceRatio(process), rng);
+        finish = rolled.finish;
+        finishLabel = FINISH_LABELS[finish];
+        process.finishKind = finish;
+        process.finishRoll = rolled.roll;
+        process.finishWeights = rolled.weights;
+      }
     }
     outcomes.push({
       processId: r.processId,
       summary: process.summary,
       detail: process.detail || '',
+      goal: process.goal || null,
       linkedStats: [...(process.linkedStats || [])],
       kind: r.kind,
       advance: r.advance,
@@ -245,6 +295,8 @@ export function applyEngineProgress(domain, rolls, { tick = null, config = null,
       finished,
       finish,
       finishLabel,
+      blessed,
+      ownerDomainId: r.ownerDomainId || process.ownerDomainId || null,
       // Обычный ход без завершения — фон, о нём отдельную запись не пишем.
       mustNarrate: finished || r.kind !== 'normal',
     });
@@ -260,8 +312,7 @@ export function formatProcessOutcomesForPrompt(outcomes) {
       if (o.finished) {
         return (
           `- [${o.processId}] «${o.summary}» — ЗАВЕРШЕНО в этом месяце. ` +
-          `Исход броска: ${o.finishLabel || o.finish || 'нейтральный успех'}. ` +
-          'Цель поручения не отменяй из-за провала — провал чаще про цену и побочный вред.'
+          `Исход броска: ${formatFinishForPrompt(o.finish, { blessed: o.blessed })}.`
         );
       }
       if (o.kind === 'stall') {
@@ -290,8 +341,10 @@ export function formatProcessLine(process, config = null) {
     process.linkedStats?.length > 0 ? process.linkedStats.join('+') : 'все статы';
   return (
     `- [${process.id}] ${process.summary}: ${process.detail || ''} ` +
+    (process.goal ? `| цель: ${process.goal} ` : '') +
     `| ожидание ~${process.monthsLeft} мес. (оценка ${process.expectedMonths}) ` +
-    `| статы: ${stats} (от ${process.onBehalfOf || process.characterName || '?'})`
+    `| статы: ${stats} (от ${process.onBehalfOf || process.characterName || '?'})` +
+    (process.blessed ? ' | благословлено: исход будет [КРИТИЧЕСКИЙ УСПЕХ]' : '')
   );
 }
 
@@ -334,6 +387,21 @@ export function processProgressFeel(process) {
   return 'ход пока не проверяли';
 }
 
+function closedProcessOutcome(process) {
+  if (process.finishBlessed || (process.blessed && process.finishKind === 'crit')) {
+    return FINISH_LABELS.blessed;
+  }
+  if (process.finishKind && FINISH_LABELS[process.finishKind]) {
+    return FINISH_LABELS[process.finishKind];
+  }
+  if (process.status === 'failed') return FINISH_LABELS.fail;
+  if (process.status === 'cancelled') {
+    return `свёрнуто (${process.cancelReason || 'без причины'})`;
+  }
+  if (process.status === 'resolved') return FINISH_LABELS.ok;
+  return process.status;
+}
+
 /** Недавно закрытые дела: правитель должен помнить итог, а не «не знаю». */
 export function recentlyClosedProcesses(domain, currentTick, { withinTicks = 2 } = {}) {
   const tick = Number(currentTick);
@@ -348,14 +416,7 @@ export function recentlyClosedProcesses(domain, currentTick, { withinTicks = 2 }
       id: a.id,
       summary: a.summary,
       status: a.status,
-      outcome:
-        a.status === 'resolved'
-          ? 'доведено до конца'
-          : a.status === 'failed'
-            ? 'провалено'
-            : a.status === 'cancelled'
-              ? `свёрнуто (${a.cancelReason || 'без причины'})`
-              : a.status,
+      outcome: closedProcessOutcome(a),
     }));
 }
 

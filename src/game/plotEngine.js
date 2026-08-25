@@ -118,7 +118,14 @@ export function planBeats({
   const taken = new Set();
 
   const addBeat = (plot, { mandatory, reason, tint, finale = false, fade = false, outcome = null }) => {
-    if (!plot || taken.has(plot.id)) return false;
+    if (!plot) return false;
+    const processKey = outcome?.processId ? `${plot.id}:${outcome.processId}` : null;
+    if (processKey) {
+      if (taken.has(processKey)) return false;
+      taken.add(processKey);
+    } else if (taken.has(plot.id)) {
+      return false;
+    }
     taken.add(plot.id);
     const rolled =
       tint ||

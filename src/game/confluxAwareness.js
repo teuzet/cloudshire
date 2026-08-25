@@ -2,6 +2,7 @@ import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { formatFullChronicleForPrompt } from './memory.js';
 import { normalizeConfluxBoard } from './confluxBoard.js';
+import { formatContactForPrompt } from './conflux.js';
 
 function clamp100(n) {
   const v = Number(n);
@@ -30,7 +31,7 @@ export async function scoreConfluxAwareness({
   const tools = [
     {
       name: 'submit_awareness',
-      description: 'Информированность каждого города о другом: 0 — изоляция, 100 — известно всё публичное.',
+      description: 'Насколько каждый город знает внутреннюю жизнь другого: 0 — ничего, 100 — всё, кроме чужих тайн.',
       parameters: {
         type: 'object',
         required: ['scores'],
@@ -70,11 +71,16 @@ export async function scoreConfluxAwareness({
     },
   ];
 
-  const pack = (domain) =>
-    [
-      `=== ${domain.id} «${domain.name}» ===`,
+  const pack = (domain) => {
+    const hidden = (domain.lore || []).filter((f) => f?.secret);
+    return [
+      `Город «${domain.name}» (id: ${domain.id})`,
       formatFullChronicleForPrompt(domain) || '(пусто)',
+      hidden.length
+        ? `Что этот город прячет от чужих:\n${hidden.map((f) => `- ${f.text}`).join('\n')}`
+        : 'От чужих этот город ничего специально не прячет.',
     ].join('\n');
+  };
 
   try {
     await runtime.run({
@@ -90,18 +96,19 @@ export async function scoreConfluxAwareness({
           role: 'user',
           content: [
             `Дата: ${world?.gameDate?.label || ''}.`,
-            `Контакт: ${conflux.contact?.kind || '?'} — ${conflux.contact?.description || ''}`,
-            `Месяц стыка ${conflux.monthsDocked || 0} из ${conflux.durationMonths || '?'}.`,
-            'Прочитай полные хроники обоих (включая secret) и оцени, насколько каждый город осведомлён о ДРУГОМ.',
-            'Шпионы, обмен, посольства — повышают; изоляция и вражда — понижают.',
-            '0 = ничего не знают о внутренней жизни соседа. 100 = известно всё публичное, кроме secret.',
+            conflux.contact?.kind ? formatContactForPrompt(conflux.contact) : null,
+            `Месяц встречи: ${conflux.monthsDocked || 0} из ${conflux.durationMonths || '?'}.`,
+            'Прочитай хроники обоих и оцени, насколько каждый город знает внутреннюю жизнь ДРУГОГО.',
+            'То, что город прячет от чужих, в оценку не входит.',
             '',
             pack(a),
             '',
             pack(b),
             '',
-            'Вызови submit_awareness.',
-          ].join('\n'),
+            'Вызови submit_awareness. Нужны два числа — по одному на каждый город.',
+          ]
+            .filter(Boolean)
+            .join('\n'),
         },
       ],
     });

@@ -8,22 +8,91 @@ import {
   forceCreateConflux,
   confluxSummary,
   findActiveConfluxForDomain,
+  monthsUntilDock,
 } from '../../game/conflux.js';
 import { getLogger, requestLogger, truncate } from '../../log.js';
 import { statEpithet } from '../../game/stats.js';
 import { chronicleEntries, castRecords } from '../../game/models.js';
 import { FINISH_SHORT } from '../../game/rolls.js';
 import { resolveIslandImage } from '../../game/islandImage.js';
-import fs from 'node:fs/promises';
+import { knownPartnerLore } from '../../game/confluxBoard.js';
+
+function slimLore(f) {
+  if (!f) return null;
+  return {
+    id: f.id,
+    text: f.text,
+    tick: f.tick ?? null,
+    gameDateLabel: f.gameDateLabel || null,
+    importance: f.importance || null,
+    author: f.author || null,
+    tags: f.tags || [],
+    secret: Boolean(f.secret),
+  };
+}
+
+function publicLore(domain) {
+  return (domain?.lore || []).filter((f) => f && !f.secret);
+}
+
+function nameForDomain(id, domain, partner) {
+  const sid = String(id || '');
+  if (sid && sid === String(domain?.id)) return domain.name;
+  if (sid && sid === String(partner?.id)) return partner.name;
+  return sid || null;
+}
+
+/** Живая доска конфлюкса и корпус информатора этого города. */
+function inspectConfluxBoard(conflux, domain, partner, world) {
+  if (!conflux) return null;
+  const viewerId = String(domain.id);
+  const partnerId = partner ? String(partner.id) : null;
+  const names = Object.fromEntries(
+    (conflux.domainIds || []).map((id) => [String(id), nameForDomain(id, domain, partner) || String(id)]),
+  );
+  const known = partner ? knownPartnerLore(partner, conflux, viewerId) : [];
+  const theyKnow = partnerId ? knownPartnerLore(domain, conflux, partnerId) : [];
+  const byTick = (a, b) => (Number(b.tick) || 0) - (Number(a.tick) || 0);
+  return {
+    ...confluxSummary(conflux, world, {
+      [domain.id]: domain,
+      ...(partner ? { [partner.id]: partner } : {}),
+    }),
+    partnerName: partner?.name || partnerId,
+    mainPlotId: conflux.mainPlotId || null,
+    awareness: {
+      ours: Number(conflux.awareness?.[viewerId] || 0),
+      theirs: partnerId ? Number(conflux.awareness?.[partnerId] || 0) : 0,
+    },
+    informant: {
+      knownCount: known.length,
+      publicCount: publicLore(partner).length,
+      known: [...known].sort(byTick).map(slimLore),
+      theyKnowCount: theyKnow.length,
+      theyPublicCount: publicLore(domain).length,
+      theyKnow: [...theyKnow].sort(byTick).map(slimLore),
+    },
+    plotlines: conflux.plotlines || [],
+    closedPlotlines: (conflux.closedPlotlines || []).slice(-20),
+    processes: conflux.processes || [],
+    lore: [...(conflux.lore || [])].slice(-40).map(slimLore),
+    domainNames: names,
+  };
+}
 
 /** Заголовки нитей и дел для карточек хроники в тестовом клиенте. */
-function chronicleRelations(entry, domain) {
+function chronicleRelations(entry, domain, extra = {}) {
   const plotsById = new Map();
-  for (const p of [...(domain.plotlines || []), ...(domain.closedPlotlines || [])]) {
+  for (const p of [
+    ...(domain.plotlines || []),
+    ...(domain.closedPlotlines || []),
+    ...(extra.plotlines || []),
+    ...(extra.closedPlotlines || []),
+  ]) {
     if (p?.id) plotsById.set(String(p.id), p.title || p.id);
   }
   const processesById = new Map();
-  for (const p of domain.state?.pendingActions || []) {
+  for (const p of [...(domain.state?.pendingActions || []), ...(extra.processes || [])]) {
     if (p?.id) processesById.set(String(p.id), p);
   }
   const relatedPlots = [...new Set((entry.relatedPlotlineIds || []).map(String))].map((id) => ({
@@ -41,6 +110,68 @@ function chronicleRelations(entry, domain) {
     processFinish: finish,
     processFinishLabel: finish ? FINISH_SHORT[finish] || finish : null,
   };
+}
+
+/** Острова текущего мира для переключателя тестового клиента. */
+async function listPlayIslands(storage, world) {
+  const domains = await storage.listDomains();
+  const bindings = await storage.listUserBindings();
+  const confluxes = await storage.listConfluxes({ status: ['approaching', 'docked'] }).catch(() => []);
+  const ownerByDomain = new Map();
+  for (const b of bindings || []) {
+    if (b?.domainId) ownerByDomain.set(String(b.domainId), b);
+  }
+  const byId = new Map(domains.map((d) => [d.id, d]));
+
+  const islands = [];
+  for (const domain of domains) {
+    if (world?.id && domain.worldId && domain.worldId !== world.id) continue;
+    if (domain.status && domain.status !== 'playing') continue;
+    const owner = ownerByDomain.get(domain.id);
+    const userId = String(domain.ownerUserId || owner?.userId || '');
+    if (!userId) continue;
+    const cf = (confluxes || []).find((c) => (c.domainIds || []).includes(domain.id));
+    const partnerId = cf ? (cf.domainIds || []).find((id) => id !== domain.id) : null;
+    const partner = partnerId ? byId.get(partnerId) : null;
+    const partnerOwner = partner ? ownerByDomain.get(partner.id) : null;
+    islands.push({
+      userId,
+      domainId: domain.id,
+      name: domain.name,
+      ruler: domain.characters?.[0]?.name || null,
+      draft: false,
+      conflux: cf
+        ? {
+            status: cf.status,
+            partnerName: partner?.name || null,
+            partnerUserId: partner
+              ? String(partner.ownerUserId || partnerOwner?.userId || '')
+              : null,
+            monthsUntilDock:
+              cf.status === 'approaching' ? monthsUntilDock(cf, world) : null,
+          }
+        : null,
+    });
+  }
+
+  for (const b of bindings || []) {
+    if (b?.domainId) continue;
+    if (world?.id && b.worldId && b.worldId !== world.id) continue;
+    islands.push({
+      userId: String(b.userId),
+      domainId: null,
+      name: b.onboarding?.cityName || 'черновик',
+      ruler: null,
+      draft: true,
+      conflux: null,
+    });
+  }
+
+  islands.sort((a, b) => {
+    if (a.draft !== b.draft) return a.draft ? 1 : -1;
+    return String(a.name).localeCompare(String(b.name), 'ru');
+  });
+  return islands;
 }
 
 /** Числа игроку видны, но рядом с ними — то же слово, которым говорит правитель. */
@@ -168,6 +299,7 @@ export function createWebServer({ config, app, runtime, storage }) {
           kind: m.kind || (domain ? null : 'onboarding'),
           at: m.at || null,
         }));
+        const islands = await listPlayIslands(storage, world);
         res.json({
           userId,
           gameDate: world.gameDate,
@@ -177,6 +309,7 @@ export function createWebServer({ config, app, runtime, storage }) {
           ticking: app.isWorldTicking(),
           canForceTick: playDevEnabled,
           canWipe: playDevEnabled,
+          islands,
           domain: domain
             ? {
                 id: domain.id,
@@ -296,18 +429,10 @@ export function createWebServer({ config, app, runtime, storage }) {
               gameDateLabel: e.gameDateLabel || null,
               importance: e.importance || null,
               author: e.author || null,
-              ...chronicleRelations(e, domain),
+              ...chronicleRelations(e, domain, conflux || {}),
               statChanges: e.statChanges || null,
             })),
-            conflux: conflux
-              ? {
-                  ...confluxSummary(conflux, world, {
-                    [domain.id]: domain,
-                    ...(partnerDomain ? { [partnerDomain.id]: partnerDomain } : {}),
-                  }),
-                  partnerName: partnerDomain?.name || partner || null,
-                }
-              : null,
+            conflux: inspectConfluxBoard(conflux, domain, partnerDomain, world),
             confluxHistory: {
               monthsSolo: domain.confluxMonthsSolo ?? 0,
               monthsDocked: domain.confluxMonthsDocked ?? 0,
@@ -317,6 +442,30 @@ export function createWebServer({ config, app, runtime, storage }) {
         });
       } catch (err) {
         req.log?.error('http.error', { error: err.message });
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    server.post('/api/play/bless', async (req, res) => {
+      try {
+        const userId = String(req.body?.userId || 'local-user');
+        const processId = String(req.body?.processId || '').trim();
+        const result = await app.blessOwnProcess(userId, processId);
+        if (!result.ok) {
+          const status =
+            result.error === 'ticking'
+              ? 409
+              : result.error === 'not_found' || result.error === 'no_domain'
+                ? 404
+                : 400;
+          return res.status(status).json({
+            ...result,
+            error: result.message || result.error,
+          });
+        }
+        res.json(result);
+      } catch (err) {
+        req.log?.error('http.error', { error: err.message, stack: err.stack });
         res.status(500).json({ error: err.message });
       }
     });
@@ -541,7 +690,18 @@ export function createWebServer({ config, app, runtime, storage }) {
       });
       const { conflux, domains, announce } = created;
       if (announce) {
-        await emitConfluxAnnouncements({ app, storage, items: [{ announce }] });
+        await emitConfluxAnnouncements({
+          app,
+          storage,
+          items: [
+            {
+              confluxId: conflux.id,
+              rematch: conflux.rematch,
+              etaMonths: conflux.etaMonths,
+              announce,
+            },
+          ],
+        });
       }
       const world = await storage.getWorld();
       const byId = Object.fromEntries(domains.map((d) => [d.id, d]));
