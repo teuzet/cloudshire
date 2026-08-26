@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createWorldFromConfig, createCharacterRecord, formatCastForPrompt, firstMentionHintForSpeech } from '../src/game/models.js';
-import { takeName, offerNames, bindCharacterNames, seedWorldNamePool } from '../src/game/names.js';
+import { takeName, takeNameAtRandom, offerNames, bindCharacterNames, seedWorldNamePool } from '../src/game/names.js';
 import {
   defaultNewsSchedule,
   normalizeNewsSchedule,
@@ -22,6 +22,15 @@ test('пул имён копируется в мир и вынимается', (
   const b = takeName(world, 'female');
   assert.notEqual(a, b);
   assert.ok(!world.namePool.female.includes(a));
+});
+
+test('случайное имя не всегда с головы пула', () => {
+  const world = { namePool: { female: ['Айра', 'Найра', 'Севра'], male: ['Кален'] } };
+  seedWorldNamePool(world);
+  const name = takeNameAtRandom(world, 'female', null, () => 0.9);
+  assert.equal(name, 'Севра');
+  assert.equal(world.namePool.female.length, 2);
+  assert.ok(!world.namePool.female.includes('Севра'));
 });
 
 test('агент берёт предложенное имя, чужое заменяем в тексте', () => {

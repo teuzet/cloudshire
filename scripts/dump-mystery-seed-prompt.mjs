@@ -14,7 +14,7 @@ import { initLogger } from '../src/log.js';
 import { createStorage } from '../src/storage/index.js';
 import { AgentRuntime } from '../src/agents/runtime.js';
 import { seedPlot } from '../src/game/storyteller.js';
-import { pickPlotTags, plotConfig } from '../src/game/plotlines.js';
+import { pickMysteryPlotTags, plotConfig } from '../src/game/plotlines.js';
 
 function parseArgs(argv) {
   const out = { name: 'Аллерия', domain: null, out: null, help: false };
@@ -131,7 +131,7 @@ try {
   const runtime = new AgentRuntime(config);
   let captured = null;
   runtime.run = async (opts) => {
-    if (!captured) {
+    if (opts.agentId === 'mysteryStart' && !captured) {
       captured = {
         ...runtime.assembleChat(opts),
         toolChoice: opts.toolChoice,
@@ -142,7 +142,7 @@ try {
   };
 
   const cfg = plotConfig(config);
-  const tags = pickPlotTags(cfg);
+  const tags = pickMysteryPlotTags(cfg);
   await seedPlot({
     config,
     runtime,

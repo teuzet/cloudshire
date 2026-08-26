@@ -21,6 +21,7 @@ import {
   plotConfig,
   plotSeedChance,
   pickSequelSeed,
+  allowSequelAfter,
   findPlotline,
   closePlotline,
   plotHasActiveProcess,
@@ -183,7 +184,7 @@ export async function resolveDomainMonth({
           text: result.fact.text,
           note: `история «${plot.title}» кончилась`,
         });
-        if (result.sequelHook) {
+        if (result.sequelHook && allowSequelAfter(plot)) {
           sequelOffers.push({
             id: plot.id,
             title: plot.title,

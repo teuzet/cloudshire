@@ -8,15 +8,23 @@ import {
   plotHasActiveProcess,
   pickPlotTags,
   pickOpeningPlotTags,
+  pickMysteryPlotTags,
+  pickSeedTags,
+  formatPlotTagsForPrompt,
+  formatMysteryAxesForPrompt,
+  mysteryTypeTag,
   openingPlotCount,
   pickSequelSeed,
+  allowSequelAfter,
+  createPlotline,
+  normalizePlotlines,
   plotSeedChance,
   liveStoryImportance,
   judgePlotSeed,
   reopenClosedPlotline,
 } from '../src/game/plotlines.js';
 import { ensureErrandForProcess, planBeats } from '../src/game/plotEngine.js';
-import { peopleUnderWatch, priorPlotChronicle } from '../src/game/storyteller.js';
+import { peopleUnderWatch, priorPlotChronicle, mintSeedCast, offerMysterySeedNames } from '../src/game/storyteller.js';
 
 function plot(id, extra = {}) {
   return {
@@ -257,6 +265,24 @@ test('закрытая нить помнит крючок на продолже�
   assert.match(archived.sequelHook, /угроза/);
 });
 
+test('стартер тайны может пометить, что история просит сиквела', () => {
+  const seeded = createPlotline({
+    title: 'Гул в трубах',
+    storyType: 'mystery',
+    asksSequel: true,
+  });
+  assert.equal(seeded.asksSequel, true);
+  const domain = { plotlines: [seeded], closedPlotlines: [] };
+  normalizePlotlines(domain);
+  assert.equal(domain.plotlines[0].asksSequel, true);
+  closePlotline(domain, seeded.id, { tick: 4, reason: 'Разгадали.', sequelHook: 'Яд шёл из соседней мастерской.' });
+  assert.equal(findClosedPlotline(domain, seeded.id).asksSequel, true);
+  assert.equal(allowSequelAfter({ storyType: 'mystery', asksSequel: true, kind: 'story' }), true);
+  assert.equal(allowSequelAfter({ storyType: 'mystery', asksSequel: false, kind: 'story' }), false);
+  assert.equal(allowSequelAfter({ storyType: 'suspense', kind: 'story' }), true);
+  assert.equal(allowSequelAfter({ kind: 'errand' }), false);
+});
+
 test('каталог завязки: характер, сфера-статы, источник, масштаб', async () => {
   const { loadConfig } = await import('../src/config.js');
   const config = loadConfig();
@@ -267,6 +293,106 @@ test('каталог завязки: характер, сфера-статы, и
   assert.ok(byId.sphere.tags.length >= 6);
   const any = byId.source.tags.find((t) => t.id === 'any');
   assert.ok(any && Number(any.weight) > 1);
+});
+
+test('каталог тайны: поле и тип', async () => {
+  const { loadConfig } = await import('../src/config.js');
+  const cfg = plotConfig(loadConfig());
+  const byId = Object.fromEntries(cfg.mysteryTagGroups.map((g) => [g.id, g]));
+  assert.ok(byId.association && byId.type);
+  assert.equal(byId.dynamic, undefined);
+  assert.equal(byId.kind, undefined);
+  assert.ok(byId.association.tags.length >= 16);
+  assert.ok(byId.type.tags.length >= 12);
+  assert.ok(byId.type.tags.length <= 16);
+  assert.ok(cfg.mysteryGraph.minNodes >= 3);
+  assert.ok(cfg.mysteryGraph.maxNodes >= cfg.mysteryGraph.minNodes);
+  const shapeIds = cfg.mysteryGraph.shapes.map((s) => s.id || s);
+  assert.ok(shapeIds.includes('linear_4'));
+  assert.ok(shapeIds.includes('linear_5'));
+  assert.ok(shapeIds.includes('linear_side'));
+  assert.equal(cfg.mysteryGraph.sideRevealChance, 0.5);
+  assert.ok(cfg.mysteryEntities.minCatalog >= 24);
+  assert.equal(cfg.mysteryEntities.pickMin, 1);
+  assert.equal(cfg.mysteryEntities.pickMax, 2);
+  assert.ok(cfg.mysteryEntities.twoChance > 0);
+  assert.ok(cfg.mysteryEntities.twoChance < 0.5);
+  const raw = loadConfig();
+  assert.match(String(raw.world?.cosmology || ''), /low-magic/);
+  assert.match(String(raw.world?.cosmology || ''), /не проявляется повсеместно/);
+  assert.match(String(raw.canon?.world || ''), /low-magic/);
+  const tags = pickMysteryPlotTags(cfg, () => 0.1);
+  assert.deepEqual(
+    tags.map((t) => t.groupId).sort(),
+    ['association', 'type'],
+  );
+  assert.ok(mysteryTypeTag(tags)?.tagName);
+  const opening = pickSeedTags(cfg, { storyType: 'mystery', opening: true, rng: () => 0.01 });
+  assert.equal(opening.some((t) => t.groupId === 'scale'), false);
+  const known = new Set(['id', 'name', 'weight', 'people', 'kind', 'about']);
+  for (const g of cfg.mysteryTagGroups) {
+    for (const t of g.tags) {
+      const extra = Object.keys(t).filter((k) => !known.has(k));
+      assert.deepEqual(extra, [], `${g.id}/${t.id}: YAML разрезал имя на лишние ключи`);
+    }
+  }
+  const formatted = formatMysteryAxesForPrompt([
+    { groupId: 'association', groupName: 'Ассоциативное поле', tagName: 'остаток' },
+    { groupId: 'type', groupName: 'Тип тайны', tagName: 'заговор', about: 'скрытая воля' },
+  ]);
+  assert.match(formatted, /ТИП ТАЙНЫ \(обязателен\): заговор/);
+  assert.match(formatted, /АССОЦИАТИВНОЕ ПОЛЕ \(должно читаться в истории\): «остаток»/);
+  assert.equal(formatted.includes('всё мягко'), false);
+  const hard = formatPlotTagsForPrompt([
+    { groupId: 'character', groupName: 'Характер', tagName: 'Мрачный' },
+  ]);
+  assert.equal(hard.includes('ассоциации'), false);
+});
+
+test('посев тайны даёт 1–2 имени без готовых карточек', () => {
+  const domain = { characters: [{ name: 'Паэла' }], lore: [] };
+  const one = offerMysterySeedNames({
+    world: { namePool: { female: ['Айра', 'Найра', 'Вера'], male: ['Кален', 'Норвел'] } },
+    domain,
+    rng: () => 0.1,
+  });
+  assert.equal(one.length, 1);
+  assert.ok(one[0].name);
+  assert.notEqual(String(one[0].name).toLowerCase(), 'паэла');
+  assert.ok(['male', 'female'].includes(one[0].gender));
+  assert.equal(one[0].role, undefined);
+  assert.equal(one[0].about, undefined);
+  const two = offerMysterySeedNames({
+    world: { namePool: { female: ['Айра', 'Найра'], male: ['Кален', 'Норвел'] } },
+    domain,
+    rng: () => 0.9,
+  });
+  assert.equal(two.length, 2);
+  assert.notEqual(two[0].name, two[1].name);
+});
+
+test('посев даёт 1–2 готовых человека из пула', () => {
+  const domain = { characters: [{ name: 'Паэла' }], lore: [] };
+  const one = mintSeedCast({
+    world: { namePool: { female: ['Айра', 'Найра', 'Вера'], male: ['Кален', 'Норвел'] } },
+    domain,
+    rng: () => 0.1,
+  });
+  assert.equal(one.length, 1);
+  assert.ok(one[0].name);
+  assert.notEqual(String(one[0].name).toLowerCase(), 'паэла');
+  assert.ok(['male', 'female'].includes(one[0].gender));
+  assert.ok(one[0].role);
+  assert.ok(one[0].about);
+  assert.ok(one[0].ageYears >= 18);
+  const two = mintSeedCast({
+    world: { namePool: { female: ['Айра', 'Найра'], male: ['Кален', 'Норвел'] } },
+    domain,
+    rng: () => 0.9,
+  });
+  assert.equal(two.length, 2);
+  assert.notEqual(two[0].name, two[1].name);
+  assert.notEqual(two[0].role, two[1].role);
 });
 
 test('жребий масштаба уважает вес: город чаще квартала', () => {

@@ -16,7 +16,9 @@ import { initLogger } from '../src/log.js';
 import { createStorage } from '../src/storage/index.js';
 import { AgentRuntime } from '../src/agents/runtime.js';
 import { seedPlot } from '../src/game/storyteller.js';
-import { formatPlotTagsForPrompt, pickPlotTags, plotConfig } from '../src/game/plotlines.js';
+import { formatPlotTagsForPrompt, pickSeedTags, plotConfig } from '../src/game/plotlines.js';
+import { formatTruthGraphForPrompt } from '../src/game/mysteryGraph.js';
+import { ensureCityEntities, formatMysteryAnchorsForPrompt } from '../src/game/cityEntities.js';
 
 function parseArgs(argv) {
   const out = {
@@ -56,12 +58,19 @@ function formatTags(tags) {
   return formatPlotTagsForPrompt(tags);
 }
 
-function tagFreq(rows, groupId) {
+function tagFreq(rows, groupId, { all = false } = {}) {
   const counts = new Map();
   for (const row of rows) {
-    const tag = (row.tags || []).find((t) => t.groupId === groupId);
-    const key = tag?.tagName || '(нет)';
-    counts.set(key, (counts.get(key) || 0) + 1);
+    const tags = (row.tags || []).filter((t) => t.groupId === groupId);
+    if (!tags.length) {
+      counts.set('(нет)', (counts.get('(нет)') || 0) + 1);
+      continue;
+    }
+    const picked = all ? tags : tags.slice(0, 1);
+    for (const tag of picked) {
+      const key = tag?.tagName || '(нет)';
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
   }
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'ru'))
@@ -110,6 +119,10 @@ function renderCard(row) {
   lines.push(
     [
       `тип ${row.storyType}`,
+      row.mysteryKind ? `род ${row.mysteryKind}` : null,
+      row.graphShape ? `граф ${row.graphShape}` : null,
+      row.sideOpen ? 'виден ещё E' : null,
+      row.asksSequel ? 'просит сиквела' : null,
       row.urgency != null ? `urgency ${row.urgency}` : null,
       row.gravity != null ? `gravity ${row.gravity}` : null,
       row.importance != null ? `важность ${row.importance}` : null,
@@ -120,7 +133,14 @@ function renderCard(row) {
       .join(' · '),
   );
   if (row.closeWhen) lines.push(`закрыть когда: ${row.closeWhen}`);
-  if (row.truth) lines.push(`разгадка (секрет): ${row.truth}`);
+  if (row.anchors?.length) {
+    lines.push('');
+    lines.push(formatMysteryAnchorsForPrompt(row.anchors));
+  }
+  if (row.graph) {
+    lines.push('');
+    lines.push(formatTruthGraphForPrompt(row.graph));
+  }
   if (row.cast.length) lines.push(`люди: ${row.cast.join(', ')}`);
   lines.push('');
   if (row.entry) {
@@ -146,7 +166,7 @@ async function runBatch({
 }) {
   const rows = [];
   for (let i = 1; i <= count; i += 1) {
-    const tags = pickPlotTags(cfg);
+    const tags = pickSeedTags(cfg, { storyType });
     process.stdout.write(`[${storyType} ${i}/${count}] ${formatTags(tags)}\n`);
     const domain = structuredClone(snapshot);
     const worldCopy = structuredClone(world);
@@ -177,6 +197,7 @@ async function runBatch({
       synopsis: plot?.synopsis || null,
       closeWhen: plot?.closeWhen || null,
       truth: plot?.truth || null,
+      graph: plot?.truthGraph || null,
       importance: plot?.importance ?? null,
       urgency: plot?.urgency ?? null,
       gravity: plot?.gravity ?? null,
@@ -184,6 +205,11 @@ async function runBatch({
       relatedStats: plot?.relatedStats || [],
       entry: result?.fact?.text || null,
       cast: (result?.cast || []).map((c) => c.name),
+      anchors: result?.anchors || [],
+      mysteryKind: result?.mysteryKind?.tagName || result?.mysteryKind?.tagId || null,
+      graphShape: result?.graphShape || null,
+      sideOpen: Boolean(result?.sideOpen),
+      asksSequel: Boolean(plot?.asksSequel),
     });
   }
   return rows;
@@ -213,6 +239,10 @@ try {
   const runtime = new AgentRuntime(config);
   const cfg = plotConfig(config);
   const liveStories = (snapshot.plotlines || []).filter((p) => p.kind === 'story');
+
+  if (args.mysteries) {
+    await ensureCityEntities({ domain: snapshot, config, runtime, log });
+  }
 
   const mysteryRows = args.mysteries
     ? await runBatch({
@@ -259,23 +289,18 @@ try {
     `- хранилище: ${storage.driver}`,
     `- дата в мире: ${world.gameDate?.label || '—'} · тик ${world.tickIndex}`,
     `- живых историй на снимке: ${liveStories.length}`,
+    `- якорей в каталоге города: ${(snapshot.cityEntities || []).length} (модели не отдаётся; в тайну — 1, редко 2)`,
     `- тайн: ${mysteryRows.length} · взошло ${mysteryRows.filter((r) => r.ok).length}`,
     `- саспенсов: ${suspenseRows.length} · взошло ${suspenseRows.filter((r) => r.ok).length}`,
     `- каждая попытка шла с одного и того же снимка; сохранение не писалось`,
     '',
     '## Жребий тайн',
     '',
-    '### Характер',
-    tagFreq(mysteryRows, 'character') || '- (нет)',
+    '### Ассоциативное поле',
+    tagFreq(mysteryRows, 'association') || '- (нет)',
     '',
-    '### Сфера',
-    tagFreq(mysteryRows, 'sphere') || '- (нет)',
-    '',
-    '### Источник',
-    tagFreq(mysteryRows, 'source') || '- (нет)',
-    '',
-    '### Масштаб',
-    tagFreq(mysteryRows, 'scale') || '- (нет)',
+    '### Тип тайны',
+    tagFreq(mysteryRows, 'type') || '- (нет)',
     '',
     '## Жребий саспенса',
     '',

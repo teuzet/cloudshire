@@ -1,5 +1,6 @@
 import { newId } from './ids.js';
 import { textsLookSame } from './processes.js';
+import { normalizeTruthGraph, judgeTruthGraph, parseMysteryShapes } from './mysteryGraph.js';
 
 /**
  * Сюжетные нити — ядро мира: событий вне нитей не бывает.
@@ -83,10 +84,22 @@ function clampStakes(n, fallback = 40) {
 function storyActState(p = {}) {
   const type = storyTypeOf(p);
   if (type === 'default') {
-    return { storyType: 'default', act: null, urgency: null, gravity: null, urgency0: null, gravity0: null, truth: '', ending: null };
+    return {
+      storyType: 'default',
+      act: null,
+      urgency: null,
+      gravity: null,
+      urgency0: null,
+      gravity0: null,
+      truth: '',
+      truthGraph: null,
+      ending: null,
+      asksSequel: false,
+    };
   }
   const urgency = clampStakes(p.urgency, 40);
   const gravity = clampStakes(p.gravity, 40);
+  const graph = type === 'mystery' ? normalizeTruthGraph(p.truthGraph) : null;
   return {
     storyType: type,
     act: Number(p.act) === 2 ? 2 : 1,
@@ -94,8 +107,10 @@ function storyActState(p = {}) {
     gravity,
     urgency0: clampStakes(p.urgency0 ?? urgency, urgency),
     gravity0: clampStakes(p.gravity0 ?? gravity, gravity),
-    truth: type === 'mystery' ? String(p.truth || '') : '',
+    truth: type === 'mystery' && !graph ? String(p.truth || '') : '',
+    truthGraph: graph,
     ending: ['crit', 'ok', 'fail'].includes(p.ending) ? p.ending : null,
+    asksSequel: Boolean(p.asksSequel),
   };
 }
 
@@ -182,6 +197,36 @@ export function plotConfig(config) {
       avoidRepeat: Math.max(0, Math.min(10, Number(p.quiet?.avoidRepeat ?? 4))),
     },
     tagGroups: Array.isArray(p.tagGroups) ? p.tagGroups : [],
+    mysteryTagGroups: Array.isArray(p.mystery?.tagGroups) ? p.mystery.tagGroups : [],
+    mysteryGraph: {
+      minNodes: Math.max(3, Math.round(Number(p.mystery?.graph?.minNodes ?? 4))),
+      maxNodes: Math.max(
+        Math.max(3, Math.round(Number(p.mystery?.graph?.minNodes ?? 4))),
+        Math.round(Number(p.mystery?.graph?.maxNodes ?? 5)),
+      ),
+      sideRevealChance: Math.max(0, Math.min(1, Number(p.mystery?.graph?.sideRevealChance ?? 0.5))),
+      shapes: parseMysteryShapes(p.mystery?.graph?.shapes),
+    },
+    mysteryEntities: (() => {
+      const minCatalog = Math.max(4, Math.round(Number(p.mystery?.entities?.minCatalog ?? 32)));
+      const pickMin = Math.max(1, Math.min(2, Math.round(Number(p.mystery?.entities?.pickMin ?? 1))));
+      return {
+        minCatalog,
+        maxCatalog: Math.max(minCatalog, Math.round(Number(p.mystery?.entities?.maxCatalog ?? 48))),
+        pickMin,
+        pickMax: Math.max(pickMin, Math.min(2, Math.round(Number(p.mystery?.entities?.pickMax ?? 2)))),
+        twoChance: Math.max(0, Math.min(1, Number(p.mystery?.entities?.twoChance ?? 0.12))),
+        inventChance: Math.max(0, Math.min(1, Number(p.mystery?.entities?.inventChance ?? 0.15))),
+      };
+    })(),
+    seedRoles: Array.isArray(p.seedRoles)
+      ? p.seedRoles
+          .map((r) => ({
+            role: String(r?.role || '').trim(),
+            about: String(r?.about || '').trim(),
+          }))
+          .filter((r) => r.role)
+      : [],
     orders: {
       defaultChance: Math.max(0, Math.min(1, Number(p.orders?.defaultChance ?? 0.2))),
     },
@@ -277,7 +322,9 @@ export function createPlotline({
   urgency0 = null,
   gravity0 = null,
   truth = '',
+  truthGraph = null,
   ending = null,
+  asksSequel = false,
   config = null,
 }) {
   const resolvedKind = PLOT_KINDS.includes(kind) ? kind : 'story';
@@ -324,7 +371,9 @@ export function createPlotline({
       urgency0,
       gravity0,
       truth,
+      truthGraph,
       ending,
+      asksSequel,
       kind: resolvedKind,
       isMainConflux,
       shared,
@@ -588,32 +637,101 @@ function pickWeightedTag(tags, rng) {
  * Группы сами по себе узкие и абстрактные — тон, сфера, источник, масштаб.
  * У тега может быть weight: больше — чаще выпадает.
  */
+function tagFromGroup(group, rng) {
+  if (!group?.tags?.length) return null;
+  const tag = pickWeightedTag(group.tags, rng);
+  if (!tag) return null;
+  const people = Math.round(Number(tag.people));
+  const inventKind = String(tag.kind || '').trim();
+  const about = String(tag.about || '').trim();
+  return {
+    groupId: group.id,
+    groupName: group.name || group.id,
+    tagId: tag.id,
+    tagName: tag.name,
+    ...(inventKind ? { kind: inventKind } : {}),
+    ...(about ? { about } : {}),
+    ...(people === 1 || people === 2 ? { people } : {}),
+  };
+}
+
 export function pickPlotTags(cfg, rng = Math.random) {
   const groups = cfg?.tagGroups || [];
-  return groups
-    .map((g) => {
-      if (!g?.tags?.length) return null;
-      const tag = pickWeightedTag(g.tags, rng);
-      if (!tag) return null;
-      return { groupId: g.id, groupName: g.name || g.id, tagId: tag.id, tagName: tag.name };
-    })
-    .filter(Boolean);
+  return groups.map((g) => tagFromGroup(g, rng)).filter(Boolean);
+}
+
+const MYSTERY_GROUP_IDS = ['association', 'type'];
+
+/** Жребий тайны: окраска (ассоциация) и жёсткий тип произошедшего. */
+export function pickMysteryPlotTags(cfg, rng = Math.random) {
+  const mystery = cfg?.mysteryTagGroups || [];
+  const byId = (id) => (mystery || []).find((g) => g.id === id);
+  return MYSTERY_GROUP_IDS.map((id) => tagFromGroup(byId(id), rng)).filter(Boolean);
+}
+
+export function mysteryTypeTag(tags = []) {
+  return (tags || []).find((t) => t.groupId === 'type') || null;
+}
+
+export function mysteryAssociationTag(tags = []) {
+  return (tags || []).find((t) => t.groupId === 'association') || null;
+}
+
+/** Тип обязателен; ассоциация должна читаться в графе, не как табличка. */
+export function formatMysteryAxesForPrompt(tags, { opening = false } = {}) {
+  const type = mysteryTypeTag(tags);
+  const assoc = mysteryAssociationTag(tags);
+  const lines = [];
+  if (type) {
+    const about = type.about ? ` — ${type.about}` : '';
+    lines.push(`ТИП ТАЙНЫ (обязателен): ${type.tagName}${about}`);
+    lines.push('Это форма произошедшего. Не подменяй канцелярией, учётом и историей кладки, если тип про другое.');
+  }
+  if (assoc) {
+    lines.push('');
+    lines.push(`АССОЦИАТИВНОЕ ПОЛЕ (должно читаться в истории): «${assoc.tagName}».`);
+    lines.push(
+      'Это не тип тайны и не факт мира. Окрась причинный граф и маску этим словом: образ, повтор, атмосфера. Игрок должен узнать поле в рассказе, не встретив само слово как вывеску.',
+    );
+  }
+  if (type || assoc) {
+    lines.push(
+      opening
+        ? 'Даже на старте это должно задеть квартал или большую группу, не двор и не описная книга. Не конец острова.'
+        : 'Масштаб — весь город или несущая жизнь острова: много людей, общая судьба, не двор и не описная книга.',
+    );
+  }
+  return lines.join('\n');
 }
 
 const OPENING_SCALES = new Set(['neighborhood', 'person']);
 
-/** Стартовый посев: тот же жребий, но масштаб только соседство или несколько человек. */
-export function pickOpeningPlotTags(cfg, rng = Math.random) {
-  const tags = pickPlotTags(cfg, rng);
-  const scaleGroup = (cfg?.tagGroups || []).find((g) => g.id === 'scale');
+function applyOpeningScale(cfg, tags, rng) {
+  const mystery = (tags || []).some((t) => t.groupId === 'association' || t.groupId === 'type');
+  const scaleGroup = mystery
+    ? (cfg?.mysteryTagGroups || []).find((g) => g.id === 'scale')
+    : (cfg?.tagGroups || []).find((g) => g.id === 'scale');
   const small = (scaleGroup?.tags || []).filter((t) => OPENING_SCALES.has(t.id));
   if (!small.length) return tags;
   const pick = pickWeightedTag(small, rng);
-  return tags.map((t) =>
+  return (tags || []).map((t) =>
     t.groupId === 'scale' && pick
       ? { ...t, tagId: pick.id, tagName: pick.name }
       : t,
   );
+}
+
+/** Стартовый посев: тот же жребий, но масштаб только соседство или несколько человек. */
+export function pickOpeningPlotTags(cfg, rng = Math.random) {
+  return applyOpeningScale(cfg, pickPlotTags(cfg, rng), rng);
+}
+
+export function pickSeedTags(cfg, { storyType = 'suspense', opening = false, rng = Math.random } = {}) {
+  if (storyType === 'mystery') {
+    const tags = pickMysteryPlotTags(cfg, rng);
+    return opening ? applyOpeningScale(cfg, tags, rng) : tags;
+  }
+  return opening ? pickOpeningPlotTags(cfg, rng) : pickPlotTags(cfg, rng);
 }
 
 export function openingPlotCount(config, rng = Math.random) {
@@ -635,7 +753,13 @@ export function judgePlotSeed(domain, draft, { storyType } = {}) {
   const entry = String(draft.entry || '').trim();
   const synopsis = String(draft.synopsis || '').trim();
   if (!title || !entry || !synopsis) return 'empty';
-  if (storyType === 'mystery' && !String(draft.truth || '').trim()) return 'missing_truth';
+  if (storyType === 'mystery') {
+    const reason = judgeTruthGraph(draft.truthGraph || draft, {
+      minNodes: 3,
+      maxNodes: 8,
+    });
+    if (reason) return reason;
+  }
   if (synopsis.length < SEED_HOOK_MIN) return 'thin_hook';
   const twin = (domain.plotlines || []).find((p) =>
     textsLookSame(`${p.title} ${p.synopsis}`, `${title} ${synopsis}`, { minShared: 7 }),
@@ -647,7 +771,7 @@ export function judgePlotSeed(domain, draft, { storyType } = {}) {
 /** Разгадка тайны не для доски, речи и инспектора. */
 export function stripPlotSecrets(plot) {
   if (!plot || typeof plot !== 'object') return plot;
-  const { truth: _truth, ...rest } = plot;
+  const { truth: _truth, truthGraph: _graph, ...rest } = plot;
   return rest;
 }
 
@@ -702,9 +826,24 @@ export function pickSequelSeed(domain, offers, cfg, rng = Math.random) {
   return viable[viable.length - 1];
 }
 
-export function formatPlotTagsForPrompt(tags) {
+/** Тайна даёт сиквел только если стартер пометил, что разгадка вскрывает новую проблему. */
+export function allowSequelAfter(plot) {
+  if (!plot || plot.kind === 'errand') return false;
+  if (plot.storyType === 'mystery') return Boolean(plot.asksSequel);
+  return true;
+}
+
+export function formatPlotTagsForPrompt(tags, { soft = false } = {}) {
   if (!tags?.length) return '(без посева)';
-  return tags.map((t) => `${t.groupName}: «${t.tagName}»`).join(' · ');
+  const hints = tags.filter((t) => t.groupId === 'hint');
+  const rest = tags.filter((t) => t.groupId !== 'hint');
+  const parts = rest.map((t) => `${t.groupName}: «${t.tagName}»`);
+  if (hints.length) {
+    parts.push(`Ассоциации (очень мягко): ${hints.map((t) => t.tagName).join(', ')}`);
+  }
+  const body = parts.join(' · ');
+  if (!soft) return body;
+  return `всё мягко, ассоциации, не указания — ${body}`;
 }
 
 /** Служебный вид доски — для движка и логов, не для речи. */

@@ -102,6 +102,16 @@ export function takeName(world, gender, config = null) {
   return world.namePool[key].shift() || (key === 'female' ? 'Айра' : 'Кален');
 }
 
+/** Имя из пула не с головы списка — чтобы посев не клеил одного и того же человека. */
+export function takeNameAtRandom(world, gender, config = null, rng = Math.random) {
+  const key = bucket(gender);
+  ensureBucket(world, key, config, rng);
+  const list = world.namePool[key];
+  if (!list.length) return key === 'female' ? 'Айра' : 'Кален';
+  const i = Math.floor(rng() * list.length);
+  return list.splice(i, 1)[0];
+}
+
 /** Несколько имён на бит: агент берёт только отсюда. Из пула ещё не вынимаем. */
 export function offerNames(world, { female = 4, male = 4 } = {}, config = null) {
   ensureBucket(world, 'female', config);

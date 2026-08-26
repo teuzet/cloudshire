@@ -21,6 +21,28 @@ import { planBeats } from '../src/game/plotEngine.js';
 import { beatChance } from '../src/game/rolls.js';
 
 const SEED_PAD = 'Дальше история должна жить своей жизнью и не обрываться на полуслове. '.repeat(4);
+
+function mysteryGraph(extra = {}) {
+  return {
+    nodes: [
+      { id: 'A', text: 'Цистерну перестали чистить.' },
+      { id: 'B', text: 'В трубах скопился ил.' },
+      { id: 'C', text: 'Ночами вода гудит.' },
+      { id: 'D', text: 'Нижний ярус слышит гул как знамение.' },
+    ],
+    edges: [
+      { from: 'A', to: 'B', reason: 'без чистки ил растёт' },
+      { from: 'B', to: 'C', reason: 'ил сжимает поток' },
+    ],
+    knowledge: [
+      { id: 'A', status: 'hidden' },
+      { id: 'B', status: 'hidden' },
+      { id: 'C', status: 'observed' },
+      { id: 'D', status: 'observed' },
+    ],
+    ...extra,
+  };
+}
 const ACTS = { acts: { failMultiplier: 2, worsenMin: 1, worsenMax: 1.5, dampMin: 0.8, dampMax: 1 } };
 const maxRng = () => 1;
 const minRng = () => 0;
@@ -243,27 +265,33 @@ test('шанс холостого тика берётся из urgency', () => {
   assert.equal(beatChance(three({ urgency: 80 }), cfg), 0.8);
 });
 
-test('завязка тайны без разгадки не проходит', () => {
+test('завязка тайны без графа не проходит', () => {
   const draft = {
     title: 'Ночной гул',
     entry: 'В цистерне гудело.',
     synopsis: `${SEED_PAD} В нижней цистерне ночами гудит вода, и никто не знает откуда.`,
   };
-  assert.equal(judgePlotSeed({ plotlines: [] }, draft, { storyType: 'mystery' }), 'missing_truth');
+  assert.equal(judgePlotSeed({ plotlines: [] }, draft, { storyType: 'mystery' }), 'missing_graph');
   assert.equal(
-    judgePlotSeed({ plotlines: [] }, { ...draft, truth: 'это был садовник' }, { storyType: 'mystery' }),
+    judgePlotSeed({ plotlines: [] }, { ...draft, ...mysteryGraph() }, { storyType: 'mystery' }),
     null,
   );
   assert.equal(judgePlotSeed({ plotlines: [] }, draft), null);
 });
 
 test('разгадка не попадает на доску и снимается с публичной карточки', () => {
-  const plot = three({ storyType: 'mystery', truth: 'это был садовник' });
+  const plot = three({
+    storyType: 'mystery',
+    truth: 'это был садовник',
+    truthGraph: mysteryGraph(),
+  });
   const board = formatBoardForPrompt({ plotlines: [plot] });
   assert.equal(board.includes('садовник'), false);
+  assert.equal(board.includes('Цистерну перестали чистить'), false);
   assert.match(board, /тип=mystery/);
   const publicCard = stripPlotSecrets(plot);
   assert.equal(publicCard.truth, undefined);
+  assert.equal(publicCard.truthGraph, undefined);
   assert.equal(publicCard.title, plot.title);
 });
 

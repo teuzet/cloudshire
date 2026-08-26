@@ -1,10 +1,10 @@
 /**
  * Авторы хроники. Движок решает, когда писать.
  *   storyStart    — завязка саспенса
- *   mysteryStart  — завязка тайны: сначала truth, в хронику он не идёт
+ *   mysteryStart  — завязка тайны: причинный граф, в хронику маска
  *   storyBeat     — default: поручения, старые нити, зеркала (агент как был)
  *   suspenseBeat  — бит саспенса
- *   mysteryBeat   — бит тайны (канон truth только у этого агента)
+ *   mysteryBeat   — бит тайны (граф только у этого агента)
  *   orderBeat     — тик постоянного порядка
  *   storyKeep     — синопсис по свежей хронике
  *   fillerNews    — быт, когда сюжета не было
@@ -31,22 +31,40 @@ import {
   plotConfig,
   formatPlotTagsForPrompt,
   clipPlotText,
-  pickPlotTags,
-  pickOpeningPlotTags,
+  pickSeedTags,
+  mysteryTypeTag,
+  formatMysteryAxesForPrompt,
   openingPlotCount,
   judgePlotSeed,
   warmPlotlines,
   pickStoryType,
   isThreeActPlot,
   plotBeatAgentId,
+  allowSequelAfter,
   PLOT_SUMMARY_MAX,
   PLOT_HOOK_MAX,
 } from './plotlines.js';
 import { pickOrderOutcome, markOrderFired } from './orders.js';
 import { TINT_LABELS, pickRollStat, rollTint, formatFinishForPrompt } from './rolls.js';
-import { offerNames, formatOfferedNamesForPrompt, bindCharacterNames } from './names.js';
+import { offerNames, formatOfferedNamesForPrompt, bindCharacterNames, takeNameAtRandom, seedWorldNamePool } from './names.js';
 import { assignPlotStakes } from './plotStakes.js';
 import { formatActMoveForPrompt } from './storyActs.js';
+import {
+  normalizeTruthGraph,
+  judgeTruthGraph,
+  formatTruthGraphForPrompt,
+  graphTexts,
+  applyGraphTexts,
+  applyEngineReveal,
+  pickMysteryGraphShape,
+  formatMysteryGraphShapeForPrompt,
+  formatMysteryMaskForPrompt,
+  mysteryGraphShapeHint,
+  mysteryPublicLeak,
+  graphNodeCount,
+  applySeedVisibility,
+} from './mysteryGraph.js';
+import { ensureCityEntities, pickMysteryAnchors, formatMysteryAnchorsForPrompt } from './cityEntities.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 
@@ -103,6 +121,101 @@ function peopleNamesBlock(world, config) {
 
 function rulerName(domain) {
   return String(domain?.characters?.[0]?.name || '').trim();
+}
+
+const FALLBACK_SEED_ROLES = [
+  { role: 'писец управы', about: 'ведёт списки дворов и пайков' },
+  { role: 'дозор у края', about: 'стоит смену на западной тропе' },
+  { role: 'смотритель цистерн', about: 'обходит водосборы на рассвете' },
+  { role: 'гончар', about: 'обжигает кувшины для цистерн' },
+];
+
+function formatSeedCastForPrompt(people) {
+  if (!people?.length) return '(людей для этой завязки движок не дал)';
+  const sexWord = { male: 'он', female: 'она' };
+  return people
+    .map((c) => {
+      const sex = sexWord[c.gender] ? ` (${sexWord[c.gender]})` : '';
+      const age = Number.isFinite(Number(c.ageYears)) ? `, ${c.ageYears} лет` : '';
+      const role = c.role ? `, ${c.role}` : '';
+      const about = c.about ? `: ${c.about}` : '';
+      return `- ${c.name}${sex}${age}${role}${about}`;
+    })
+    .join('\n');
+}
+
+function formatSeedNamesForPrompt(names) {
+  if (!names?.length) return '(имён для этой завязки движок не дал)';
+  const sexWord = { male: 'он', female: 'она' };
+  return names
+    .map((n) => `- ${n.name}${sexWord[n.gender] ? ` (${sexWord[n.gender]})` : ''}`)
+    .join('\n');
+}
+
+function offeredBuckets(names) {
+  return {
+    female: (names || []).filter((n) => n.gender === 'female').map((n) => n.name),
+    male: (names || []).filter((n) => n.gender === 'male').map((n) => n.name),
+  };
+}
+
+/**
+ * 1–2 имени из пула, без роли и возраста. Из пула ещё не вынимаем:
+ * заберёт bindCharacterNames, когда агент заведёт человека.
+ */
+export function offerMysterySeedNames({ world, domain, config, rng = Math.random } = {}) {
+  seedWorldNamePool(world, config, rng);
+  const n = rng() < 0.5 ? 1 : 2;
+  const ruler = rulerName(domain).toLowerCase();
+  const names = [];
+  const taken = new Set();
+  for (let i = 0; i < n; i += 1) {
+    const gender = rng() < 0.5 ? 'female' : 'male';
+    const key = gender === 'female' ? 'female' : 'male';
+    const pool = (world.namePool?.[key] || []).filter((name) => {
+      const k = String(name || '').toLowerCase();
+      return k && k !== ruler && !taken.has(k);
+    });
+    if (!pool.length) continue;
+    const name = pool[Math.floor(rng() * pool.length)];
+    taken.add(String(name).toLowerCase());
+    names.push({ name, gender });
+  }
+  return names;
+}
+
+/** 1–2 готовых человека: имя из пула, роль из каталога, возраст ставит движок. */
+export function mintSeedCast({ world, domain, config, rng = Math.random, count = null } = {}) {
+  seedWorldNamePool(world, config, rng);
+  const roles = plotConfig(config).seedRoles;
+  const catalog = roles.length ? roles : FALLBACK_SEED_ROLES;
+  const n = count === 1 || count === 2 ? count : rng() < 0.5 ? 1 : 2;
+  const used = new Set();
+  const ruler = rulerName(domain).toLowerCase();
+  const people = [];
+  for (let i = 0; i < n; i += 1) {
+    const gender = rng() < 0.5 ? 'female' : 'male';
+    let name = takeNameAtRandom(world, gender, config, rng);
+    if (ruler && name.toLowerCase() === ruler) {
+      name = takeNameAtRandom(world, gender, config, rng);
+    }
+    const available = catalog
+      .map((_, i) => i)
+      .filter((i) => !used.has(i));
+    const pool = available.length ? available : catalog.map((_, i) => i);
+    const idx = pool[Math.floor(rng() * pool.length)];
+    used.add(idx);
+    const spec = catalog[idx] || catalog[0];
+    people.push({
+      name,
+      gender,
+      role: spec.role,
+      about: spec.about,
+      ageYears: 18 + Math.floor(rng() * 43),
+      status: 'alive',
+    });
+  }
+  return people;
 }
 
 function registerCharacters(domain, list, { world, plotId = null, author = 'storyteller' }) {
@@ -185,14 +298,26 @@ export async function seedPlot({
   const cfg = plotConfig(config);
   const maxChars = chronicleMaxChars(config);
   const statIds = (config.stats || []).map((s) => s.id).join(', ');
+  const mystery = storyType === 'mystery';
+  if (mystery) {
+    await ensureCityEntities({ domain, config, runtime, log });
+  }
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const roll =
       attempt === 0 && tags?.length
         ? tags
-        : opening
-          ? pickOpeningPlotTags(cfg)
-          : pickPlotTags(cfg);
+        : pickSeedTags(cfg, { storyType, opening });
+    const seedPeople = mystery ? [] : mintSeedCast({ world, domain, config });
+    const seedNames = mystery ? offerMysterySeedNames({ world, domain, config }) : [];
+    const mysteryKind = mystery ? mysteryTypeTag(roll) : null;
+    const graphShape = mystery ? pickMysteryGraphShape(cfg) : null;
+    const nodeCount = mystery ? graphNodeCount(graphShape) : 0;
+    const sideOpen =
+      mystery && graphShape === 'linear_side' && Math.random() < Number(cfg.mysteryGraph?.sideRevealChance ?? 0.5);
+    const anchors = mystery
+      ? pickMysteryAnchors(domain.cityEntities, cfg, Math.random, { inventKind: mysteryKind?.kind })
+      : [];
     const draft = { data: null };
     const asked = await askPlotSeed({
       runtime,
@@ -206,6 +331,12 @@ export async function seedPlot({
       fromClosed,
       opening,
       storyType,
+      seedPeople,
+      seedNames,
+      nodeCount,
+      anchors,
+      graphShape,
+      sideOpen,
     });
     if (!asked) {
       log.warn('storyteller.seed_failed', { attempt });
@@ -226,6 +357,27 @@ export async function seedPlot({
     if (opening) {
       asked.importance = Math.min(40, Math.max(15, Number(asked.importance) || 25));
       asked.maxAgeMonths = Math.min(5, Math.max(2, Number(asked.maxAgeMonths) || 4));
+    } else if (mystery) {
+      asked.importance = Math.max(60, Math.min(95, Number(asked.importance) || 75));
+    }
+
+    if (mystery) {
+      let graph = normalizeTruthGraph(asked.truthGraph || asked);
+      if (!graph) {
+        log.info('storyteller.seed_rejected', { reason: 'missing_graph', attempt, title: asked.title });
+        continue;
+      }
+      const bound = bindCharacterNames(world, asked.newCharacters, {
+        offered: offeredBuckets(seedNames),
+        texts: [asked.entry, asked.synopsis, asked.closeWhen, ...graphTexts(graph)],
+        config,
+      });
+      asked.newCharacters = bound.list;
+      asked.entry = bound.texts[0];
+      asked.synopsis = bound.texts[1];
+      asked.closeWhen = bound.texts[2];
+      graph = applyGraphTexts(graph, bound.texts.slice(3));
+      asked.truthGraph = graph;
     }
 
     const plot = createPlotline({
@@ -241,7 +393,8 @@ export async function seedPlot({
       relatedPlotlineIds: fromClosed?.id ? [fromClosed.id] : [],
       storyType,
       act: 1,
-      truth: storyType === 'mystery' ? String(asked.truth || '').trim() : '',
+      truthGraph: mystery ? asked.truthGraph : null,
+      asksSequel: mystery ? asked.asksSequel === true || asked.asksSequel === 'true' : false,
       config,
     });
     domain.plotlines.push(plot);
@@ -254,17 +407,11 @@ export async function seedPlot({
       plotIds: [plot.id],
       author: 'storyteller:seed',
     });
-    const adopted = adoptPeople(domain, asked.newCharacters, {
+    const cast = registerCharacters(domain, mystery ? asked.newCharacters : seedPeople, {
       world,
       plotId: plot.id,
       author: 'storyteller:seed',
-      texts: [asked.entry],
-      offered: draft.offered,
     });
-    if (adopted.texts[0] && adopted.texts[0] !== fact.text) {
-      fact.text = adopted.texts[0];
-    }
-    const cast = adopted.cast;
 
     log.info('storyteller.seed', {
       plotId: plot.id,
@@ -278,8 +425,16 @@ export async function seedPlot({
       maxAgeMonths: plot.maxAgeMonths,
       relatedStats: plot.relatedStats,
       cast: cast.map((c) => c.name),
+      graphNodes: mystery ? asked.truthGraph?.nodes?.length : undefined,
+      graphShape: mystery ? graphShape : undefined,
+      sideOpen: mystery ? sideOpen : undefined,
+      mysteryKind: mystery ? mysteryKind?.tagId : undefined,
+      asksSequel: mystery ? asked.asksSequel === true || asked.asksSequel === 'true' : undefined,
+      anchors: mystery
+        ? anchors.map((a) => (a.invent ? `invent:${a.kind}` : a.name))
+        : undefined,
     });
-    return { plot, fact, cast };
+    return { plot, fact, cast, anchors, graphShape, mysteryKind, sideOpen };
   }
 
   log.info('storyteller.seed_skipped', { reason: 'no_clean_seed' });
@@ -327,15 +482,21 @@ async function askPlotSeed({
   fromClosed = null,
   opening = false,
   storyType = 'suspense',
+  seedPeople = [],
+  seedNames = [],
+  nodeCount = 4,
+  anchors = [],
+  graphShape = null,
+  sideOpen = false,
 }) {
   const mystery = storyType === 'mystery';
   const required = ['title', 'synopsis', 'closeWhen', 'importance', 'maxAgeMonths', 'relatedStats', 'entry'];
-  if (mystery) required.push('truth');
+  if (mystery) required.push('nodes', 'edges', 'asksSequel', 'newCharacters');
   const tools = [
     {
       name: 'submit_plot_seed',
       description: mystery
-        ? 'Новая тайна: сначала канон разгадки (truth), потом экспозиция, из которой разгадки не следует.'
+        ? 'Новая тайна: истинный причинный граф и экспозиция из того, что система уже сделала видимым.'
         : 'Новая история-саспенс: завязка, как она начинается в этом месяце, и карточка для продолжения.',
       parameters: {
         type: 'object',
@@ -345,20 +506,22 @@ async function askPlotSeed({
           synopsis: {
             type: 'string',
             description: mystery
-              ? `Как сейчас обстоят дела и куда это может пойти, до ${PLOT_SUMMARY_MAX} символов. ` +
-                'По этому тексту историю будут продолжать. Разгадку тайны сюда не пиши.'
+              ? `Как город СЕЙЧАС понимает случившееся из уже видимого, до ${PLOT_SUMMARY_MAX} символов. ` +
+                'Только известная часть тайны. Скрытые узлы, причины и разгадку сюда не пиши даже намёком.'
               : `Как сейчас обстоят дела и куда это может пойти, до ${PLOT_SUMMARY_MAX} символов. ` +
                 'По этому тексту историю будут продолжать.',
           },
           closeWhen: {
             type: 'string',
             description: mystery
-              ? `Что должно произойти, чтобы тайну считали разгаданной. Одна фраза, до ${PLOT_HOOK_MAX} символов.`
+              ? `Когда причинную модель считают раскрытой, без самой разгадки. Одна фраза, до ${PLOT_HOOK_MAX} символов.`
               : `Что должно произойти, чтобы историю закрыть по существу. Одна фраза, до ${PLOT_HOOK_MAX} символов.`,
           },
           importance: {
             type: 'number',
-            description: '0–100. Держись масштаба жребия: город ≈ 55, остров ≈ 75.',
+            description: mystery
+              ? '0–100. Судьбоносность: весь город ≈ 75, весь остров ≈ 90. Не местечковый двор.'
+              : '0–100. Держись масштаба жребия: город ≈ 55, остров ≈ 75.',
           },
           maxAgeMonths: {
             type: 'number',
@@ -372,43 +535,88 @@ async function askPlotSeed({
           entry: {
             type: 'string',
             description: mystery
-              ? `Экспозиция этого месяца, до ${maxChars} символов. Разгадку не называй и не намекай впрямую.`
+              ? `Первая запись хроники, до ${maxChars} символов. Только то, что город уже заметил ` +
+                '(видимый узел маски). Без скрытой причины, мотива и виновного.'
               : `Что случилось в этом месяце, до ${maxChars} символов. Сухой факт.`,
           },
-          truth: mystery
+          nodes: mystery
             ? {
-                type: 'string',
-                description:
-                  'Полная разгадка тайны: что на самом деле было. Не попадёт в хронику и не будет видно правителю. Только движок и агент бита.',
+                type: 'array',
+                description: `Ровно ${nodeCount} утверждений истины. id короткие: A, B, C…`,
+                items: {
+                  type: 'object',
+                  required: ['id', 'text'],
+                  properties: {
+                    id: { type: 'string', description: 'Короткий id узла: A, B, C…' },
+                    text: { type: 'string', description: 'Что произошло на самом деле. Одно утверждение.' },
+                  },
+                },
               }
             : undefined,
-          newCharacters: CHARACTERS_SCHEMA,
+          edges: mystery
+            ? {
+                type: 'array',
+                description: 'Причинные связи. Хотя бы одна. from и to — id узлов.',
+                items: {
+                  type: 'object',
+                  required: ['from', 'to'],
+                  properties: {
+                    from: { type: 'string' },
+                    to: { type: 'string' },
+                    reason: { type: 'string', description: 'Почему from вызывает to.' },
+                  },
+                },
+              }
+            : undefined,
+          asksSequel: mystery
+            ? {
+                type: 'boolean',
+                description:
+                  'true только если разгадка этой тайны сама вскрывает новую, доселе неизвестную проблему или конфликт. ' +
+                  'Если разгадка гармонично закрывает историю — false. Сиквел сейчас не пиши.',
+              }
+            : undefined,
+          newCharacters: mystery ? CHARACTERS_SCHEMA : undefined,
         },
       },
       handler: async (args) => {
         if (!String(args.title || '').trim() || !String(args.entry || '').trim() || !String(args.synopsis || '').trim()) {
           return toolFail('empty', 'Нужны название, синопсис и запись хроники.');
         }
-        if (mystery && !String(args.truth || '').trim()) {
-          return toolFail('empty', 'Нужна разгадка тайны в поле truth.');
+        if (mystery) {
+          const graph = normalizeTruthGraph(args);
+          const reason = judgeTruthGraph(graph, {
+            minNodes: nodeCount,
+            maxNodes: nodeCount,
+            shape: graphShape,
+          });
+          if (reason) {
+            return toolFail(reason, mysteryGraphShapeHint(graphShape));
+          }
+          applySeedVisibility(graph, { shape: graphShape, sideOpen });
+          const leak = mysteryPublicLeak(graph, [args.entry, args.synopsis]);
+          if (leak) {
+            return toolFail(
+              'mask_leak',
+              `entry и synopsis только из видимого. Скрытое «${leak}» туда попало — оставь лишь то, что город уже заметил.`,
+            );
+          }
+          args.truthGraph = graph;
         }
         draft.data = args;
         return { ok: true };
       },
     },
   ];
-  if (!mystery) delete tools[0].parameters.properties.truth;
+  if (!mystery) {
+    delete tools[0].parameters.properties.nodes;
+    delete tools[0].parameters.properties.edges;
+    delete tools[0].parameters.properties.asksSequel;
+    delete tools[0].parameters.properties.newCharacters;
+  }
 
   const city = cityStoryContext(domain);
-  const open = (domain.plotlines || [])
-    .map((p) => {
-      const kind = p.kind === 'errand' ? 'текущее дело' : p.kind === 'order' ? 'постоянный порядок' : 'история';
-      return `- «${p.title}» (${kind}): ${p.synopsis || 'только началась'}`;
-    })
-    .join('\n');
-
-  const names = peopleNamesBlock(world);
-  draft.offered = names.offered;
+  const ruler = rulerName(domain);
 
   await runtime.run({
     agentId: mystery ? 'mysteryStart' : 'storyStart',
@@ -424,15 +632,25 @@ async function askPlotSeed({
         role: 'user',
         content: [
           mystery
-            ? `Придумай новую ТАЙНУ города (${world.gameDate.label}). Тип уже выбран движком.`
+            ? `Придумай новую историю-ТАЙНУ города (${world.gameDate.label}). Тип уже выбран движком.`
             : `Придумай новую историю-саспенс города (${world.gameDate.label}). Тип уже выбран движком.`,
           mystery
             ? [
-                'Сначала придумай разгадку (`truth`) — что на самом деле происходит.',
-                'Потом напиши завязку (`entry`, `synopsis`), из которой правда ещё не читается.',
-                '`closeWhen` — когда тайна считается разгаданной, без самой разгадки.',
-                '`truth` никуда больше не копируй: не в entry, не в synopsis, не в closeWhen.',
-              ].join('\n')
+                formatMysteryGraphShapeForPrompt(graphShape),
+                formatMysteryMaskForPrompt(graphShape, { sideOpen }),
+                '`entry` и `synopsis` — только известная часть тайны (видимые узлы). Скрытое туда не пиши даже другими словами.',
+                '`closeWhen` — когда модель считают раскрытой, без самой разгадки.',
+                '`asksSequel` — true, только если разгадка вскрывает новую неизвестную проблему или конфликт. Если разгадка гармонично закрывает историю — false.',
+                opening
+                  ? 'Масштаб — квартал или большая группа, ставки ощутимы. Не канцелярия и не конец острова.'
+                  : 'Масштаб — весь город или несущая жизнь острова. Много людей, общая судьба — не двор, не смена и не учётная книга.',
+                'Тип тайны ниже обязателен. Ассоциативное поле должно быть прослеживающейся темой, но не обязательно "в лоб".',
+                anchors.length
+                  ? 'Якоря ниже обязательны: причинная модель висит на них, а не на самом громком риске из описания города.'
+                  : null,
+              ]
+                .filter(Boolean)
+                .join('\n')
             : [
                 'Фокусируйся на саспенсе — развитии истории.',
                 'Отдавай приоритет продвижению сюжета вперёд, развитию конфликтов, сюжетным поворотам, а не открытию неизвестной информации.',
@@ -458,27 +676,31 @@ async function askPlotSeed({
                 ].join(' ')
               : 'Завязка должна быть оригинальной и интересной — такой, чтобы захотелось узнать, что будет дальше.',
           '',
-          `Направление: ${formatPlotTagsForPrompt(tags)}`,
+          mystery
+            ? formatMysteryAxesForPrompt(tags, { opening })
+            : `Направление: ${formatPlotTagsForPrompt(tags)}`,
           '',
-          'Последние записи хроники:',
-          city.recent,
-          '',
-          'Сейчас в городе делают (это чужая работа, не завязка новой истории):',
-          city.processes,
-          '',
-          'Люди, которых город уже знает (можно назвать, но не делай их двигателем чужого дела):',
-          city.people,
-          '',
-          'Уже идут другие истории и дела — не продолжай их и не делай вторую сторону того же случая:',
-          open || '- (нет)',
-          'Новый случай: свой предмет, не срыв и не тайна того, что уже делают.',
-          '',
-          names.block,
+          mystery && anchors.length ? formatMysteryAnchorsForPrompt(anchors) : null,
+          mystery && anchors.length ? '' : null,
+          mystery
+            ? [
+                'Имена для завязки (бери только их, своих не выдумывай). Карточки не готовы — заведи этих людей в newCharacters с ролью и коротко кто они:',
+                formatSeedNamesForPrompt(seedNames),
+              ].join('\n')
+            : [
+                'Люди этой завязки — уже готовые карточки. Назови только их. Новых имён и newCharacters не заводи.',
+                formatSeedCastForPrompt(seedPeople),
+              ].join('\n'),
+          ruler
+            ? `Правитель города — ${ruler}. Этого человека в завязку двигателем не ставь и второго с тем же именем не заводи.`
+            : null,
           '',
           mystery
-            ? 'Напиши экспозицию этого месяца: что увидели, без разгадки.'
+            ? 'Напиши ПЕРВУЮ хронику и синопсис только из известной городу части тайны: то, что маска назвала видимым. Скрытые узлы — не в текст.'
             : 'Напиши первую запись: что увидели в этом месяце.',
-          'Синопсис — как обстоят дела сейчас, чтобы по нему можно было продолжить.',
+          mystery
+            ? 'Синопсис — как город сейчас понимает уже замеченное, чтобы по нему можно было продолжить, не зная скрытого.'
+            : 'Синопсис — как обстоят дела сейчас, чтобы по нему можно было продолжить.',
           'closeWhen — условие настоящей развязки, не инструкция на последний месяц. ' +
             'Если это условие выполнится раньше срока (нашли пропавшую на шестом месяце из двенадцати) — историю можно закрыть сразу.',
           'Вызови submit_plot_seed.',
@@ -648,7 +870,11 @@ export async function beatPlot({
 
   const closeHint = threeAct
     ? engineEnding
-      ? 'Движок уже закрывает историю. closes не выбирай. Если развязка оставила новый нерешённый узел — sequelHook одной фразой, иначе пусто.'
+      ? mystery
+        ? plot.asksSequel
+          ? 'Движок уже закрывает историю. closes не выбирай. Стартер пометил: разгадка вскрывает новую проблему. Если она в этом месяце вышла наружу — sequelHook одной фразой. Если развязка сама гармонично всё закрыла — поле пустое.'
+          : 'Движок уже закрывает историю. closes не выбирай. Развязка должна закрыть тайну гармонично. sequelHook не ставь.'
+        : 'Движок уже закрывает историю. closes не выбирай. Если развязка оставила новый нерешённый узел — sequelHook одной фразой, иначе пусто.'
       : 'Историю этим месяцем не закрывай. closes не выбирай.'
     : finale
       ? 'Проходное дело закончилось: покажи итог. closes=true.'
@@ -668,9 +894,11 @@ export async function beatPlot({
       `Город «${domain.name}». ${cityBrief(domain)}`,
       ruler ? `Правитель города — ${ruler}. Этого человека в newCharacters не заводи, второго с тем же именем тоже.` : null,
       `Известные люди города:\n${formatCastForPrompt(domain.lore, { limit: 12 })}`,
-      mystery && plot.truth
-        ? `ТАЙНА (канон, не в хронику пока движок не велел):\n${plot.truth}`
-        : null,
+      mystery && plot.truthGraph
+        ? `${formatTruthGraphForPrompt(plot.truthGraph)}\nСтрой хронику вокруг узлов, помеченных «замечено». Скрытое в запись не выноси.`
+        : mystery && plot.truth
+          ? `ТАЙНА (канон, не в хронику пока движок не велел):\n${plot.truth}`
+          : null,
     ]
       .filter(Boolean)
       .join('\n\n'),
@@ -702,7 +930,7 @@ export async function beatPlot({
           '',
           names.block,
           '',
-          'Вызови submit_plot_beat. Только запись этого месяца; карточку истории не переписывай.',
+          'Вызови submit_plot_beat. Только запись этого месяца; карточку истории и граф истины не переписывай.',
         ]
           .filter(Boolean)
           .join('\n'),
@@ -743,6 +971,13 @@ export async function beatPlot({
   if (adopted.texts[1]) d.synopsis = adopted.texts[1];
   const cast = adopted.cast;
 
+  if (mystery && plot.truthGraph) {
+    applyEngineReveal(plot.truthGraph, {
+      reveal: beat.actMove?.reveal || 'none',
+      ending: engineEnding,
+    });
+  }
+
   if (Array.isArray(d.relatedStats) && d.relatedStats.length) {
     const allowed = new Set((config.stats || []).map((s) => s.id));
     const next = d.relatedStats.map(String).filter((id) => allowed.has(id));
@@ -761,7 +996,7 @@ export async function beatPlot({
         : 'успех'
     : d.closeReason || (beat.finale ? 'дело закончилось' : 'условие закрытия исполнилось');
   const sequelHook =
-    closed && plot.kind !== 'errand' ? clipPlotText(String(d.sequelHook || '').trim(), PLOT_HOOK_MAX) : '';
+    closed && allowSequelAfter(plot) ? clipPlotText(String(d.sequelHook || '').trim(), PLOT_HOOK_MAX) : '';
   if (closed) {
     closePlotline(domain, plot.id, {
       tick: world.tickIndex,

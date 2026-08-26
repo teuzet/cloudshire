@@ -2,6 +2,7 @@ import { newId } from './ids.js';
 import { seedWorldNamePool, normalizeNamePool } from './names.js';
 import { normalizeOrders } from './orders.js';
 import { stampPersonAge } from './ages.js';
+import { normalizeCityEntities } from './cityEntities.js';
 
 export function emptyState() {
   return {
@@ -48,6 +49,9 @@ export function normalizeDomain(domain) {
   }
   if (typeof domain.imagePath !== 'string') domain.imagePath = domain.imagePath || null;
   if (typeof domain.imageBase64 !== 'string') domain.imageBase64 = domain.imageBase64 || null;
+  domain.cityEntities = normalizeCityEntities(domain.cityEntities);
+  if (domain.cityEntities.length) domain.cityEntitiesReady = true;
+  else if (typeof domain.cityEntitiesReady !== 'boolean') domain.cityEntitiesReady = false;
   ensurePatronFact(domain);
   // pendingActions = длительные процессы; нормализация полей — в processes.normalizeDomainProcesses
   if (Array.isArray(domain.characters)) {
@@ -165,6 +169,8 @@ export function createDomainRecord({
     characters: [character],
     lore,
     plotlines: [],
+    cityEntities: [],
+    cityEntitiesReady: false,
     status: 'playing',
     lastTickAt: null,
     createdTick: Number.isInteger(createdTick) ? createdTick : 0,
