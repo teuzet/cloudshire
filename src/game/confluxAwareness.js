@@ -31,7 +31,8 @@ export async function scoreConfluxAwareness({
   const tools = [
     {
       name: 'submit_awareness',
-      description: 'Насколько каждый город знает внутреннюю жизнь другого: 0 — ничего, 100 — всё, кроме чужих тайн.',
+      description:
+        'Текущая проницаемость соседа для новой информации: 0 — почти полная темнота, 100 — обычная открытая жизнь почти прозрачна. Не процент уже накопленных знаний.',
       parameters: {
         type: 'object',
         required: ['scores'],
@@ -45,7 +46,7 @@ export async function scoreConfluxAwareness({
               required: ['domainId', 'value'],
               properties: {
                 domainId: { type: 'string' },
-                value: { type: 'number', description: '0–100' },
+                value: { type: 'number', description: '0–100. Текущая проницаемость соседа для новой информации, не накопленные знания.' },
               },
             },
           },
@@ -98,8 +99,9 @@ export async function scoreConfluxAwareness({
             `Дата: ${world?.gameDate?.label || ''}.`,
             conflux.contact?.kind ? formatContactForPrompt(conflux.contact) : null,
             `Месяц встречи: ${conflux.monthsDocked || 0} из ${conflux.durationMonths || '?'}.`,
-            'Прочитай хроники обоих и оцени, насколько каждый город знает внутреннюю жизнь ДРУГОГО.',
-            'То, что город прячет от чужих, в оценку не входит.',
+            'Прочитай хроники обоих и оцени, насколько каждый город ПРЯМО СЕЙЧАС способен получать новую внутреннюю информацию о другом.',
+            'Это проницаемость каналов, не процент уже известных сведений. Агрессия сама по себе число не снижает — смотри, закрылись ли контакты.',
+            'Чужие secrets в оценку не входят. Два направления не обязаны быть равны.',
             '',
             pack(a),
             '',

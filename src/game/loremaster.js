@@ -1,7 +1,10 @@
 import { newId } from './ids.js';
-import { createLoreFact, formatCastForPrompt } from './models.js';
+import { createLoreFact, formatCastForPrompt, chronicleEntries } from './models.js';
 import { formatFullChronicleForPrompt, formatFactsForPrompt } from './memory.js';
 import { findActiveConfluxForDomain, monthsUntilDock } from './conflux.js';
+import { isOrderPlot } from './plotlines.js';
+import { plotConcerns, plotVisibleToRuler } from './confluxBoard.js';
+import { formatTruthGraphForPrompt } from './mysteryGraph.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 
@@ -10,6 +13,66 @@ function visibleLoreForDomain(lore, domainId) {
     if (!f?.secret) return true;
     return String(f.secretForDomainId || '') === String(domainId);
   });
+}
+
+export function storiesForLoremaster(domain, conflux = null) {
+  const byId = new Map();
+  for (const p of domain?.plotlines || []) {
+    if (p && !isOrderPlot(p)) byId.set(p.id, p);
+  }
+  if (conflux) {
+    for (const p of conflux.plotlines || []) {
+      if (!p || isOrderPlot(p)) continue;
+      if (p.isMainConflux || plotConcerns(p, domain.id) || plotVisibleToRuler(p, domain.id, conflux)) {
+        if (!byId.has(p.id)) byId.set(p.id, p);
+      }
+    }
+  }
+  return [...byId.values()];
+}
+
+export function formatStoriesForLoremaster(plots = []) {
+  if (!plots.length) return 'Открытых историй нет.';
+  return plots.map(formatStoryForLoremaster).join('\n\n');
+}
+
+function formatStoryForLoremaster(p) {
+  const kind =
+    p.storyType === 'mystery'
+      ? 'ТАЙНА'
+      : p.kind === 'errand'
+        ? 'поручение'
+        : p.isMainConflux || p.shared
+          ? 'общая история сопряжения'
+          : 'история';
+  const lines = [
+    `«${p.title}» (${kind})`,
+    p.synopsis ? `Как сейчас: ${p.synopsis}` : null,
+    p.closeWhen ? `Закроется, когда: ${p.closeWhen}` : null,
+  ];
+  if (p.storyType === 'mystery' && (p.truthGraph || p.truth)) {
+    lines.push(
+      'ЭТА ТАЙНА ЗАЩИЩЕНА. Канон истины ниже — его нельзя раскрывать, достраивать, объяснять или записывать в fact.',
+    );
+    if (p.truthGraph) {
+      lines.push(
+        formatTruthGraphForPrompt(p.truthGraph).replace(
+          'ПРИЧИННЫЙ ГРАФ (канон истины; узлы и рёбра не переписывай, меняй только статусы знания):',
+          'ПРИЧИННЫЙ ГРАФ (канон истины; только читать. Скрытое не раскрывай и не достраивай.):',
+        ),
+      );
+    } else if (p.truth) {
+      lines.push(`Канон (не раскрывай): ${p.truth}`);
+    }
+    lines.push(
+      'В ответы и add_fact можно брать только то, что уже «замечено» или «понято». Скрытое оставляй неизвестным.',
+    );
+  } else {
+    lines.push(
+      'Не выдумывай исход, виновника, скрытый мотив, причину или иное, что относится к нерешённому в этой истории.',
+    );
+  }
+  return lines.filter(Boolean).join('\n');
 }
 
 function partnerBrief(partner, viewerDomainId) {
@@ -104,12 +167,15 @@ export async function askLoremaster({
               monthsLeft: a.monthsLeft,
               expectedMonths: a.expectedMonths,
             })),
+          openStories: formatStoriesForLoremaster(storiesForLoremaster(working, conflux)),
           reminder:
             'Хроника приложена целиком — это твой главный источник, рядом с ним knownPeople: ' +
             'судьбы названных людей записаны там, даже если хроника о них молчит. Ты их только читаешь: ' +
             'писать и менять записи хроники нельзя, твой инструмент — факты. ' +
-            'Если хроника упоминает явление без деталей — add_fact с конкретными именами/деталями. ' +
-            '«Неизвестно» при уже упомянутом явлении запрещено. ' +
+            'openStories — идущие истории и тайны. Не выдумывай ничего, что относится к тайне идущей истории ' +
+            'или решает незавершённое дело. Скрытый канон тайны нельзя раскрывать и нельзя достраивать новым фактом. ' +
+            'Если хроника упоминает явление без деталей и это не защищённый вопрос — add_fact с конкретными именами/деталями. ' +
+            '«Неизвестно» — редко: только когда ответ защищён текущей неопределённостью или противоречил бы канону. ' +
             'Факт, противоречащий хронике или текущему состоянию, — устарел: update_fact или retire_fact.',
         };
 
@@ -332,7 +398,8 @@ export async function askLoremaster({
           qText || '(нет вопросов)',
           '',
           'Порядок: read_lore → при пробелах add_fact (СУХО, без пафоса), при противоречиях update_fact / retire_fact → submit_answers.',
-          'Перед ответом сверь факты с хроникой и состоянием: устаревшие обнови или сними, не пересказывай их как правду.',
+          'Перед ответом сверь факты с хроникой, openStories и состоянием: устаревшие обнови или сними, не пересказывай их как правду.',
+          'Не выдумывай ничего, что относится к тайне идущей истории. Защищённое неизвестное оставляй неизвестным и не записывай в fact.',
           'Факты как справочник, не проза. Пример: «Местный продукт — виноград; сладкий, тонкая кожица.»',
         ]
           .filter((line) => line !== undefined)

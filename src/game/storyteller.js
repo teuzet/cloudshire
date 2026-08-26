@@ -6,9 +6,10 @@
  *   suspenseBeat  — бит саспенса
  *   mysteryBeat   — бит тайны (граф только у этого агента)
  *   orderBeat     — тик постоянного порядка
- *   storyKeep     — синопсис по свежей хронике
+ *   storyKeep     — синопсис локальных нитей по свежей хронике
+ *   confluxStoryKeep — синопсис общих нитей сопряжения
  *   fillerNews    — быт, когда сюжета не было
- * Главная линия сопряжения — confluxBeat, не этот модуль.
+ * Главная линия сопряжения пишет confluxBeat; синопсис — confluxStoryKeep.
  * След в статах города ставит отдельный агент (statJudge), не они.
  */
 
@@ -36,14 +37,15 @@ import {
   formatMysteryAxesForPrompt,
   openingPlotCount,
   judgePlotSeed,
-  warmPlotlines,
   pickStoryType,
   isThreeActPlot,
   plotBeatAgentId,
+  plotScale,
   allowSequelAfter,
   PLOT_SUMMARY_MAX,
   PLOT_HOOK_MAX,
 } from './plotlines.js';
+import { sharedPlots } from './confluxBoard.js';
 import { pickOrderOutcome, markOrderFired } from './orders.js';
 import { TINT_LABELS, pickRollStat, rollTint, formatFinishForPrompt } from './rolls.js';
 import { offerNames, formatOfferedNamesForPrompt, bindCharacterNames, takeNameAtRandom, seedWorldNamePool } from './names.js';
@@ -93,17 +95,6 @@ function cityStoryContext(domain, { chronicleLimit = 8 } = {}) {
     processes: processes || '- (сейчас ничего особенного не делают)',
     people: formatCastForPrompt(domain.lore, { limit: 20 }),
   };
-}
-
-function recentPlayerTalk(domain, limit = 8) {
-  const history = domain.characters?.[0]?.dialogHistory || [];
-  return history
-    .slice(-limit)
-    .map((m) => {
-      const who = m.role === 'user' ? 'Покровитель' : 'Правитель';
-      return `${who}: ${String(m.content || '').replace(/\s+/g, ' ').trim()}`;
-    })
-    .join('\n');
 }
 
 const CHARACTERS_SCHEMA = newCharactersSchema();
@@ -368,10 +359,7 @@ export async function seedPlot({
     }
 
     if (opening) {
-      asked.importance = Math.min(40, Math.max(15, Number(asked.importance) || 25));
       asked.maxAgeMonths = Math.min(5, Math.max(2, Number(asked.maxAgeMonths) || 4));
-    } else if (mystery) {
-      asked.importance = Math.max(60, Math.min(95, Number(asked.importance) || 75));
     }
 
     if (mystery) {
@@ -398,7 +386,6 @@ export async function seedPlot({
       synopsis: asked.synopsis,
       closeWhen: asked.closeWhen,
       relatedStats: asked.relatedStats,
-      importance: asked.importance,
       maxAgeMonths: asked.maxAgeMonths,
       temperature: cfg.temperature.initial,
       tags: roll,
@@ -415,7 +402,7 @@ export async function seedPlot({
 
     const fact = pushChronicle(domain, {
       text: asked.entry,
-      importance: Number(asked.importance) >= 70 ? 'major' : 'minor',
+      importance: plotScale(plot) >= 70 ? 'major' : 'minor',
       world,
       plotIds: [plot.id],
       author: 'storyteller:seed',
@@ -608,10 +595,7 @@ async function seedMysteryPlot({
     }
 
     if (opening) {
-      asked.importance = Math.min(40, Math.max(15, Number(asked.importance) || 25));
       asked.maxAgeMonths = Math.min(5, Math.max(2, Number(asked.maxAgeMonths) || 4));
-    } else {
-      asked.importance = Math.max(60, Math.min(95, Number(asked.importance) || 75));
     }
 
     const plot = createPlotline({
@@ -619,7 +603,6 @@ async function seedMysteryPlot({
       synopsis: asked.synopsis,
       closeWhen: asked.closeWhen,
       relatedStats: asked.relatedStats,
-      importance: asked.importance,
       maxAgeMonths: asked.maxAgeMonths,
       temperature: cfg.temperature.initial,
       tags: roll,
@@ -636,7 +619,7 @@ async function seedMysteryPlot({
 
     const fact = pushChronicle(domain, {
       text: asked.entry,
-      importance: Number(asked.importance) >= 70 ? 'major' : 'minor',
+      importance: plotScale(plot) >= 70 ? 'major' : 'minor',
       world,
       plotIds: [plot.id],
       author: 'storyteller:seed',
@@ -739,7 +722,7 @@ async function askPlotSeed({
   sideOpen = false,
 }) {
   const mystery = storyType === 'mystery';
-  const required = ['title', 'synopsis', 'closeWhen', 'importance', 'maxAgeMonths', 'relatedStats', 'entry'];
+  const required = ['title', 'synopsis', 'closeWhen', 'maxAgeMonths', 'relatedStats', 'entry'];
   if (mystery) required.push('nodes', 'edges', 'asksSequel', 'newCharacters');
   const tools = [
     {
@@ -757,8 +740,8 @@ async function askPlotSeed({
             description: mystery
               ? `Как город СЕЙЧАС понимает случившееся из уже видимого, до ${PLOT_SUMMARY_MAX} символов. ` +
                 'Только известная часть тайны. Скрытые узлы, причины и разгадку сюда не пиши даже намёком.'
-              : `Как сейчас обстоят дела и куда это может пойти, до ${PLOT_SUMMARY_MAX} символов. ` +
-                'По этому тексту историю будут продолжать.',
+              : `Как сейчас обстоят дела, до ${PLOT_SUMMARY_MAX} символов. ` +
+                'По этому тексту историю будут продолжать. Не прогнозируй сюжет.',
           },
           closeWhen: {
             type: 'string',
@@ -766,12 +749,6 @@ async function askPlotSeed({
               ? `Когда причинную модель считают раскрытой. Требовать можно только то, что уже названо в узлах ` +
                 `(текст, вещество, имя, место). Без самой разгадки в формулировке. Одна фраза, до ${PLOT_HOOK_MAX} символов.`
               : `Что должно произойти, чтобы историю закрыть по существу. Одна фраза, до ${PLOT_HOOK_MAX} символов.`,
-          },
-          importance: {
-            type: 'number',
-            description: mystery
-              ? '0–100. Судьбоносность: весь город ≈ 75, весь остров ≈ 90. Не местечковый двор.'
-              : '0–100. Держись масштаба жребия: город ≈ 55, остров ≈ 75.',
           },
           maxAgeMonths: {
             type: 'number',
@@ -924,7 +901,7 @@ async function askPlotSeed({
             : opening
               ? [
                   'Это СТАРТ нового города: короткая живая завязка, не катастрофа и не тайна мироздания.',
-                  'Масштаб — соседство или несколько человек. Важность 15–35, срок 2–5 месяцев.',
+                  'Масштаб — соседство или несколько человек. Срок 2–5 месяцев.',
                   'Игрок сразу должен понять, куда можно вмешаться: решение, поручение или вопрос правителю.',
                   'Не делай проклятие всего острова, войну, мор и конец света.',
                 ].join(' ')
@@ -1184,7 +1161,7 @@ export async function beatPlot({
           '',
           names.block,
           '',
-          'Вызови submit_plot_beat. Только запись этого месяца; карточку истории и граф истины не переписывай.',
+          'Вызови submit_plot_beat. Только запись этого месяца; карточку истории и граф истины не переписывай. Синопсис не обновляй — это делает storyKeep.',
         ]
           .filter(Boolean)
           .join('\n'),
@@ -1202,7 +1179,7 @@ export async function beatPlot({
   const major =
     Boolean(engineEnding) ||
     (!threeAct && (beat.finale || d.closes)) ||
-    plot.importance >= 70;
+    plotScale(plot) >= 70;
 
   const fact = pushChronicle(domain, {
     text: d.entry,
@@ -1345,20 +1322,16 @@ export async function tickOrder({
             description: 'Завязка обычной истории, которая выросла из этого постоянного порядка.',
             parameters: {
               type: 'object',
-              required: ['title', 'synopsis', 'closeWhen', 'importance', 'maxAgeMonths', 'relatedStats', 'entry'],
+              required: ['title', 'synopsis', 'closeWhen', 'maxAgeMonths', 'relatedStats', 'entry'],
               properties: {
                 title: { type: 'string', description: 'Название, 1–4 слова' },
                 synopsis: {
                   type: 'string',
-                  description: `Как сейчас обстоят дела и куда это может пойти, до ${PLOT_SUMMARY_MAX} символов.`,
+                  description: `Как сейчас обстоят дела, до ${PLOT_SUMMARY_MAX} символов. Только сжатие уже установленного, без прогноза.`,
                 },
                 closeWhen: {
                   type: 'string',
                   description: `Что должно произойти, чтобы эту историю закрыть. До ${PLOT_HOOK_MAX} символов.`,
-                },
-                importance: {
-                  type: 'number',
-                  description: '0–100. Держись масштаба случая, не всего указа сразу.',
                 },
                 maxAgeMonths: {
                   type: 'number',
@@ -1426,7 +1399,7 @@ export async function tickOrder({
             ? [
                 'Формат уже решён: заведи ОБЫЧНУЮ историю, которая выросла из этого порядка.',
                 'Это не продолжение карточки указа и не новое правило. Конкретный случай: бунт из-за налога, ложный избранный, саботаж осмотра.',
-                'Первая запись — что увидели в этом месяце. Синопсис — как обстоят дела у ЭТОЙ истории, не у указа.',
+                'Первая запись — что увидели в этом месяце. Синопсис — сжатие уже установленного у ЭТОЙ истории, не у указа.',
                 'Карточку самого порядка не переписывай.',
                 'Вызови submit_order_story.',
               ].join(' ')
@@ -1468,7 +1441,6 @@ export async function tickOrder({
         synopsis: d.synopsis,
         closeWhen: d.closeWhen,
         relatedStats: d.relatedStats,
-        importance: d.importance,
         maxAgeMonths: d.maxAgeMonths,
         temperature: cfg.temperature.initial,
         tick: world.tickIndex,
@@ -1479,7 +1451,7 @@ export async function tickOrder({
       if (!plot.relatedPlotlineIds.includes(spawned.id)) plot.relatedPlotlineIds.push(spawned.id);
       fact = pushChronicle(domain, {
         text: d.entry,
-        importance: Number(d.importance) >= 70 ? 'major' : 'minor',
+        importance: plotScale(spawned) >= 70 ? 'major' : 'minor',
         world,
         plotIds: [spawned.id],
         author: 'storyteller:order-story',
@@ -1553,7 +1525,7 @@ function mirrorBeatToPartner({ partner, domain, plot, fact, note, world, conflux
       synopsis: text,
       closeWhen: 'Сосед ушёл в небо или дело у них кончилось.',
       relatedStats: plot.relatedStats,
-      importance: Math.max(10, Math.round(plot.importance * 0.6)),
+      importance: Math.max(10, Math.round(plotScale(plot) * 0.6)),
       maxAgeMonths: Math.max(2, Math.round(plot.maxAgeMonths * 0.6)),
       temperature: plotConfig(config).temperature.initial,
       tick: world.tickIndex,
@@ -1758,63 +1730,34 @@ export async function quietMonth({ config, runtime, domain, world, log: parentLo
 
 /**
  * Конец месяца: обновить синопсисы по свежей хронике.
- * «История всплыла» — сигнал; насколько поднять интерес, считает движок.
- * Один сигнал на нить за прогон: модель не может накрутить жар повторными вызовами.
+ * Reducer: ничего нового не придумывает. Ставки и интерес — не его работа.
  */
-export async function keepStories({
-  config,
-  runtime,
-  domain,
-  world,
+async function runStoryKeep({
+  agentId,
+  scene,
+  board,
+  plots,
   chronicleAdds = [],
-  log: parentLog,
+  extraSystem,
+  userLead,
+  runtime,
+  world,
+  log,
+  domainId,
 }) {
-  const plots = (domain.plotlines || []).filter((p) => p.kind !== 'order');
   if (!plots.length) return null;
-  const log = (parentLog || getLogger()).child({ scope: 'storyteller.keep', domainId: domain.id });
-  const cfg = plotConfig(config);
-  const surfaced = new Set();
   const draft = { plots: null };
-
-  const bumpOnce = (plotId) => {
-    const id = String(plotId || '').trim();
-    const plot = findPlotline(domain, id);
-    if (!plot) return { ok: false, error: 'unknown' };
-    if (surfaced.has(id)) return { ok: true, already: true };
-    surfaced.add(id);
-    warmPlotlines(domain, [id], cfg);
-    return { ok: true, already: false };
-  };
-
   const tools = [
     {
-      name: 'story_surfaced',
-      description:
-        'История всплыла: отозвалась в разговоре покровителя или перекликнулась с другой историей этого месяца. ' +
-        'Вызывай по одной истории и только если отклик настоящий. Насколько поднять интерес — решит система.',
-      parameters: {
-        type: 'object',
-        required: ['plotId'],
-        properties: {
-          plotId: { type: 'string', description: 'id истории из списка ниже' },
-        },
-      },
-      handler: async ({ plotId }) => {
-        const result = bumpOnce(plotId);
-        if (!result.ok) return toolFail('unknown', 'Такой открытой истории нет.');
-        return result;
-      },
-    },
-    {
       name: 'submit_story_keep',
-      description: 'Обновлённые синопсисы открытых историй. В конце вызови обязательно.',
+      description: 'Обновлённые синопсисы. Только сжатие уже установленного. Новую хронику не пиши.',
       parameters: {
         type: 'object',
         required: ['plots'],
         properties: {
           plots: {
             type: 'array',
-            description: 'Только те истории, чей синопсис реально изменился.',
+            description: 'Только те истории, чей синопсис реально изменился. Пустой массив, если ничего не сдвинулось.',
             items: {
               type: 'object',
               required: ['plotId', 'synopsis'],
@@ -1822,7 +1765,9 @@ export async function keepStories({
                 plotId: { type: 'string' },
                 synopsis: {
                   type: 'string',
-                  description: `Как сейчас обстоят дела, до ${PLOT_SUMMARY_MAX} символов.`,
+                  description:
+                    `Сжатие уже установленного, до ${PLOT_SUMMARY_MAX} символов. ` +
+                    'Сначала что уже произошло, затем как ситуация выглядит сейчас. Без прогноза и нового мотива.',
                 },
               },
             },
@@ -1861,43 +1806,40 @@ export async function keepStories({
       return [
         `id ${p.id} — «${p.title}»`,
         `Сейчас: ${p.synopsis || 'только началась'}`,
+        p.closeWhen ? `Закроется, когда: ${p.closeWhen}` : null,
         fresh.length ? `В этом месяце:\n${fresh.join('\n')}` : 'В этом месяце своей записи не было.',
-      ].join('\n');
+      ]
+        .filter(Boolean)
+        .join('\n');
     })
     .join('\n\n');
 
-  const monthNotes = (domain.state?.monthLog || [])
-    .map((m) => `- ${m.text || m}`)
-    .join('\n');
-  const talk = recentPlayerTalk(domain);
-
   await runtime.run({
-    agentId: 'storyKeep',
+    agentId,
     tools,
-    maxTurns: 6,
-    toolChoice: 'required',
+    maxTurns: 3,
+    toolChoice: { type: 'function', function: { name: 'submit_story_keep' } },
     log,
-    scene: 'story_keep',
-    domainId: domain.id,
-    extraSystem: `Город «${domain.name}».`,
+    scene,
+    domainId,
+    extraSystem,
     userMessages: [
       {
         role: 'user',
         content: [
-          `Конец месяца ${world.gameDate.label}. Обнови карточки открытых историй.`,
-          'Синопсис — как обстоят дела СЕЙЧАС, чтобы по нему можно было продолжить. Не пересказывай хронику целиком.',
-          'Развязка из хроники (нашли, умер, под стражей, в бегах) должна остаться в синопсисе. Нельзя вернуть человека в «ищем», если его уже нашли.',
-          'Если у истории не было новой записи и картина не сдвинулась — не включай её в submit_story_keep.',
-          'Если история отозвалась в разговоре покровителя или перекликнулась с другой историей этого месяца — вызови story_surfaced (по одной, и только тогда).',
-          'Насколько поднять интерес, решит система. Новую хронику не пиши.',
+          ...userLead,
+          'Ты reducer, не рассказчик. Ничего нового в историю не добавляй: ни будущего, ни мотива, ни скрытого смысла.',
+          'Синопсис — только сжатие уже установленного: сначала что произошло за всё время, затем как ситуация выглядит сейчас.',
+          'Если уместно, одной фразой назови, что остаётся нерешённым — только если это уже следует из самой истории.',
+          'Не пиши, куда история может пойти. Не прогнозируй сюжет.',
+          'Для тайны: не раскрывай скрытый канон, если его ещё нет в хронике. Не достраивай разгадку из догадок.',
+          'Развязка из хроники (нашли, умер, под стражей, в бегах) должна остаться в синопсисе.',
+          'Если у истории не было новой записи и картина не сдвинулась — не включай её.',
+          'Новую хронику не пиши. Вызови submit_story_keep.',
           '',
           'Открытые истории:',
           plotBlocks,
           otherLines.length ? `\nПрочие записи месяца:\n${otherLines.join('\n')}` : null,
-          monthNotes ? `\nЧто произошло в городе за разговоры этого месяца:\n${monthNotes}` : null,
-          talk ? `\nПоследний разговор покровителя с правителем:\n${talk}` : null,
-          '',
-          'Сначала story_surfaced, если нужно. Затем обязательно submit_story_keep.',
         ]
           .filter(Boolean)
           .join('\n'),
@@ -1907,18 +1849,75 @@ export async function keepStories({
 
   let updated = 0;
   for (const item of draft.plots || []) {
-    const plot = findPlotline(domain, item.plotId);
-    if (!plot) continue;
+    const plot = findPlotline(board, item.plotId);
+    if (!plot || plot.kind === 'order') continue;
     const next = clipPlotText(item.synopsis, PLOT_SUMMARY_MAX);
     if (!next) continue;
     plot.synopsis = next;
     updated += 1;
   }
 
-  log.info('storyteller.keep', {
-    plots: plots.length,
-    updated,
-    surfaced: [...surfaced],
+  log.info(`${scene}.done`, { plots: plots.length, updated });
+  return { updated };
+}
+
+export async function keepStories({
+  config,
+  runtime,
+  domain,
+  world,
+  chronicleAdds = [],
+  log: parentLog,
+}) {
+  const plots = (domain.plotlines || []).filter((p) => p.kind !== 'order');
+  if (!plots.length) return null;
+  const log = (parentLog || getLogger()).child({ scope: 'storyteller.keep', domainId: domain.id });
+  return runStoryKeep({
+    agentId: 'storyKeep',
+    scene: 'story_keep',
+    board: domain,
+    plots,
+    chronicleAdds,
+    extraSystem: `Город «${domain.name}».`,
+    userLead: [`Конец месяца ${world.gameDate.label}. Обнови карточки открытых историй этого города.`],
+    runtime,
+    world,
+    log,
+    domainId: domain.id,
   });
-  return { updated, surfaced: [...surfaced] };
+}
+
+/** Синопсисы общих нитей сопряжения. Вызывать после confluxBeat, не вместо него. */
+export async function keepSharedStories({
+  runtime,
+  conflux,
+  domains = [],
+  world,
+  chronicleAdds = [],
+  log: parentLog,
+}) {
+  const plots = sharedPlots(conflux);
+  if (!plots.length) return null;
+  const log = (parentLog || getLogger()).child({ scope: 'conflux.keep', confluxId: conflux.id });
+  const names = (domains || []).map((d) => `«${d.name}»`).join(' и ');
+  return runStoryKeep({
+    agentId: 'confluxStoryKeep',
+    scene: 'conflux_story_keep',
+    board: conflux,
+    plots,
+    chronicleAdds,
+    extraSystem: [
+      names ? `Города: ${names}.` : 'История на сопряжении двух островов.',
+      'Оба берега равноправны. Не суди, кто прав, и не пиши письмо одного правителя.',
+    ].join(' '),
+    userLead: [
+      `Конец месяца ${world.gameDate.label}. Обнови карточки общих историй сопряжения.`,
+      names ? `Истории касаются ${names}.` : null,
+      'Синопсис общий для обоих городов: назови оба, если событие задело оба.',
+    ].filter(Boolean),
+    runtime,
+    world,
+    log,
+    domainId: (conflux.domainIds || []).join('+'),
+  });
 }

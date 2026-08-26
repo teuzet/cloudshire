@@ -7,10 +7,10 @@ import { normalizeTruthGraph, judgeTruthGraph, parseMysteryShapes } from './myst
  * Здесь только модель и формат; отбор битов, окраска и часы — в движке тика.
  *
  * Механика (см. docs/PIVOT_PLOTLINES.md):
- *   gravity     — масштаб (бывшая importance) у трёхтактных историй
- *   urgency     — шанс, что история сама стрельнет в месяц без дела
- *   temperature — интерес (старые нити, указы, сопряжение)
- *   importance  — судьбоносность; у трёхтактных зеркало gravity
+ *   gravity     — масштаб последствий; у трёхтактных ставит plotStakes
+ *   urgency     — шанс, что история сама сдвинется в месяц без дела
+ *   temperature — интерес (старые нити, указы, сопряжение; греет внимание игрока)
+ *   importance  — внутренний масштаб дельт; у трёхтактных зеркало gravity, агенты не ставят
  *   maxAgeMonths / ageMonths — сколько месяцев история живёт без внимания;
  *     срок сам по себе не развязка: выдохшаяся нить гаснет, только если нет дел и упоминаний
  *   closeWhen — что должно случиться, чтобы историю закрыть по существу, не «что писать в последний месяц»
@@ -66,6 +66,12 @@ export function storyTypeOf(plot) {
 export function isThreeActPlot(plot) {
   const t = storyTypeOf(plot);
   return t === 'suspense' || t === 'mystery';
+}
+
+/** Масштаб истории для механики: у трёхтактных gravity, иначе внутренний importance. */
+export function plotScale(plot) {
+  if (isThreeActPlot(plot)) return clamp100(plot?.gravity, 40);
+  return clamp100(plot?.importance, 40);
 }
 
 export function plotBeatAgentId(plot) {
@@ -777,11 +783,11 @@ export function stripPlotSecrets(plot) {
   return rest;
 }
 
-/** Сумма важности живых историй. Дела не считаются. */
+/** Сумма масштаба живых историй. Дела не считаются. */
 export function liveStoryImportance(domain) {
   return (domain?.plotlines || [])
     .filter((p) => p && p.kind === 'story')
-    .reduce((sum, p) => sum + clamp100(isThreeActPlot(p) ? p.gravity : p.importance, 0), 0);
+    .reduce((sum, p) => sum + plotScale(p), 0);
 }
 
 /**
@@ -860,7 +866,7 @@ export function formatBoardForPrompt(domain) {
       const three = isThreeActPlot(p);
       const meters = three
         ? `urgency=${p.urgency} gravity=${p.gravity} такт=${p.act} тип=${p.storyType}`
-        : `T=${p.temperature} важность=${p.importance} тип=${p.storyType || 'default'}`;
+        : `T=${p.temperature} тип=${p.storyType || 'default'}`;
       return (
         `- [${p.id}] «${p.title}» ${kindLabel} ${meters} возраст=${p.ageMonths}/${p.maxAgeMonths}` +
         stats +

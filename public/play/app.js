@@ -354,7 +354,6 @@ function plotCard(p, names = {}) {
     p.sharedReason ? `стала общей: ${p.sharedReason}` : null,
     host ? `хозяин: ${host}` : null,
     concerns.length ? `касается: ${concerns.join(', ')}` : null,
-    `важность ${p.importance}`,
     `жар ${p.temperature}`,
     `возраст ${p.ageMonths}/${p.maxAgeMonths}`,
     `битов ${p.beatCount}`,

@@ -3,7 +3,7 @@
  * Указы (kind: order) остаются на домене.
  */
 
-import { createPlotline, isOrderPlot, clipPlotText, PLOT_SUMMARY_MAX, PLOT_TITLE_MAX } from './plotlines.js';
+import { createPlotline, isOrderPlot, clipPlotText, plotScale, PLOT_SUMMARY_MAX, PLOT_TITLE_MAX } from './plotlines.js';
 import { newId } from './ids.js';
 import { createLoreFact } from './models.js';
 
@@ -83,7 +83,7 @@ export function sharePlotWithDomain(plot, domainId, { reason = 'leak' } = {}) {
 export function maybeLeakPlot(plot, conflux, otherDomainId, rng = Math.random) {
   if (!plot || isSharedPlot(plot) || isOrderPlot(plot)) return false;
   if (conflux?.status !== 'docked') return false;
-  const chance = leakChanceFromImportance(plot.importance, averageAwareness(conflux));
+  const chance = leakChanceFromImportance(plotScale(plot), averageAwareness(conflux));
   if (chance <= 0 || rng() >= chance) return false;
   sharePlotWithDomain(plot, otherDomainId, { reason: 'leak' });
   return true;

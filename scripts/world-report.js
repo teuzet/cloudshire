@@ -361,7 +361,8 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
     plotlines: plots.map((p) => ({
       title: p.title,
       temperature: p.temperature,
-      importance: p.importance,
+      gravity: p.gravity,
+      urgency: p.urgency,
       kind: p.kind,
       age: plotlineAge(p),
       maxAge: p.maxAgeMonths,
@@ -458,7 +459,8 @@ function printDomain(rep, { dialogTail = 0, dialog = [] } = {}) {
     for (const p of rep.plotlines) {
       console.log(
         `  • «${p.title}»${p.kind === 'errand' ? ' (дело)' : ''} T=${p.temperature} ` +
-          `важность=${p.importance} возраст=${p.age ?? '?'}/${p.maxAge ?? '?'}`,
+          (p.gravity != null ? `gravity=${p.gravity} urgency=${p.urgency} ` : '') +
+          `возраст=${p.age ?? '?'}/${p.maxAge ?? '?'}`,
       );
     }
   } else {

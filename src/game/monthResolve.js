@@ -328,7 +328,7 @@ export async function resolveDomainMonth({
     seeded: wantSeed,
     sequelOf: sequel?.id || null,
     ordersPlanned: orderPlan.length,
-    kept: kept ? { updated: kept.updated, surfaced: kept.surfaced } : null,
+    kept: kept ? { updated: kept.updated } : null,
     statsScored: scored?.scored ?? 0,
     steward: steward?.act || null,
     highlight: highlight ? `${highlight.kind}: ${highlight.title}` : null,

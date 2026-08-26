@@ -3,7 +3,7 @@
  * записи месяца и ставит, какие стороны города задеты. Величину считает движок.
  */
 
-import { findPlotline } from './plotlines.js';
+import { findPlotline, plotScale } from './plotlines.js';
 import { resolveStatDeltas, planQuietDrift } from './plotEngine.js';
 import { applyStatDeltas, statEpithet } from './stats.js';
 import { getLogger, truncate } from '../log.js';
@@ -41,7 +41,7 @@ export function factsForStatJudge(chronicleAdds = []) {
 
 function importanceForFact(domain, fact) {
   const plot = plotForFact(domain, fact);
-  if (plot) return plot.importance;
+  if (plot) return plotScale(plot);
   if (PLAYER_AUTHORS.has(fact?.author)) return 45;
   if (fact?.importance === 'major' || fact?.importance === 'critical') return 70;
   return 40;

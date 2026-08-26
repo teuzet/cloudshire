@@ -2,7 +2,7 @@ import { newId } from './ids.js';
 import { createLoreFact, createCharacterRecord, formatCastForPrompt, findCharacterByName, newCharactersSchema } from './models.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
-import { attachChronicleToPlotlines, clipPlotText, PLOT_SUMMARY_MAX, PLOT_HOOK_MAX } from './plotlines.js';
+import { attachChronicleToPlotlines, clipPlotText, PLOT_HOOK_MAX } from './plotlines.js';
 import { mixedChronicleForPrompt, knownPartnerLore, pushInternalChronicle, chronicleReceiversForBeat } from './confluxBoard.js';
 import { priorPlotChronicle } from './storyteller.js';
 import { TINT_LABELS, formatFinishForPrompt } from './rolls.js';
@@ -128,7 +128,7 @@ export async function beatSharedPlot({
       description: 'Запись этого месяца по истории, которая касается обоих островов.',
       parameters: {
         type: 'object',
-        required: ['entry', 'synopsis'],
+        required: ['entry'],
         properties: {
           entry: {
             type: 'string',
@@ -137,10 +137,6 @@ export async function beatSharedPlot({
               : docked
                 ? `Что случилось в этом месяце, до ${entryMax} символов. Сухой факт. Назови оба города, если задеты оба. Стражу и войско называй с городом, не голое «стража».`
                 : `Что случилось в этом месяце на видимом берегу, до ${entryMax} символов. Сухой факт.`,
-          },
-          synopsis: {
-            type: 'string',
-            description: `Как обстоят дела сейчас, до ${PLOT_SUMMARY_MAX} символов. Сначала что уже было, потом где история стоит.`,
           },
           newCharacters: CHARACTERS_SCHEMA,
           closes: {
@@ -255,7 +251,7 @@ export async function beatSharedPlot({
             '',
             formatOfferedNamesForPrompt(nameOffer),
             '',
-            'Вызови submit_plot_beat. Только запись этого месяца; карточку истории не переписывай, кроме синопсиса.',
+            'Вызови submit_plot_beat. Только запись этого месяца; карточку истории не переписывай. Синопсис не обновляй — это делает confluxStoryKeep.',
           ]
             .filter(Boolean)
             .join('\n'),
@@ -268,16 +264,14 @@ export async function beatSharedPlot({
 
   const d = draft.data;
   const entry = String(d?.entry || '').trim() || fallbackSharedEntry(plot, beat, domains);
-  if (d?.synopsis) plot.synopsis = clipPlotText(d.synopsis, PLOT_SUMMARY_MAX);
   plot.lastBeatTick = world.tickIndex;
   plot.beatCount = Number(plot.beatCount || 0) + 1;
 
   const boundPeople = bindCharacterNames(world, d?.newCharacters || [], {
     offered: nameOffer,
-    texts: [entry, d?.synopsis || ''],
+    texts: [entry],
   });
   const entryBound = boundPeople.texts[0] || entry;
-  if (boundPeople.texts[1] && d?.synopsis) plot.synopsis = clipPlotText(boundPeople.texts[1], PLOT_SUMMARY_MAX);
 
   const hiddenFrom = d?.hiddenFromOther ? domainByCityName(domains, d.hiddenFromCity) : null;
   const secretOwner = hiddenFrom ? (domains || []).find((x) => x.id !== hiddenFrom.id) || null : null;

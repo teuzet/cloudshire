@@ -22,6 +22,7 @@ import {
   liveStoryImportance,
   judgePlotSeed,
   reopenClosedPlotline,
+  plotScale,
 } from '../src/game/plotlines.js';
 import { ensureErrandForProcess, planBeats } from '../src/game/plotEngine.js';
 import { peopleUnderWatch, priorPlotChronicle, mintSeedCast, offerMysterySeedNames } from '../src/game/storyteller.js';
@@ -482,4 +483,19 @@ test('процессы занимают лимит тика, случайная 
   assert.equal(slotsUsed, 1);
   assert.ok(beats.some((b) => b.plotId === 'p_proc' && b.mandatory));
   assert.equal(beats.some((b) => b.plotId === 'p_story' && !b.fade), false);
+});
+
+test('масштаб трёхтактной истории берётся из gravity, не из importance', () => {
+  assert.equal(plotScale({ kind: 'story', storyType: 'suspense', gravity: 80, importance: 10 }), 80);
+  assert.equal(plotScale({ kind: 'story', importance: 55 }), 55);
+  assert.equal(
+    liveStoryImportance({
+      plotlines: [
+        { kind: 'story', storyType: 'mystery', gravity: 70, importance: 10 },
+        { kind: 'story', importance: 20 },
+        { kind: 'errand', importance: 90 },
+      ],
+    }),
+    90,
+  );
 });

@@ -24,7 +24,7 @@ import {
   processesForPlots,
 } from './confluxBoard.js';
 import { beatSharedPlot } from './confluxBeat.js';
-import { fadeQuietPlot } from './storyteller.js';
+import { fadeQuietPlot, keepSharedStories } from './storyteller.js';
 import { scoreMonthStats, factsForStatJudge } from './statJudge.js';
 
 function boardFromShared(conflux, domains) {
@@ -156,6 +156,18 @@ export async function resolveConfluxSharedMonth({
       addsByDomain.get(row.domainId).push(row.fact);
     }
   }
+
+  const keepAdds = [];
+  for (const adds of addsByDomain.values()) keepAdds.push(...adds);
+  const internals = (conflux.lore || []).filter((f) => Number(f.tick) === Number(world.tickIndex));
+  await keepSharedStories({
+    runtime,
+    conflux,
+    domains,
+    world,
+    chronicleAdds: [...internals, ...keepAdds],
+    log,
+  });
 
   for (const domain of domains) {
     const adds = addsByDomain.get(domain.id) || [];
