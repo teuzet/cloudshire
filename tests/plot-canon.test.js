@@ -311,6 +311,10 @@ test('каталог тайны: поле и тип', async () => {
   assert.ok(shapeIds.includes('linear_4'));
   assert.ok(shapeIds.includes('linear_5'));
   assert.ok(shapeIds.includes('linear_side'));
+  const byShape = Object.fromEntries(cfg.mysteryGraph.shapes.map((s) => [s.id || s, Number(s.weight)]));
+  assert.equal(byShape.linear_5, 0);
+  assert.ok(byShape.linear_4 > 0);
+  assert.equal(byShape.linear_4, byShape.linear_side);
   assert.equal(cfg.mysteryGraph.sideRevealChance, 0.5);
   assert.ok(cfg.mysteryEntities.minCatalog >= 24);
   assert.equal(cfg.mysteryEntities.pickMin, 1);
@@ -341,7 +345,7 @@ test('каталог тайны: поле и тип', async () => {
     { groupId: 'type', groupName: 'Тип тайны', tagName: 'заговор', about: 'скрытая воля' },
   ]);
   assert.match(formatted, /ТИП ТАЙНЫ \(обязателен\): заговор/);
-  assert.match(formatted, /АССОЦИАТИВНОЕ ПОЛЕ \(должно читаться в истории\): «остаток»/);
+  assert.match(formatted, /АССОЦИАТИВНОЕ ПОЛЕ \(очень слабый импульс\): «остаток»/);
   assert.equal(formatted.includes('всё мягко'), false);
   const hard = formatPlotTagsForPrompt([
     { groupId: 'character', groupName: 'Характер', tagName: 'Мрачный' },

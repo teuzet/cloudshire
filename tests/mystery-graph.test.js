@@ -6,6 +6,7 @@ import {
   formatTruthGraphForPrompt,
   formatMysteryGraphShapeForPrompt,
   formatMysteryMaskForPrompt,
+  formatMysteryCausalContractForPrompt,
   applyEngineReveal,
   applySeedVisibility,
   pickMysteryGraphSize,
@@ -23,21 +24,32 @@ function linear4() {
       { id: 'A', text: 'Цистерну перестали чистить.' },
       { id: 'B', text: 'В трубах скопился ил.' },
       { id: 'C', text: 'Ночами вода гудит.' },
-      { id: 'D', text: 'Ярус слышит знамение.' },
+      { id: 'X', text: 'Ярус слышит знамение.' },
     ],
     edges: [
       { from: 'A', to: 'B', reason: 'ил растёт без чистки' },
       { from: 'B', to: 'C', reason: 'ил сжимает поток' },
-      { from: 'C', to: 'D', reason: 'гул доходит до яруса' },
+      { from: 'C', to: 'X', reason: 'гул доходит до яруса' },
     ],
   };
 }
 
 function linear5() {
-  const g = linear4();
-  g.nodes.push({ id: 'E', text: 'Город принимает гул за знамение.' });
-  g.edges.push({ from: 'D', to: 'E', reason: 'слух расползается' });
-  return g;
+  return {
+    nodes: [
+      { id: 'A', text: 'Цистерну перестали чистить.' },
+      { id: 'B', text: 'В трубах скопился ил.' },
+      { id: 'C', text: 'Ночами вода гудит.' },
+      { id: 'D', text: 'Гул доходит до нижнего яруса.' },
+      { id: 'X', text: 'Город принимает гул за знамение.' },
+    ],
+    edges: [
+      { from: 'A', to: 'B', reason: 'ил растёт без чистки' },
+      { from: 'B', to: 'C', reason: 'ил сжимает поток' },
+      { from: 'C', to: 'D', reason: 'гул идёт вниз' },
+      { from: 'D', to: 'X', reason: 'слух расползается' },
+    ],
+  };
 }
 
 function linearSide(target = 'B') {
@@ -62,7 +74,7 @@ test('промпт показывает статусы после маски с�
   const g = applySeedVisibility(normalizeTruthGraph(linear4()), { shape: 'linear_4' });
   const text = formatTruthGraphForPrompt(g);
   assert.match(text, /A \[скрыто\]/);
-  assert.match(text, /D \[замечено\]/);
+  assert.match(text, /X \[замечено\]/);
   assert.match(text, /A → B/);
   assert.equal(text.includes('Гипотеза'), false);
 });
@@ -92,33 +104,44 @@ test('провал не раскрывает граф', () => {
   assert.equal(g.nodes[3].knowledge, 'observed');
 });
 
-test('жребий формы: linear_4 50%, остальные по 25%', () => {
+test('жребий формы: linear_4 и linear_side по 50%, linear_5 выключен', () => {
   const cfg = {
     mysteryGraph: {
       shapes: [
-        { id: 'linear_4', weight: 2 },
-        { id: 'linear_5', weight: 1 },
+        { id: 'linear_4', weight: 1 },
+        { id: 'linear_5', weight: 0 },
         { id: 'linear_side', weight: 1 },
       ],
     },
   };
   assert.equal(pickMysteryGraphShape(cfg, () => 0), 'linear_4');
   assert.equal(pickMysteryGraphShape(cfg, () => 0.49), 'linear_4');
-  assert.equal(pickMysteryGraphShape(cfg, () => 0.5), 'linear_5');
-  assert.equal(pickMysteryGraphShape(cfg, () => 0.74), 'linear_5');
-  assert.equal(pickMysteryGraphShape(cfg, () => 0.75), 'linear_side');
+  assert.equal(pickMysteryGraphShape(cfg, () => 0.5), 'linear_side');
+  assert.equal(pickMysteryGraphShape(cfg, () => 0.99), 'linear_side');
+  for (const r of [0, 0.25, 0.5, 0.75, 0.99]) {
+    assert.notEqual(pickMysteryGraphShape(cfg, () => r), 'linear_5');
+  }
   assert.equal(pickMysteryGraphSize(cfg, () => 0, 'linear_4'), 4);
   assert.equal(pickMysteryGraphSize(cfg, () => 0, 'linear_5'), 5);
   assert.equal(pickMysteryGraphSize(cfg, () => 0, 'linear_side'), 5);
 });
 
 test('маска в промпте говорит, вокруг чего строить завязку', () => {
+  assert.match(formatMysteryGraphShapeForPrompt('linear_4'), /A → B → C → X/);
+  assert.match(formatMysteryGraphShapeForPrompt('linear_5'), /A → B → C → D → X/);
+  assert.match(formatMysteryGraphShapeForPrompt('linear_side'), /A → B → C → X/);
   assert.match(formatMysteryGraphShapeForPrompt('linear_side'), /ПРИЧИНА E/);
-  assert.match(formatMysteryMaskForPrompt('linear_4'), /только D/);
-  assert.match(formatMysteryMaskForPrompt('linear_5'), /только E/);
-  assert.match(formatMysteryMaskForPrompt('linear_side', { sideOpen: false }), /только D/);
+  assert.match(formatMysteryMaskForPrompt('linear_4'), /только X/);
+  assert.match(formatMysteryMaskForPrompt('linear_5'), /только X/);
+  assert.match(formatMysteryMaskForPrompt('linear_side', { sideOpen: false }), /только X/);
   assert.match(formatMysteryMaskForPrompt('linear_side', { sideOpen: true }), /боковая причина/);
   assert.match(formatMysteryMaskForPrompt('linear_4'), /ТОЛЬКО ИЗВЕСТНАЯ ЧАСТЬ ТАЙНЫ/);
+  const contract = formatMysteryCausalContractForPrompt();
+  assert.match(contract, /КОНТРАКТ УЗЛА/);
+  assert.match(contract, /откуда знает/);
+  assert.match(contract, /Магия не склеивает цепь/);
+  assert.match(formatMysteryGraphShapeForPrompt('linear_4'), /КОНТРАКТ УЗЛА/);
+  assert.match(formatMysteryGraphShapeForPrompt('linear_side'), /КОНТРАКТ УЗЛА/);
 });
 
 test('публичный текст не должен тащить скрытый узел', () => {
@@ -146,12 +169,12 @@ test('linear_4 / linear_5 — цепь; linear_side — причина в B ил
   assert.equal(judgeTruthGraph(consequence, { shape: 'linear_side' }), 'wrong_shape');
 
   assert.equal(judgeTruthGraph(linearSide('A'), { shape: 'linear_side' }), 'wrong_shape');
-  assert.equal(judgeTruthGraph(linearSide('D'), { shape: 'linear_side' }), 'wrong_shape');
+  assert.equal(judgeTruthGraph(linearSide('X'), { shape: 'linear_side' }), 'wrong_shape');
 });
 
 test('система открывает последний узел цепи и иногда E', () => {
   const four = applySeedVisibility(normalizeTruthGraph(linear4()), { shape: 'linear_4' });
-  assert.deepEqual(knowledgeOf(four), { A: 'hidden', B: 'hidden', C: 'hidden', D: 'observed' });
+  assert.deepEqual(knowledgeOf(four), { A: 'hidden', B: 'hidden', C: 'hidden', X: 'observed' });
 
   const five = applySeedVisibility(normalizeTruthGraph(linear5()), { shape: 'linear_5' });
   assert.deepEqual(knowledgeOf(five), {
@@ -159,7 +182,7 @@ test('система открывает последний узел цепи и 
     B: 'hidden',
     C: 'hidden',
     D: 'hidden',
-    E: 'observed',
+    X: 'observed',
   });
 
   const sideClosed = applySeedVisibility(normalizeTruthGraph(linearSide('C')), {
@@ -170,7 +193,7 @@ test('система открывает последний узел цепи и 
     A: 'hidden',
     B: 'hidden',
     C: 'hidden',
-    D: 'observed',
+    X: 'observed',
     E: 'hidden',
   });
 
@@ -182,7 +205,7 @@ test('система открывает последний узел цепи и 
     A: 'hidden',
     B: 'hidden',
     C: 'hidden',
-    D: 'observed',
+    X: 'observed',
     E: 'observed',
   });
 });

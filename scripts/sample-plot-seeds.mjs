@@ -104,17 +104,133 @@ async function resolveDomain(storage, { domain, name }) {
   );
 }
 
+function formatJudgeDecision(label, judge) {
+  if (!judge) return [];
+  const lines = [
+    `**${label}:** ${judge.verdict}${judge.summary ? ` — ${judge.summary}` : ''}`,
+  ];
+  for (const issue of judge.issues || []) {
+    const loc = issue.location ? ` @ ${issue.location}` : '';
+    lines.push(`- \`${issue.code}\`${loc}: ${issue.reason}`);
+  }
+  return lines;
+}
+
+function skipLabel(skip) {
+  if (skip === 'no_seed') return 'генератор не вернул сюжет';
+  if (skip === 'missing_graph') return 'нет причинного графа';
+  if (skip === 'twin') return 'близнец уже идущей истории';
+  return skip || null;
+}
+
+function formatIssue(issue) {
+  if (!issue) return '';
+  const loc = issue.location ? ` @ ${issue.location}` : '';
+  return `${issue.code || 'OTHER'}${loc}: ${issue.reason || ''}`.trim();
+}
+
+function formatAttemptHeadline(a) {
+  const n = a.attempt != null ? a.attempt : `g${Number(a.genTry) + 1}`;
+  const prefix = `попытка ${n}`;
+  if (a.skip && !a.lunaJudge) {
+    return `${prefix}: ${skipLabel(a.skip)}${a.title ? ` «${a.title}»` : ''}`;
+  }
+  const luna = a.lunaJudge?.verdict || '?';
+  const terra = a.terraJudge?.verdict;
+  const summary = a.terraJudge?.summary || a.lunaJudge?.summary || '';
+  const chain = terra ? `Luna ${luna} → Terra ${terra}` : `Luna ${luna}`;
+  const mark = a.accepted ? 'принята' : a.skip ? skipLabel(a.skip) : 'отклонена';
+  const title = a.title ? ` «${a.title}»` : '';
+  return `${prefix}${title}: ${mark} (${chain})${summary ? ` — ${summary}` : ''}`;
+}
+
+function renderAttempt(a) {
+  const lines = [];
+  const n = a.attempt != null ? a.attempt : `g${Number(a.genTry) + 1}`;
+  const status = skipLabel(a.skip) || (a.accepted ? 'принята' : 'отклонена');
+  lines.push(`#### Попытка ${n} — ${status}`);
+  lines.push('');
+  if (a.tags?.length) lines.push(formatTags(a.tags));
+  if (a.title) lines.push(`«${a.title}»`);
+  if (a.graphShape) lines.push(`граф ${a.graphShape}${a.people?.length ? ` · люди: ${a.people.join(', ')}` : ''}`);
+  if (a.anchors?.length) {
+    lines.push('');
+    lines.push(formatMysteryAnchorsForPrompt(a.anchors));
+  }
+  const luna = formatJudgeDecision('Luna', a.lunaJudge);
+  const terra = formatJudgeDecision('Terra', a.terraJudge);
+  if (luna.length || terra.length) {
+    lines.push('');
+    lines.push(...luna);
+    if (terra.length) lines.push(...terra);
+  }
+  if (a.graph) {
+    lines.push('');
+    lines.push(formatTruthGraphForPrompt(a.graph));
+  }
+  if (a.entry) {
+    lines.push('');
+    lines.push(a.entry);
+  }
+  if (a.synopsis) {
+    lines.push('');
+    lines.push(a.synopsis);
+  }
+  if (a.closeWhen) lines.push(`закрыть когда: ${a.closeWhen}`);
+  lines.push('');
+  return lines;
+}
+
+function collectJudgeStats(rows) {
+  const attempts = rows.flatMap((r) => r.judgeAttempts || []);
+  const luna = { PASS: 0, FAIL: 0, UNCERTAIN: 0 };
+  const terra = { PASS: 0, FAIL: 0, UNCERTAIN: 0 };
+  const codes = new Map();
+  let judged = 0;
+  let skipped = 0;
+  for (const a of attempts) {
+    if (a.skip && !a.lunaJudge) {
+      skipped += 1;
+      continue;
+    }
+    judged += 1;
+    if (a.lunaJudge?.verdict && luna[a.lunaJudge.verdict] != null) luna[a.lunaJudge.verdict] += 1;
+    if (a.terraJudge?.verdict && terra[a.terraJudge.verdict] != null) {
+      terra[a.terraJudge.verdict] += 1;
+    }
+    for (const issue of [...(a.lunaJudge?.issues || []), ...(a.terraJudge?.issues || [])]) {
+      const key = issue.code || 'OTHER';
+      codes.set(key, (codes.get(key) || 0) + 1);
+    }
+  }
+  const codeLines = [...codes.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([code, n]) => `- ${code}: ${n}`);
+  return { attempts: attempts.length, judged, skipped, luna, terra, codeLines };
+}
+
 function renderCard(row) {
   const lines = [];
   lines.push(`### ${row.n}. ${row.ok ? `«${row.title}»` : 'не взошло'}`);
   lines.push('');
   lines.push(formatTags(row.tags) || '(жребий пуст)');
+  const attempts = row.judgeAttempts || [];
+  const rejected = attempts.filter((a) => !a.accepted);
+  const accepted = attempts.filter((a) => a.accepted);
+
   if (!row.ok) {
     lines.push('');
-    lines.push(row.error ? `ошибка: ${row.error}` : 'движок отсёк завязку или агент ничего не вернул');
+    if (!attempts.length) {
+      lines.push(row.error ? `ошибка: ${row.error}` : 'движок отсёк завязку или агент ничего не вернул');
+      lines.push('');
+      return lines;
+    }
+    lines.push(`каскад: ${attempts.length} попыток, ни одна не принята.`);
     lines.push('');
+    for (const a of attempts) lines.push(...renderAttempt(a));
     return lines;
   }
+
   lines.push('');
   lines.push(
     [
@@ -123,6 +239,8 @@ function renderCard(row) {
       row.graphShape ? `граф ${row.graphShape}` : null,
       row.sideOpen ? 'виден ещё E' : null,
       row.asksSequel ? 'просит сиквела' : null,
+      row.lunaJudge ? `Luna ${row.lunaJudge}` : null,
+      row.terraJudge ? `Terra ${row.terraJudge}` : null,
       row.urgency != null ? `urgency ${row.urgency}` : null,
       row.gravity != null ? `gravity ${row.gravity}` : null,
       row.importance != null ? `важность ${row.importance}` : null,
@@ -132,6 +250,12 @@ function renderCard(row) {
       .filter(Boolean)
       .join(' · '),
   );
+  const win = accepted[accepted.length - 1] || null;
+  if (win?.lunaJudge || win?.terraJudge) {
+    lines.push('');
+    lines.push(...formatJudgeDecision('Luna', win.lunaJudge));
+    if (win.terraJudge) lines.push(...formatJudgeDecision('Terra', win.terraJudge));
+  }
   if (row.closeWhen) lines.push(`закрыть когда: ${row.closeWhen}`);
   if (row.anchors?.length) {
     lines.push('');
@@ -150,6 +274,11 @@ function renderCard(row) {
   if (row.synopsis) {
     lines.push(row.synopsis);
     lines.push('');
+  }
+  if (rejected.length) {
+    lines.push('Отклонённые попытки до этой:');
+    lines.push('');
+    for (const a of rejected) lines.push(...renderAttempt(a));
   }
   return lines;
 }
@@ -187,6 +316,22 @@ async function runBatch({
       log.warn('sample_seed_failed', { storyType, i, error: err.message });
     }
     const plot = result?.plot || null;
+    if (storyType === 'mystery') {
+      for (const attempt of result?.attempts || []) {
+        process.stdout.write(`  ${formatAttemptHeadline(attempt)}\n`);
+        const issues = [
+          ...(attempt.lunaJudge?.issues || []),
+          ...(attempt.terraJudge?.issues || []),
+        ];
+        for (const issue of issues.slice(0, 8)) {
+          process.stdout.write(`    · ${formatIssue(issue)}\n`);
+        }
+        if (issues.length > 8) {
+          process.stdout.write(`    · … и ещё ${issues.length - 8}\n`);
+        }
+      }
+      process.stdout.write(`  → ${plot ? 'карточка принята' : 'карточка пропущена'}\n`);
+    }
     rows.push({
       n: i,
       storyType,
@@ -210,6 +355,9 @@ async function runBatch({
       graphShape: result?.graphShape || null,
       sideOpen: Boolean(result?.sideOpen),
       asksSequel: Boolean(plot?.asksSequel),
+      lunaJudge: result?.judge?.lunaJudge?.verdict || null,
+      terraJudge: result?.judge?.terraJudge?.verdict || null,
+      judgeAttempts: result?.attempts || null,
     });
   }
   return rows;
@@ -294,6 +442,24 @@ try {
     `- саспенсов: ${suspenseRows.length} · взошло ${suspenseRows.filter((r) => r.ok).length}`,
     `- каждая попытка шла с одного и того же снимка; сохранение не писалось`,
     '',
+  ];
+
+  if (mysteryRows.length) {
+    const st = collectJudgeStats(mysteryRows);
+    body.push(
+      '## Каскад валидации',
+      '',
+      `- попыток генератора: ${st.attempts} · дошло до judge: ${st.judged} · без графа/ответа: ${st.skipped}`,
+      `- Luna: PASS ${st.luna.PASS} · FAIL ${st.luna.FAIL} · UNCERTAIN ${st.luna.UNCERTAIN}`,
+      `- Terra: PASS ${st.terra.PASS} · FAIL ${st.terra.FAIL} · UNCERTAIN ${st.terra.UNCERTAIN}`,
+      '',
+      'Частые коды отказов:',
+      st.codeLines.length ? st.codeLines.join('\n') : '- (нет)',
+      '',
+    );
+  }
+
+  body.push(
     '## Жребий тайн',
     '',
     '### Ассоциативное поле',
@@ -318,7 +484,7 @@ try {
     '',
     '## Тайны',
     '',
-  ];
+  );
 
   if (!mysteryRows.length) body.push('(не сеяли)');
   for (const row of mysteryRows) body.push(...renderCard(row));

@@ -60,10 +60,10 @@ import {
   formatMysteryGraphShapeForPrompt,
   formatMysteryMaskForPrompt,
   mysteryGraphShapeHint,
-  mysteryPublicLeak,
   graphNodeCount,
   applySeedVisibility,
 } from './mysteryGraph.js';
+import { formatMysteryJudgeCase, judgeMysteryCascade, summarizeJudgeAttempt } from './mysteryJudge.js';
 import { ensureCityEntities, pickMysteryAnchors, formatMysteryAnchorsForPrompt } from './cityEntities.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
@@ -301,6 +301,19 @@ export async function seedPlot({
   const mystery = storyType === 'mystery';
   if (mystery) {
     await ensureCityEntities({ domain, config, runtime, log });
+    return seedMysteryPlot({
+      config,
+      runtime,
+      domain,
+      world,
+      tags,
+      fromClosed,
+      opening,
+      log,
+      cfg,
+      maxChars,
+      statIds,
+    });
   }
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -441,6 +454,242 @@ export async function seedPlot({
   return null;
 }
 
+async function seedMysteryPlot({
+  config,
+  runtime,
+  domain,
+  world,
+  tags = null,
+  fromClosed = null,
+  opening = false,
+  log,
+  cfg,
+  maxChars,
+  statIds,
+}) {
+  const maxJudged = cfg.mysteryGraph?.judgeAttempts ?? 3;
+  const maxGen = cfg.mysteryGraph?.generateTries ?? 6;
+  let judged = 0;
+  const attempts = [];
+
+  for (let genTry = 0; genTry < maxGen && judged < maxJudged; genTry += 1) {
+    const roll =
+      genTry === 0 && tags?.length ? tags : pickSeedTags(cfg, { storyType: 'mystery', opening });
+    const seedNames = offerMysterySeedNames({ world, domain, config });
+    const mysteryKind = mysteryTypeTag(roll);
+    const graphShape = pickMysteryGraphShape(cfg);
+    const nodeCount = graphNodeCount(graphShape);
+    const sideOpen = graphShape === 'linear_side' && Math.random() < Number(cfg.mysteryGraph?.sideRevealChance ?? 0.5);
+    const anchors = pickMysteryAnchors(domain.cityEntities, cfg, Math.random, {
+      inventKind: mysteryKind?.kind,
+    });
+    const draft = { data: null };
+    const asked = await askPlotSeed({
+      runtime,
+      domain,
+      world,
+      tags: roll,
+      log,
+      maxChars,
+      statIds,
+      draft,
+      fromClosed,
+      opening,
+      storyType: 'mystery',
+      seedPeople: [],
+      seedNames,
+      nodeCount,
+      anchors,
+      graphShape,
+      sideOpen,
+    });
+    if (!asked) {
+      attempts.push({
+        genTry,
+        attempt: null,
+        skip: 'no_seed',
+        title: null,
+        tags: roll,
+        graphShape,
+        anchors,
+        graph: null,
+        entry: null,
+        synopsis: null,
+        closeWhen: null,
+        people: [],
+        accepted: false,
+        lunaJudge: null,
+        terraJudge: null,
+      });
+      log.warn('storyteller.seed_failed', { genTry, judged });
+      continue;
+    }
+
+    let graph = normalizeTruthGraph(asked.truthGraph || asked);
+    if (!graph) {
+      attempts.push({
+        genTry,
+        attempt: null,
+        skip: 'missing_graph',
+        title: asked.title || null,
+        tags: roll,
+        graphShape,
+        anchors,
+        graph: null,
+        entry: asked.entry || null,
+        synopsis: asked.synopsis || null,
+        closeWhen: asked.closeWhen || null,
+        people: (asked.newCharacters || []).map((c) => c.name).filter(Boolean),
+        accepted: false,
+        lunaJudge: null,
+        terraJudge: null,
+      });
+      log.info('storyteller.seed_rejected', { reason: 'missing_graph', genTry });
+      continue;
+    }
+    const bound = bindCharacterNames(world, asked.newCharacters, {
+      offered: offeredBuckets(seedNames),
+      texts: [asked.entry, asked.synopsis, asked.closeWhen, ...graphTexts(graph)],
+      config,
+    });
+    asked.newCharacters = bound.list;
+    asked.entry = bound.texts[0];
+    asked.synopsis = bound.texts[1];
+    asked.closeWhen = bound.texts[2];
+    graph = applyGraphTexts(graph, bound.texts.slice(3));
+    asked.truthGraph = graph;
+
+    judged += 1;
+    const caseText = formatMysteryJudgeCase({
+      tags: roll,
+      anchors,
+      graphShape,
+      graph,
+      draft: asked,
+    });
+    const cascade = await judgeMysteryCascade({
+      runtime,
+      caseText,
+      log,
+      domainId: domain.id,
+    });
+    const rec = {
+      genTry,
+      attempt: judged,
+      skip: null,
+      title: asked.title,
+      tags: roll,
+      graphShape,
+      anchors,
+      graph,
+      entry: asked.entry,
+      synopsis: asked.synopsis,
+      closeWhen: asked.closeWhen,
+      people: (asked.newCharacters || []).map((c) => c.name).filter(Boolean),
+      ...summarizeJudgeAttempt(cascade),
+    };
+    attempts.push(rec);
+    log.info('mystery.seed.judge', {
+      attempt: rec.attempt,
+      genTry,
+      title: rec.title,
+      accepted: rec.accepted,
+      luna: rec.lunaJudge,
+      terra: rec.terraJudge,
+    });
+    if (!cascade.accepted) continue;
+
+    const twin = judgePlotSeed(domain, asked, { storyType: 'mystery' });
+    if (twin === 'twin') {
+      rec.accepted = false;
+      rec.skip = 'twin';
+      log.info('storyteller.seed_rejected', { reason: 'twin', judged, title: asked.title });
+      continue;
+    }
+
+    if (opening) {
+      asked.importance = Math.min(40, Math.max(15, Number(asked.importance) || 25));
+      asked.maxAgeMonths = Math.min(5, Math.max(2, Number(asked.maxAgeMonths) || 4));
+    } else {
+      asked.importance = Math.max(60, Math.min(95, Number(asked.importance) || 75));
+    }
+
+    const plot = createPlotline({
+      title: asked.title,
+      synopsis: asked.synopsis,
+      closeWhen: asked.closeWhen,
+      relatedStats: asked.relatedStats,
+      importance: asked.importance,
+      maxAgeMonths: asked.maxAgeMonths,
+      temperature: cfg.temperature.initial,
+      tags: roll,
+      tick: world.tickIndex,
+      relatedPlotlineIds: fromClosed?.id ? [fromClosed.id] : [],
+      storyType: 'mystery',
+      act: 1,
+      truthGraph: asked.truthGraph,
+      asksSequel: asked.asksSequel === true || asked.asksSequel === 'true',
+      config,
+    });
+    domain.plotlines.push(plot);
+    await assignPlotStakes({ runtime, domain, plot, world, log });
+
+    const fact = pushChronicle(domain, {
+      text: asked.entry,
+      importance: Number(asked.importance) >= 70 ? 'major' : 'minor',
+      world,
+      plotIds: [plot.id],
+      author: 'storyteller:seed',
+    });
+    const cast = registerCharacters(domain, asked.newCharacters, {
+      world,
+      plotId: plot.id,
+      author: 'storyteller:seed',
+    });
+
+    log.info('storyteller.seed', {
+      plotId: plot.id,
+      title: plot.title,
+      attempt: judged,
+      sequelOf: fromClosed?.id || null,
+      importance: plot.importance,
+      storyType: 'mystery',
+      urgency: plot.urgency,
+      gravity: plot.gravity,
+      maxAgeMonths: plot.maxAgeMonths,
+      relatedStats: plot.relatedStats,
+      cast: cast.map((c) => c.name),
+      graphNodes: asked.truthGraph?.nodes?.length,
+      graphShape,
+      sideOpen,
+      mysteryKind: mysteryKind?.tagId,
+      asksSequel: asked.asksSequel === true || asked.asksSequel === 'true',
+      anchors: anchors.map((a) => (a.invent ? `invent:${a.kind}` : a.name)),
+      lunaJudge: rec.lunaJudge?.verdict,
+      terraJudge: rec.terraJudge?.verdict,
+    });
+    return { plot, fact, cast, anchors, graphShape, mysteryKind, sideOpen, judge: rec, attempts };
+  }
+
+  log.info('storyteller.seed_skipped', {
+    reason: 'generation_failed',
+    judged,
+    attempts: attempts.map((a) => ({
+      attempt: a.attempt,
+      skip: a.skip,
+      accepted: a.accepted,
+      luna: a.lunaJudge?.verdict,
+      terra: a.terraJudge?.verdict,
+      title: a.title,
+      issues: [
+        ...(a.lunaJudge?.issues || []),
+        ...(a.terraJudge?.issues || []),
+      ].map((i) => i.code),
+    })),
+  });
+  return { plot: null, attempts, skipped: 'generation_failed' };
+}
+
 /** 1–2 коротких истории сразу после генезиса. Ошибка посева город не ломает. */
 export async function seedOpeningPlots({ config, runtime, domain, world, log: parentLog, rng = Math.random }) {
   const log = (parentLog || getLogger()).child({ scope: 'storyteller.opening', domainId: domain.id });
@@ -514,7 +763,8 @@ async function askPlotSeed({
           closeWhen: {
             type: 'string',
             description: mystery
-              ? `Когда причинную модель считают раскрытой, без самой разгадки. Одна фраза, до ${PLOT_HOOK_MAX} символов.`
+              ? `Когда причинную модель считают раскрытой. Требовать можно только то, что уже названо в узлах ` +
+                `(текст, вещество, имя, место). Без самой разгадки в формулировке. Одна фраза, до ${PLOT_HOOK_MAX} символов.`
               : `Что должно произойти, чтобы историю закрыть по существу. Одна фраза, до ${PLOT_HOOK_MAX} символов.`,
           },
           importance: {
@@ -542,13 +792,21 @@ async function askPlotSeed({
           nodes: mystery
             ? {
                 type: 'array',
-                description: `Ровно ${nodeCount} утверждений истины. id короткие: A, B, C…`,
+                description: `Ровно ${nodeCount} утверждений истины. Последний узел главной цепи — всегда X.`,
                 items: {
                   type: 'object',
                   required: ['id', 'text'],
                   properties: {
-                    id: { type: 'string', description: 'Короткий id узла: A, B, C…' },
-                    text: { type: 'string', description: 'Что произошло на самом деле. Одно утверждение.' },
+                    id: {
+                      type: 'string',
+                      description: 'Короткий id. Главная цепь кончается на X — завязка для игрока, последнее наблюдаемое следствие.',
+                    },
+                    text: {
+                      type: 'string',
+                      description:
+                        'Что произошло на самом деле. Одно полное событие: кто, что сделал, зачем, откуда знает, ' +
+                        'откуда предмет. Не ярлык и не атмосфера.',
+                    },
                   },
                 },
               }
@@ -563,7 +821,10 @@ async function askPlotSeed({
                   properties: {
                     from: { type: 'string' },
                     to: { type: 'string' },
-                    reason: { type: 'string', description: 'Почему from вызывает to.' },
+                    reason: {
+                      type: 'string',
+                      description: 'Почему from вызывает to: знание, действие или физика. Не «и тогда случилось».',
+                    },
                   },
                 },
               }
@@ -594,13 +855,6 @@ async function askPlotSeed({
             return toolFail(reason, mysteryGraphShapeHint(graphShape));
           }
           applySeedVisibility(graph, { shape: graphShape, sideOpen });
-          const leak = mysteryPublicLeak(graph, [args.entry, args.synopsis]);
-          if (leak) {
-            return toolFail(
-              'mask_leak',
-              `entry и synopsis только из видимого. Скрытое «${leak}» туда попало — оставь лишь то, что город уже заметил.`,
-            );
-          }
           args.truthGraph = graph;
         }
         draft.data = args;
@@ -644,7 +898,7 @@ async function askPlotSeed({
                 opening
                   ? 'Масштаб — квартал или большая группа, ставки ощутимы. Не канцелярия и не конец острова.'
                   : 'Масштаб — весь город или несущая жизнь острова. Много людей, общая судьба — не двор, не смена и не учётная книга.',
-                'Тип тайны ниже обязателен. Ассоциативное поле должно быть прослеживающейся темой, но не обязательно "в лоб".',
+                'Тип тайны ниже обязателен. Ассоциативное поле — слабый импульс, не обязательная тема.',
                 anchors.length
                   ? 'Якоря ниже обязательны: причинная модель висит на них, а не на самом громком риске из описания города.'
                   : null,

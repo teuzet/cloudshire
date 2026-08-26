@@ -68,6 +68,8 @@ export class AgentRuntime {
       agentId,
       model,
       provider: agent.provider,
+      reasoningEffort: agent.reasoningEffort || null,
+      maxTokens: agent.maxTokens || null,
       systemContent,
       messages: [{ role: 'system', content: systemContent }, ...userMessages],
       tools: toOpenAiTools(tools),
@@ -82,6 +84,7 @@ export class AgentRuntime {
     extraSystem = '',
     toolChoice,
     maxTokens,
+    reasoningEffort,
     log: parentLog,
     scene = null,
     domainId = null,
@@ -91,6 +94,7 @@ export class AgentRuntime {
     const provider = this.getProvider(agent.provider);
     const model = assembled.model;
     const tokens = maxTokens ?? agent.maxTokens;
+    const effort = reasoningEffort ?? agent.reasoningEffort;
     let choice = toolChoice;
 
     const log = (parentLog || getLogger()).child({
@@ -125,6 +129,7 @@ export class AgentRuntime {
       maxTurns,
       scene: scene || null,
       domainId: domainId || null,
+      reasoningEffort: effort || null,
       toolNames: tools.map((t) => t.name),
       forcedTool,
       userPreview: truncate(
@@ -143,6 +148,7 @@ export class AgentRuntime {
         tlog.debug('agent.llm.request', {
           messageCount: messages.length,
           toolChoice: forcedTool && choice ? forcedTool : null,
+          reasoningEffort: effort || null,
         });
 
         const started = Date.now();
@@ -155,6 +161,7 @@ export class AgentRuntime {
             tools: openAiTools.length ? openAiTools : undefined,
             toolChoice: openAiTools.length ? choice : undefined,
             maxTokens: tokens,
+            reasoningEffort: effort,
           });
           message = resp.message;
           usage = normalizeUsage(resp.usage);

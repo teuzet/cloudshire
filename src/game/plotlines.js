@@ -206,6 +206,8 @@ export function plotConfig(config) {
       ),
       sideRevealChance: Math.max(0, Math.min(1, Number(p.mystery?.graph?.sideRevealChance ?? 0.5))),
       shapes: parseMysteryShapes(p.mystery?.graph?.shapes),
+      judgeAttempts: Math.max(1, Math.min(8, Math.round(Number(p.mystery?.graph?.judgeAttempts ?? 3)))),
+      generateTries: Math.max(1, Math.min(12, Math.round(Number(p.mystery?.graph?.generateTries ?? 6)))),
     },
     mysteryEntities: (() => {
       const minCatalog = Math.max(4, Math.round(Number(p.mystery?.entities?.minCatalog ?? 32)));
@@ -689,9 +691,9 @@ export function formatMysteryAxesForPrompt(tags, { opening = false } = {}) {
   }
   if (assoc) {
     lines.push('');
-    lines.push(`АССОЦИАТИВНОЕ ПОЛЕ (должно читаться в истории): «${assoc.tagName}».`);
+    lines.push(`АССОЦИАТИВНОЕ ПОЛЕ (очень слабый импульс): «${assoc.tagName}».`);
     lines.push(
-      'Это не тип тайны и не факт мира. Окрась причинный граф и маску этим словом: образ, повтор, атмосфера. Игрок должен узнать поле в рассказе, не встретив само слово как вывеску.',
+      'Не факт мира и не обязательная тема. Может слегка коснуться связи, следа или X. Не создавай ради него сущность, событие или вторую линию. Слабый резонанс — нормально.',
     );
   }
   if (type || assoc) {

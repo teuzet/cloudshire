@@ -74,6 +74,7 @@ function renderDump({ snapshot, world, captured, tags }) {
     `- дата в мире: ${world.gameDate?.label || '—'} · тик ${world.tickIndex}`,
     `- агент: ${captured.agentId}`,
     `- модель: ${captured.model}`,
+    `- reasoning: ${captured.reasoningEffort || captured.agent?.reasoningEffort || '—'}`,
     `- сцена: ${captured.scene || 'plot_seed'}`,
     `- tool: ${toolChoice || 'submit_plot_seed'}`,
     `- живых нитей на снимке: ${(snapshot.plotlines || []).length}`,

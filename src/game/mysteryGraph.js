@@ -2,7 +2,8 @@
  * Причинный граф тайны: канон мира + информационная маска.
  * Узлы и рёбра после посева не переписываем — меняются только статусы знания.
  *
- * Форму графа выбирает движок. Маску на посеве тоже: видим последний узел главной цепи,
+ * Форму графа выбирает движок. Маску на посеве тоже: видим X — последнее
+ * наблюдаемое следствие главной цепи; в linear_side с шансом ещё боковую причину E.
  * в linear_side с шансом ещё и боковую причину E. Агент knowledge не ставит.
  * Дальше маску двигает applyEngineReveal. resolved — только полная разгадка движком.
  */
@@ -19,12 +20,12 @@ const KNOWLEDGE_LABEL = {
 const RANK = { hidden: 0, observed: 1, resolved: 2 };
 const LEGACY_KNOWLEDGE = { misread: 'observed', connected: 'observed' };
 
-const NODE_TEXT_MAX = 280;
-const EDGE_REASON_MAX = 200;
+const NODE_TEXT_MAX = 480;
+const EDGE_REASON_MAX = 280;
 
 export const GRAPH_SHAPE_DEFAULTS = [
-  { id: 'linear_4', weight: 2 },
-  { id: 'linear_5', weight: 1 },
+  { id: 'linear_4', weight: 1 },
+  { id: 'linear_5', weight: 0 },
   { id: 'linear_side', weight: 1 },
 ];
 
@@ -67,8 +68,8 @@ export function parseMysteryShapes(raw) {
   for (const item of src) {
     const id = String(item?.id || item || '').trim();
     if (!SHAPE_IDS.has(id)) continue;
-    const weight = Math.max(0, Number(item?.weight ?? 1) || 0);
-    out.push({ id, weight: weight > 0 ? weight : 1 });
+    const weight = Math.max(0, Number(item?.weight ?? 1));
+    out.push({ id, weight: Number.isFinite(weight) ? weight : 1 });
   }
   return out.length ? out : GRAPH_SHAPE_DEFAULTS.map((s) => ({ ...s }));
 }
@@ -79,36 +80,59 @@ export function graphNodeCount(shape) {
 
 export function pickMysteryGraphShape(cfg, rng = Math.random) {
   const list = parseMysteryShapes(cfg?.mysteryGraph?.shapes);
-  const total = list.reduce((sum, s) => sum + s.weight, 0);
+  const live = list.filter((s) => s.weight > 0);
+  const pool = live.length ? live : list;
+  const total = pool.reduce((sum, s) => sum + s.weight, 0) || pool.length;
   let r = rng() * total;
-  for (const item of list) {
-    r -= item.weight;
+  for (const item of pool) {
+    r -= item.weight || 1;
     if (r < 0) return item.id;
   }
-  return list[list.length - 1].id;
+  return pool[pool.length - 1].id;
 }
 
 export function pickMysteryGraphSize(_cfg, _rng, shape = 'linear_4') {
   return graphNodeCount(shape);
 }
 
+export function formatMysteryCausalContractForPrompt() {
+  return [
+    'КОНТРАКТ УЗЛА (жёстко):',
+    'Узел — полное событие: кто, что сделал, зачем, как. Не атмосфера и не ярлык. Краткость не оправдывает дыру.',
+    'Предмет, вещество, текст, группа: что это и откуда взялись — в этом узле или в предыдущем. «Нашёл лежащее» без того, кто положил, нельзя.',
+    'Если человек знает, что нечто опасно, запретно или нужно скрыть — откуда знает (видел печать, сказали по должности, сам делал). Без источника нельзя.',
+    'Физическое следствие — физическая или ремесленная причина. Обряд и «воздействие» не заменяют механизм. Магия не склеивает цепь.',
+    'Не вводи вещь, которой нет в якорях и в других узлах. A — причина, не находка необъяснённого; такая находка для игрока — X.',
+    'Не сшивай два разных сюжета паникой одного человека. Ассоциативное поле — слабый импульс, не вторая завязка.',
+    'Ребро reason — почему from вызывает to. closeWhen опирается только на то, что уже названо в узлах.',
+  ].join('\n');
+}
+
 export function formatMysteryGraphShapeForPrompt(shape, _opts = {}) {
+  const xLine = 'X — завязка для игрока: последнее наблюдаемое следствие, к которому всё привело. Этот id обязателен.';
+  const contract = formatMysteryCausalContractForPrompt();
   if (shape === 'linear_5') {
     return [
-      'ШАБЛОН ГРАФА (обязателен): линейный из 5 узлов. A → B → C → D → E.',
+      'ШАБЛОН ГРАФА (обязателен): линейный из 5 узлов. A → B → C → D → X.',
       'Рёбер ровно 4. Без ответвлений и без параллельных причин.',
+      xLine,
+      contract,
     ].join('\n');
   }
   if (shape === 'linear_side') {
     return [
-      'ШАБЛОН ГРАФА (обязателен): главная цепь A → B → C → D и дополнительная ПРИЧИНА E.',
+      'ШАБЛОН ГРАФА (обязателен): главная цепь A → B → C → X и дополнительная ПРИЧИНА E.',
       'E → B или E → C. E — отдельная причина одного из средних узлов, не следствие из цепи.',
       'Ровно 5 узлов и 4 ребра. У E нет входа и нет продолжения дальше B/C.',
+      xLine,
+      contract,
     ].join('\n');
   }
   return [
-    'ШАБЛОН ГРАФА (обязателен): линейный из 4 узлов. A → B → C → D.',
+    'ШАБЛОН ГРАФА (обязателен): линейный из 4 узлов. A → B → C → X.',
     'Рёбер ровно 3. Без ответвлений и без параллельных причин.',
+    xLine,
+    contract,
   ].join('\n');
 }
 
@@ -123,7 +147,7 @@ export function formatMysteryMaskForPrompt(shape, { sideOpen = false } = {}) {
   if (shape === 'linear_5') {
     return [
       'МАСКА ЗНАНИЯ (решила система, не выбирай её):',
-      'Видимо городу: только E — последний узел цепи.',
+      'Видимо городу: только X — последнее наблюдаемое следствие, завязка тайны.',
       'Скрыто: A, B, C, D и все связи.',
       ...hard,
     ].join('\n');
@@ -132,14 +156,14 @@ export function formatMysteryMaskForPrompt(shape, { sideOpen = false } = {}) {
     return sideOpen
       ? [
           'МАСКА ЗНАНИЯ (решила система, не выбирай её):',
-          'Видимо городу: D (последний узел цепи) и E (боковая причина).',
+          'Видимо городу: X (последнее наблюдаемое следствие) и E (боковая причина).',
           'Скрыто: A, B, C и все связи.',
           ...hard,
-          'D и E можно показать как два замеченных факта. Скрытую связь между ними не называй.',
+          'X и E можно показать как два замеченных факта. Скрытую связь между ними не называй.',
         ].join('\n')
       : [
           'МАСКА ЗНАНИЯ (решила система, не выбирай её):',
-          'Видимо городу: только D — последний узел цепи.',
+          'Видимо городу: только X — последнее наблюдаемое следствие, завязка тайны.',
           'Скрыто: A, B, C, E и все связи.',
           ...hard,
           'E не упоминай.',
@@ -147,7 +171,7 @@ export function formatMysteryMaskForPrompt(shape, { sideOpen = false } = {}) {
   }
   return [
     'МАСКА ЗНАНИЯ (решила система, не выбирай её):',
-    'Видимо городу: только D — последний узел цепи.',
+    'Видимо городу: только X — последнее наблюдаемое следствие, завязка тайны.',
     'Скрыто: A, B, C и все связи.',
     ...hard,
   ].join('\n');
@@ -192,12 +216,12 @@ function hiddenSpanLeaks(pub, raw, minLen = 12) {
 
 export function mysteryGraphShapeHint(shape) {
   if (shape === 'linear_5') {
-    return 'Нужен линейный граф из 5 узлов: A → B → C → D → E, ровно 4 ребра.';
+    return 'Нужен линейный граф из 5 узлов: A → B → C → D → X, ровно 4 ребра. X — последнее наблюдаемое следствие.';
   }
   if (shape === 'linear_side') {
-    return 'Нужна цепь A → B → C → D и дополнительная причина E → B или E → C (не следствие из цепи). Ровно 5 узлов и 4 ребра.';
+    return 'Нужна цепь A → B → C → X и дополнительная причина E → B или E → C (не следствие из цепи). Ровно 5 узлов и 4 ребра. X — последнее наблюдаемое следствие.';
   }
-  return 'Нужен линейный граф из 4 узлов: A → B → C → D, ровно 3 ребра.';
+  return 'Нужен линейный граф из 4 узлов: A → B → C → X, ровно 3 ребра. X — последнее наблюдаемое следствие.';
 }
 
 function outgoingMap(nodes, edges) {
@@ -232,6 +256,7 @@ function inspectLinearChain(nodes, edges, wantLen) {
   if (edges.length !== wantLen - 1) return null;
   const path = longestNodePath(nodes, edges);
   if (path.length !== wantLen) return null;
+  if (String(path[path.length - 1]).toUpperCase() !== 'X') return null;
   return { path, sideId: null };
 }
 
