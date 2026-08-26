@@ -43,6 +43,7 @@ import { seedPlot, beatPlot, tickOrder, quietMonth, keepStories, fadeQuietPlot }
 import { scoreMonthStats, factsForStatJudge } from './statJudge.js';
 import { runSteward } from './steward.js';
 import { getLogger } from '../log.js';
+import { realignFinishedOutcomes } from './plotAlign.js';
 import {
   hydrateDomainFromConflux,
   dehydrateDomainToConflux,
@@ -120,6 +121,7 @@ export async function resolveDomainMonth({
     tick: world.tickIndex,
     config,
   });
+  await realignFinishedOutcomes({ runtime, domain: working, outcomes: processOutcomes, log });
 
   // 2. Часы доски (нити указов не стареют). На конфлюксе часы shared/локальных уже тикнули.
   if (!skipPlotClocks) advancePlotMonth(working, cfg);

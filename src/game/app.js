@@ -938,6 +938,20 @@ function characterTools(domain, storage, character, ctx) {
           applyObjectiveSchedule(action, estimated.months, remainingMonths);
         }
         syncErrandFromProcess(domain, action);
+        const plot = findPlotline(domain, action.plotlineId);
+        if (
+          plot &&
+          isThreeActPlot(plot) &&
+          (goal != null || revised.rewritten || summary || detail || addDetail)
+        ) {
+          await judgeProcessAlignment({
+            runtime: ctx.runtime,
+            domain,
+            process: action,
+            plot,
+            log: ctx.log,
+          });
+        }
         await save();
         const mode = revised.fresh ? 'дело ещё не сдвинулось, можно было переписать' : 'дело уже шло, текст только дополнен';
         return {

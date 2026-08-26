@@ -1,14 +1,44 @@
-import { isThreeActPlot } from './plotlines.js';
+import { isThreeActPlot, plotsForProcess } from './plotlines.js';
 import { getLogger } from '../log.js';
 
+export const PLOT_ENGAGEMENTS = ['DIRECT', 'RELEVANT', 'UNRELATED'];
+
 /**
- * Крошечный судья: цель дела совпадает с условием закрытия нити?
- * Результат замораживается на деле (plotAligned).
+ * DIRECT / RELEVANT / UNRELATED.
+ * Старый boolean: true → DIRECT, false → RELEVANT (дело на нити, но не closeWhen).
+ * Нет данных → UNRELATED.
+ */
+export function engagementOf(process) {
+  const raw = String(process?.plotEngagement || '').toUpperCase();
+  if (PLOT_ENGAGEMENTS.includes(raw)) return raw;
+  if (process?.plotAligned === true) return 'DIRECT';
+  if (process?.plotAligned === false) return 'RELEVANT';
+  return 'UNRELATED';
+}
+
+export function engagementAttends(engagement) {
+  return engagement === 'DIRECT' || engagement === 'RELEVANT';
+}
+
+export function applyEngagement(process, engagement) {
+  const value = PLOT_ENGAGEMENTS.includes(engagement) ? engagement : 'UNRELATED';
+  if (process) {
+    process.plotEngagement = value;
+    process.plotAligned = value === 'DIRECT';
+  }
+  return value;
+}
+
+/**
+ * Крошечный судья: цель дела к closeWhen — DIRECT / RELEVANT / UNRELATED.
+ * На старте — чтобы не глушить urgency посторонним делом.
+ * На финише вызывается снова: closeWhen и цель могли измениться.
+ * Ошибка агента → UNRELATED, иначе сломанный align заморозит сюжет.
  */
 export async function judgeProcessAlignment({ runtime, domain, process, plot, log: parentLog }) {
   if (!process || !isThreeActPlot(plot)) return null;
   const log = (parentLog || getLogger()).child({ scope: 'plot.align', plotId: plot.id });
-  const draft = { aligned: true };
+  const draft = { engagement: 'UNRELATED' };
 
   try {
     await runtime.run({
@@ -16,20 +46,22 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
       tools: [
         {
           name: 'submit_alignment',
-          description: 'Совпадает ли цель дела с тем, чем должна кончиться история.',
+          description: 'Отношение цели дела к условию закрытия истории.',
           parameters: {
             type: 'object',
-            required: ['aligned'],
+            required: ['relation'],
             properties: {
-              aligned: {
-                type: 'boolean',
+              relation: {
+                type: 'string',
+                enum: PLOT_ENGAGEMENTS,
                 description:
-                  'true — дело про то же, чем закрывается история. false — дело на этой нити, но закрывает не то.',
+                  'DIRECT — цель сама закрывает closeWhen. RELEVANT — естественный шаг к closeWhen. UNRELATED — даже полный успех сюжет не двигает.',
               },
             },
           },
           handler: async (args) => {
-            draft.aligned = Boolean(args.aligned);
+            const rel = String(args?.relation || '').toUpperCase();
+            draft.engagement = PLOT_ENGAGEMENTS.includes(rel) ? rel : 'UNRELATED';
             return { ok: true };
           },
         },
@@ -43,11 +75,16 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
         {
           role: 'user',
           content: [
-            `История «${plot.title}». Кончится, когда: ${plot.closeWhen || '—'}`,
+            `История «${plot.title}» (${plot.storyType || ''}).`,
+            `Кончится, когда: ${plot.closeWhen || '—'}`,
+            plot.synopsis ? `Сейчас: ${plot.synopsis}` : '',
             `Дело: ${process.summary || ''}`,
             process.goal ? `Цель дела: ${process.goal}` : '',
             process.detail ? `Поручение: ${process.detail}` : '',
-            'aligned=true только если успех дела сам по себе выполняет условие закрытия истории.',
+            'Верни ровно DIRECT, RELEVANT или UNRELATED по цели process, не по броску.',
+            'DIRECT: успех сам устанавливает ключевую часть closeWhen.',
+            'RELEVANT: естественный промежуточный шаг к closeWhen, сам его не закрывает.',
+            'UNRELATED: даже полный успех closeWhen не двигает. Не ставь RELEVANT за случайную улику, которую рассказчик мог бы придумать.',
           ]
             .filter(Boolean)
             .join('\n'),
@@ -56,10 +93,29 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
     });
   } catch (err) {
     log.warn('plot.align_failed', { error: err.message });
-    draft.aligned = true;
+    draft.engagement = 'UNRELATED';
   }
 
-  process.plotAligned = Boolean(draft.aligned);
-  log.info('plot.align', { summary: process.summary, aligned: process.plotAligned });
-  return process.plotAligned;
+  const engagement = applyEngagement(process, draft.engagement);
+  log.info('plot.align', { summary: process.summary, engagement });
+  return engagement;
+}
+
+function findProcess(domain, processId) {
+  return (domain?.state?.pendingActions || []).find((a) => String(a.id) === String(processId)) || null;
+}
+
+/** Пересчитать relation завершившихся дел к текущему closeWhen. */
+export async function realignFinishedOutcomes({ runtime, domain, outcomes = [], log } = {}) {
+  for (const outcome of outcomes) {
+    if (!outcome?.finished) continue;
+    const process = findProcess(domain, outcome.processId);
+    if (!process) continue;
+    const plot = plotsForProcess(domain, outcome.processId).find((p) => isThreeActPlot(p));
+    if (!plot) continue;
+    const engagement = await judgeProcessAlignment({ runtime, domain, process, plot, log });
+    outcome.plotEngagement = engagement || 'UNRELATED';
+    outcome.plotAligned = outcome.plotEngagement === 'DIRECT';
+  }
+  return outcomes;
 }

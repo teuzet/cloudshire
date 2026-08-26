@@ -347,6 +347,7 @@ function plotCard(p, names = {}) {
     p.kind,
     p.storyType === 'mystery' ? 'тайна' : p.storyType === 'suspense' ? 'саспенс' : null,
     p.act ? `такт ${p.act}` : null,
+    p.escalationLevel != null ? `кризис ${p.escalationLevel}/${p.maxEscalations ?? 3}` : null,
     p.urgency != null ? `срочность ${p.urgency}` : null,
     p.gravity != null ? `масштаб ${p.gravity}` : null,
     p.isMainConflux ? 'главная нить сопряжения' : null,

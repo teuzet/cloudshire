@@ -84,7 +84,7 @@ export function plotBeatAgentId(plot) {
 function clampStakes(n, fallback = 40) {
   const v = Math.round(Number(n));
   if (!Number.isFinite(v)) return fallback;
-  return Math.max(0, Math.min(200, v));
+  return Math.max(0, Math.min(100, v));
 }
 
 function storyActState(p = {}) {
@@ -97,6 +97,8 @@ function storyActState(p = {}) {
       gravity: null,
       urgency0: null,
       gravity0: null,
+      escalationLevel: null,
+      maxEscalations: null,
       truth: '',
       truthGraph: null,
       ending: null,
@@ -106,6 +108,7 @@ function storyActState(p = {}) {
   const urgency = clampStakes(p.urgency, 40);
   const gravity = clampStakes(p.gravity, 40);
   const graph = type === 'mystery' ? normalizeTruthGraph(p.truthGraph) : null;
+  const maxEsc = Math.max(1, Math.round(Number(p.maxEscalations ?? 3)));
   return {
     storyType: type,
     act: Number(p.act) === 2 ? 2 : 1,
@@ -113,6 +116,8 @@ function storyActState(p = {}) {
     gravity,
     urgency0: clampStakes(p.urgency0 ?? urgency, urgency),
     gravity0: clampStakes(p.gravity0 ?? gravity, gravity),
+    escalationLevel: Math.max(0, Math.min(maxEsc, Math.round(Number(p.escalationLevel) || 0))),
+    maxEscalations: maxEsc,
     truth: type === 'mystery' && !graph ? String(p.truth || '') : '',
     truthGraph: graph,
     ending: ['crit', 'ok', 'fail'].includes(p.ending) ? p.ending : null,
@@ -239,7 +244,7 @@ export function plotConfig(config) {
       defaultChance: Math.max(0, Math.min(1, Number(p.orders?.defaultChance ?? 0.2))),
     },
     acts: {
-      failMultiplier: Math.max(1, Number(p.acts?.failMultiplier ?? 2)),
+      maxEscalations: Math.max(1, Math.round(Number(p.acts?.maxEscalations ?? 3))),
       worsenMin: Number(p.acts?.worsenMin ?? 1),
       worsenMax: Number(p.acts?.worsenMax ?? 1.5),
       dampMin: Number(p.acts?.dampMin ?? 0.8),
@@ -329,6 +334,8 @@ export function createPlotline({
   gravity = null,
   urgency0 = null,
   gravity0 = null,
+  escalationLevel = 0,
+  maxEscalations = 3,
   truth = '',
   truthGraph = null,
   ending = null,
@@ -378,6 +385,8 @@ export function createPlotline({
       gravity,
       urgency0,
       gravity0,
+      escalationLevel,
+      maxEscalations,
       truth,
       truthGraph,
       ending,
@@ -462,6 +471,12 @@ export function findClosedPlotline(domain, plotlineId) {
   return (domain?.closedPlotlines || []).find((p) => p.id === id) || null;
 }
 
+export function plotsForProcess(domain, processId) {
+  const id = String(processId || '');
+  if (!id) return [];
+  return (domain?.plotlines || []).filter((p) => (p.relatedProcessIds || []).includes(id));
+}
+
 /** Поручение ещё идёт — нить рано убирать с доски, иначе дело получит пустую карточку. */
 export function plotHasActiveProcess(domain, plot) {
   const ids = new Set((plot?.relatedProcessIds || []).map(String));
@@ -469,6 +484,25 @@ export function plotHasActiveProcess(domain, plot) {
   return (domain?.state?.pendingActions || []).some(
     (a) => ids.has(String(a.id)) && (!a.status || a.status === 'active'),
   );
+}
+
+function processEngagement(action) {
+  const raw = String(action?.plotEngagement || '').toUpperCase();
+  if (raw === 'DIRECT' || raw === 'RELEVANT' || raw === 'UNRELATED') return raw;
+  if (action?.plotAligned === true) return 'DIRECT';
+  if (action?.plotAligned === false) return 'RELEVANT';
+  return 'UNRELATED';
+}
+
+/** DIRECT/RELEVANT дело глушит автотик; UNRELATED — нет. */
+export function plotHasAttendingProcess(domain, plot) {
+  const ids = new Set((plot?.relatedProcessIds || []).map(String));
+  if (!ids.size) return false;
+  return (domain?.state?.pendingActions || []).some((a) => {
+    if (!ids.has(String(a.id)) || (a.status && a.status !== 'active')) return false;
+    const eng = processEngagement(a);
+    return eng === 'DIRECT' || eng === 'RELEVANT';
+  });
 }
 
 function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } = {}) {
@@ -865,7 +899,7 @@ export function formatBoardForPrompt(domain) {
       const kindLabel = p.kind === 'errand' ? '(дело)' : p.kind === 'order' ? '(порядок)' : '';
       const three = isThreeActPlot(p);
       const meters = three
-        ? `urgency=${p.urgency} gravity=${p.gravity} такт=${p.act} тип=${p.storyType}`
+        ? `urgency=${p.urgency} gravity=${p.gravity} эск=${p.escalationLevel}/${p.maxEscalations} такт=${p.act} тип=${p.storyType}`
         : `T=${p.temperature} тип=${p.storyType || 'default'}`;
       return (
         `- [${p.id}] «${p.title}» ${kindLabel} ${meters} возраст=${p.ageMonths}/${p.maxAgeMonths}` +

@@ -1126,7 +1126,7 @@ export async function beatPlot({
       ruler ? `Правитель города — ${ruler}. Этого человека в newCharacters не заводи, второго с тем же именем тоже.` : null,
       `Известные люди города:\n${formatCastForPrompt(domain.lore, { limit: 12 })}`,
       mystery && plot.truthGraph
-        ? `${formatTruthGraphForPrompt(plot.truthGraph)}\nСтрой хронику вокруг узлов, помеченных «замечено». Скрытое в запись не выноси.`
+        ? `${formatTruthGraphForPrompt(plot.truthGraph)}\nСкрытое в запись не выноси, кроме узлов и рёбер, которые блок ТАКТОВКА открывает в этом месяце.`
         : mystery && plot.truth
           ? `ТАЙНА (канон, не в хронику пока движок не велел):\n${plot.truth}`
           : null,
@@ -1206,6 +1206,8 @@ export async function beatPlot({
     applyEngineReveal(plot.truthGraph, {
       reveal: beat.actMove?.reveal || 'none',
       ending: engineEnding,
+      openedNodes: beat.actMove?.openedNodes || [],
+      openedEdges: beat.actMove?.openedEdges || [],
     });
   }
 

@@ -26,6 +26,7 @@ import {
 import { beatSharedPlot } from './confluxBeat.js';
 import { fadeQuietPlot, keepSharedStories } from './storyteller.js';
 import { scoreMonthStats, factsForStatJudge } from './statJudge.js';
+import { realignFinishedOutcomes } from './plotAlign.js';
 
 function boardFromShared(conflux, domains) {
   const plots = sharedPlots(conflux);
@@ -92,6 +93,7 @@ export async function resolveConfluxSharedMonth({
     tick: world.tickIndex,
     config,
   });
+  await realignFinishedOutcomes({ runtime, domain: board, outcomes: processOutcomes, log });
   conflux.processes = (conflux.processes || []).map((pr) => {
     const updated = (board.state.pendingActions || []).find((x) => x.id === pr.id);
     return updated || pr;

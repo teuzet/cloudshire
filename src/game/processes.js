@@ -52,7 +52,19 @@ export function normalizeProcess(action, config = null) {
   } else {
     action.objectiveMonths = Math.max(1, Math.min(12, Math.round(Number(action.objectiveMonths) || 1)));
   }
-  if (action.plotAligned != null) action.plotAligned = Boolean(action.plotAligned);
+  if (action.plotEngagement != null || action.plotAligned != null) {
+    const raw = String(action.plotEngagement || '').toUpperCase();
+    if (raw === 'DIRECT' || raw === 'RELEVANT' || raw === 'UNRELATED') {
+      action.plotEngagement = raw;
+    } else if (action.plotAligned === true) {
+      action.plotEngagement = 'DIRECT';
+    } else if (action.plotAligned === false) {
+      action.plotEngagement = 'RELEVANT';
+    } else {
+      action.plotEngagement = 'UNRELATED';
+    }
+    action.plotAligned = action.plotEngagement === 'DIRECT';
+  }
   return action;
 }
 
@@ -328,7 +340,8 @@ export function applyEngineProgress(domain, rolls, { tick = null, config = null,
       finishLabel,
       blessed,
       ownerDomainId: r.ownerDomainId || process.ownerDomainId || null,
-      plotAligned: process.plotAligned === true,
+      plotEngagement: process.plotEngagement || null,
+      plotAligned: process.plotEngagement === 'DIRECT' || process.plotAligned === true,
       // Обычный ход без завершения — фон, о нём отдельную запись не пишем.
       mustNarrate: finished || r.kind !== 'normal',
     });

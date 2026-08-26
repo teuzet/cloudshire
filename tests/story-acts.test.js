@@ -2,12 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   applyStoryActMove,
-  stakesExceeded,
+  escalationWouldFail,
   formatActMoveForPrompt,
 } from '../src/game/storyActs.js';
 import {
   isThreeActPlot,
   plotCanFade,
+  plotHasAttendingProcess,
   judgePlotSeed,
   formatBoardForPrompt,
   stripPlotSecrets,
@@ -19,6 +20,8 @@ import {
 } from '../src/game/plotlines.js';
 import { planBeats } from '../src/game/plotEngine.js';
 import { beatChance } from '../src/game/rolls.js';
+import { engagementOf, applyEngagement } from '../src/game/plotAlign.js';
+import { applySeedVisibility, normalizeTruthGraph, pickFrontierReveal } from '../src/game/mysteryGraph.js';
 
 const SEED_PAD = 'Дальше история должна жить своей жизнью и не обрываться на полуслове. '.repeat(4);
 
@@ -28,22 +31,22 @@ function mysteryGraph(extra = {}) {
       { id: 'A', text: 'Цистерну перестали чистить.' },
       { id: 'B', text: 'В трубах скопился ил.' },
       { id: 'C', text: 'Ночами вода гудит.' },
-      { id: 'D', text: 'Нижний ярус слышит гул как знамение.' },
+      { id: 'X', text: 'Нижний ярус слышит гул как знамение.' },
     ],
     edges: [
       { from: 'A', to: 'B', reason: 'без чистки ил растёт' },
       { from: 'B', to: 'C', reason: 'ил сжимает поток' },
-    ],
-    knowledge: [
-      { id: 'A', status: 'hidden' },
-      { id: 'B', status: 'hidden' },
-      { id: 'C', status: 'observed' },
-      { id: 'D', status: 'observed' },
+      { from: 'C', to: 'X', reason: 'гул доходит до яруса' },
     ],
     ...extra,
   };
 }
-const ACTS = { acts: { failMultiplier: 2, worsenMin: 1, worsenMax: 1.5, dampMin: 0.8, dampMax: 1 } };
+
+function seededMystery() {
+  return applySeedVisibility(normalizeTruthGraph(mysteryGraph()), { shape: 'linear_4' });
+}
+
+const ACTS = { acts: { maxEscalations: 3, worsenMin: 1, worsenMax: 1.5, dampMin: 0.8, dampMax: 1 } };
 const maxRng = () => 1;
 const minRng = () => 0;
 
@@ -60,6 +63,8 @@ function three(extra = {}) {
     gravity: 40,
     urgency0: 40,
     gravity0: 40,
+    escalationLevel: 0,
+    maxEscalations: 3,
     relatedProcessIds: [],
     relatedStats: ['stability'],
     tags: [],
@@ -104,20 +109,21 @@ test('движок ставит default поручениям, указам, со
   assert.equal(storyTypeOf({ kind: 'story' }), 'default');
 });
 
-test('саспенс такт 1: холостой тик → такт 2 и worsen', () => {
+test('саспенс такт 1: холостой тик остаётся в экспозиции и эскалирует', () => {
   const plot = three();
   const move = applyStoryActMove(plot, { trigger: 'auto', rng: minRng, config: ACTS });
-  assert.equal(plot.act, 2);
+  assert.equal(plot.act, 1);
   assert.ok(!plot.ending);
   assert.equal(move.stakes.kind, 'worsen');
+  assert.equal(plot.escalationLevel, 1);
   assert.equal(plot.urgency, 40);
 });
 
-test('саспенс такт 1: сопряжённый крит сразу закрывает', () => {
+test('саспенс такт 1: DIRECT крит сразу закрывает', () => {
   const plot = three();
   const move = applyStoryActMove(plot, {
     trigger: 'process_finished',
-    aligned: true,
+    relation: 'DIRECT',
     finish: 'crit',
     rng: minRng,
     config: ACTS,
@@ -125,26 +131,43 @@ test('саспенс такт 1: сопряжённый крит сразу за
   assert.equal(move.ending, 'crit');
   assert.equal(plot.ending, 'crit');
   assert.equal(plot.act, 1);
+  assert.equal(plot.escalationLevel, 0);
 });
 
-test('саспенс такт 2: сопряжённый успех закрывает', () => {
+test('саспенс такт 1: DIRECT успех идёт во второй такт без эскалации', () => {
+  const plot = three();
+  const move = applyStoryActMove(plot, {
+    trigger: 'process_finished',
+    relation: 'DIRECT',
+    finish: 'ok',
+    rng: minRng,
+    config: ACTS,
+  });
+  assert.equal(plot.act, 2);
+  assert.ok(!plot.ending);
+  assert.equal(move.pressure, 'NONE');
+  assert.equal(plot.escalationLevel, 0);
+  assert.equal(plot.urgency, 40);
+});
+
+test('саспенс такт 2: DIRECT успех закрывает', () => {
   const plot = three({ act: 2 });
   const move = applyStoryActMove(plot, {
     trigger: 'process_finished',
-    aligned: true,
+    relation: 'DIRECT',
     finish: 'ok',
     config: ACTS,
   });
   assert.equal(move.ending, 'ok');
   assert.equal(plot.ending, 'ok');
-  assert.equal(plot.act, 2);
+  assert.equal(move.actTo, 3);
 });
 
-test('саспенс такт 2: несопряжённый крит гасит ставки, такт тот же', () => {
-  const plot = three({ act: 2 });
+test('саспенс: UNRELATED крит гасит ставки и ступень, такт тот же', () => {
+  const plot = three({ act: 2, escalationLevel: 2 });
   const move = applyStoryActMove(plot, {
     trigger: 'process_finished',
-    aligned: false,
+    relation: 'UNRELATED',
     finish: 'crit',
     rng: minRng,
     config: ACTS,
@@ -153,34 +176,81 @@ test('саспенс такт 2: несопряжённый крит гасит 
   assert.ok(!plot.ending);
   assert.equal(plot.act, 2);
   assert.equal(move.stakes.kind, 'damp');
+  assert.equal(plot.escalationLevel, 1);
   assert.equal(plot.urgency, 32);
   assert.equal(plot.gravity, 32);
 });
 
-test('ставки: оба параметра в X раз от старта → провал', () => {
-  const plot = three({ act: 2 });
+test('третья эскалация закрывает провалом, числа клампятся сотней', () => {
+  const plot = three({ act: 1, urgency: 80, gravity: 80, escalationLevel: 2 });
+  assert.equal(escalationWouldFail(plot, ACTS), true);
   applyStoryActMove(plot, { trigger: 'auto', rng: maxRng, config: ACTS });
-  assert.ok(!plot.ending);
-  assert.equal(stakesExceeded(plot, ACTS), false);
-  applyStoryActMove(plot, { trigger: 'auto', rng: maxRng, config: ACTS });
-  assert.equal(plot.urgency, 90);
-  assert.equal(plot.gravity, 90);
   assert.equal(plot.ending, 'fail');
-  assert.equal(stakesExceeded(plot, ACTS), true);
+  assert.equal(plot.escalationLevel, 3);
+  assert.equal(plot.urgency, 100);
+  assert.equal(plot.gravity, 100);
+  assert.equal(plot.act, 1);
 });
 
-test('тайна такт 1: сопряжённый успех частично открывает и идёт во второй такт', () => {
-  const plot = three({ storyType: 'mystery', truth: 'это был садовник' });
+test('тайна такт 1: DIRECT успех открывает ближайший к концу узел и идёт во второй такт', () => {
+  const plot = three({
+    storyType: 'mystery',
+    truthGraph: seededMystery(),
+  });
   const move = applyStoryActMove(plot, {
     trigger: 'process_finished',
-    aligned: true,
+    relation: 'DIRECT',
     finish: 'ok',
     rng: minRng,
     config: ACTS,
   });
   assert.equal(plot.act, 2);
   assert.equal(move.reveal, 'partial');
+  assert.deepEqual(move.openedNodes, ['C']);
   assert.ok(!plot.ending);
+  assert.equal(plot.escalationLevel, 0);
+  assert.equal(plot.truthGraph.nodes.find((n) => n.id === 'C').knowledge, 'hidden');
+});
+
+test('тайна: RELEVANT успех открывает фронтир, остаётся в акте 1 и эскалирует', () => {
+  const plot = three({
+    storyType: 'mystery',
+    truthGraph: seededMystery(),
+  });
+  const move = applyStoryActMove(plot, {
+    trigger: 'process_finished',
+    relation: 'RELEVANT',
+    finish: 'ok',
+    rng: minRng,
+    config: ACTS,
+  });
+  assert.equal(plot.act, 1);
+  assert.equal(move.reveal, 'partial');
+  assert.deepEqual(move.openedNodes, ['C']);
+  assert.equal(plot.escalationLevel, 1);
+  assert.ok(!plot.ending);
+});
+
+test('тайна: последний скрытый узел закрывает сюжет', () => {
+  const graph = seededMystery();
+  graph.nodes.find((n) => n.id === 'C').knowledge = 'observed';
+  graph.nodes.find((n) => n.id === 'B').knowledge = 'observed';
+  const plot = three({
+    storyType: 'mystery',
+    act: 2,
+    truthGraph: graph,
+  });
+  const move = applyStoryActMove(plot, {
+    trigger: 'process_finished',
+    relation: 'RELEVANT',
+    finish: 'ok',
+    rng: minRng,
+    config: ACTS,
+  });
+  assert.equal(move.reveal, 'full');
+  assert.equal(move.ending, 'ok');
+  assert.deepEqual(move.openedNodes, ['A']);
+  assert.equal(plot.escalationLevel, 0);
 });
 
 test('трёхтактная нить не гаснет по сроку', () => {
@@ -188,30 +258,39 @@ test('трёхтактная нить не гаснет по сроку', () => 
   assert.equal(plotCanFade({ plotlines: [plot], state: { pendingActions: [] } }, plot), false);
 });
 
-test('план битов: трёхтактная с активным делом не тикает сама', () => {
-  const plot = three({ id: 'p_busy', relatedProcessIds: ['act_1'] });
-  const { beats } = planBeats({
+test('план битов: DIRECT/RELEVANT дело глушит холостой тик, UNRELATED — нет', () => {
+  const attending = three({ id: 'p_busy', relatedProcessIds: ['act_1'] });
+  const { beats: blocked } = planBeats({
     domain: {
-      plotlines: [plot],
-      state: { pendingActions: [{ id: 'act_1', status: 'active' }] },
+      plotlines: [attending],
+      state: { pendingActions: [{ id: 'act_1', status: 'active', plotEngagement: 'DIRECT' }] },
     },
     rng: minRng,
   });
-  assert.equal(beats.length, 0);
-  assert.equal(plot.act, 1);
+  assert.equal(blocked.length, 0);
+
+  const side = three({ id: 'p_side', relatedProcessIds: ['act_2'] });
+  const domain = {
+    plotlines: [side],
+    state: { pendingActions: [{ id: 'act_2', status: 'active', plotEngagement: 'UNRELATED' }] },
+  };
+  const { beats: open } = planBeats({ domain, rng: minRng });
+  assert.ok(open.find((b) => b.reason === 'auto'));
+  assert.equal(domain.plotlines[0].act, 1);
+  assert.equal(plotHasAttendingProcess(domain, side), false);
 });
 
 test('план битов: пауза дела не держит холостой тик', () => {
   const plot = three({ id: 'p_pause', relatedProcessIds: ['act_1'] });
   const domain = {
     plotlines: [plot],
-    state: { pendingActions: [{ id: 'act_1', status: 'paused' }] },
+    state: { pendingActions: [{ id: 'act_1', status: 'paused', plotEngagement: 'DIRECT' }] },
   };
   const { beats } = planBeats({ domain, rng: minRng });
   const auto = beats.find((b) => b.reason === 'auto');
   assert.ok(auto);
   assert.equal(auto.skipTint, true);
-  assert.equal(domain.plotlines[0].act, 2);
+  assert.equal(domain.plotlines[0].act, 1);
 });
 
 test('план битов: финиш дела прыгает по тактам, stall — нет', () => {
@@ -228,7 +307,7 @@ test('план битов: финиш дела прыгает по тактам,
         mustNarrate: true,
         finished: true,
         finish: 'crit',
-        plotAligned: true,
+        plotEngagement: 'DIRECT',
       },
     ],
     rng: () => 1,
@@ -239,7 +318,7 @@ test('план битов: финиш дела прыгает по тактам,
 
   const stallDomain = {
     plotlines: [three({ id: 'p_stall', relatedProcessIds: ['act_stall'] })],
-    state: { pendingActions: [{ id: 'act_stall', status: 'active' }] },
+    state: { pendingActions: [{ id: 'act_stall', status: 'active', plotEngagement: 'DIRECT' }] },
   };
   const { beats: stallBeats } = planBeats({
     domain: stallDomain,
@@ -299,9 +378,37 @@ test('тактовка для бита говорит закрывать тол�
   const plot = three({ act: 2, ending: 'ok' });
   const text = formatActMoveForPrompt(plot, {
     actFrom: 2,
+    actTo: 3,
     ending: 'ok',
+    reveal: 'none',
+    pressure: 'NONE',
+    relation: 'DIRECT',
+    finish: 'ok',
+    trigger: 'process_finished',
+    openedNodes: [],
+    openedEdges: [],
     stakes: { kind: 'none', before: { urgency: 40, gravity: 40 }, after: { urgency: 40, gravity: 40 } },
   });
   assert.match(text, /КОНЦОВКА УЖЕ РЕШЕНА/);
   assert.match(text, /\[УСПЕХ\]/);
+  assert.match(text, /фаза: 2 → 3/);
+});
+
+test('plotAlign: старый boolean и безопасный default', () => {
+  assert.equal(engagementOf({ plotEngagement: 'RELEVANT' }), 'RELEVANT');
+  assert.equal(engagementOf({ plotAligned: true }), 'DIRECT');
+  assert.equal(engagementOf({ plotAligned: false }), 'RELEVANT');
+  assert.equal(engagementOf({}), 'UNRELATED');
+  const p = {};
+  assert.equal(applyEngagement(p, 'DIRECT'), 'DIRECT');
+  assert.equal(p.plotAligned, true);
+  assert.equal(applyEngagement(p, 'nope'), 'UNRELATED');
+  assert.equal(p.plotAligned, false);
+});
+
+test('фронтир тайны идёт от конца цепи', () => {
+  const g = seededMystery();
+  assert.equal(pickFrontierReveal(g, minRng).nodeId, 'C');
+  g.nodes.find((n) => n.id === 'C').knowledge = 'observed';
+  assert.equal(pickFrontierReveal(g, minRng).nodeId, 'B');
 });

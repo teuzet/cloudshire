@@ -12,6 +12,8 @@ import {
   pickMysteryGraphSize,
   pickMysteryGraphShape,
   mysteryPublicLeak,
+  pickFrontierReveal,
+  remainingHiddenNodeIds,
 } from '../src/game/mysteryGraph.js';
 
 function knowledgeOf(graph) {
@@ -88,10 +90,11 @@ test('старые misread на узле читаются как observed, ги�
   assert.equal(g.hypothesis, undefined);
 });
 
-test('маску можно только повышать, движок открывает по reveal', () => {
+test('маску можно только повышать, движок открывает фронтир или всё', () => {
   const g = applySeedVisibility(normalizeTruthGraph(linear4()), { shape: 'linear_4' });
-  applyEngineReveal(g, { reveal: 'clue' });
-  assert.equal(g.nodes[0].knowledge, 'observed');
+  applyEngineReveal(g, { reveal: 'partial', rng: () => 0 });
+  assert.equal(g.nodes.find((n) => n.id === 'C').knowledge, 'observed');
+  assert.equal(g.nodes.find((n) => n.id === 'A').knowledge, 'hidden');
   applyEngineReveal(g, { reveal: 'full' });
   assert.ok(g.nodes.every((n) => n.knowledge === 'resolved'));
   assert.ok(g.edges.every((e) => e.knowledge === 'resolved'));
@@ -208,4 +211,21 @@ test('система открывает последний узел цепи и 
     X: 'observed',
     E: 'observed',
   });
+});
+
+test('фронтир: ближайшая причина известного; ветка E конкурирует, когда открыт ребёнок', () => {
+  const four = applySeedVisibility(normalizeTruthGraph(linear4()), { shape: 'linear_4' });
+  assert.equal(pickFrontierReveal(four, () => 0).nodeId, 'C');
+  applyEngineReveal(four, { reveal: 'partial', openedNodes: ['C'], openedEdges: [{ from: 'C', to: 'X' }] });
+  assert.equal(four.nodes.find((n) => n.id === 'C').knowledge, 'observed');
+  assert.equal(pickFrontierReveal(four, () => 0).nodeId, 'B');
+
+  const side = applySeedVisibility(normalizeTruthGraph(linearSide('C')), { shape: 'linear_side' });
+  applyEngineReveal(side, { reveal: 'partial', openedNodes: ['C'], openedEdges: [{ from: 'C', to: 'X' }] });
+  const ids = new Set();
+  ids.add(pickFrontierReveal(side, () => 0).nodeId);
+  ids.add(pickFrontierReveal(side, () => 0.99).nodeId);
+  assert.ok(ids.has('B'));
+  assert.ok(ids.has('E'));
+  assert.equal(remainingHiddenNodeIds(side, ['B', 'E', 'A']).length, 0);
 });

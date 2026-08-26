@@ -11,7 +11,8 @@ import {
   findClosedPlotline,
   reopenClosedPlotline,
   plotCanFade,
-  plotHasActiveProcess,
+  plotHasAttendingProcess,
+  plotsForProcess,
   createErrandPlotline,
   boardHasRoom,
   plotConfig,
@@ -90,11 +91,6 @@ export function linkProcessToPlotline(domain, processId, plotlineId) {
   return plot;
 }
 
-function plotsForProcess(domain, processId) {
-  const id = String(processId);
-  return (domain.plotlines || []).filter((p) => (p.relatedProcessIds || []).includes(id));
-}
-
 function statValue(domain, statId) {
   const v = Number(domain?.stats?.[statId]);
   return Number.isFinite(v) ? v : 50;
@@ -166,6 +162,7 @@ export function planBeats({
       if (isThreeActPlot(plot) && outcome.finished) {
         actMove = applyStoryActMove(plot, {
           trigger: 'process_finished',
+          relation: outcome.plotEngagement,
           aligned: outcome.plotAligned === true,
           finish: outcome.finish || 'ok',
           rng,
@@ -210,7 +207,7 @@ export function planBeats({
     if (plot.kind !== 'story') continue;
     if (taken.has(plot.id)) continue;
     if (slotsUsed >= cap) break;
-    if (isThreeActPlot(plot) && plotHasActiveProcess(domain, plot)) continue;
+    if (isThreeActPlot(plot) && plotHasAttendingProcess(domain, plot)) continue;
     const chance = beatChance(plot, cfg);
     if (rng() >= chance) continue;
     let actMove = null;

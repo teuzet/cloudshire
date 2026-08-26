@@ -5,7 +5,7 @@
  * Форму графа выбирает движок. Маску на посеве тоже: видим X — последнее
  * наблюдаемое следствие главной цепи; в linear_side с шансом ещё боковую причину E.
  * в linear_side с шансом ещё и боковую причину E. Агент knowledge не ставит.
- * Дальше маску двигает applyEngineReveal. resolved — только полная разгадка движком.
+ * Дальше маску двигает applyEngineReveal: фронтир (причина известного) или полное resolved.
  */
 
 export const MASK_STATES = ['hidden', 'observed'];
@@ -439,36 +439,101 @@ export function applyKnowledgeUpdates(graph, updates = []) {
   return graph;
 }
 
-function firstHidden(items) {
-  return items.filter((x) => x.knowledge === 'hidden');
+function isKnown(node) {
+  return node?.knowledge === 'observed' || node?.knowledge === 'resolved';
+}
+
+function knownIds(graph) {
+  return new Set((graph?.nodes || []).filter(isKnown).map((n) => n.id));
+}
+
+/** Скрытые непосредственные причины уже известных узлов. */
+export function listFrontierNodes(graph) {
+  if (!graph?.nodes) return [];
+  const known = knownIds(graph);
+  const out = [];
+  for (const n of graph.nodes) {
+    if (n.knowledge !== 'hidden') continue;
+    const edges = (graph.edges || []).filter((e) => e.from === n.id && known.has(e.to));
+    if (edges.length) out.push({ node: n, edges });
+  }
+  return out;
+}
+
+export function remainingHiddenNodeIds(graph, extraOpen = []) {
+  const extra = new Set((extraOpen || []).map(String));
+  return (graph?.nodes || [])
+    .filter((n) => n.knowledge === 'hidden' && !extra.has(n.id))
+    .map((n) => n.id);
 }
 
 /**
- * Движок сказал, сколько открыть. Если агент сам не разметил — двигаем маску.
- * full + не провал: всё resolved. fail: граф не раскрываем.
+ * Ближайшая к известному концу скрытая причина; при нескольких — случайная.
+ * На линейной цепи это всегда следующий узел к корню от X.
  */
-export function applyEngineReveal(graph, { reveal = 'none', ending = null } = {}) {
+export function pickFrontierReveal(graph, rng = Math.random) {
+  if (!graph?.nodes) return null;
+  let list = listFrontierNodes(graph);
+  if (!list.length) {
+    const hidden = graph.nodes.filter((n) => n.knowledge === 'hidden');
+    if (!hidden.length) return null;
+    const n = hidden[Math.min(hidden.length - 1, Math.floor(rng() * hidden.length))];
+    return { nodeId: n.id, edge: null };
+  }
+  const pick = list[Math.min(list.length - 1, Math.floor(rng() * list.length))];
+  const edge = pick.edges[0] || null;
+  return {
+    nodeId: pick.node.id,
+    edge: edge ? { from: edge.from, to: edge.to } : null,
+  };
+}
+
+function openEdge(graph, from, to) {
+  const edge = findEdge(graph, from, to);
+  if (edge) edge.knowledge = bump(edge.knowledge, 'observed');
+}
+
+function resolveAll(graph) {
+  for (const n of graph.nodes) n.knowledge = 'resolved';
+  for (const e of graph.edges) e.knowledge = 'resolved';
+}
+
+/**
+ * Движок сказал, что открыть. fail / none — маска не двигается.
+ * full — всё resolved. partial — указанные фронтирные узлы, иначе один фронтир.
+ */
+export function applyEngineReveal(
+  graph,
+  { reveal = 'none', ending = null, openedNodes = [], openedEdges = [], rng = Math.random } = {},
+) {
   if (!graph?.nodes) return graph;
   delete graph.hypothesis;
   if (ending === 'fail' || reveal === 'none') return graph;
   if (reveal === 'full') {
-    for (const n of graph.nodes) n.knowledge = 'resolved';
-    for (const e of graph.edges) e.knowledge = 'resolved';
+    resolveAll(graph);
     return graph;
   }
-  const want = reveal === 'partial' ? 2 : 1;
-  const hiddenNodes = firstHidden(graph.nodes);
-  const hiddenEdges = firstHidden(graph.edges);
-  let left = want;
-  for (const n of hiddenNodes) {
-    if (left <= 0) break;
-    n.knowledge = 'observed';
-    left -= 1;
+
+  const nodeIds = (Array.isArray(openedNodes) ? openedNodes : []).map(String).filter(Boolean);
+  const edges = Array.isArray(openedEdges) ? openedEdges : [];
+  if (!nodeIds.length) {
+    const picked = pickFrontierReveal(graph, rng);
+    if (picked?.nodeId) nodeIds.push(picked.nodeId);
+    if (picked?.edge) edges.push(picked.edge);
   }
-  for (const e of hiddenEdges) {
-    if (left <= 0) break;
-    e.knowledge = 'observed';
-    left -= 1;
+  for (const id of nodeIds) {
+    const node = findNode(graph, id);
+    if (node) node.knowledge = bump(node.knowledge, 'observed');
   }
+  for (const e of edges) {
+    if (!e) continue;
+    if (typeof e === 'string' && e.includes('→')) {
+      const [from, to] = e.split('→').map((s) => s.trim());
+      openEdge(graph, from, to);
+    } else if (e.from && e.to) {
+      openEdge(graph, e.from, e.to);
+    }
+  }
+  if (!remainingHiddenNodeIds(graph).length) resolveAll(graph);
   return graph;
 }

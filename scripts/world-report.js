@@ -363,6 +363,8 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
       temperature: p.temperature,
       gravity: p.gravity,
       urgency: p.urgency,
+      escalationLevel: p.escalationLevel,
+      act: p.act,
       kind: p.kind,
       age: plotlineAge(p),
       maxAge: p.maxAgeMonths,
@@ -460,6 +462,7 @@ function printDomain(rep, { dialogTail = 0, dialog = [] } = {}) {
       console.log(
         `  • «${p.title}»${p.kind === 'errand' ? ' (дело)' : ''} T=${p.temperature} ` +
           (p.gravity != null ? `gravity=${p.gravity} urgency=${p.urgency} ` : '') +
+          (p.escalationLevel != null ? `эск=${p.escalationLevel} такт=${p.act} ` : '') +
           `возраст=${p.age ?? '?'}/${p.maxAge ?? '?'}`,
       );
     }
