@@ -206,3 +206,95 @@ test('после срабатывания расписание ставит сл
   assert.equal(plot.nextDueTick, 6);
   assert.equal(plot.beatCount, 1);
 });
+
+test('указ на стык хочет тик один раз на это сопряжение', () => {
+  const plot = { kind: 'order', fireOn: 'conflux_dock', fireChance: 0.9, scheduleEveryMonths: 2 };
+  const docked = { id: 'cf_1', status: 'docked' };
+  assert.equal(orderWantsTick(plot, 10, () => 0, { conflux: docked }).want, true);
+  assert.equal(orderWantsTick(plot, 10, () => 0, { conflux: docked }).scheduled, true);
+  assert.equal(orderWantsTick(plot, 10, () => 0, { conflux: docked }).event, 'conflux_dock');
+  assert.equal(orderWantsTick(plot, 10, () => 0, { conflux: { id: 'cf_1', status: 'approaching' } }).want, false);
+  assert.equal(orderWantsTick(plot, 10, () => 0).want, false);
+  plot.lastFiredConfluxId = 'cf_1';
+  assert.equal(orderWantsTick(plot, 11, () => 0, { conflux: docked }).want, false);
+  assert.equal(orderWantsTick(plot, 12, () => 0, { conflux: { id: 'cf_2', status: 'docked' } }).want, true);
+});
+
+test('стык обнуляет расписание и шанс при нормализации', () => {
+  const domain = {
+    plotlines: [
+      {
+        id: 'o1',
+        title: 'Делегация',
+        kind: 'order',
+        fireOn: 'conflux_dock',
+        fireChance: 0.9,
+        scheduleEveryMonths: 1,
+        nextDueTick: 10,
+      },
+    ],
+  };
+  normalizePlotlines(domain);
+  assert.equal(domain.plotlines[0].fireOn, 'conflux_dock');
+  assert.equal(domain.plotlines[0].fireChance, 0);
+  assert.equal(domain.plotlines[0].scheduleEveryMonths, null);
+  assert.equal(domain.plotlines[0].nextDueTick, null);
+});
+
+test('стык идёт даже без слота месяца', () => {
+  const domain = {
+    plotlines: [
+      { id: 'o_dock', title: 'Учёные', kind: 'order', fireOn: 'conflux_dock' },
+      { id: 'o_maybe', title: 'Налог', kind: 'order', fireChance: 1 },
+    ],
+  };
+  const planned = planOrderTicks({
+    domain,
+    slotsLeft: 0,
+    tick: 8,
+    rng: () => 0,
+    conflux: { id: 'cf_1', status: 'docked' },
+  });
+  assert.equal(planned.length, 1);
+  assert.equal(planned[0].plotId, 'o_dock');
+  assert.equal(planned[0].event, 'conflux_dock');
+});
+
+test('агент порядка ставит fireOn=conflux_dock и обнуляет календарь', async () => {
+  const domain = normalizeDomain({
+    id: 'd1',
+    name: 'Саркум',
+    description: 'Город у края.',
+    state: { modifiers: [], pendingOrderRequests: [] },
+    plotlines: [],
+  });
+  queueOrderRequest(domain, {
+    action: 'create',
+    text: 'При каждом сопряжении отправлять делегацию учёных на соседский остров',
+    tick: 4,
+  });
+  const runtime = {
+    async run({ tools }) {
+      const submit = tools.find((t) => t.name === 'submit_order_card');
+      await submit.handler({
+        title: 'Делегация учёных',
+        synopsis: 'На каждую встречу островов город шлёт учёных.',
+        closeWhen: 'Покровитель отменил.',
+        fireChance: 0.4,
+        scheduleEveryMonths: 2,
+        fireOn: 'conflux_dock',
+        dueNow: true,
+      });
+    },
+  };
+  await resolvePendingOrders({
+    config: { tick: { plot: {} } },
+    runtime,
+    domain,
+    world: { tickIndex: 4, gameDate: { label: 'Год 1, месяц 4' } },
+  });
+  assert.equal(domain.plotlines[0].fireOn, 'conflux_dock');
+  assert.equal(domain.plotlines[0].fireChance, 0);
+  assert.equal(domain.plotlines[0].scheduleEveryMonths, null);
+  assert.equal(domain.plotlines[0].nextDueTick, null);
+});

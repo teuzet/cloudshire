@@ -6,6 +6,10 @@ import {
   parseMysteryJudgeVerdict,
   formatMysteryJudgeCase,
   judgeMysteryCascade,
+  formatMysteryPresentationJudgeCase,
+  judgeMysteryPresentation,
+  formatJudgeRevisionForPrompt,
+  literaryJudgeAccepts,
 } from '../src/game/mysteryJudge.js';
 
 function graph() {
@@ -147,11 +151,16 @@ test('конфиг каскада и агенты judge на месте', () => 
   assert.equal(cfg.mysteryGraph.judgeAttempts, 3);
   assert.equal(cfg.mysteryGraph.generateTries, 6);
   assert.equal(cfg.mysteryGraph.presentationTries, 3);
+  assert.equal(cfg.suspense.judgeAttempts, 3);
   assert.equal(config.agents.mysteryJudge.model, 'gpt-5.6-luna');
   assert.equal(config.agents.mysteryJudgeTerra.model, 'gpt-5.6-terra');
   assert.equal(config.agents.mysteryPresentation.model, 'gpt-5.6-luna');
+  assert.equal(config.agents.mysteryPresentationJudge.model, 'gpt-5.6-luna');
+  assert.equal(config.agents.suspenseJudge.model, 'gpt-5.6-luna');
   assert.equal(config.agents.mysteryStart.reasoningEffort, undefined);
   assert.equal(config.agents.mysteryPresentation.reasoningEffort, undefined);
+  assert.equal(config.agents.mysteryPresentationJudge.reasoningEffort, undefined);
+  assert.equal(config.agents.suspenseJudge.reasoningEffort, undefined);
 });
 
 test('ассоциация в промпте — слабый импульс', () => {
@@ -162,4 +171,69 @@ test('ассоциация в промпте — слабый импульс', (
   assert.match(formatted, /ТИП ТАЙНЫ \(обязателен\): заговор/);
   assert.match(formatted, /очень слабый импульс/);
   assert.equal(formatted.includes('должно читаться'), false);
+});
+
+test('литературный судья принимает PASS и UNCERTAIN, только FAIL гоняет на доработку', () => {
+  assert.equal(literaryJudgeAccepts('PASS'), true);
+  assert.equal(literaryJudgeAccepts('UNCERTAIN'), true);
+  assert.equal(literaryJudgeAccepts('FAIL'), false);
+  assert.equal(literaryJudgeAccepts(null), true);
+});
+
+test('пакет подачи: известные узлы отдельно от скрытых, есть синопсис и хроника', () => {
+  const text = formatMysteryPresentationJudgeCase({
+    title: 'Перекос под крышами',
+    graph: graph(),
+    observedFacts: ['Ярус слышит знамение.'],
+    resolutionFacts: ['Почему гудит вода'],
+    presentation: {
+      synopsis: 'Ярус слышит ночной гул в трубах.',
+      entry: 'В ярусе ночами гудит вода. Откуда звук — неясно.',
+      closeWhen: 'Установлен источник гула.',
+      mootWhen: 'Гул сам стих и больше не возвращается.',
+    },
+  });
+  assert.match(text, /ИЗВЕСТНЫЕ УЗЛЫ/);
+  assert.match(text, /Ярус слышит знамение/);
+  assert.match(text, /СКРЫТЫЕ УЗЛЫ/);
+  assert.match(text, /Цистерну перестали чистить/);
+  assert.match(text, /synopsis: Ярус слышит ночной гул/);
+  assert.match(text, /entry: В ярусе ночами/);
+  assert.match(text, /closeWhen: Установлен источник/);
+  assert.match(text, /mootWhen: Гул сам стих/);
+  assert.equal(text.includes('летающий остров'), false);
+});
+
+test('заметки доработки содержат ошибки судьи и предыдущий текст', () => {
+  const notes = formatJudgeRevisionForPrompt({
+    mechanical: null,
+    judge: {
+      summary: 'синопсис выдаёт виновного',
+      issues: [{ code: 'MASK_LEAK', location: 'synopsis', reason: 'назван Фавор' }],
+    },
+    previous: {
+      synopsis: 'Фавор заставил помощника.',
+      entry: 'Крыши провисли.',
+      closeWhen: 'Узнать всё.',
+      mootWhen: '',
+    },
+  });
+  assert.match(notes, /ДОРАБОТКА/);
+  assert.match(notes, /MASK_LEAK/);
+  assert.match(notes, /Фавор заставил/);
+  assert.match(notes, /mootWhen: \(пусто\)/);
+});
+
+test('литературный судья подачи зовёт mysteryPresentationJudge', async () => {
+  const { runtime, seen } = runtimeQueue([
+    {
+      verdict: 'FAIL',
+      issues: [{ code: 'MASK_LEAK', location: 'synopsis', reason: 'назван виновный' }],
+      summary: 'утечка',
+    },
+  ]);
+  const out = await judgeMysteryPresentation({ runtime, caseText: 'пакет' });
+  assert.equal(out.verdict, 'FAIL');
+  assert.equal(out.issues[0].code, 'MASK_LEAK');
+  assert.deepEqual(seen, ['mysteryPresentationJudge']);
 });

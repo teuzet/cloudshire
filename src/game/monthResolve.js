@@ -39,6 +39,7 @@ import {
 } from './plotEngine.js';
 import { planOrderTicks, pickOrderOutcome } from './orders.js';
 import { resolvePendingOrders } from './orderSmith.js';
+import { fireConfluxDockOrder } from './orderDock.js';
 import { seedPlot, beatPlot, tickOrder, quietMonth, keepStories, fadeQuietPlot } from './storyteller.js';
 import { resolveSuspenseLegacy } from './legacyResolver.js';
 import { scoreMonthStats, factsForStatJudge } from './statJudge.js';
@@ -219,7 +220,7 @@ export async function resolveDomainMonth({
           kind: 'finale',
           title: plot.title,
           text: result.fact.text,
-          note: `история «${plot.title}» кончилась`,
+          note: result.closeReason || 'история дошла до конца',
         });
         if (plot.storyType === 'suspense') {
           suspenseClosures.push({
@@ -280,16 +281,34 @@ export async function resolveDomainMonth({
     }
   }
 
-  // 5. Указы: расписание — всегда, даже сверх лимита; вероятность — только в остаток слотов.
+  // 5. Указы: расписание и сопряжение — всегда, даже сверх лимита; вероятность — только в остаток слотов.
   const orderPlan = planOrderTicks({
     domain: working,
     config,
     slotsLeft: Math.max(0, cap - used),
     tick: world.tickIndex,
+    conflux,
   });
   for (const item of orderPlan) {
     const plot = findPlotline(working, item.plotId);
     if (!plot) continue;
+    if (item.event === 'conflux_dock') {
+      const result = await fireConfluxDockOrder({
+        config,
+        runtime,
+        domain: working,
+        world,
+        plot,
+        conflux,
+        partner,
+        log,
+      });
+      if (result?.fact) {
+        chronicleAdds.push(result.fact);
+        used += 1;
+      }
+      continue;
+    }
     const mode = pickOrderOutcome(working, cfg);
     const result = await tickOrder({
       config,

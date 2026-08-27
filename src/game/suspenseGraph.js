@@ -27,10 +27,19 @@ function slugId(raw, fallback, used) {
   return out;
 }
 
-export function normalizeHiddenPremises(raw) {
+export function hiddenPremisesBudget(depth = 1) {
+  const d = Math.max(1, Math.min(4, Math.round(Number(depth) || 1)));
+  if (d <= 1) return { min: 0, max: 1 };
+  if (d === 2) return { min: 1, max: 2 };
+  if (d === 3) return { min: 2, max: 3 };
+  return { min: 2, max: 4 };
+}
+
+export function normalizeHiddenPremises(raw, depth = null) {
   const list = Array.isArray(raw) ? raw : [];
   const out = [];
   const seen = new Set();
+  const max = depth != null ? hiddenPremisesBudget(depth).max : 6;
   for (const item of list) {
     const text = clip(typeof item === 'string' ? item : item?.text || item?.premise || '', 280);
     if (text.length < 8) continue;
@@ -38,7 +47,7 @@ export function normalizeHiddenPremises(raw) {
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(text);
-    if (out.length >= 6) break;
+    if (out.length >= max) break;
   }
   return out;
 }
@@ -96,11 +105,14 @@ export function ladderFullyRevealed(ladder = []) {
 
 export function judgeSuspenseCore(draft, depth) {
   const d = Math.max(1, Math.min(4, Math.round(Number(depth) || 1)));
+  const budget = hiddenPremisesBudget(d);
+  const offered = normalizeHiddenPremises(draft?.hiddenPremises);
+  if (offered.length > budget.max) return 'hidden_over_budget';
+  const hidden = offered.slice(0, budget.max);
   if (d <= 1) return null;
   const ladder = normalizeDiscoveryLadder(draft?.discoveryLadder, d);
   if (ladder.length !== d) return 'bad_ladder';
-  const hidden = normalizeHiddenPremises(draft?.hiddenPremises);
-  if (hidden.length < Math.min(2, d)) return 'thin_hidden';
+  if (hidden.length < budget.min) return 'thin_hidden';
   const gate = clip(draft?.closureGate, 280);
   if (gate.length < 12) return 'missing_closure';
   const pub = `${draft?.entry || ''} ${draft?.synopsis || ''} ${draft?.closeWhen || ''}`

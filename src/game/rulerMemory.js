@@ -10,13 +10,36 @@ export function rulerMemoryOf(domain) {
   return Array.isArray(list) ? list : [];
 }
 
-export function formatRulerMemoryForPrompt(domain) {
+/** Имя, должность, нрав — один голос для живого разговора и письма месяца. */
+export function formatRulerPersonaForPrompt(domain) {
+  const character = domain?.characters?.[0];
+  if (!character?.name) return '';
+  const title = String(character.title || '').trim() || 'правитель';
+  const city = String(domain?.name || '').trim() || 'города';
+  const about = String(character.description || '').trim();
+  return [
+    `Ты ${character.name}, ${title} города «${city}».`,
+    about,
+    'Говори от первого лица этим человеком. Нрав, привычки и мера почтительности — из описания, не общий шаблон жреца.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+export function formatRulerMemoryForPrompt(domain, { writable = true } = {}) {
   const list = rulerMemoryOf(domain);
   if (!list.length) return '';
-  return [
-    'ТВОЯ ПАМЯТЬ (держись этого, пока не перепишешь):',
-    ...list.map((n) => `- [${n.id}] ${n.text}`),
-  ].join('\n');
+  const header = writable
+    ? 'ТВОЯ ПАМЯТЬ (держись этого, пока не перепишешь):'
+    : 'ТВОЯ ПАМЯТЬ (держись этого; здесь только чтение, не записывай и не стирай заметки):';
+  return [header, ...list.map((n) => `- [${n.id}] ${n.text}`)].join('\n');
+}
+
+/** Общий кусок хода: персоналия + память. Письмо месяца — writable: false. */
+export function formatRulerVoiceForPrompt(domain, { writable = true } = {}) {
+  return [formatRulerPersonaForPrompt(domain), formatRulerMemoryForPrompt(domain, { writable })]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 export function writeRulerMemory(domain, text, { tick = null } = {}) {

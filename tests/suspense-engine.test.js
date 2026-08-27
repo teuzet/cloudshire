@@ -94,6 +94,30 @@ test('judge саспенса depth>=2 требует лестницу и скр�
   assert.equal(judgeSuspenseCore(leak, 3), 'hidden_leak');
 });
 
+test('бюджет hiddenPremises: depth 1 не больше одной посылки', () => {
+  const one = {
+    title: 'Капля',
+    entry: 'У порога вода вернулась к седьмому удару.',
+    synopsis: `${'Дальше история должна жить своей жизнью и не обрываться на полуслове. '.repeat(4)} Удар сбился.`,
+    hiddenPremises: ['Седьмой удар открывает лишний сток в нижний ход.'],
+  };
+  assert.equal(judgeSuspenseCore(one, 1), null);
+  assert.equal(
+    judgeSuspenseCore(
+      {
+        ...one,
+        hiddenPremises: [
+          'Седьмой удар открывает лишний сток в нижний ход.',
+          'Старый обряд передал источник городу.',
+          'Кладка больше не держит воду.',
+        ],
+      },
+      1,
+    ),
+    'hidden_over_budget',
+  );
+});
+
 test('auto-tick deepening не эскалирует сразу, после двух холостых — да', () => {
   assert.equal(autoTickPrefersDeepen('deepening', { unattendedBeats: 0 }), true);
   assert.equal(autoTickPrefersDeepen('deepening', { unattendedBeats: 2 }), false);

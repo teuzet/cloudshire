@@ -24,8 +24,10 @@ test('явный reasoningEffort агента перекрывает дефол�
   assert.equal(resolveReasoningEffort({ reasoningEffort: 'wat' }), undefined);
 });
 
-test('mysteryStart и mysteryPresentation без reasoningEffort', () => {
+test('mysteryStart, presentation и литературные судьи без reasoningEffort', () => {
   const config = loadConfig();
   assert.equal(config.agents.mysteryStart.reasoningEffort, undefined);
   assert.equal(config.agents.mysteryPresentation.reasoningEffort, undefined);
+  assert.equal(config.agents.mysteryPresentationJudge.reasoningEffort, undefined);
+  assert.equal(config.agents.suspenseJudge.reasoningEffort, undefined);
 });

@@ -14,7 +14,7 @@ import { normalizeDiscoveryLadder, normalizeHiddenPremises, judgeSuspenseCore } 
  *   importance  — внутренний масштаб дельт; у трёхтактных зеркало gravity, агенты не ставят
  *   maxAgeMonths / ageMonths — сколько месяцев история живёт без внимания;
  *     срок сам по себе не развязка: выдохшаяся нить гаснет, только если нет дел и упоминаний
- *   closeWhen — что должно случиться, чтобы историю закрыть по существу, не «что писать в последний месяц»
+ *   closeWhen — успешный исход; mootWhen — когда задача потеряла смысл
  *   relatedStats — какие стороны города сейчас в игре (по ним кидается окраска бита)
  */
 
@@ -54,10 +54,12 @@ export function pickStoryType(rng = Math.random) {
 
 /**
  * Тип, который выставил движок: suspense | mystery | default.
- * Default — старые рельсы (поручение, указ, сопряжение, наследие без типа).
+ * Default — поручение, указ, главная нить стыка, наследие без типа.
+ * Нативная городская история остаётся трёхтактной и на доске сопряжения,
+ * пока не станет главной нитью встречи. Contested меняет рассказчика, не тип.
  */
 export function storyTypeOf(plot) {
-  if (!plot || plot.kind !== 'story' || plot.isMainConflux || plot.shared || plot.confluxId) {
+  if (!plot || plot.kind !== 'story' || plot.isMainConflux) {
     return 'default';
   }
   if (THREE_ACT_TYPES.includes(plot.storyType)) return plot.storyType;
@@ -145,7 +147,7 @@ function storyActState(p = {}) {
     ending: ['crit', 'ok', 'fail'].includes(p.ending) ? p.ending : null,
     asksSequel: Boolean(p.asksSequel),
     depth,
-    hiddenPremises: type === 'suspense' ? normalizeHiddenPremises(p.hiddenPremises) : [],
+    hiddenPremises: type === 'suspense' ? normalizeHiddenPremises(p.hiddenPremises, depth) : [],
     discoveryLadder: ladder,
     closureGate: type === 'suspense' ? clipText(p.closureGate, PLOT_HOOK_MAX * 2) : '',
     closureUnlocked: type === 'suspense' ? (depth <= 1 ? true : Boolean(p.closureUnlocked)) : null,
@@ -205,15 +207,19 @@ function clampChance(n, fallback = 0.2) {
 
 function orderCadence(p, config = null) {
   const fallback = Number(config?.tick?.plot?.orders?.defaultChance ?? 0.2);
+  const fireOn = p?.fireOn === 'conflux_dock' ? 'conflux_dock' : null;
   const every = Math.round(Number(p?.scheduleEveryMonths));
-  const scheduled = Number.isInteger(every) && every >= 1 && every <= 12;
+  const scheduled = !fireOn && Number.isInteger(every) && every >= 1 && every <= 12;
   const due = Number(p?.nextDueTick);
+  const lastFired = p?.lastFiredConfluxId ? String(p.lastFiredConfluxId) : null;
   return {
     modifierId: p?.modifierId ? String(p.modifierId) : null,
-    // Регулярность и вероятность взаимоисключающи: расписание = гарантия, шанс = лотерея.
-    fireChance: scheduled ? 0 : clampChance(p?.fireChance, Number.isFinite(fallback) ? fallback : 0.2),
+    fireOn,
+    lastFiredConfluxId: fireOn ? lastFired : null,
+    // Регулярность, вероятность и сопряжение взаимоисключающи.
+    fireChance: fireOn || scheduled ? 0 : clampChance(p?.fireChance, Number.isFinite(fallback) ? fallback : 0.2),
     scheduleEveryMonths: scheduled ? every : null,
-    nextDueTick: Number.isInteger(due) ? due : null,
+    nextDueTick: fireOn ? null : Number.isInteger(due) ? due : null,
   };
 }
 
@@ -326,6 +332,7 @@ export function plotConfig(config) {
       depth4Chance: Math.max(0, Math.min(0.2, Number(p.suspense?.depth4Chance ?? 0.03))),
       depth4MinGravity: Math.max(50, Math.min(100, Math.round(Number(p.suspense?.depth4MinGravity ?? 75)))),
       legacyMinGravity: Math.max(0, Math.min(100, Math.round(Number(p.suspense?.legacyMinGravity ?? 25)))),
+      judgeAttempts: Math.max(1, Math.min(6, Math.round(Number(p.suspense?.judgeAttempts ?? 3)))),
     },
   };
 }
@@ -337,48 +344,62 @@ function normalizeStatIds(raw, config = null) {
   return allowed.size ? uniq.filter((id) => allowed.has(id)) : uniq;
 }
 
+function closedPlotIds(domain) {
+  return new Set((domain?.closedPlotlines || []).map((p) => p?.id).filter(Boolean));
+}
+
+/** Форма карточки на месте: тот же объект, без второй копии. */
+function applyPlotShape(p, config = null) {
+  p.id = p.id || newId('plot');
+  p.title = clipText(p.title || 'Сюжет', PLOT_TITLE_MAX);
+  p.synopsis = clipText(p.synopsis ?? p.summary ?? '', PLOT_SUMMARY_MAX);
+  p.closeWhen = clipText(p.closeWhen, PLOT_HOOK_MAX);
+  p.mootWhen = clipText(p.mootWhen, PLOT_HOOK_MAX);
+  p.kind = PLOT_KINDS.includes(p.kind) ? p.kind : 'story';
+  p.tags = Array.isArray(p.tags) ? p.tags : [];
+  p.relatedStats = normalizeStatIds(p.relatedStats, config);
+  p.chronicleIds = Array.isArray(p.chronicleIds) ? p.chronicleIds.map(String) : [];
+  p.relatedProcessIds = Array.isArray(p.relatedProcessIds) ? p.relatedProcessIds.map(String) : [];
+  p.relatedPlotlineIds = Array.isArray(p.relatedPlotlineIds) ? p.relatedPlotlineIds.map(String) : [];
+  p.importance = clamp100(p.importance, 40);
+  p.maxAgeMonths = Math.max(1, Math.min(36, Math.round(Number(p.maxAgeMonths) || 6)));
+  p.ageMonths = Math.max(0, Math.round(Number(p.ageMonths) || 0));
+  p.temperature = clamp100(p.temperature, 30);
+  p.mirrorOf = p.mirrorOf ? String(p.mirrorOf) : null;
+  p.confluxId = p.confluxId ? String(p.confluxId) : null;
+  p.partnerGone = Boolean(p.partnerGone);
+  p.hostDomainId = p.hostDomainId ? String(p.hostDomainId) : null;
+  p.concernsDomainIds = Array.isArray(p.concernsDomainIds)
+    ? [...new Set(p.concernsDomainIds.map(String))]
+    : [];
+  p.shared = Boolean(p.shared);
+  p.isMainConflux = Boolean(p.isMainConflux);
+  p.sharedReason = p.sharedReason ? String(p.sharedReason) : null;
+  p.plotAwareness = normalizePlotAwarenessMap(p);
+  p.status = 'open';
+  p.createdTick = p.createdTick == null ? null : Number(p.createdTick);
+  p.lastBeatTick = p.lastBeatTick == null ? null : Number(p.lastBeatTick);
+  p.beatCount = Math.max(0, Math.round(Number(p.beatCount) || 0));
+  Object.assign(p, storyActState(p));
+  if (p.kind === 'order') Object.assign(p, orderCadence(p, config));
+  return p;
+}
+
 export function normalizePlotlines(domain, config = null) {
   if (!domain || typeof domain !== 'object') return domain;
   if (!Array.isArray(domain.plotlines)) domain.plotlines = [];
-  domain.plotlines = domain.plotlines
-    .filter((p) => p && typeof p === 'object' && p.status !== 'closed')
-    .map((p) => ({
-      id: p.id || newId('plot'),
-      title: clipText(p.title || 'Сюжет', PLOT_TITLE_MAX),
-      synopsis: clipText(p.synopsis ?? p.summary ?? '', PLOT_SUMMARY_MAX),
-      closeWhen: clipText(p.closeWhen, PLOT_HOOK_MAX),
-      kind: PLOT_KINDS.includes(p.kind) ? p.kind : 'story',
-      tags: Array.isArray(p.tags) ? p.tags : [],
-      relatedStats: normalizeStatIds(p.relatedStats, config),
-      chronicleIds: Array.isArray(p.chronicleIds) ? p.chronicleIds.map(String) : [],
-      relatedProcessIds: Array.isArray(p.relatedProcessIds)
-        ? p.relatedProcessIds.map(String)
-        : [],
-      relatedPlotlineIds: Array.isArray(p.relatedPlotlineIds)
-        ? p.relatedPlotlineIds.map(String)
-        : [],
-      importance: clamp100(p.importance, 40),
-      maxAgeMonths: Math.max(1, Math.min(36, Math.round(Number(p.maxAgeMonths) || 6))),
-      ageMonths: Math.max(0, Math.round(Number(p.ageMonths) || 0)),
-      temperature: clamp100(p.temperature, 30),
-      mirrorOf: p.mirrorOf ? String(p.mirrorOf) : null,
-      confluxId: p.confluxId ? String(p.confluxId) : null,
-      partnerGone: Boolean(p.partnerGone),
-      hostDomainId: p.hostDomainId ? String(p.hostDomainId) : null,
-      concernsDomainIds: Array.isArray(p.concernsDomainIds)
-        ? [...new Set(p.concernsDomainIds.map(String))]
-        : [],
-      shared: Boolean(p.shared),
-      isMainConflux: Boolean(p.isMainConflux),
-      sharedReason: p.sharedReason ? String(p.sharedReason) : null,
-      plotAwareness: normalizePlotAwarenessMap(p),
-      status: 'open',
-      createdTick: p.createdTick == null ? null : Number(p.createdTick),
-      lastBeatTick: p.lastBeatTick == null ? null : Number(p.lastBeatTick),
-      beatCount: Math.max(0, Math.round(Number(p.beatCount) || 0)),
-      ...storyActState(p),
-      ...(p.kind === 'order' ? orderCadence(p, config) : {}),
-    }));
+  const closedIds = closedPlotIds(domain);
+  const seen = new Set();
+  const next = [];
+  for (const p of domain.plotlines) {
+    if (!p || typeof p !== 'object' || p.status === 'closed') continue;
+    if (p.id && closedIds.has(p.id)) continue;
+    if (p.id && seen.has(p.id)) continue;
+    applyPlotShape(p, config);
+    if (p.id) seen.add(p.id);
+    next.push(p);
+  }
+  domain.plotlines = next;
   return domain;
 }
 
@@ -387,6 +408,7 @@ export function createPlotline({
   synopsis = '',
   summary = '', // legacy-алиас, уйдёт вместе со старым режиссёром
   closeWhen = '',
+  mootWhen = '',
   kind = 'story',
   tags = [],
   relatedStats = [],
@@ -406,6 +428,8 @@ export function createPlotline({
   fireChance = null,
   scheduleEveryMonths = null,
   nextDueTick = null,
+  fireOn = null,
+  lastFiredConfluxId = null,
   storyType = null,
   act = 1,
   urgency = null,
@@ -440,6 +464,7 @@ export function createPlotline({
     title: clipText(title || (resolvedKind === 'order' ? 'Порядок' : 'Сюжет'), PLOT_TITLE_MAX),
     synopsis: clipText(synopsis || summary, PLOT_SUMMARY_MAX),
     closeWhen: clipText(closeWhen, PLOT_HOOK_MAX),
+    mootWhen: clipText(mootWhen, PLOT_HOOK_MAX),
     kind: resolvedKind,
     tags: Array.isArray(tags) ? tags : [],
     relatedStats: normalizeStatIds(relatedStats, config),
@@ -467,7 +492,7 @@ export function createPlotline({
     beatCount: 0,
     ...(resolvedKind === 'order'
       ? orderCadence(
-          { modifierId, fireChance, scheduleEveryMonths, nextDueTick },
+          { modifierId, fireChance, scheduleEveryMonths, nextDueTick, fireOn, lastFiredConfluxId },
           config,
         )
       : {}),
@@ -621,6 +646,7 @@ function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } =
     title: plot.title,
     synopsis: plot.synopsis || '',
     closeWhen: plot.closeWhen || '',
+    mootWhen: plot.mootWhen || '',
     kind: plot.kind || 'story',
     tags: Array.isArray(plot.tags) ? plot.tags : [],
     relatedStats: Array.isArray(plot.relatedStats) ? [...plot.relatedStats] : [],
@@ -647,6 +673,8 @@ function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } =
           fireChance: plot.fireChance,
           scheduleEveryMonths: plot.scheduleEveryMonths ?? null,
           nextDueTick: plot.nextDueTick ?? null,
+          fireOn: plot.fireOn || null,
+          lastFiredConfluxId: plot.lastFiredConfluxId || null,
         }
       : {}),
     status: 'closed',
@@ -677,6 +705,7 @@ export function reopenClosedPlotline(domain, closedOrId) {
       PLOT_SUMMARY_MAX,
     ),
     closeWhen: clipText(closed.closeWhen, PLOT_HOOK_MAX),
+    mootWhen: clipText(closed.mootWhen, PLOT_HOOK_MAX),
     kind: PLOT_KINDS.includes(closed.kind) ? closed.kind : 'story',
     tags: Array.isArray(closed.tags) ? closed.tags : [],
     relatedStats: Array.isArray(closed.relatedStats) ? [...closed.relatedStats] : [],
@@ -1033,7 +1062,7 @@ export function formatBoardForPrompt(domain) {
 }
 
 /**
- * Компактная доска для речи: без id, температур и прочей механики.
+ * Компактная доска для речи правителя: id для инструментов, без заголовка нити.
  * @param {(ids: string[]) => string} statsFeel — качественное описание статов
  */
 export function formatBoardForSpeech(domain, { statsFeel = null, max = 8, viewerId = null } = {}) {
@@ -1071,7 +1100,7 @@ export function formatBoardForSpeech(domain, { statsFeel = null, max = 8, viewer
             ? 'дела нет'
             : 'поручения ещё нет';
       const syn = clipText(p.synopsis || 'только началось', 180);
-      return `«${p.title}» [${p.id}] (${kind}, ${duty}): ${syn}${feel}`;
+      return `[${p.id}] (${kind}, ${duty}): ${syn}${feel}`;
     })
     .join('\n');
 }

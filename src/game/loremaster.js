@@ -48,9 +48,10 @@ function formatStoryForLoremaster(p, viewerId = null) {
           ? 'общая история сопряжения'
           : 'история';
   const lines = [
-    `«${p.title}» (${kind})`,
+    `Нить ${p.id} (${kind})`,
     p.synopsis ? `Как сейчас: ${p.synopsis}` : null,
-    p.closeWhen ? `Закроется, когда: ${p.closeWhen}` : null,
+    p.closeWhen ? `Успешный исход: ${p.closeWhen}` : null,
+    p.mootWhen ? `Теряет смысл, когда: ${p.mootWhen}` : null,
   ];
   if (!own) {
     lines.push(

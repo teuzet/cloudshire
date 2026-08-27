@@ -108,7 +108,7 @@ import {
   tickNewsStyleHint,
 } from './newsSchedule.js';
 import {
-  formatRulerMemoryForPrompt,
+  formatRulerVoiceForPrompt,
   writeRulerMemory,
   forgetRulerMemory,
   shouldRulerAskPatron,
@@ -856,8 +856,8 @@ function characterTools(domain, storage, character, ctx) {
     {
       name: 'declare_standing_order',
       description:
-        'Заявка на постоянный порядок / правило (запрет, осмотр, регулярный обряд). ' +
-        'Карточку и каденс соберёт город к новостям месяца. Не для строек, судов, походов — те через declare_process.',
+        'Заявка на постоянный порядок / правило (запрет, осмотр, регулярный обряд, «при каждом сопряжении делайте X»). ' +
+        'Карточку и каденс соберёт город к новостям месяца. Не для разовой стройки, суда, похода — те через declare_process.',
       parameters: {
         type: 'object',
         required: ['text'],
@@ -2264,13 +2264,11 @@ export class GameApp {
 
     // Здесь только данные хода. Правила поведения живут в instructions агента.
     const extraSystem = [
-      `Ты ${character.name}, ${character.title || 'правитель'} города «${domain.name}».`,
-      character.description,
+      formatRulerVoiceForPrompt(domain, { writable: true }),
       world?.gameDate?.label ? `ДАТА СЕЙЧАС: ${world.gameDate.label}.` : '',
       patronLine,
       confluxCanon,
       undockCanon,
-      formatRulerMemoryForPrompt(domain),
       `Письма о месяце (движок шлёт сам): ${newsMonths}` +
         `${newsSched.alsoOnCritical ? '; также если случится совсем важное' : ''}. ` +
         'Покровитель просит иначе — set_news_schedule. Сближение островов не глуши.',
@@ -2286,6 +2284,7 @@ export class GameApp {
         ? [
             'ЖИВЫЕ НИТИ СЮЖЕТА (внутренняя правда; вплетай в речь, не рапортуй списком):',
             plotBrief,
+            'id нити — только в инструменты (plotId). В речи не называй историю заголовком и не бери название в кавычки: говори о месте, людях и случившемся.',
             'Каждая нить сама по себе. Общее место или общие люди не делают их одним делом.',
             'Приказ по истории без поручения — новое дело с plotId этой истории, не правка соседнего.',
             conflux
@@ -2653,8 +2652,7 @@ export class GameApp {
         tools: [],
         maxTurns: 1,
         extraSystem: [
-          `Ты ${character.name}, ${character.title || 'правитель'} города «${domain.name}».`,
-          character.description,
+          formatRulerVoiceForPrompt(domain, { writable: false }),
           addressHint,
           undockSystem,
           'Ты пишешь покровителю новости месяца живой речью, как человек, а не сводку событий.',
@@ -2665,7 +2663,9 @@ export class GameApp {
             const board = formatBoardForSpeech(domain, {
               statsFeel: (ids) => statEpithetsShort(domain.stats || {}, this.config, ids),
             });
-            return board ? `Живые нити города (для памяти, не пересказывай списком):\n${board}` : '';
+            return board
+              ? `Живые нити города (для памяти, не пересказывай списком; в речи без заголовков в кавычках):\n${board}`
+              : '';
           })(),
         ]
           .filter(Boolean)
@@ -2735,8 +2735,7 @@ export class GameApp {
         scene: firstSight ? 'conflux_announce' : 'conflux_approach',
         domainId: domain.id,
         extraSystem: [
-          `Ты ${character.name}, ${character.title || 'правитель'} города «${domain.name}».`,
-          character.description || '',
+          formatRulerVoiceForPrompt(domain, { writable: false }),
           addressHint,
           'Ты пишешь покровителю живой речью, как человек, а не сводку.',
           `Не начинай письмо с «${character.name}:».`,

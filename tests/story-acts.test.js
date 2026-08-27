@@ -84,21 +84,21 @@ test('тип истории: половина тайна, половина са�
   assert.equal(pickStoryType(() => 0.5), 'suspense');
 });
 
-test('трёхтактными не бывают указы, поручения и сопряжение', () => {
+test('трёхтактными не бывают указы, поручения и главная нить стыка', () => {
   assert.equal(isThreeActPlot(three()), true);
   assert.equal(isThreeActPlot(three({ kind: 'errand' })), false);
-  assert.equal(isThreeActPlot(three({ shared: true })), false);
-  assert.equal(isThreeActPlot(three({ confluxId: 'c1' })), false);
+  assert.equal(isThreeActPlot(three({ shared: true })), true);
+  assert.equal(isThreeActPlot(three({ confluxId: 'c1' })), true);
   assert.equal(isThreeActPlot(three({ isMainConflux: true })), false);
   assert.equal(isThreeActPlot({ kind: 'story', title: 'старая' }), false);
 });
 
-test('движок ставит default поручениям, указам, сопряжению и наследию', () => {
+test('движок ставит default поручениям, указам, главной нити стыка и наследию', () => {
   assert.equal(createPlotline({ title: 'Дело', kind: 'errand' }).storyType, 'default');
   assert.equal(createPlotline({ title: 'Указ', kind: 'order' }).storyType, 'default');
   assert.equal(createPlotline({ title: 'Стык', kind: 'story', confluxId: 'c1' }).storyType, 'default');
   assert.equal(createPlotline({ title: 'Стык', kind: 'story', isMainConflux: true }).storyType, 'default');
-  assert.equal(createPlotline({ title: 'Общая', kind: 'story', shared: true, storyType: 'suspense' }).storyType, 'default');
+  assert.equal(createPlotline({ title: 'Общая', kind: 'story', shared: true, storyType: 'suspense' }).storyType, 'suspense');
   assert.equal(createPlotline({ title: 'Старая', kind: 'story' }).storyType, 'default');
   assert.equal(createPlotline({ title: 'Гул', kind: 'story', storyType: 'suspense' }).storyType, 'suspense');
   assert.equal(createPlotline({ title: 'Тайна', kind: 'story', storyType: 'mystery' }).storyType, 'mystery');
@@ -106,6 +106,7 @@ test('движок ставит default поручениям, указам, со
   assert.equal(plotBeatAgentId({ kind: 'story', isMainConflux: true }), 'storyBeat');
   assert.equal(plotBeatAgentId(three()), 'suspenseBeat');
   assert.equal(plotBeatAgentId(three({ storyType: 'mystery' })), 'mysteryBeat');
+  assert.equal(plotBeatAgentId(three({ confluxId: 'c1' })), 'suspenseBeat');
   assert.equal(storyTypeOf({ kind: 'story' }), 'default');
 });
 
@@ -237,6 +238,18 @@ test('саспенс depth 1: DIRECT успех сразу закрывает', 
   const move = applyStoryActMove(plot, {
     trigger: 'process_finished',
     relation: 'DIRECT',
+    finish: 'ok',
+    config: ACTS,
+  });
+  assert.equal(move.ending, 'ok');
+  assert.equal(plot.ending, 'ok');
+});
+
+test('саспенс depth 1: RELEVANT успех в такте 2 закрывает', () => {
+  const plot = three({ depth: 1, act: 2, closureUnlocked: true });
+  const move = applyStoryActMove(plot, {
+    trigger: 'process_finished',
+    relation: 'RELEVANT',
     finish: 'ok',
     config: ACTS,
   });

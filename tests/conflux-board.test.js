@@ -14,7 +14,7 @@ import {
   isSharedPlot,
   chronicleReceiversForBeat,
 } from '../src/game/confluxBoard.js';
-import { createPlotline, isOrderPlot } from '../src/game/plotlines.js';
+import { createPlotline, isOrderPlot, isThreeActPlot, normalizePlotlines, closePlotline, formatBoardForSpeech } from '../src/game/plotlines.js';
 
 function domain(id, extra = {}) {
   return {
@@ -203,4 +203,63 @@ test('до стыковки хроника нити не идёт в чужой 
     docked.map((d) => d.id).sort(),
     ['a', 'b'],
   );
+});
+
+test('нативный саспенс на доске сопряжения сохраняет тип и скрытые посылки', () => {
+  const plot = createPlotline({
+    title: 'Седьмая капля',
+    kind: 'story',
+    storyType: 'suspense',
+    depth: 1,
+    hiddenPremises: ['Седьмой удар открывает лишний сток.'],
+    closeWhen: 'Происхождение удара установлено.',
+    mootWhen: 'Порог закрыли и обряд больше не держат.',
+  });
+  const a = domain('a', { plotlines: [plot] });
+  const c = conflux({ status: 'approaching' });
+  takeDomainBoardIntoConflux(a, c);
+  const live = c.plotlines[0];
+  assert.equal(live, plot);
+  assert.equal(isThreeActPlot(live), true);
+  assert.equal(live.storyType, 'suspense');
+  assert.equal(live.hiddenPremises.length, 1);
+  normalizePlotlines(c);
+  assert.equal(c.plotlines[0], live);
+  assert.equal(live.storyType, 'suspense');
+  assert.equal(live.hiddenPremises[0], 'Седьмой удар открывает лишний сток.');
+  assert.equal(live.mootWhen.includes('обряд'), true);
+});
+
+test('закрытие на гидратированной доске не оставляет открытую копию', () => {
+  const plot = createPlotline({
+    title: 'Седьмая капля',
+    kind: 'story',
+    storyType: 'suspense',
+    depth: 1,
+    hostDomainId: 'a',
+  });
+  const a = domain('a');
+  const c = conflux({ status: 'approaching' });
+  c.plotlines = [plot];
+  plot.confluxId = c.id;
+  plot.hostDomainId = 'a';
+  hydrateDomainFromConflux(a, c, { mode: 'month' });
+  assert.equal(a.plotlines[0], plot);
+  closePlotline(a, plot.id, { tick: 21, reason: 'успех' });
+  dehydrateDomainToConflux(a, c);
+  assert.equal(c.plotlines.some((p) => p.id === plot.id), false);
+  assert.equal(c.closedPlotlines.filter((p) => p.id === plot.id).length, 1);
+});
+
+test('речь правителя не отдаёт заголовок нити в кавычках', () => {
+  const plot = createPlotline({
+    title: 'Седьмая капля',
+    kind: 'story',
+    storyType: 'suspense',
+    synopsis: 'После обряда вода вернулась к седьмому удару.',
+  });
+  const speech = formatBoardForSpeech({ plotlines: [plot] });
+  assert.equal(speech.includes('«Седьмая капля»'), false);
+  assert.equal(speech.includes(plot.id), true);
+  assert.equal(speech.includes('седьмому удару'), true);
 });

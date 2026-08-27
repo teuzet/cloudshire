@@ -75,14 +75,21 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
         {
           role: 'user',
           content: [
-            `История «${plot.title}» (${plot.storyType || ''}).`,
-            `Кончится, когда: ${plot.closeWhen || '—'}`,
+            `История (${plot.storyType || ''}).`,
+            `Успешный исход: ${plot.closeWhen || '—'}`,
+            plot.mootWhen ? `История теряет смысл, когда: ${plot.mootWhen}` : '',
             plot.synopsis ? `Сейчас: ${plot.synopsis}` : '',
+            plot.storyType === 'suspense' && plot.closureGate
+              ? `Порог закрытия: ${plot.closureGate}`
+              : '',
+            plot.storyType === 'suspense' && plot.hiddenPremises?.length
+              ? `Скрытые посылки (двигатель, не для хроники): ${plot.hiddenPremises.join(' | ')}`
+              : '',
             `Дело: ${process.summary || ''}`,
             process.goal ? `Цель дела: ${process.goal}` : '',
             process.detail ? `Поручение: ${process.detail}` : '',
             'Верни ровно DIRECT, RELEVANT или UNRELATED по цели process, не по броску.',
-            'DIRECT: успех сам устанавливает ключевую часть closeWhen.',
+            'DIRECT: успех сам устанавливает closeWhen или делает историю бессмысленной (mootWhen).',
             'RELEVANT: естественный промежуточный шаг к closeWhen, сам его не закрывает.',
             'UNRELATED: даже полный успех closeWhen не двигает. Не ставь RELEVANT за случайную улику, которую рассказчик мог бы придумать.',
           ]

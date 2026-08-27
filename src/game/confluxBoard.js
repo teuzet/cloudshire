@@ -459,14 +459,16 @@ export function processesOwnedBy(conflux, domainId) {
 export function hydrateDomainFromConflux(domain, conflux, { mode = 'month' } = {}) {
   if (!domain || !conflux) return domain;
   normalizeConfluxBoard(conflux);
+  const closedIds = new Set((conflux.closedPlotlines || []).map((p) => p?.id).filter(Boolean));
   const orders = (domain.plotlines || []).filter((p) => isOrderPlot(p));
-  const extra =
+  const extra = (
     mode === 'ruler'
       ? (conflux.plotlines || []).filter((p) => plotVisibleToRuler(p, domain.id, conflux))
-      : localPlotsForMonth(conflux, domain.id);
-  domain.plotlines = [...orders, ...extra];
+      : localPlotsForMonth(conflux, domain.id)
+  ).filter((p) => p && !closedIds.has(p.id));
+  const seenPlots = new Set(orders.map((p) => p.id));
+  domain.plotlines = [...orders, ...extra.filter((p) => !seenPlots.has(p.id))];
 
-  const extraIds = new Set(extra.map((p) => p.id));
   const extraProcIds = new Set();
   for (const p of extra) {
     for (const id of asIdList(p.relatedProcessIds)) extraProcIds.add(id);
@@ -516,8 +518,27 @@ export function dehydrateDomainToConflux(domain, conflux) {
   }
   domain.plotlines = orders;
 
-  const plotById = new Map((conflux.plotlines || []).map((p) => [p.id, p]));
-  for (const p of movedPlots) plotById.set(p.id, p);
+  const closedById = new Map();
+  for (const p of conflux.closedPlotlines || []) {
+    if (p?.id) closedById.set(p.id, p);
+  }
+  for (const p of domain.closedPlotlines || []) {
+    if (isOrderPlot(p)) continue;
+    if (!p?.id) continue;
+    closedById.set(p.id, p);
+  }
+  conflux.closedPlotlines = [...closedById.values()];
+  const skipOpen = new Set(closedById.keys());
+
+  const plotById = new Map();
+  for (const p of conflux.plotlines || []) {
+    if (!p?.id || skipOpen.has(p.id) || p.status === 'closed') continue;
+    plotById.set(p.id, p);
+  }
+  for (const p of movedPlots) {
+    if (!p?.id || skipOpen.has(p.id) || p.status === 'closed') continue;
+    plotById.set(p.id, p);
+  }
   conflux.plotlines = [...plotById.values()];
 
   const stay = [];
@@ -530,27 +551,23 @@ export function dehydrateDomainToConflux(domain, conflux) {
   const procById = new Map((conflux.processes || []).map((p) => [p.id, p]));
   for (const pr of movedProcs) procById.set(pr.id, pr);
   conflux.processes = [...procById.values()];
-
-  const keepClosed = [];
-  for (const p of domain.closedPlotlines || []) {
-    if (isOrderPlot(p)) keepClosed.push(p);
-    else {
-      if (!conflux.closedPlotlines.some((x) => x.id === p.id)) conflux.closedPlotlines.push(p);
-    }
-  }
-  domain.closedPlotlines = keepClosed;
+  domain.closedPlotlines = (domain.closedPlotlines || []).filter((p) => isOrderPlot(p));
 }
 
 export function takeDomainBoardIntoConflux(domain, conflux) {
   normalizeConfluxBoard(conflux);
   const keepPlots = [];
+  const existingPlotIds = new Set((conflux.plotlines || []).map((p) => p.id));
   for (const p of domain.plotlines || []) {
     if (isOrderPlot(p)) {
       keepPlots.push(p);
       continue;
     }
     stampPlotOnConflux(p, conflux, domain.id);
-    conflux.plotlines.push(p);
+    if (!existingPlotIds.has(p.id)) {
+      conflux.plotlines.push(p);
+      existingPlotIds.add(p.id);
+    }
   }
   domain.plotlines = keepPlots;
 
@@ -559,7 +576,7 @@ export function takeDomainBoardIntoConflux(domain, conflux) {
     if (isOrderPlot(p)) keepClosed.push(p);
     else {
       p.confluxId = conflux.id;
-      conflux.closedPlotlines.push(p);
+      if (!conflux.closedPlotlines.some((x) => x.id === p.id)) conflux.closedPlotlines.push(p);
     }
   }
   domain.closedPlotlines = keepClosed;
@@ -572,7 +589,7 @@ export function takeDomainBoardIntoConflux(domain, conflux) {
   for (const pr of domain.state?.pendingActions || []) {
     if (movedPlotProcIds.has(String(pr.id))) {
       stampProcessOnConflux(pr, conflux, domain.id);
-      conflux.processes.push(pr);
+      if (!conflux.processes.some((x) => x.id === pr.id)) conflux.processes.push(pr);
     } else keepProcs.push(pr);
   }
   domain.state.pendingActions = keepProcs;

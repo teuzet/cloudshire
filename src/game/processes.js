@@ -48,6 +48,9 @@ export function normalizeProcess(action, config = null) {
   if (!action.initiative) action.initiative = 'patron';
   action.blessed = Boolean(action.blessed);
   action.intel = Boolean(action.intel);
+  if (action.sourceOrderId) action.sourceOrderId = String(action.sourceOrderId);
+  else action.sourceOrderId = null;
+  action.slotless = Boolean(action.slotless) || Boolean(action.sourceOrderId);
   if (action.objectiveMonths == null) {
     action.objectiveMonths = action.expectedMonths;
   } else {
@@ -471,12 +474,12 @@ export function recentlyClosedProcesses(domain, currentTick, { withinTicks = 2 }
 
 export function canStartProcess(domain, config = null) {
   const max = maxActiveProcesses(config);
-  const active = activeProcesses(domain, config);
+  const occupying = activeProcesses(domain, config).filter((a) => !a.slotless);
   return {
-    ok: active.length < max,
-    active: active.length,
+    ok: occupying.length < max,
+    active: occupying.length,
     max,
-    busy: active.map((a) => a.summary),
+    busy: occupying.map((a) => a.summary),
   };
 }
 

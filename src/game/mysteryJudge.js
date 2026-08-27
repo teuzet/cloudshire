@@ -1,6 +1,9 @@
 /**
  * Каскад валидации CORE тайны: Luna — дешёвый rejector, иначе Terra — acceptor.
  * Judge не чинит историю, не видит лор города и не оценивает подачу.
+ *
+ * Литературный судья подачи (Luna): синопсис/хроника только из известных узлов,
+ * хроника оставляет зацепку. FAIL не отсеивает core — возврат сторителлеру на доработку.
  */
 
 import { getLogger } from '../log.js';
@@ -31,7 +34,17 @@ export const MYSTERY_JUDGE_CODES = [
   'OTHER',
 ];
 
-const CODE_SET = new Set(MYSTERY_JUDGE_CODES);
+export const MYSTERY_PRESENTATION_JUDGE_CODES = [
+  'MASK_LEAK',
+  'SYNOPSIS_NOT_FROM_KNOWN',
+  'ENTRY_NOT_FROM_KNOWN',
+  'ENTRY_NO_HOOK',
+  'CLOSE_WHEN_LEAK',
+  'CLOSE_WHEN_COMPOUND',
+  'MOOT_WHEN_MISSING',
+  'MOOT_WHEN_DUP',
+  'OTHER',
+];
 
 function clip(s, max) {
   const t = String(s ?? '').trim();
@@ -39,12 +52,12 @@ function clip(s, max) {
   return `${t.slice(0, max).replace(/[\s,;:—-]+$/, '')}…`;
 }
 
-function asCode(raw) {
-  const c = String(raw || '').trim().toUpperCase().replace(/\s+/g, '_');
-  return CODE_SET.has(c) ? c : 'OTHER';
-}
-
-export function parseMysteryJudgeVerdict(raw) {
+export function parseJudgeVerdict(raw, codes = MYSTERY_JUDGE_CODES) {
+  const codeSet = new Set(codes);
+  const asCode = (value) => {
+    const c = String(value || '').trim().toUpperCase().replace(/\s+/g, '_');
+    return codeSet.has(c) ? c : 'OTHER';
+  };
   const verdict = String(raw?.verdict || '').trim().toUpperCase();
   const summary = clip(raw?.summary, 400);
   const issues = [];
@@ -73,6 +86,47 @@ export function parseMysteryJudgeVerdict(raw) {
     };
   }
   return { verdict, issues, summary };
+}
+
+export function parseMysteryJudgeVerdict(raw) {
+  return parseJudgeVerdict(raw, MYSTERY_JUDGE_CODES);
+}
+
+/** Литературный Luna: только FAIL гоняет на доработку. PASS и UNCERTAIN принимают. */
+export function literaryJudgeAccepts(verdict) {
+  return String(verdict || '').toUpperCase() !== 'FAIL';
+}
+
+export function formatJudgeRevisionForPrompt(revision) {
+  if (!revision) return null;
+  const prev = revision.previous || {};
+  const lines = [
+    'ДОРАБОТКА. Предыдущий текст не принят. Исправь указанные ошибки.',
+    'Не меняй уже принятый core / режиссуру. Новых фактов не выдумывай.',
+  ];
+  if (revision.mechanical) lines.push(`Технический отсев: ${revision.mechanical}`);
+  if (revision.judge?.summary) lines.push(`Судья: ${revision.judge.summary}`);
+  for (const issue of revision.judge?.issues || []) {
+    const loc = issue.location ? ` ${issue.location}` : '';
+    lines.push(`- [${issue.code}]${loc} — ${issue.reason}`);
+  }
+  const dump = [
+    prev.title ? `title: ${prev.title}` : null,
+    prev.synopsis ? `synopsis: ${prev.synopsis}` : null,
+    prev.entry ? `entry: ${prev.entry}` : null,
+    prev.closeWhen ? `closeWhen: ${prev.closeWhen}` : null,
+    prev.mootWhen != null && prev.mootWhen !== undefined
+      ? `mootWhen: ${String(prev.mootWhen).trim() || '(пусто)'}`
+      : null,
+    Array.isArray(prev.hiddenPremises) && prev.hiddenPremises.length
+      ? `hiddenPremises:\n${prev.hiddenPremises.map((h) => `- ${h}`).join('\n')}`
+      : null,
+  ].filter(Boolean);
+  if (dump.length) {
+    lines.push('', 'Предыдущий текст:');
+    lines.push(...dump);
+  }
+  return lines.join('\n');
 }
 
 function formatAnchors(anchors = []) {
@@ -140,10 +194,14 @@ export function formatMysteryJudgeCase({
     .join('\n');
 }
 
-function verdictTool() {
+function verdictTool({
+  codes = MYSTERY_JUDGE_CODES,
+  name = 'submit_mystery_verdict',
+  description = 'Вердикт по уже написанной тайне. Историю не чини и не переписывай.',
+} = {}) {
   return {
-    name: 'submit_mystery_verdict',
-    description: 'Вердикт по уже написанной тайне. Историю не чини и не переписывай.',
+    name,
+    description,
     parameters: {
       type: 'object',
       required: ['verdict', 'issues', 'summary'],
@@ -160,7 +218,7 @@ function verdictTool() {
             type: 'object',
             required: ['code', 'reason'],
             properties: {
-              code: { type: 'string', description: `Один из: ${MYSTERY_JUDGE_CODES.join(', ')}` },
+              code: { type: 'string', description: `Один из: ${codes.join(', ')}` },
               location: { type: 'string', description: 'Узел, ребро или поле: C, A → B, X, entry…' },
               reason: { type: 'string', description: 'Почему это ошибка. Без предложения исправления.' },
             },
@@ -172,19 +230,24 @@ function verdictTool() {
   };
 }
 
-export async function runMysteryJudge({
+export async function runVerdictJudge({
   runtime,
   agentId,
   caseText,
   extraUser = '',
   log: parentLog,
   domainId = null,
+  codes = MYSTERY_JUDGE_CODES,
+  scene = 'mystery_judge',
+  scope = 'mystery.judge',
+  toolName = 'submit_mystery_verdict',
+  toolDescription = 'Вердикт. Историю не чини и не переписывай.',
 } = {}) {
-  const log = (parentLog || getLogger()).child({ scope: 'mystery.judge', agentId });
+  const log = (parentLog || getLogger()).child({ scope, agentId });
   const draft = { data: null };
-  const tool = verdictTool();
+  const tool = verdictTool({ codes, name: toolName, description: toolDescription });
   tool.handler = async (args) => {
-    draft.data = parseMysteryJudgeVerdict(args);
+    draft.data = parseJudgeVerdict(args, codes);
     return { ok: true };
   };
   try {
@@ -192,34 +255,40 @@ export async function runMysteryJudge({
       agentId,
       tools: [tool],
       maxTurns: 2,
-      toolChoice: { type: 'function', function: { name: 'submit_mystery_verdict' } },
+      toolChoice: { type: 'function', function: { name: toolName } },
       log,
-      scene: 'mystery_judge',
+      scene,
       domainId,
       extraSystem: '',
       userMessages: [
         {
           role: 'user',
-          content: [extraUser, caseText, 'Вызови submit_mystery_verdict. Историю не чини.']
+          content: [extraUser, caseText, `Вызови ${toolName}. Историю не чини.`]
             .filter(Boolean)
             .join('\n\n'),
         },
       ],
     });
   } catch (err) {
-    log.warn('mystery.judge_failed', { agentId, error: err.message });
-    return parseMysteryJudgeVerdict({
-      verdict: 'UNCERTAIN',
-      summary: err.message || 'сбой валидатора',
-    });
+    log.warn('seed.judge_failed', { agentId, error: err.message });
+    return parseJudgeVerdict(
+      { verdict: 'UNCERTAIN', summary: err.message || 'сбой валидатора' },
+      codes,
+    );
   }
   if (!draft.data) {
-    return parseMysteryJudgeVerdict({
-      verdict: 'UNCERTAIN',
-      summary: 'валидатор не вернул вердикт',
-    });
+    return parseJudgeVerdict({ verdict: 'UNCERTAIN', summary: 'валидатор не вернул вердикт' }, codes);
   }
   return draft.data;
+}
+
+export async function runMysteryJudge(opts = {}) {
+  return runVerdictJudge({
+    ...opts,
+    codes: opts.codes || MYSTERY_JUDGE_CODES,
+    scene: opts.scene || 'mystery_judge',
+    scope: opts.scope || 'mystery.judge',
+  });
 }
 
 /**
@@ -270,7 +339,7 @@ export async function judgeMysteryCascade({
   return { accepted, luna, terra };
 }
 
-export function summarizeJudgeAttempt({ luna, terra, accepted } = {}) {
+export function summarizeJudgeAttempt({ luna, terra, accepted, literary } = {}) {
   return {
     accepted: Boolean(accepted),
     lunaJudge: luna
@@ -279,5 +348,94 @@ export function summarizeJudgeAttempt({ luna, terra, accepted } = {}) {
     terraJudge: terra
       ? { verdict: terra.verdict, issues: terra.issues, summary: terra.summary }
       : null,
+    literaryJudge: literary
+      ? { verdict: literary.verdict, issues: literary.issues, summary: literary.summary }
+      : null,
   };
+}
+
+function listNodes(nodes, empty) {
+  if (!nodes?.length) return empty;
+  return nodes.map((n) => `- ${n.id}: ${n.text}`).join('\n');
+}
+
+/** Пакет литературного судьи подачи: известное vs скрытое, без лора города. */
+export function formatMysteryPresentationJudgeCase({
+  graph = null,
+  presentation = {},
+  observedFacts = [],
+  resolutionFacts = [],
+  title = '',
+} = {}) {
+  const nodes = graph?.nodes || [];
+  const known = nodes.filter((n) => n.knowledge === 'observed' || n.knowledge === 'resolved');
+  const hidden = nodes.filter((n) => n.knowledge === 'hidden');
+  return [
+    'ПАКЕТ НА ПРОВЕРКУ ПОДАЧИ (core уже принят; лора города нет).',
+    'Синопсис и хроника имеют право только на известные узлы и observedFacts.',
+    title ? `Название: ${title}` : null,
+    '',
+    'ИЗВЕСТНЫЕ УЗЛЫ (единственный источник синопсиса и хроники):',
+    listNodes(known, '- (нет)'),
+    '',
+    'observedFacts:',
+    ...(observedFacts || []).length ? observedFacts.map((f, i) => `${i + 1}. ${f}`) : ['- (нет)'],
+    '',
+    'СКРЫТЫЕ УЗЛЫ (в подачу нельзя даже пересказом):',
+    listNodes(hidden, '- (нет)'),
+    '',
+    'resolutionFacts (closeWhen может требовать их установить, но не называть ответы):',
+    ...(resolutionFacts || []).length ? resolutionFacts.map((f, i) => `${i + 1}. ${f}`) : ['- (нет)'],
+    '',
+    'ПОДАЧА:',
+    `synopsis: ${presentation.synopsis || '—'}`,
+    `entry: ${presentation.entry || '—'}`,
+    `closeWhen: ${presentation.closeWhen || '—'}`,
+    `mootWhen: ${String(presentation.mootWhen || '').trim() || '—'}`,
+  ]
+    .filter((line) => line != null)
+    .join('\n');
+}
+
+const PRESENTATION_JUDGE_PROMPT = [
+  'Ты литературный судья ПОДАЧИ тайны. Luna. Core уже принят — граф не оценивай и не чини.',
+  'FAIL только на явной ошибке подачи. Спорное — UNCERTAIN, не FAIL.',
+  '',
+  'FAIL если:',
+  '- synopsis или entry выдают скрытый узел (виновный, мотив, механизм, улика из hidden), даже другими словами;',
+  '- synopsis или entry добавляют факты, которых нет в известных узлах и observedFacts;',
+  '- хроника (entry) не оставляет зацепки: нет странности или открытого «почему», по которому захочется поручить проверку;',
+  '- closeWhen называет разгадку или склеивает несколько условий через «и»;',
+  '- mootWhen пустой или повторяет closeWhen.',
+  '',
+  'PASS если синопсис честно показывает только известное, а хроника из того же слоя зовёт узнать дальше.',
+].join('\n');
+
+export async function judgeMysteryPresentation({
+  runtime,
+  caseText,
+  log: parentLog,
+  domainId = null,
+} = {}) {
+  const log = (parentLog || getLogger()).child({ scope: 'mystery.judge.presentation' });
+  const verdict = await runVerdictJudge({
+    runtime,
+    agentId: 'mysteryPresentationJudge',
+    caseText,
+    extraUser: PRESENTATION_JUDGE_PROMPT,
+    log,
+    domainId,
+    codes: MYSTERY_PRESENTATION_JUDGE_CODES,
+    scene: 'mystery_presentation_judge',
+    scope: 'mystery.judge.presentation',
+    toolName: 'submit_mystery_verdict',
+    toolDescription: 'Вердикт по подаче тайны. Текст не чини.',
+  });
+  log.info('mystery.judge.presentation', {
+    verdict: verdict.verdict,
+    issues: verdict.issues,
+    summary: verdict.summary,
+    accepted: literaryJudgeAccepts(verdict.verdict),
+  });
+  return verdict;
 }

@@ -164,6 +164,14 @@ function decideSuspenseSkeleton({ act, auto, relation, fin, depth, unlocked, dyn
     if (fin === 'fail') {
       return { nextAct: 2, pressure: 'ESCALATE', progress: 'SETBACK', ending: null };
     }
+    if (depth <= 1 && act === 2) {
+      return {
+        nextAct: 2,
+        pressure: fin === 'crit' ? 'DEESCALATE' : 'NONE',
+        progress: 'RESOLVE',
+        ending: fin === 'crit' ? 'crit' : 'ok',
+      };
+    }
     if (fin === 'crit') {
       return { nextAct: 2, pressure: 'DEESCALATE', progress: 'ADVANCE', ending: null };
     }

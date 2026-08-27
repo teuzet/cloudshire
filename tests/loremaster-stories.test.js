@@ -21,6 +21,7 @@ test('лормастер видит идущие истории и канон т
   ]);
   assert.match(plots, /ТАЙНА/);
   assert.match(plots, /ЗАЩИЩЕНА/);
+  assert.equal(plots.includes('«Гул в цистерне»'), false);
   assert.match(plots, /Цистерну перестали чистить/);
   assert.match(plots, /скрыто/i);
 });

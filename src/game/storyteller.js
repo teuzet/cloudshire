@@ -3,6 +3,8 @@
  *   storyStart    — завязка саспенса
  *   mysteryStart  — core тайны: граф, observedFacts, resolutionFacts
  *   mysteryPresentation — entry/synopsis/closeWhen только из публичных фактов
+ *   mysteryPresentationJudge — литературный судья подачи (Luna); FAIL → доработка
+ *   suspenseJudge — литературный судья завязки саспенса (Luna); FAIL → доработка
  *   storyBeat     — default: поручения, старые нити, зеркала (агент как был)
  *   suspenseBeat  — бит саспенса
  *   mysteryBeat   — бит тайны (граф только у этого агента)
@@ -47,7 +49,7 @@ import {
   PLOT_HOOK_MAX,
 } from './plotlines.js';
 import { rollSuspenseSeed, formatSuspenseSeedForPrompt, characterPlotOccupancy, formatOccupancyForPrompt } from './suspenseSeed.js';
-import { normalizeDiscoveryLadder, normalizeHiddenPremises } from './suspenseGraph.js';
+import { normalizeDiscoveryLadder, normalizeHiddenPremises, hiddenPremisesBudget } from './suspenseGraph.js';
 import { sharedPlots } from './confluxBoard.js';
 import { pickOrderOutcome, markOrderFired } from './orders.js';
 import { TINT_LABELS, pickRollStat, rollTint, formatFinishForPrompt } from './rolls.js';
@@ -77,7 +79,8 @@ import {
   OBSERVED_FACT_MAX,
   RESOLUTION_FACT_MAX,
 } from './mysteryGraph.js';
-import { formatMysteryJudgeCase, judgeMysteryCascade, summarizeJudgeAttempt } from './mysteryJudge.js';
+import { formatMysteryJudgeCase, judgeMysteryCascade, summarizeJudgeAttempt, judgeMysteryPresentation, formatMysteryPresentationJudgeCase, formatJudgeRevisionForPrompt, literaryJudgeAccepts } from './mysteryJudge.js';
+import { formatSuspenseJudgeCase, judgeSuspenseSeed } from './suspenseJudge.js';
 import { ensureCityEntities, pickMysteryAnchors, formatMysteryAnchorsForPrompt } from './cityEntities.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
@@ -319,18 +322,23 @@ export async function seedPlot({
     });
   }
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const seed = rollSuspenseSeed({ domain, cfg, opening, fromClosed });
-    if (attempt === 0 && tags?.length) {
-      seed.tags = tags;
-      seed.tonePrimary = tags.find((t) => t.groupId === 'tone' && !t.secondary)?.tagId || seed.tonePrimary;
-      seed.toneSecondary = tags.find((t) => t.groupId === 'tone' && t.secondary)?.tagId || seed.toneSecondary;
-      seed.source = tags.find((t) => t.groupId === 'source')?.tagId || seed.source;
-      seed.situation = tags.find((t) => t.groupId === 'situation')?.tagId || seed.situation;
-      seed.dynamic = tags.find((t) => t.groupId === 'dynamic')?.tagId || seed.dynamic;
-    }
-    const roll = seed.tags;
-    const occupancy = characterPlotOccupancy(domain);
+  const seed = rollSuspenseSeed({ domain, cfg, opening, fromClosed });
+  if (tags?.length) {
+    seed.tags = tags;
+    seed.tonePrimary = tags.find((t) => t.groupId === 'tone' && !t.secondary)?.tagId || seed.tonePrimary;
+    seed.toneSecondary = tags.find((t) => t.groupId === 'tone' && t.secondary)?.tagId || seed.toneSecondary;
+    seed.source = tags.find((t) => t.groupId === 'source')?.tagId || seed.source;
+    seed.situation = tags.find((t) => t.groupId === 'situation')?.tagId || seed.situation;
+    seed.dynamic = tags.find((t) => t.groupId === 'dynamic')?.tagId || seed.dynamic;
+  }
+  const roll = seed.tags;
+  const occupancy = characterPlotOccupancy(domain);
+  const maxRevise = cfg.suspense?.judgeAttempts ?? 3;
+  let revision = null;
+  let lastAsked = null;
+  let lastJudge = null;
+
+  for (let attempt = 0; attempt < maxRevise; attempt += 1) {
     const draft = { data: null };
     const asked = await askPlotSeed({
       runtime,
@@ -352,11 +360,13 @@ export async function seedPlot({
       sideOpen: false,
       suspenseSeed: seed,
       occupancy,
+      revision,
     });
     if (!asked) {
       log.warn('storyteller.seed_failed', { attempt });
       continue;
     }
+    lastAsked = asked;
 
     const reason = judgePlotSeed(domain, asked, { storyType, depth: seed.depth });
     if (reason) {
@@ -367,6 +377,26 @@ export async function seedPlot({
         tags: roll.map((t) => t.tagId),
         depth: seed.depth,
       });
+      revision = { mechanical: reason, judge: null, previous: asked };
+      continue;
+    }
+
+    const caseText = formatSuspenseJudgeCase({ draft: asked, seed, tags: roll });
+    lastJudge = await judgeSuspenseSeed({
+      runtime,
+      caseText,
+      log,
+      domainId: domain.id,
+    });
+    log.info('suspense.seed.judge', {
+      attempt: attempt + 1,
+      title: asked.title,
+      verdict: lastJudge.verdict,
+      issues: lastJudge.issues,
+      summary: lastJudge.summary,
+    });
+    if (!literaryJudgeAccepts(lastJudge.verdict)) {
+      revision = { mechanical: null, judge: lastJudge, previous: asked };
       continue;
     }
 
@@ -375,12 +405,13 @@ export async function seedPlot({
     }
 
     const ladder = normalizeDiscoveryLadder(asked.discoveryLadder, seed.depth);
-    const hidden = normalizeHiddenPremises(asked.hiddenPremises);
+    const hidden = normalizeHiddenPremises(asked.hiddenPremises, seed.depth);
 
     const plot = createPlotline({
       title: asked.title,
       synopsis: asked.synopsis,
       closeWhen: asked.closeWhen,
+      mootWhen: asked.mootWhen,
       relatedStats: asked.relatedStats,
       maxAgeMonths: asked.maxAgeMonths,
       temperature: cfg.temperature.initial,
@@ -437,11 +468,17 @@ export async function seedPlot({
       relatedStats: plot.relatedStats,
       cast: cast.map((c) => c.name),
       ladder: ladder.map((r) => r.id),
+      literaryJudge: lastJudge?.verdict,
     });
-    return { plot, fact, cast, seed };
+    return { plot, fact, cast, seed, judge: lastJudge };
   }
 
-  log.info('storyteller.seed_skipped', { reason: 'no_clean_seed' });
+  log.info('storyteller.seed_skipped', {
+    reason: 'no_clean_seed',
+    attempts: maxRevise,
+    lastTitle: lastAsked?.title || null,
+    literary: lastJudge?.verdict || null,
+  });
   return null;
 }
 
@@ -586,6 +623,9 @@ async function seedMysteryPlot({
     if (!cascade.accepted) continue;
 
     let presented = null;
+    let lastPres = null;
+    let literary = null;
+    let revision = null;
     for (let presTry = 0; presTry < maxPres; presTry += 1) {
       const presDraft = { data: null };
       const pres = await askMysteryPresentation({
@@ -599,6 +639,7 @@ async function seedMysteryPlot({
         maxChars,
         statIds,
         opening,
+        revision,
       });
       if (!pres) {
         log.info('storyteller.presentation_rejected', { reason: 'no_presentation', genTry, presTry });
@@ -612,10 +653,43 @@ async function seedMysteryPlot({
       });
       if (presReason) {
         log.info('storyteller.presentation_rejected', { reason: presReason, genTry, presTry });
+        revision = { mechanical: presReason, judge: null, previous: pres };
         continue;
       }
-      presented = pres;
-      break;
+      lastPres = pres;
+      const presCase = formatMysteryPresentationJudgeCase({
+        graph,
+        presentation: pres,
+        observedFacts: asked.observedFacts,
+        resolutionFacts: asked.resolutionFacts,
+        title: asked.title,
+      });
+      literary = await judgeMysteryPresentation({
+        runtime,
+        caseText: presCase,
+        log,
+        domainId: domain.id,
+      });
+      if (literaryJudgeAccepts(literary.verdict)) {
+        presented = pres;
+        break;
+      }
+      log.info('storyteller.presentation_revise', {
+        genTry,
+        presTry,
+        verdict: literary.verdict,
+        issues: literary.issues,
+        summary: literary.summary,
+      });
+      revision = { mechanical: null, judge: literary, previous: pres };
+    }
+    if (!presented) presented = lastPres;
+    if (presented && literary && !literaryJudgeAccepts(literary.verdict)) {
+      log.info('storyteller.presentation_kept', {
+        title: asked.title,
+        verdict: literary.verdict,
+        issues: (literary.issues || []).map((i) => i.code),
+      });
     }
     if (!presented) {
       rec.accepted = false;
@@ -623,9 +697,13 @@ async function seedMysteryPlot({
       log.info('storyteller.seed_rejected', { reason: 'presentation_failed', judged, title: asked.title });
       continue;
     }
+    rec.literaryJudge = literary
+      ? { verdict: literary.verdict, issues: literary.issues, summary: literary.summary }
+      : null;
     asked.entry = presented.entry;
     asked.synopsis = presented.synopsis;
     asked.closeWhen = presented.closeWhen;
+    asked.mootWhen = presented.mootWhen;
     asked.relatedStats = presented.relatedStats;
     asked.maxAgeMonths = presented.maxAgeMonths;
 
@@ -645,6 +723,7 @@ async function seedMysteryPlot({
       title: asked.title,
       synopsis: asked.synopsis,
       closeWhen: asked.closeWhen,
+      mootWhen: asked.mootWhen,
       relatedStats: asked.relatedStats,
       maxAgeMonths: asked.maxAgeMonths,
       temperature: cfg.temperature.initial,
@@ -695,6 +774,7 @@ async function seedMysteryPlot({
       anchors: anchors.map((a) => (a.invent ? `invent:${a.kind}` : a.name)),
       lunaJudge: rec.lunaJudge?.verdict,
       terraJudge: rec.terraJudge?.verdict,
+      literaryJudge: rec.literaryJudge?.verdict,
     });
     return { plot, fact, cast, anchors, graphShape, mysteryKind, sideOpen, judge: rec, attempts };
   }
@@ -708,8 +788,11 @@ async function seedMysteryPlot({
       accepted: a.accepted,
       luna: a.lunaJudge?.verdict,
       terra: a.terraJudge?.verdict,
+      literary: a.literaryJudge?.verdict,
       title: a.title,
-      issues: [...(a.lunaJudge?.issues || []), ...(a.terraJudge?.issues || [])].map((i) => i.code),
+      issues: [...(a.lunaJudge?.issues || []), ...(a.terraJudge?.issues || []), ...(a.literaryJudge?.issues || [])].map(
+        (i) => i.code,
+      ),
     })),
   });
   return { plot: null, attempts, skipped: 'generation_failed' };
@@ -934,6 +1017,7 @@ async function askMysteryPresentation({
   maxChars,
   statIds,
   opening = false,
+  revision = null,
 }) {
   const x = (core.truthGraph?.nodes || []).find((n) => String(n.id).toUpperCase() === 'X');
   const tools = [
@@ -942,7 +1026,7 @@ async function askMysteryPresentation({
       description: 'Экспозиция тайны только из уже данных публичных фактов. Новых фактов не создавай.',
       parameters: {
         type: 'object',
-        required: ['synopsis', 'entry', 'closeWhen', 'maxAgeMonths', 'relatedStats'],
+        required: ['synopsis', 'entry', 'closeWhen', 'mootWhen', 'maxAgeMonths', 'relatedStats'],
         properties: {
           synopsis: {
             type: 'string',
@@ -954,7 +1038,11 @@ async function askMysteryPresentation({
           },
           closeWhen: {
             type: 'string',
-            description: `Одна фраза: projection resolutionFacts, до ${PLOT_HOOK_MAX} символов. Без разгадки и новых объектов.`,
+            description: `Один успешный исход: projection resolutionFacts, до ${PLOT_HOOK_MAX} символов. Без разгадки, без «и … и», без новых объектов.`,
+          },
+          mootWhen: {
+            type: 'string',
+            description: `Когда расследование потеряло смысл. Одно условие, не дубль closeWhen, до ${PLOT_HOOK_MAX} символов.`,
           },
           maxAgeMonths: {
             type: 'number',
@@ -1013,6 +1101,8 @@ async function askMysteryPresentation({
           '',
           'Можно сокращать, менять порядок, перефразировать, писать голосом жреца.',
           'Нельзя: новый предмет, след, реакцию города, гипотезу как факт, вывод из скрытого.',
+          'Хроника — видимое плюс зацепка: странность, по которой захочется поручить проверку. Не разгадка.',
+          formatJudgeRevisionForPrompt(revision),
           'Вызови submit_mystery_presentation.',
         ]
           .filter(Boolean)
@@ -1044,10 +1134,16 @@ async function askPlotSeed({
   sideOpen = false,
   suspenseSeed = null,
   occupancy = null,
+  revision = null,
 }) {
   const mystery = storyType === 'mystery';
   const depth = Math.max(1, Math.min(4, Math.round(Number(suspenseSeed?.depth) || 1)));
-  const required = ['title', 'synopsis', 'closeWhen', 'maxAgeMonths', 'relatedStats', 'entry'];
+  const budget = hiddenPremisesBudget(depth);
+  const hiddenDesc =
+    depth >= 2
+      ? `Скрытые факты НАСТОЯЩЕГО, заранее установленные. От ${budget.min} до ${budget.max}. Конкретный ответ на странность, не «просто сквозняк». В entry/synopsis не пиши.`
+      : `Не больше ${budget.max}: скрытый факт настоящего, если в premise есть неизвестность. Короткой истории не нужны три посылки.`;
+  const required = ['title', 'synopsis', 'closeWhen', 'mootWhen', 'maxAgeMonths', 'relatedStats', 'entry'];
   if (mystery) required.push('nodes', 'edges', 'asksSequel', 'newCharacters');
   if (!mystery && depth >= 2) required.push('hiddenPremises', 'discoveryLadder', 'closureGate');
   const tools = [
@@ -1072,9 +1168,15 @@ async function askPlotSeed({
           closeWhen: {
             type: 'string',
             description: mystery
-              ? `Когда причинную модель считают раскрытой. Требовать можно только то, что уже названо в узлах ` +
-                `(текст, вещество, имя, место). Без самой разгадки в формулировке. Одна фраза, до ${PLOT_HOOK_MAX} символов.`
-              : `Что должно произойти, чтобы историю закрыть по существу. Одна фраза, до ${PLOT_HOOK_MAX} символов.`,
+              ? `Один успешный исход: когда причинную модель считают раскрытой. Требовать можно только то, что уже названо в узлах ` +
+                `(текст, вещество, имя, место). Без разгадки. Без «и … и». Одна фраза, до ${PLOT_HOOK_MAX} символов.`
+              : `Один успешный исход истории. Не список условий через «и». Одна фраза, до ${PLOT_HOOK_MAX} символов.`,
+          },
+          mootWhen: {
+            type: 'string',
+            description:
+              `Когда задача потеряла смысл: явление само прошло, предмет исчез, обряд больше не держат. ` +
+              `Одно условие, не дубль closeWhen. Одна фраза, до ${PLOT_HOOK_MAX} символов.`,
           },
           maxAgeMonths: {
             type: 'number',
@@ -1146,10 +1248,7 @@ async function askPlotSeed({
             : {
                 type: 'array',
                 items: { type: 'string' },
-                description:
-                  depth >= 2
-                    ? `Скрытые факты НАСТОЯЩЕГО, заранее установленные. Не менее ${Math.min(2, depth)}. Конкретный ответ на странность, не «просто сквозняк». В entry/synopsis не пиши.`
-                    : 'Опционально: скрытый факт настоящего, если в premise есть неизвестность.',
+                description: hiddenDesc,
               },
           discoveryLadder: mystery
             ? undefined
@@ -1200,10 +1299,15 @@ async function askPlotSeed({
           }
           applySeedVisibility(graph, { shape: graphShape, sideOpen });
           args.truthGraph = graph;
-        } else if (depth >= 2) {
+        } else {
           const reason = judgePlotSeed({ plotlines: [] }, args, { storyType: 'suspense', depth });
           if (reason && reason !== 'twin' && reason !== 'empty' && reason !== 'thin_hook') {
-            return toolFail(reason, 'Нужны hiddenPremises, discoveryLadder длины depth и closureGate. В хронику скрытое не пиши.');
+            return toolFail(
+              reason,
+              depth >= 2
+                ? 'Нужны hiddenPremises, discoveryLadder длины depth и closureGate. В хронику скрытое не пиши.'
+                : 'Для короткой истории не больше одной скрытой посылки. closeWhen — одно условие успеха, mootWhen — одно условие бессмысленности.',
+            );
           }
         }
         draft.data = args;
@@ -1310,8 +1414,9 @@ async function askPlotSeed({
           mystery
             ? 'Синопсис — как город сейчас понимает уже замеченное, чтобы по нему можно было продолжить, не зная скрытого.'
             : 'Синопсис — как обстоят дела сейчас, чтобы по нему можно было продолжить.',
-          'closeWhen — условие настоящей развязки, не инструкция на последний месяц. ' +
-            'Если это условие выполнится раньше срока (нашли пропавшую на шестом месяце из двенадцати) — историю можно закрыть сразу.',
+          'closeWhen — один успешный исход, не список через «и». mootWhen — когда задача потеряла смысл. Тоже одно условие. ' +
+            'Если closeWhen выполнится раньше срока — историю можно закрыть сразу.',
+          formatJudgeRevisionForPrompt(revision),
           'Вызови submit_plot_seed.',
         ]
           .filter(Boolean)
@@ -1520,7 +1625,7 @@ export async function beatPlot({
           `История «${plot.title}» (${world.gameDate.label}).`,
           `Сейчас: ${plot.synopsis || 'только началась'}`,
           plot.closeWhen
-            ? `Историю можно закрыть, когда случится: ${plot.closeWhen}. Это условие развязки, не срок.`
+            ? `Успешный исход: ${plot.closeWhen}. История теряет смысл, когда: ${plot.mootWhen || '—'}. Это условия развязки, не срок.`
             : null,
           prior.length ? `\nУже записано по этой истории (не отменяй):\n${prior.join('\n')}` : null,
           watched.length
@@ -1666,6 +1771,7 @@ export async function tickOrder({
   world,
   plot,
   mode,
+  event = null,
   log: parentLog,
 }) {
   if (!plot || plot.kind !== 'order') return null;
@@ -1775,6 +1881,18 @@ export async function tickOrder({
           `Как устроен: ${plot.synopsis || 'только объявлен'}`,
           plot.closeWhen ? `Порядок снимут, когда: ${plot.closeWhen}` : null,
           prior.length ? `\nУже писали про этот порядок:\n${prior.join('\n')}` : null,
+          event?.kind === 'conflux_dock'
+            ? [
+                '',
+                'Сейчас сопряжение с соседним островом. Этот порядок срабатывает на сопряжении, не по календарю.',
+                event.partnerName ? `Соседний остров: «${event.partnerName}».` : null,
+                event.processSummary
+                  ? `Город уже начал дело: «${event.processSummary}». Хроника — что отправили и зачем, сухим фактом.`
+                  : 'Напиши, как город исполнил это правило на этой встрече.',
+              ]
+                .filter(Boolean)
+                .join(' ')
+            : null,
           '',
           `ИСХОД ЭТОГО МЕСЯЦА (решено броском, не спорь): ${TINT_LABELS[tint]}.`,
           resolvedMode === 'story'
@@ -1787,7 +1905,9 @@ export async function tickOrder({
               ].join(' ')
             : [
                 'Формат уже решён: одна запись хроники на нити этого порядка, без новой истории.',
-                'Покажи, как правило отозвалось в жизни города в этом месяце. Не развивай интригу к развязке.',
+                event?.kind === 'conflux_dock'
+                  ? 'Это исполнение постоянного правила на сопряжении. Не заводи отдельную интригу и не пиши завязку новой истории.'
+                  : 'Покажи, как правило отозвалось в жизни города в этом месяце. Не развивай интригу к развязке.',
                 'Карточку порядка не переписывай.',
                 'Вызови submit_order_chronicle.',
               ].join(' '),
@@ -1807,7 +1927,7 @@ export async function tickOrder({
       plotIds: [plot.id],
       author: 'storyteller:order-fallback',
     });
-    markOrderFired(plot, world.tickIndex);
+    markOrderFired(plot, world.tickIndex, { confluxId: event?.confluxId });
     return { fact, plot, mode: 'chronicle', spawned: null };
   }
 
@@ -1860,7 +1980,7 @@ export async function tickOrder({
     const next = d.relatedStats.map(String).filter((id) => allowed.has(id));
     if (next.length && !spawned) plot.relatedStats = next;
   }
-  markOrderFired(plot, world.tickIndex);
+  markOrderFired(plot, world.tickIndex, { confluxId: event?.confluxId });
 
   log.info('storyteller.order', {
     plotId: plot.id,
@@ -2188,7 +2308,8 @@ async function runStoryKeep({
       return [
         `id ${p.id} — «${p.title}»`,
         `Сейчас: ${p.synopsis || 'только началась'}`,
-        p.closeWhen ? `Закроется, когда: ${p.closeWhen}` : null,
+        p.closeWhen ? `Успешный исход: ${p.closeWhen}` : null,
+        p.mootWhen ? `Теряет смысл, когда: ${p.mootWhen}` : null,
         fresh.length ? `В этом месяце:\n${fresh.join('\n')}` : 'В этом месяце своей записи не было.',
       ]
         .filter(Boolean)

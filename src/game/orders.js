@@ -219,21 +219,32 @@ export function orderIsScheduled(plot) {
   return Number.isInteger(every) && every >= 1;
 }
 
-export function orderWantsTick(plot, tick, rng = Math.random) {
-  if (!plot || plot.kind !== 'order') return { want: false, scheduled: false };
+export function orderFireOn(plot) {
+  return plot?.fireOn === 'conflux_dock' ? 'conflux_dock' : null;
+}
+
+export function orderWantsTick(plot, tick, rng = Math.random, { conflux = null } = {}) {
+  if (!plot || plot.kind !== 'order') return { want: false, scheduled: false, event: null };
+  if (orderFireOn(plot) === 'conflux_dock') {
+    if (conflux?.status !== 'docked') return { want: false, scheduled: false, event: 'conflux_dock' };
+    if (plot.lastFiredConfluxId && String(plot.lastFiredConfluxId) === String(conflux.id)) {
+      return { want: false, scheduled: false, event: 'conflux_dock' };
+    }
+    return { want: true, scheduled: true, event: 'conflux_dock' };
+  }
   if (orderIsScheduled(plot)) {
     const due = Number.isInteger(plot.nextDueTick) ? plot.nextDueTick : Number(tick);
-    return { want: Number(tick) >= due, scheduled: true };
+    return { want: Number(tick) >= due, scheduled: true, event: null };
   }
   // dueNow у вероятностного указа: одна попытка в этот месяц, всё ещё в лимите слотов.
   if (Number.isInteger(plot.nextDueTick) && Number(tick) >= plot.nextDueTick) {
-    return { want: true, scheduled: false };
+    return { want: true, scheduled: false, event: null };
   }
   const chance = Number(plot.fireChance);
   if (Number.isFinite(chance) && chance > 0 && rng() < chance) {
-    return { want: true, scheduled: false };
+    return { want: true, scheduled: false, event: null };
   }
-  return { want: false, scheduled: false };
+  return { want: false, scheduled: false, event: null };
 }
 
 /**
@@ -254,28 +265,43 @@ export function pickOrderOutcome(domain, cfg, rng = Math.random) {
   return rng() < Math.max(0, Math.min(ceil, chance)) ? 'story' : 'chronicle';
 }
 
-export function planOrderTicks({ domain, config, slotsLeft, tick, rng = Math.random }) {
+export function planOrderTicks({ domain, config, slotsLeft, tick, rng = Math.random, conflux = null }) {
   const remainder = Math.max(0, Math.round(Number(slotsLeft) || 0));
   const scheduled = [];
   const chance = [];
   for (const plot of domain.plotlines || []) {
     if (plot?.kind !== 'order') continue;
-    const w = orderWantsTick(plot, tick, rng);
+    const w = orderWantsTick(plot, tick, rng, { conflux });
     if (!w.want) continue;
-    if (w.scheduled) scheduled.push(plot);
-    else chance.push(plot);
+    if (w.scheduled) scheduled.push({ plot, event: w.event || null });
+    else chance.push({ plot, event: null });
   }
   const takenChance = chance.slice(0, remainder);
   return [
-    ...scheduled.map((p) => ({ plotId: p.id, title: p.title, scheduled: true })),
-    ...takenChance.map((p) => ({ plotId: p.id, title: p.title, scheduled: false })),
+    ...scheduled.map((row) => ({
+      plotId: row.plot.id,
+      title: row.plot.title,
+      scheduled: true,
+      event: row.event,
+    })),
+    ...takenChance.map((row) => ({
+      plotId: row.plot.id,
+      title: row.plot.title,
+      scheduled: false,
+      event: null,
+    })),
   ];
 }
 
-export function markOrderFired(plot, tick) {
+export function markOrderFired(plot, tick, { confluxId = null } = {}) {
   if (!plot) return;
   plot.lastBeatTick = tick;
   plot.beatCount = Math.max(0, Math.round(Number(plot.beatCount) || 0)) + 1;
+  if (orderFireOn(plot) === 'conflux_dock') {
+    plot.nextDueTick = null;
+    if (confluxId) plot.lastFiredConfluxId = String(confluxId);
+    return;
+  }
   const every = Number(plot.scheduleEveryMonths);
   if (Number.isInteger(every) && every >= 1) {
     plot.nextDueTick = Number(tick) + every;

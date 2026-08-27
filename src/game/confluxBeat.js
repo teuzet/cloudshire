@@ -232,7 +232,7 @@ export async function beatSharedPlot({
             contested ? contestedCanon(plot) : null,
             `Сейчас: ${plot.synopsis || 'только началась'}`,
             plot.closeWhen
-              ? `Историю можно закрыть, когда случится: ${plot.closeWhen}. Это условие развязки, не срок.`
+              ? `Успешный исход: ${plot.closeWhen}. История теряет смысл, когда: ${plot.mootWhen || '—'}. Это условия развязки, не срок.`
               : null,
             prior.length ? `\nУже записано по этой истории (не отменяй):\n${prior.join('\n')}` : null,
             mixed
