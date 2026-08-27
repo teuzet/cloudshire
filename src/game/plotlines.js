@@ -1,13 +1,14 @@
 import { newId } from './ids.js';
 import { textsLookSame } from './processes.js';
 import { normalizeTruthGraph, judgeTruthGraph, parseMysteryShapes, normalizeFactList, RESOLUTION_FACT_MAX } from './mysteryGraph.js';
+import { normalizeDiscoveryLadder, normalizeHiddenPremises, judgeSuspenseCore } from './suspenseGraph.js';
 
 /**
  * Сюжетные нити — ядро мира: событий вне нитей не бывает.
  * Здесь только модель и формат; отбор битов, окраска и часы — в движке тика.
  *
  * Механика (см. docs/PIVOT_PLOTLINES.md):
- *   gravity     — масштаб последствий; у трёхтактных ставит plotStakes
+ *   gravity     — масштаб последствий; у саспенса сеет движок, у тайны ставит plotStakes
  *   urgency     — шанс, что история сама сдвинется в месяц без дела
  *   temperature — интерес (старые нити, указы, сопряжение; греет внимание игрока)
  *   importance  — внутренний масштаб дельт; у трёхтактных зеркало gravity, агенты не ставят
@@ -105,12 +106,28 @@ function storyActState(p = {}) {
       resolutionFacts: [],
       ending: null,
       asksSequel: false,
+      depth: null,
+      hiddenPremises: [],
+      discoveryLadder: null,
+      closureGate: '',
+      closureUnlocked: null,
+      tonePrimary: null,
+      toneSecondary: null,
+      source: null,
+      situation: null,
+      dynamic: null,
+      legacyAxes: [],
+      unattendedBeats: null,
     };
   }
   const urgency = clampStakes(p.urgency, 40);
   const gravity = clampStakes(p.gravity, 40);
   const graph = type === 'mystery' ? normalizeTruthGraph(p.truthGraph) : null;
   const maxEsc = Math.max(1, Math.round(Number(p.maxEscalations ?? 3)));
+  const depth =
+    type === 'suspense' ? Math.max(1, Math.min(4, Math.round(Number(p.depth) || 1))) : null;
+  const ladder =
+    type === 'suspense' ? normalizeDiscoveryLadder(p.discoveryLadder, depth) : null;
   return {
     storyType: type,
     act: Number(p.act) === 2 ? 2 : 1,
@@ -127,6 +144,18 @@ function storyActState(p = {}) {
       type === 'mystery' ? normalizeFactList(p.resolutionFacts, { maxLen: RESOLUTION_FACT_MAX }).facts : [],
     ending: ['crit', 'ok', 'fail'].includes(p.ending) ? p.ending : null,
     asksSequel: Boolean(p.asksSequel),
+    depth,
+    hiddenPremises: type === 'suspense' ? normalizeHiddenPremises(p.hiddenPremises) : [],
+    discoveryLadder: ladder,
+    closureGate: type === 'suspense' ? clipText(p.closureGate, PLOT_HOOK_MAX * 2) : '',
+    closureUnlocked: type === 'suspense' ? (depth <= 1 ? true : Boolean(p.closureUnlocked)) : null,
+    tonePrimary: type === 'suspense' ? String(p.tonePrimary || '').trim() || null : null,
+    toneSecondary: type === 'suspense' ? String(p.toneSecondary || '').trim() || null : null,
+    source: type === 'suspense' ? String(p.source || '').trim() || null : null,
+    situation: type === 'suspense' ? String(p.situation || '').trim() || null : null,
+    dynamic: type === 'suspense' ? String(p.dynamic || '').trim() || null : null,
+    legacyAxes: type === 'suspense' && Array.isArray(p.legacyAxes) ? p.legacyAxes.map(String).filter(Boolean) : [],
+    unattendedBeats: type === 'suspense' ? Math.max(0, Math.round(Number(p.unattendedBeats) || 0)) : null,
   };
 }
 
@@ -256,6 +285,14 @@ export function plotConfig(config) {
       dampMin: Number(p.acts?.dampMin ?? 0.8),
       dampMax: Number(p.acts?.dampMax ?? 1),
     },
+    suspense: {
+      gravityFloor: Math.max(5, Math.min(40, Math.round(Number(p.suspense?.gravityFloor ?? 20)))),
+      openingGravityMin: Math.max(5, Math.min(40, Math.round(Number(p.suspense?.openingGravityMin ?? 20)))),
+      openingGravityMax: Math.max(20, Math.min(60, Math.round(Number(p.suspense?.openingGravityMax ?? 40)))),
+      depth4Chance: Math.max(0, Math.min(0.2, Number(p.suspense?.depth4Chance ?? 0.03))),
+      depth4MinGravity: Math.max(50, Math.min(100, Math.round(Number(p.suspense?.depth4MinGravity ?? 75)))),
+      legacyMinGravity: Math.max(0, Math.min(100, Math.round(Number(p.suspense?.legacyMinGravity ?? 25)))),
+    },
   };
 }
 
@@ -348,6 +385,18 @@ export function createPlotline({
   resolutionFacts = [],
   ending = null,
   asksSequel = false,
+  depth = null,
+  hiddenPremises = [],
+  discoveryLadder = null,
+  closureGate = '',
+  closureUnlocked = null,
+  tonePrimary = null,
+  toneSecondary = null,
+  source = null,
+  situation = null,
+  dynamic = null,
+  legacyAxes = [],
+  unattendedBeats = 0,
   config = null,
 }) {
   const resolvedKind = PLOT_KINDS.includes(kind) ? kind : 'story';
@@ -401,6 +450,18 @@ export function createPlotline({
       resolutionFacts,
       ending,
       asksSequel,
+      depth,
+      hiddenPremises,
+      discoveryLadder,
+      closureGate,
+      closureUnlocked,
+      tonePrimary,
+      toneSecondary,
+      source,
+      situation,
+      dynamic,
+      legacyAxes,
+      unattendedBeats,
       kind: resolvedKind,
       isMainConflux,
       shared,
@@ -686,8 +747,7 @@ function pickWeightedTag(tags, rng) {
 
 /**
  * Жребий завязки: по одному тегу из каждой группы, все обязательны.
- * Группы сами по себе узкие и абстрактные — тон, сфера, источник, масштаб.
- * У тега может быть weight: больше — чаще выпадает.
+ * Группы саспенса: тон, сфера, источник (причинная сила), ситуация, динамика.
  */
 function tagFromGroup(group, rng) {
   if (!group?.tags?.length) return null;
@@ -783,7 +843,7 @@ export function pickSeedTags(cfg, { storyType = 'suspense', opening = false, rng
     const tags = pickMysteryPlotTags(cfg, rng);
     return opening ? applyOpeningScale(cfg, tags, rng) : tags;
   }
-  return opening ? pickOpeningPlotTags(cfg, rng) : pickPlotTags(cfg, rng);
+  return pickPlotTags(cfg, rng);
 }
 
 export function openingPlotCount(config, rng = Math.random) {
@@ -799,7 +859,7 @@ const SEED_HOOK_MIN = 220;
 /**
  * Отсев пустышки и близнеца. Форму «кто хочет / что мешает» не проверяем.
  */
-export function judgePlotSeed(domain, draft, { storyType } = {}) {
+export function judgePlotSeed(domain, draft, { storyType, depth = 1 } = {}) {
   if (!draft) return 'empty';
   const title = String(draft.title || '').trim();
   const entry = String(draft.entry || '').trim();
@@ -811,8 +871,10 @@ export function judgePlotSeed(domain, draft, { storyType } = {}) {
       maxNodes: 8,
     });
     if (reason) return reason;
-  } else if (synopsis.length < SEED_HOOK_MIN) {
-    return 'thin_hook';
+  } else {
+    if (synopsis.length < SEED_HOOK_MIN) return 'thin_hook';
+    const reason = judgeSuspenseCore(draft, depth);
+    if (reason) return reason;
   }
   const twin = (domain.plotlines || []).find((p) =>
     textsLookSame(`${p.title} ${p.synopsis}`, `${title} ${synopsis}`, { minShared: 7 }),
@@ -824,7 +886,15 @@ export function judgePlotSeed(domain, draft, { storyType } = {}) {
 /** Разгадка тайны не для доски, речи и инспектора. */
 export function stripPlotSecrets(plot) {
   if (!plot || typeof plot !== 'object') return plot;
-  const { truth: _truth, truthGraph: _graph, resolutionFacts: _res, ...rest } = plot;
+  const {
+    truth: _truth,
+    truthGraph: _graph,
+    resolutionFacts: _res,
+    hiddenPremises: _hidden,
+    discoveryLadder: _ladder,
+    closureGate: _gate,
+    ...rest
+  } = plot;
   return rest;
 }
 
@@ -867,12 +937,12 @@ export function plotSeedChance(domain, cfg, tick = null) {
 }
 
 /**
- * Продолжение сразу после развязки: только если живых историй не осталось
- * и закрытие оставило крючок. Шанс — sequelChance; иначе обычный посев.
+ * Продолжение в освободившийся слот: крючок есть, доска не полна.
+ * Другие живые истории не мешают. Шанс — sequelChance.
  */
 export function pickSequelSeed(domain, offers, cfg, rng = Math.random) {
-  const { stories, total } = countOpen(domain);
-  if (stories > 0 || total >= cfg.board.maxOpen) return null;
+  const { total } = countOpen(domain);
+  if (total >= cfg.board.maxOpen) return null;
   const viable = (offers || []).filter((o) => o && String(o.hook || '').trim());
   if (!viable.length) return null;
   if (rng() >= Number(cfg.board.sequelChance ?? 0)) return null;
@@ -910,7 +980,8 @@ export function formatBoardForPrompt(domain) {
       const kindLabel = p.kind === 'errand' ? '(дело)' : p.kind === 'order' ? '(порядок)' : '';
       const three = isThreeActPlot(p);
       const meters = three
-        ? `urgency=${p.urgency} gravity=${p.gravity} эск=${p.escalationLevel}/${p.maxEscalations} такт=${p.act} тип=${p.storyType}`
+        ? `urgency=${p.urgency} gravity=${p.gravity} эск=${p.escalationLevel}/${p.maxEscalations} такт=${p.act} тип=${p.storyType}` +
+          (p.storyType === 'suspense' && p.depth ? ` depth=${p.depth}` : '')
         : `T=${p.temperature} тип=${p.storyType || 'default'}`;
       return (
         `- [${p.id}] «${p.title}» ${kindLabel} ${meters} возраст=${p.ageMonths}/${p.maxAgeMonths}` +

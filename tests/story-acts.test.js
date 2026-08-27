@@ -134,8 +134,15 @@ test('саспенс такт 1: DIRECT крит сразу закрывает',
   assert.equal(plot.escalationLevel, 0);
 });
 
-test('саспенс такт 1: DIRECT успех идёт во второй такт без эскалации', () => {
-  const plot = three();
+test('саспенс такт 1: DIRECT успех при depth 2 идёт во второй такт без эскалации', () => {
+  const plot = three({
+    depth: 2,
+    closureUnlocked: false,
+    discoveryLadder: [
+      { id: 'a', promise: 'первый слой', revealed: false },
+      { id: 'b', promise: 'второй слой', revealed: false },
+    ],
+  });
   const move = applyStoryActMove(plot, {
     trigger: 'process_finished',
     relation: 'DIRECT',
@@ -163,7 +170,7 @@ test('саспенс такт 2: DIRECT успех закрывает', () => {
   assert.equal(move.actTo, 3);
 });
 
-test('саспенс: UNRELATED крит гасит ставки и ступень, такт тот же', () => {
+test('саспенс: UNRELATED крит гасит urgency и ступень, gravity не трогает', () => {
   const plot = three({ act: 2, escalationLevel: 2 });
   const move = applyStoryActMove(plot, {
     trigger: 'process_finished',
@@ -178,18 +185,76 @@ test('саспенс: UNRELATED крит гасит ставки и ступен
   assert.equal(move.stakes.kind, 'damp');
   assert.equal(plot.escalationLevel, 1);
   assert.equal(plot.urgency, 32);
-  assert.equal(plot.gravity, 32);
+  assert.equal(plot.gravity, 40);
 });
 
-test('третья эскалация закрывает провалом, числа клампятся сотней', () => {
+test('третья эскалация закрывает провалом; у саспенса gravity не растёт', () => {
   const plot = three({ act: 1, urgency: 80, gravity: 80, escalationLevel: 2 });
   assert.equal(escalationWouldFail(plot, ACTS), true);
   applyStoryActMove(plot, { trigger: 'auto', rng: maxRng, config: ACTS });
   assert.equal(plot.ending, 'fail');
   assert.equal(plot.escalationLevel, 3);
   assert.equal(plot.urgency, 100);
-  assert.equal(plot.gravity, 100);
+  assert.equal(plot.gravity, 80);
   assert.equal(plot.act, 1);
+});
+
+test('саспенс depth 3: DIRECT крит в такте 1 идёт во второй такт и закрывает одну ступень', () => {
+  const plot = three({
+    depth: 3,
+    closureUnlocked: false,
+    discoveryLadder: [
+      { id: 'cold_source', promise: 'откуда холод', revealed: false },
+      { id: 'shaft', promise: 'искусственная шахта', revealed: false },
+      { id: 'chamber', promise: 'камера', revealed: false },
+    ],
+    hiddenPremises: [
+      'Холод идёт из древней шахты.',
+      'Стены выровнены инструментом.',
+      'За затвором техническая камера.',
+    ],
+  });
+  const move = applyStoryActMove(plot, {
+    trigger: 'process_finished',
+    relation: 'DIRECT',
+    finish: 'crit',
+    rng: minRng,
+    config: ACTS,
+  });
+  assert.equal(move.ending, null);
+  assert.ok(!plot.ending);
+  assert.equal(plot.act, 2);
+  assert.equal(move.progress, 'BREAKTHROUGH');
+  assert.deepEqual(move.openedLadder, ['cold_source']);
+  assert.equal(plot.discoveryLadder[0].revealed, true);
+  assert.equal(plot.discoveryLadder[1].revealed, false);
+  assert.equal(plot.closureUnlocked, false);
+  assert.equal(plot.gravity, 40);
+});
+
+test('саспенс depth 1: DIRECT успех сразу закрывает', () => {
+  const plot = three({ depth: 1 });
+  const move = applyStoryActMove(plot, {
+    trigger: 'process_finished',
+    relation: 'DIRECT',
+    finish: 'ok',
+    config: ACTS,
+  });
+  assert.equal(move.ending, 'ok');
+  assert.equal(plot.ending, 'ok');
+});
+
+test('тайна: эскалация по-прежнему может поднять gravity', () => {
+  const plot = three({
+    storyType: 'mystery',
+    truthGraph: seededMystery(),
+    urgency: 40,
+    gravity: 40,
+  });
+  applyStoryActMove(plot, { trigger: 'auto', rng: minRng, config: ACTS });
+  assert.equal(plot.gravity, 40);
+  applyStoryActMove(plot, { trigger: 'auto', rng: maxRng, config: ACTS });
+  assert.equal(plot.gravity, 60);
 });
 
 test('тайна такт 1: DIRECT успех открывает ближайший к концу узел и идёт во второй такт', () => {

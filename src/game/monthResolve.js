@@ -40,6 +40,7 @@ import {
 import { planOrderTicks, pickOrderOutcome } from './orders.js';
 import { resolvePendingOrders } from './orderSmith.js';
 import { seedPlot, beatPlot, tickOrder, quietMonth, keepStories, fadeQuietPlot } from './storyteller.js';
+import { resolveSuspenseLegacy } from './legacyResolver.js';
 import { scoreMonthStats, factsForStatJudge } from './statJudge.js';
 import { runSteward } from './steward.js';
 import { getLogger } from '../log.js';
@@ -149,6 +150,7 @@ export async function resolveDomainMonth({
 
   // 4. Биты процессов и историй.
   const sequelOffers = [];
+  const suspenseClosures = [];
   for (const beat of beats) {
     const plot = findPlotline(working, beat.plotId);
     if (!plot) continue;
@@ -186,6 +188,19 @@ export async function resolveDomainMonth({
           text: result.fact.text,
           note: `история «${plot.title}» кончилась`,
         });
+        if (plot.storyType === 'suspense') {
+          suspenseClosures.push({
+            id: plot.id,
+            title: plot.title,
+            synopsis: plot.synopsis,
+            gravity: plot.gravity,
+            depth: plot.depth,
+            ending: plot.ending,
+            lastEntry: result.fact.text,
+            closeReason: result.closeReason || '',
+            hook: result.sequelHook || '',
+          });
+        }
         if (result.sequelHook && allowSequelAfter(plot)) {
           sequelOffers.push({
             id: plot.id,
@@ -195,6 +210,8 @@ export async function resolveDomainMonth({
             reason: result.closeReason || '',
             hook: result.sequelHook,
             lastEntry: result.fact.text,
+            gravity: plot.gravity,
+            storyType: plot.storyType,
           });
         }
       }
@@ -256,7 +273,7 @@ export async function resolveDomainMonth({
     }
   }
 
-  // 6. Посев мира: после указов, только в остаток слота и если живых историй нет.
+  // 6. Посев мира: сиквел занимает освободившийся слот; иначе обычный посев, если живых историй нет.
   const { stories } = countOpen(working);
   const sequel = pickSequelSeed(working, sequelOffers, cfg);
   const seedChance = sequel ? 1 : plotSeedChance(working, cfg, world.tickIndex);
@@ -264,6 +281,7 @@ export async function resolveDomainMonth({
     cap - used > 0 &&
     (Boolean(sequel) || stories === 0) &&
     (Boolean(sequel) || Math.random() < seedChance);
+  let sequelledId = null;
   if (wantSeed) {
     const seeded = await seedPlot({
       config,
@@ -271,12 +289,28 @@ export async function resolveDomainMonth({
       domain: working,
       world,
       fromClosed: sequel,
+      storyType:
+        sequel?.storyType === 'mystery' || sequel?.storyType === 'suspense' ? sequel.storyType : null,
       log,
     });
     if (seeded?.fact) {
       chronicleAdds.push(seeded.fact);
       used += 1;
     }
+    if (seeded?.plot && sequel?.id) sequelledId = sequel.id;
+  }
+
+  for (const closed of suspenseClosures) {
+    if (closed.id === sequelledId) continue;
+    const legacy = await resolveSuspenseLegacy({
+      runtime,
+      domain: working,
+      world,
+      closed,
+      config,
+      log,
+    });
+    if (legacy?.facts?.length) chronicleAdds.push(...legacy.facts);
   }
 
   // 7. Тихий месяц: без сюжета, но город всё равно жил.

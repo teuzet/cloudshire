@@ -46,6 +46,8 @@ import {
   PLOT_SUMMARY_MAX,
   PLOT_HOOK_MAX,
 } from './plotlines.js';
+import { rollSuspenseSeed, formatSuspenseSeedForPrompt, characterPlotOccupancy, formatOccupancyForPrompt } from './suspenseSeed.js';
+import { normalizeDiscoveryLadder, normalizeHiddenPremises } from './suspenseGraph.js';
 import { sharedPlots } from './confluxBoard.js';
 import { pickOrderOutcome, markOrderFired } from './orders.js';
 import { TINT_LABELS, pickRollStat, rollTint, formatFinishForPrompt } from './rolls.js';
@@ -318,20 +320,17 @@ export async function seedPlot({
   }
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const roll =
-      attempt === 0 && tags?.length
-        ? tags
-        : pickSeedTags(cfg, { storyType, opening });
-    const seedPeople = mystery ? [] : mintSeedCast({ world, domain, config });
-    const seedNames = mystery ? offerMysterySeedNames({ world, domain, config }) : [];
-    const mysteryKind = mystery ? mysteryTypeTag(roll) : null;
-    const graphShape = mystery ? pickMysteryGraphShape(cfg) : null;
-    const nodeCount = mystery ? graphNodeCount(graphShape) : 0;
-    const sideOpen =
-      mystery && graphShape === 'linear_side' && Math.random() < Number(cfg.mysteryGraph?.sideRevealChance ?? 0.5);
-    const anchors = mystery
-      ? pickMysteryAnchors(domain.cityEntities, cfg, Math.random, { inventKind: mysteryKind?.kind })
-      : [];
+    const seed = rollSuspenseSeed({ domain, cfg, opening, fromClosed });
+    if (attempt === 0 && tags?.length) {
+      seed.tags = tags;
+      seed.tonePrimary = tags.find((t) => t.groupId === 'tone' && !t.secondary)?.tagId || seed.tonePrimary;
+      seed.toneSecondary = tags.find((t) => t.groupId === 'tone' && t.secondary)?.tagId || seed.toneSecondary;
+      seed.source = tags.find((t) => t.groupId === 'source')?.tagId || seed.source;
+      seed.situation = tags.find((t) => t.groupId === 'situation')?.tagId || seed.situation;
+      seed.dynamic = tags.find((t) => t.groupId === 'dynamic')?.tagId || seed.dynamic;
+    }
+    const roll = seed.tags;
+    const occupancy = characterPlotOccupancy(domain);
     const draft = { data: null };
     const asked = await askPlotSeed({
       runtime,
@@ -345,25 +344,28 @@ export async function seedPlot({
       fromClosed,
       opening,
       storyType,
-      seedPeople,
-      seedNames,
-      nodeCount,
-      anchors,
-      graphShape,
-      sideOpen,
+      seedPeople: [],
+      seedNames: [],
+      nodeCount: 0,
+      anchors: [],
+      graphShape: null,
+      sideOpen: false,
+      suspenseSeed: seed,
+      occupancy,
     });
     if (!asked) {
       log.warn('storyteller.seed_failed', { attempt });
       continue;
     }
 
-    const reason = judgePlotSeed(domain, asked, { storyType });
+    const reason = judgePlotSeed(domain, asked, { storyType, depth: seed.depth });
     if (reason) {
       log.info('storyteller.seed_rejected', {
         reason,
         attempt,
         title: asked.title,
         tags: roll.map((t) => t.tagId),
+        depth: seed.depth,
       });
       continue;
     }
@@ -372,24 +374,8 @@ export async function seedPlot({
       asked.maxAgeMonths = Math.min(5, Math.max(2, Number(asked.maxAgeMonths) || 4));
     }
 
-    if (mystery) {
-      let graph = normalizeTruthGraph(asked.truthGraph || asked);
-      if (!graph) {
-        log.info('storyteller.seed_rejected', { reason: 'missing_graph', attempt, title: asked.title });
-        continue;
-      }
-      const bound = bindCharacterNames(world, asked.newCharacters, {
-        offered: offeredBuckets(seedNames),
-        texts: [asked.entry, asked.synopsis, asked.closeWhen, ...graphTexts(graph)],
-        config,
-      });
-      asked.newCharacters = bound.list;
-      asked.entry = bound.texts[0];
-      asked.synopsis = bound.texts[1];
-      asked.closeWhen = bound.texts[2];
-      graph = applyGraphTexts(graph, bound.texts.slice(3));
-      asked.truthGraph = graph;
-    }
+    const ladder = normalizeDiscoveryLadder(asked.discoveryLadder, seed.depth);
+    const hidden = normalizeHiddenPremises(asked.hiddenPremises);
 
     const plot = createPlotline({
       title: asked.title,
@@ -403,8 +389,19 @@ export async function seedPlot({
       relatedPlotlineIds: fromClosed?.id ? [fromClosed.id] : [],
       storyType,
       act: 1,
-      truthGraph: mystery ? asked.truthGraph : null,
-      asksSequel: mystery ? asked.asksSequel === true || asked.asksSequel === 'true' : false,
+      gravity: seed.gravity,
+      gravity0: seed.gravity,
+      depth: seed.depth,
+      hiddenPremises: hidden,
+      discoveryLadder: ladder,
+      closureGate: asked.closureGate,
+      closureUnlocked: seed.depth <= 1,
+      tonePrimary: seed.tonePrimary,
+      toneSecondary: seed.toneSecondary,
+      source: seed.source,
+      situation: seed.situation,
+      dynamic: seed.dynamic,
+      legacyAxes: Array.isArray(asked.legacyAxes) ? asked.legacyAxes : [],
       config,
     });
     domain.plotlines.push(plot);
@@ -417,7 +414,7 @@ export async function seedPlot({
       plotIds: [plot.id],
       author: 'storyteller:seed',
     });
-    const cast = registerCharacters(domain, mystery ? asked.newCharacters : seedPeople, {
+    const cast = registerCharacters(domain, asked.newCharacters, {
       world,
       plotId: plot.id,
       author: 'storyteller:seed',
@@ -432,19 +429,16 @@ export async function seedPlot({
       storyType: plot.storyType,
       urgency: plot.urgency,
       gravity: plot.gravity,
+      depth: plot.depth,
+      source: plot.source,
+      tone: plot.tonePrimary,
+      dynamic: plot.dynamic,
       maxAgeMonths: plot.maxAgeMonths,
       relatedStats: plot.relatedStats,
       cast: cast.map((c) => c.name),
-      graphNodes: mystery ? asked.truthGraph?.nodes?.length : undefined,
-      graphShape: mystery ? graphShape : undefined,
-      sideOpen: mystery ? sideOpen : undefined,
-      mysteryKind: mystery ? mysteryKind?.tagId : undefined,
-      asksSequel: mystery ? asked.asksSequel === true || asked.asksSequel === 'true' : undefined,
-      anchors: mystery
-        ? anchors.map((a) => (a.invent ? `invent:${a.kind}` : a.name))
-        : undefined,
+      ladder: ladder.map((r) => r.id),
     });
-    return { plot, fact, cast, anchors, graphShape, mysteryKind, sideOpen };
+    return { plot, fact, cast, seed };
   }
 
   log.info('storyteller.seed_skipped', { reason: 'no_clean_seed' });
@@ -1048,10 +1042,14 @@ async function askPlotSeed({
   anchors = [],
   graphShape = null,
   sideOpen = false,
+  suspenseSeed = null,
+  occupancy = null,
 }) {
   const mystery = storyType === 'mystery';
+  const depth = Math.max(1, Math.min(4, Math.round(Number(suspenseSeed?.depth) || 1)));
   const required = ['title', 'synopsis', 'closeWhen', 'maxAgeMonths', 'relatedStats', 'entry'];
   if (mystery) required.push('nodes', 'edges', 'asksSequel', 'newCharacters');
+  if (!mystery && depth >= 2) required.push('hiddenPremises', 'discoveryLadder', 'closureGate');
   const tools = [
     {
       name: 'submit_plot_seed',
@@ -1142,7 +1140,48 @@ async function askPlotSeed({
                   'Если разгадка гармонично закрывает историю — false. Сиквел сейчас не пиши.',
               }
             : undefined,
-          newCharacters: mystery ? CHARACTERS_SCHEMA : undefined,
+          newCharacters: CHARACTERS_SCHEMA,
+          hiddenPremises: mystery
+            ? undefined
+            : {
+                type: 'array',
+                items: { type: 'string' },
+                description:
+                  depth >= 2
+                    ? `Скрытые факты НАСТОЯЩЕГО, заранее установленные. Не менее ${Math.min(2, depth)}. Конкретный ответ на странность, не «просто сквозняк». В entry/synopsis не пиши.`
+                    : 'Опционально: скрытый факт настоящего, если в premise есть неизвестность.',
+              },
+          discoveryLadder: mystery
+            ? undefined
+            : {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  required: ['id', 'promise'],
+                  properties: {
+                    id: { type: 'string' },
+                    promise: { type: 'string', description: 'Какой слой откроется на этой ступени.' },
+                  },
+                },
+                description:
+                  depth >= 2
+                    ? `Ровно ${depth} ступени драматургической ёмкости. Это не сценарий финала.`
+                    : 'Для короткой истории можно не заполнять.',
+              },
+          closureGate: mystery
+            ? undefined
+            : {
+                type: 'string',
+                description:
+                  'Какой содержательный уровень должен быть достигнут, прежде чем сюжет закрываем. Не конкретное решение игрока.',
+              },
+          legacyAxes: mystery
+            ? undefined
+            : {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Возможные оси долгого следа: geography, institution, religion, population, technology, ecology, external_relation, political_order, resource_base, supernatural_order, infrastructure, culture. Не фиксируй итог.',
+              },
         },
       },
       handler: async (args) => {
@@ -1161,6 +1200,11 @@ async function askPlotSeed({
           }
           applySeedVisibility(graph, { shape: graphShape, sideOpen });
           args.truthGraph = graph;
+        } else if (depth >= 2) {
+          const reason = judgePlotSeed({ plotlines: [] }, args, { storyType: 'suspense', depth });
+          if (reason && reason !== 'twin' && reason !== 'empty' && reason !== 'thin_hook') {
+            return toolFail(reason, 'Нужны hiddenPremises, discoveryLadder длины depth и closureGate. В хронику скрытое не пиши.');
+          }
         }
         draft.data = args;
         return { ok: true };
@@ -1171,7 +1215,11 @@ async function askPlotSeed({
     delete tools[0].parameters.properties.nodes;
     delete tools[0].parameters.properties.edges;
     delete tools[0].parameters.properties.asksSequel;
-    delete tools[0].parameters.properties.newCharacters;
+  } else {
+    delete tools[0].parameters.properties.hiddenPremises;
+    delete tools[0].parameters.properties.discoveryLadder;
+    delete tools[0].parameters.properties.closureGate;
+    delete tools[0].parameters.properties.legacyAxes;
   }
 
   const city = cityStoryContext(domain);
@@ -1211,9 +1259,10 @@ async function askPlotSeed({
                 .filter(Boolean)
                 .join('\n')
             : [
-                'Фокусируйся на саспенсе — развитии истории.',
-                'Отдавай приоритет продвижению сюжета вперёд, развитию конфликтов, сюжетным поворотам, а не открытию неизвестной информации.',
+                'Фокусируйся на саспенсе: нестабильное настоящее, открытое будущее.',
+                'Не задерживай раскрытие — углубляй его. Каждый слой даёт payoff.',
                 'Это не поручение правителя и не сопряжение — сюжет, который остров проживает сам.',
+                'Сначала событие (source + tone + gravity), потом как оно входит в этот город.',
               ].join('\n'),
           fromClosed
             ? [
@@ -1237,7 +1286,11 @@ async function askPlotSeed({
           '',
           mystery
             ? formatMysteryAxesForPrompt(tags, { opening })
-            : `Направление: ${formatPlotTagsForPrompt(tags)}`,
+            : [
+                formatSuspenseSeedForPrompt(suspenseSeed, { opening, fromClosed }),
+                '',
+                `Направление: ${formatPlotTagsForPrompt(tags)}`,
+              ].join('\n'),
           '',
           mystery && anchors.length ? formatMysteryAnchorsForPrompt(anchors) : null,
           mystery && anchors.length ? '' : null,
@@ -1246,17 +1299,14 @@ async function askPlotSeed({
                 'Имена для завязки (бери только их, своих не выдумывай). Карточки не готовы — заведи этих людей в newCharacters с ролью и коротко кто они:',
                 formatSeedNamesForPrompt(seedNames),
               ].join('\n')
-            : [
-                'Люди этой завязки — уже готовые карточки. Назови только их. Новых имён и newCharacters не заводи.',
-                formatSeedCastForPrompt(seedPeople),
-              ].join('\n'),
+            : formatOccupancyForPrompt(occupancy || characterPlotOccupancy(domain)),
           ruler
             ? `Правитель города — ${ruler}. Этого человека в завязку двигателем не ставь и второго с тем же именем не заводи.`
             : null,
           '',
           mystery
             ? 'Напиши ПЕРВУЮ хронику и синопсис только из известной городу части тайны: то, что маска назвала видимым. Скрытые узлы — не в текст.'
-            : 'Напиши первую запись: что увидели в этом месяце.',
+            : 'Напиши первую запись: что увидели в этом месяце. Скрытые premises в хронику и синопсис не пиши.',
           mystery
             ? 'Синопсис — как город сейчас понимает уже замеченное, чтобы по нему можно было продолжить, не зная скрытого.'
             : 'Синопсис — как обстоят дела сейчас, чтобы по нему можно было продолжить.',
@@ -1426,6 +1476,7 @@ export async function beatPlot({
   const names = peopleNamesBlock(world);
   const ruler = rulerName(domain);
   const actBlock = threeAct ? formatActMoveForPrompt(plot, beat.actMove) : '';
+  const occupancy = !mystery && threeAct ? characterPlotOccupancy(domain) : null;
 
   const closeHint = threeAct
     ? engineEnding
@@ -1433,7 +1484,7 @@ export async function beatPlot({
         ? plot.asksSequel
           ? 'Движок уже закрывает историю. closes не выбирай. Стартер пометил: разгадка вскрывает новую проблему. Если она в этом месяце вышла наружу — sequelHook одной фразой. Если развязка сама гармонично всё закрыла — поле пустое.'
           : 'Движок уже закрывает историю. closes не выбирай. Развязка должна закрыть тайну гармонично. sequelHook не ставь.'
-        : 'Движок уже закрывает историю. closes не выбирай. Если развязка оставила новый нерешённый узел — sequelHook одной фразой, иначе пусто.'
+        : 'Движок уже закрывает историю. closes не выбирай. Если развязка оставила новый нерешённый узел — sequelHook одной фразой, иначе пусто. Сиквел или след в каноне решает движок.'
       : 'Историю этим месяцем не закрывай. closes не выбирай.'
     : finale
       ? 'Проходное дело закончилось: покажи итог. closes=true.'
@@ -1453,6 +1504,7 @@ export async function beatPlot({
       `Город «${domain.name}». ${cityBrief(domain)}`,
       ruler ? `Правитель города — ${ruler}. Этого человека в newCharacters не заводи, второго с тем же именем тоже.` : null,
       `Известные люди города:\n${formatCastForPrompt(domain.lore, { limit: 12 })}`,
+      occupancy ? formatOccupancyForPrompt(occupancy) : null,
       mystery && plot.truthGraph
         ? `${formatTruthGraphForPrompt(plot.truthGraph)}\nСкрытое в запись не выноси, кроме узлов и рёбер, которые блок ТАКТОВКА открывает в этом месяце.`
         : mystery && plot.truth

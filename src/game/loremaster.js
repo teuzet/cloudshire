@@ -71,6 +71,11 @@ function formatStoryForLoremaster(p) {
     lines.push(
       'Не выдумывай исход, виновника, скрытый мотив, причину или иное, что относится к нерешённому в этой истории.',
     );
+    if (p.storyType === 'suspense' && (p.hiddenPremises?.length || p.discoveryLadder?.length)) {
+      lines.push(
+        'У этой истории есть скрытая природа настоящего. Не раскрывай её, не достраивай и не записывай в fact.',
+      );
+    }
   }
   return lines.filter(Boolean).join('\n');
 }

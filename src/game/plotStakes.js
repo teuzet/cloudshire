@@ -7,12 +7,14 @@ function clampStakes(n, fallback) {
   return Math.max(5, Math.min(95, v));
 }
 
-/** Простой контракт: выставить urgency и gravity новой истории. */
+/** Простой контракт: urgency всегда; gravity — только у тайны. У саспенса gravity уже посеял движок. */
 export async function assignPlotStakes({ runtime, domain, plot, world, log: parentLog }) {
   if (!isThreeActPlot(plot)) return plot;
   const log = (parentLog || getLogger()).child({ scope: 'plot.stakes', plotId: plot.id });
+  const suspense = plot.storyType === 'suspense';
   const draft = { data: null };
   const type = plot.storyType === 'mystery' ? 'тайна (неизвестно, что было)' : 'саспенс (неизвестно, что будет)';
+  const seededGravity = Number(plot.gravity);
 
   try {
     await runtime.run({
@@ -20,10 +22,12 @@ export async function assignPlotStakes({ runtime, domain, plot, world, log: pare
       tools: [
         {
           name: 'submit_stakes',
-          description: 'urgency и gravity этой истории, 0–100. Сюжет не пиши.',
+          description: suspense
+            ? 'urgency этой истории, 0–100. Gravity уже задана движком. Сюжет не пиши.'
+            : 'urgency и gravity этой истории, 0–100. Сюжет не пиши.',
           parameters: {
             type: 'object',
-            required: ['urgency', 'gravity'],
+            required: suspense ? ['urgency'] : ['urgency', 'gravity'],
             properties: {
               urgency: {
                 type: 'number',
@@ -58,7 +62,13 @@ export async function assignPlotStakes({ runtime, domain, plot, world, log: pare
             `История «${plot.title}» (${type}).`,
             `Сейчас: ${plot.synopsis || ''}`,
             plot.closeWhen ? `Кончится, когда: ${plot.closeWhen}` : '',
-            'Поставь urgency (собственная динамика без вмешательства) и gravity (тяжесть последствий для города).',
+            plot.dynamic ? `Динамика без вмешательства (нарративный характер): ${plot.dynamic}.` : '',
+            suspense
+              ? `Gravity уже посеяна движком: ${Number.isFinite(seededGravity) ? seededGravity : 40}. Не ставь и не меняй её.`
+              : '',
+            suspense
+              ? 'Поставь только urgency (собственная динамика без вмешательства).'
+              : 'Поставь urgency (собственная динамика без вмешательства) и gravity (тяжесть последствий для города).',
             'Числа независимы: тяжёлое может быть медленным, быстрое — локальным. Не завышай ради интересности.',
             'Только submit_stakes, без сюжета.',
           ]
@@ -72,10 +82,14 @@ export async function assignPlotStakes({ runtime, domain, plot, world, log: pare
   }
 
   plot.urgency = clampStakes(draft.data?.urgency, 40);
-  plot.gravity = clampStakes(draft.data?.gravity, 40);
+  if (suspense && Number.isFinite(seededGravity)) {
+    plot.gravity = Math.max(0, Math.min(100, Math.round(seededGravity)));
+  } else {
+    plot.gravity = clampStakes(draft.data?.gravity, 40);
+  }
   plot.urgency0 = plot.urgency;
   plot.gravity0 = plot.gravity;
   plot.importance = Math.min(100, plot.gravity);
-  log.info('plot.stakes', { title: plot.title, urgency: plot.urgency, gravity: plot.gravity });
+  log.info('plot.stakes', { title: plot.title, urgency: plot.urgency, gravity: plot.gravity, seeded: suspense });
   return plot;
 }

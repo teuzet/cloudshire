@@ -125,6 +125,20 @@ export function capCityEntities(list, maxCatalog) {
   return out;
 }
 
+/** Добавить сущность в каталог города (legacy саспенса). Дубли по имени не плодим. */
+export function addCityEntity(domain, raw) {
+  if (!domain || typeof domain !== 'object') return null;
+  const one = normalizeCityEntity(raw);
+  if (!one) return null;
+  const list = normalizeCityEntities(domain.cityEntities);
+  const key = one.name.toLowerCase();
+  const existing = list.find((e) => e.name.toLowerCase() === key);
+  if (existing) return existing;
+  list.push(one);
+  domain.cityEntities = list;
+  return one;
+}
+
 export function hasCityEntityCatalog(domain) {
   if (!domain || typeof domain !== 'object') return false;
   if (normalizeCityEntities(domain.cityEntities).length) return true;
