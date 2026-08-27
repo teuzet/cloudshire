@@ -14,6 +14,13 @@ import {
   mysteryPublicLeak,
   pickFrontierReveal,
   remainingHiddenNodeIds,
+  graphOverflows,
+  observedFactsIssue,
+  resolutionFactsIssue,
+  presentationIssue,
+  NODE_TEXT_MAX,
+  EDGE_REASON_MAX,
+  GRAPH_SHAPE_DEFAULTS,
 } from '../src/game/mysteryGraph.js';
 
 function knowledgeOf(graph) {
@@ -139,6 +146,8 @@ test('маска в промпте говорит, вокруг чего стр�
   assert.match(formatMysteryMaskForPrompt('linear_side', { sideOpen: false }), /только X/);
   assert.match(formatMysteryMaskForPrompt('linear_side', { sideOpen: true }), /боковая причина/);
   assert.match(formatMysteryMaskForPrompt('linear_4'), /ТОЛЬКО ИЗВЕСТНАЯ ЧАСТЬ ТАЙНЫ/);
+  assert.match(formatMysteryMaskForPrompt('linear_4', { forCore: true }), /observedFacts/);
+  assert.match(formatMysteryMaskForPrompt('linear_4', { forCore: true }), /Не пиши synopsis/);
   const contract = formatMysteryCausalContractForPrompt();
   assert.match(contract, /КОНТРАКТ УЗЛА/);
   assert.match(contract, /откуда знает/);
@@ -228,4 +237,68 @@ test('фронтир: ближайшая причина известного; в
   assert.ok(ids.has('B'));
   assert.ok(ids.has('E'));
   assert.equal(remainingHiddenNodeIds(side, ['B', 'E', 'A']).length, 0);
+});
+
+test('по умолчанию сеем только linear_4', () => {
+  const byId = Object.fromEntries(GRAPH_SHAPE_DEFAULTS.map((s) => [s.id, s.weight]));
+  assert.equal(byId.linear_4, 1);
+  assert.equal(byId.linear_5, 0);
+  assert.equal(byId.linear_side, 0);
+  for (const r of [0, 0.5, 0.99]) {
+    assert.equal(pickMysteryGraphShape(undefined, () => r), 'linear_4');
+  }
+});
+
+test('переполнение узла и ребра не клипается молча', () => {
+  const g = linear4();
+  g.nodes[0].text = 'а'.repeat(NODE_TEXT_MAX + 1);
+  assert.equal(graphOverflows(g), 'truncated_node');
+  const e = linear4();
+  e.edges[0].reason = 'б'.repeat(EDGE_REASON_MAX + 1);
+  assert.equal(graphOverflows(e), 'truncated_edge');
+  assert.equal(graphOverflows(linear4()), null);
+});
+
+test('observedFacts только из X, resolutionFacts из узлов, подача не светит скрытое', () => {
+  const g = applySeedVisibility(normalizeTruthGraph(linear4()), { shape: 'linear_4' });
+  assert.equal(
+    observedFactsIssue(['Ярус слышит знамение', 'слышит знамение'], g),
+    null,
+  );
+  assert.equal(observedFactsIssue(['Ярус слышит знамение'], g), 'thin_observed');
+  assert.equal(
+    observedFactsIssue(['Ярус слышит знамение', 'Цистерну перестали чистить'], g),
+    'observed_leak',
+  );
+  assert.equal(
+    observedFactsIssue(['Ярус слышит знамение', 'На площади видели лисицу у колокола'], g),
+    'observed_not_in_x',
+  );
+  assert.equal(
+    resolutionFactsIssue(['Почему цистерну перестали чистить', 'Откуда ил в трубах'], g),
+    null,
+  );
+  assert.equal(resolutionFactsIssue(['Почему цистерну перестали чистить'], g), 'thin_resolution');
+  assert.equal(
+    resolutionFactsIssue(['Почему цистерну перестали чистить', 'Где спрятан неоновый реактор'], g),
+    'resolution_invention',
+  );
+  assert.equal(
+    presentationIssue({
+      synopsis: 'Ярус слышит знамение по ночам.',
+      entry: 'Нижний ярус принимает гул за знамение.',
+      closeWhen: 'Узнать, откуда гул.',
+      graph: g,
+    }),
+    null,
+  );
+  assert.equal(
+    presentationIssue({
+      synopsis: 'Цистерну перестали чистить.',
+      entry: 'Ярус слышит знамение.',
+      closeWhen: 'Узнать причину.',
+      graph: g,
+    }),
+    'mask_leak',
+  );
 });

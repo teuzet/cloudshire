@@ -265,6 +265,16 @@ function renderCard(row) {
     lines.push('');
     lines.push(formatTruthGraphForPrompt(row.graph));
   }
+  if (row.observedFacts?.length) {
+    lines.push('');
+    lines.push('observedFacts:');
+    for (const f of row.observedFacts) lines.push(`- ${f}`);
+  }
+  if (row.resolutionFacts?.length) {
+    lines.push('');
+    lines.push('resolutionFacts:');
+    for (const f of row.resolutionFacts) lines.push(`- ${f}`);
+  }
   if (row.cast.length) lines.push(`люди: ${row.cast.join(', ')}`);
   lines.push('');
   if (row.entry) {
@@ -343,6 +353,8 @@ async function runBatch({
       closeWhen: plot?.closeWhen || null,
       truth: plot?.truth || null,
       graph: plot?.truthGraph || null,
+      observedFacts: plot?.observedFacts || [],
+      resolutionFacts: plot?.resolutionFacts || [],
       importance: plot?.importance ?? null,
       urgency: plot?.urgency ?? null,
       gravity: plot?.gravity ?? null,

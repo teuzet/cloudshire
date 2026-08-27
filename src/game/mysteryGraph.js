@@ -20,13 +20,15 @@ const KNOWLEDGE_LABEL = {
 const RANK = { hidden: 0, observed: 1, resolved: 2 };
 const LEGACY_KNOWLEDGE = { misread: 'observed', connected: 'observed' };
 
-const NODE_TEXT_MAX = 480;
-const EDGE_REASON_MAX = 280;
+export const NODE_TEXT_MAX = 720;
+export const EDGE_REASON_MAX = 400;
+export const OBSERVED_FACT_MAX = 240;
+export const RESOLUTION_FACT_MAX = 180;
 
 export const GRAPH_SHAPE_DEFAULTS = [
   { id: 'linear_4', weight: 1 },
   { id: 'linear_5', weight: 0 },
-  { id: 'linear_side', weight: 1 },
+  { id: 'linear_side', weight: 0 },
 ];
 
 export const GRAPH_SHAPES = GRAPH_SHAPE_DEFAULTS.map((s) => s.id);
@@ -104,7 +106,7 @@ export function formatMysteryCausalContractForPrompt() {
     'Физическое следствие — физическая или ремесленная причина. Обряд и «воздействие» не заменяют механизм. Магия не склеивает цепь.',
     'Не вводи вещь, которой нет в якорях и в других узлах. A — причина, не находка необъяснённого; такая находка для игрока — X.',
     'Не сшивай два разных сюжета паникой одного человека. Ассоциативное поле — слабый импульс, не вторая завязка.',
-    'Ребро reason — почему from вызывает to. closeWhen опирается только на то, что уже названо в узлах.',
+    'Ребро reason — два коротких предложения: механизм parent → child и counterfactual (что было бы без parent). Без новых сущностей. resolutionFacts опираются только на то, что уже названо в узлах.',
   ].join('\n');
 }
 
@@ -136,14 +138,20 @@ export function formatMysteryGraphShapeForPrompt(shape, _opts = {}) {
   ].join('\n');
 }
 
-export function formatMysteryMaskForPrompt(shape, { sideOpen = false } = {}) {
-  const hard = [
-    'ПЕРВАЯ ХРОНИКА И СИНОПСИС — ТОЛЬКО ИЗВЕСТНАЯ ЧАСТЬ ТАЙНЫ (жёстко).',
-    'entry — что город УЖЕ заметил: симптом, слух, странность на поверхности. Без причины.',
-    'synopsis — как город это сейчас понимает из того же видимого. Не полный сюжет и не разгадка.',
-    'Скрытые узлы, скрытые связи, мотив, виновный, вещество, замысел — в entry и synopsis нельзя даже намёком.',
-    'Не пересказывай скрытый узел другими словами. Граф истины пиши полностью, повествование — только из видимого.',
-  ];
+export function formatMysteryMaskForPrompt(shape, { sideOpen = false, forCore = false } = {}) {
+  const hard = forCore
+    ? [
+        'ВИДИМОЕ ДЛЯ ИГРОКА — ТОЛЬКО X. observedFacts бери только из текста X, почти дословно.',
+        'Скрытые узлы, связи, мотив, виновный, вещество — в observedFacts нельзя даже намёком.',
+        'Граф истины пиши полностью. Не пиши synopsis, entry, closeWhen.',
+      ]
+    : [
+        'ПЕРВАЯ ХРОНИКА И СИНОПСИС — ТОЛЬКО ИЗВЕСТНАЯ ЧАСТЬ ТАЙНЫ (жёстко).',
+        'entry — что город УЖЕ заметил: симптом, слух, странность на поверхности. Без причины.',
+        'synopsis — как город это сейчас понимает из того же видимого. Не полный сюжет и не разгадка.',
+        'Скрытые узлы, скрытые связи, мотив, виновный, вещество, замысел — в entry и synopsis нельзя даже намёком.',
+        'Не пересказывай скрытый узел другими словами. Граф истины пиши полностью, повествование — только из видимого.',
+      ];
   if (shape === 'linear_5') {
     return [
       'МАСКА ЗНАНИЯ (решила система, не выбирай её):',
@@ -189,6 +197,84 @@ export function mysteryPublicLeak(graph, texts) {
     if (e.knowledge !== 'hidden') continue;
     if (hiddenSpanLeaks(pub, e.reason, 16)) return `${e.from}→${e.to}`;
   }
+  return null;
+}
+
+export function graphOverflows(raw) {
+  for (const n of raw?.nodes || []) {
+    const t = String(n?.text || n?.description || '').trim();
+    if (t.length > NODE_TEXT_MAX) return 'truncated_node';
+  }
+  for (const e of raw?.edges || []) {
+    const t = String(e?.reason || '').trim();
+    if (t.length > EDGE_REASON_MAX) return 'truncated_edge';
+  }
+  return null;
+}
+
+export function normalizeFactList(raw, { maxItems = 5, maxLen = OBSERVED_FACT_MAX } = {}) {
+  const out = [];
+  for (const item of Array.isArray(raw) ? raw : []) {
+    const t = String(item?.text || item || '')
+      .trim()
+      .replace(/\s+/g, ' ');
+    if (!t) continue;
+    if (t.length > maxLen) return { facts: out, reason: 'truncated_fact' };
+    out.push(t);
+    if (out.length >= maxItems) break;
+  }
+  return { facts: out, reason: null };
+}
+
+export function terminalNode(graph) {
+  return (
+    (graph?.nodes || []).find((n) => String(n.id).toUpperCase() === 'X') ||
+    (graph?.nodes || []).find((n) => n.knowledge === 'observed') ||
+    null
+  );
+}
+
+function backedBy(sourceText, fact, minLen = 10) {
+  const src = foldMysteryText(sourceText);
+  const t = foldMysteryText(fact);
+  if (!src || !t) return false;
+  if (src.includes(t) || t.includes(src)) return true;
+  return hiddenSpanLeaks(src, fact, minLen);
+}
+
+/** observedFacts — 2–5 пунктов, каждый из X, без скрытых узлов. */
+export function observedFactsIssue(facts, graph) {
+  if (!Array.isArray(facts) || facts.length < 2) return 'thin_observed';
+  const x = terminalNode(graph);
+  if (!x?.text) return 'missing_x';
+  for (const f of facts) {
+    const leak = mysteryPublicLeak(graph, [f]);
+    if (leak) return 'observed_leak';
+    if (!backedBy(x.text, f, 10)) return 'observed_not_in_x';
+  }
+  return null;
+}
+
+/** resolutionFacts — 2–5 неизвестных; ключевые слова уже есть в узлах. */
+export function resolutionFactsIssue(facts, graph) {
+  if (!Array.isArray(facts) || facts.length < 2) return 'thin_resolution';
+  const all = foldMysteryText((graph?.nodes || []).map((n) => n.text).join(' '));
+  for (const f of facts) {
+    const words = foldMysteryText(f)
+      .split(' ')
+      .filter((w) => w.length >= 5);
+    if (!words.length) continue;
+    if (!words.some((w) => all.includes(w))) return 'resolution_invention';
+  }
+  return null;
+}
+
+/** Подача: не раскрывать скрытое. Перефраз разрешён. */
+export function presentationIssue({ synopsis, entry, closeWhen, graph }) {
+  if (!String(synopsis || '').trim() || !String(entry || '').trim()) return 'empty_presentation';
+  if (!String(closeWhen || '').trim()) return 'empty_close';
+  const leak = mysteryPublicLeak(graph, [synopsis, entry, closeWhen]);
+  if (leak) return 'mask_leak';
   return null;
 }
 

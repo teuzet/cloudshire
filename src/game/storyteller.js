@@ -1,7 +1,8 @@
 /**
  * Авторы хроники. Движок решает, когда писать.
  *   storyStart    — завязка саспенса
- *   mysteryStart  — завязка тайны: причинный граф, в хронику маска
+ *   mysteryStart  — core тайны: граф, observedFacts, resolutionFacts
+ *   mysteryPresentation — entry/synopsis/closeWhen только из публичных фактов
  *   storyBeat     — default: поручения, старые нити, зеркала (агент как был)
  *   suspenseBeat  — бит саспенса
  *   mysteryBeat   — бит тайны (граф только у этого агента)
@@ -64,6 +65,15 @@ import {
   mysteryGraphShapeHint,
   graphNodeCount,
   applySeedVisibility,
+  graphOverflows,
+  normalizeFactList,
+  observedFactsIssue,
+  resolutionFactsIssue,
+  presentationIssue,
+  NODE_TEXT_MAX,
+  EDGE_REASON_MAX,
+  OBSERVED_FACT_MAX,
+  RESOLUTION_FACT_MAX,
 } from './mysteryGraph.js';
 import { formatMysteryJudgeCase, judgeMysteryCascade, summarizeJudgeAttempt } from './mysteryJudge.js';
 import { ensureCityEntities, pickMysteryAnchors, formatMysteryAnchorsForPrompt } from './cityEntities.js';
@@ -456,6 +466,7 @@ async function seedMysteryPlot({
 }) {
   const maxJudged = cfg.mysteryGraph?.judgeAttempts ?? 3;
   const maxGen = cfg.mysteryGraph?.generateTries ?? 6;
+  const maxPres = cfg.mysteryGraph?.presentationTries ?? 3;
   let judged = 0;
   const attempts = [];
 
@@ -466,24 +477,21 @@ async function seedMysteryPlot({
     const mysteryKind = mysteryTypeTag(roll);
     const graphShape = pickMysteryGraphShape(cfg);
     const nodeCount = graphNodeCount(graphShape);
-    const sideOpen = graphShape === 'linear_side' && Math.random() < Number(cfg.mysteryGraph?.sideRevealChance ?? 0.5);
+    const sideOpen =
+      graphShape === 'linear_side' && Math.random() < Number(cfg.mysteryGraph?.sideRevealChance ?? 0.5);
     const anchors = pickMysteryAnchors(domain.cityEntities, cfg, Math.random, {
       inventKind: mysteryKind?.kind,
     });
-    const draft = { data: null };
-    const asked = await askPlotSeed({
+    const coreDraft = { data: null };
+    const asked = await askMysteryCore({
       runtime,
       domain,
       world,
       tags: roll,
       log,
-      maxChars,
-      statIds,
-      draft,
+      draft: coreDraft,
       fromClosed,
       opening,
-      storyType: 'mystery',
-      seedPeople: [],
       seedNames,
       nodeCount,
       anchors,
@@ -491,59 +499,57 @@ async function seedMysteryPlot({
       sideOpen,
     });
     if (!asked) {
-      attempts.push({
-        genTry,
-        attempt: null,
-        skip: 'no_seed',
-        title: null,
-        tags: roll,
-        graphShape,
-        anchors,
-        graph: null,
-        entry: null,
-        synopsis: null,
-        closeWhen: null,
-        people: [],
-        accepted: false,
-        lunaJudge: null,
-        terraJudge: null,
-      });
+      attempts.push({ genTry, skip: 'no_seed', accepted: false, lunaJudge: null, terraJudge: null });
       log.warn('storyteller.seed_failed', { genTry, judged });
       continue;
     }
 
-    let graph = normalizeTruthGraph(asked.truthGraph || asked);
-    if (!graph) {
+    const overflow = graphOverflows(asked.truthGraph || asked);
+    let graph = overflow ? null : normalizeTruthGraph(asked.truthGraph || asked);
+    const observed = normalizeFactList(asked.observedFacts, { maxLen: OBSERVED_FACT_MAX });
+    const resolution = normalizeFactList(asked.resolutionFacts, {
+      maxItems: 5,
+      maxLen: RESOLUTION_FACT_MAX,
+    });
+    const factReason =
+      overflow ||
+      (!graph ? 'missing_graph' : null) ||
+      observed.reason ||
+      resolution.reason ||
+      observedFactsIssue(observed.facts, graph) ||
+      resolutionFactsIssue(resolution.facts, graph);
+    if (factReason) {
       attempts.push({
         genTry,
-        attempt: null,
-        skip: 'missing_graph',
+        skip: factReason,
         title: asked.title || null,
-        tags: roll,
-        graphShape,
-        anchors,
-        graph: null,
-        entry: asked.entry || null,
-        synopsis: asked.synopsis || null,
-        closeWhen: asked.closeWhen || null,
-        people: (asked.newCharacters || []).map((c) => c.name).filter(Boolean),
         accepted: false,
         lunaJudge: null,
         terraJudge: null,
       });
-      log.info('storyteller.seed_rejected', { reason: 'missing_graph', genTry });
+      log.info('storyteller.seed_rejected', { reason: factReason, genTry });
       continue;
     }
+    asked.observedFacts = observed.facts;
+    asked.resolutionFacts = resolution.facts;
+
     const bound = bindCharacterNames(world, asked.newCharacters, {
       offered: offeredBuckets(seedNames),
-      texts: [asked.entry, asked.synopsis, asked.closeWhen, ...graphTexts(graph)],
+      texts: [
+        asked.title,
+        ...graphTexts(graph),
+        ...asked.observedFacts,
+        ...asked.resolutionFacts,
+      ],
       config,
     });
     asked.newCharacters = bound.list;
-    asked.entry = bound.texts[0];
-    asked.synopsis = bound.texts[1];
-    asked.closeWhen = bound.texts[2];
-    graph = applyGraphTexts(graph, bound.texts.slice(3));
+    asked.title = bound.texts[0];
+    const nGraph = graphTexts(graph).length;
+    graph = applyGraphTexts(graph, bound.texts.slice(1, 1 + nGraph));
+    const afterGraph = 1 + nGraph;
+    asked.observedFacts = bound.texts.slice(afterGraph, afterGraph + asked.observedFacts.length);
+    asked.resolutionFacts = bound.texts.slice(afterGraph + asked.observedFacts.length);
     asked.truthGraph = graph;
 
     judged += 1;
@@ -569,9 +575,8 @@ async function seedMysteryPlot({
       graphShape,
       anchors,
       graph,
-      entry: asked.entry,
-      synopsis: asked.synopsis,
-      closeWhen: asked.closeWhen,
+      observedFacts: asked.observedFacts,
+      resolutionFacts: asked.resolutionFacts,
       people: (asked.newCharacters || []).map((c) => c.name).filter(Boolean),
       ...summarizeJudgeAttempt(cascade),
     };
@@ -585,6 +590,50 @@ async function seedMysteryPlot({
       terra: rec.terraJudge,
     });
     if (!cascade.accepted) continue;
+
+    let presented = null;
+    for (let presTry = 0; presTry < maxPres; presTry += 1) {
+      const presDraft = { data: null };
+      const pres = await askMysteryPresentation({
+        runtime,
+        domain,
+        world,
+        tags: roll,
+        log,
+        draft: presDraft,
+        core: asked,
+        maxChars,
+        statIds,
+        opening,
+      });
+      if (!pres) {
+        log.info('storyteller.presentation_rejected', { reason: 'no_presentation', genTry, presTry });
+        continue;
+      }
+      const presReason = presentationIssue({
+        synopsis: pres.synopsis,
+        entry: pres.entry,
+        closeWhen: pres.closeWhen,
+        graph,
+      });
+      if (presReason) {
+        log.info('storyteller.presentation_rejected', { reason: presReason, genTry, presTry });
+        continue;
+      }
+      presented = pres;
+      break;
+    }
+    if (!presented) {
+      rec.accepted = false;
+      rec.skip = 'presentation_failed';
+      log.info('storyteller.seed_rejected', { reason: 'presentation_failed', judged, title: asked.title });
+      continue;
+    }
+    asked.entry = presented.entry;
+    asked.synopsis = presented.synopsis;
+    asked.closeWhen = presented.closeWhen;
+    asked.relatedStats = presented.relatedStats;
+    asked.maxAgeMonths = presented.maxAgeMonths;
 
     const twin = judgePlotSeed(domain, asked, { storyType: 'mystery' });
     if (twin === 'twin') {
@@ -611,6 +660,8 @@ async function seedMysteryPlot({
       storyType: 'mystery',
       act: 1,
       truthGraph: asked.truthGraph,
+      observedFacts: asked.observedFacts,
+      resolutionFacts: asked.resolutionFacts,
       asksSequel: asked.asksSequel === true || asked.asksSequel === 'true',
       config,
     });
@@ -664,10 +715,7 @@ async function seedMysteryPlot({
       luna: a.lunaJudge?.verdict,
       terra: a.terraJudge?.verdict,
       title: a.title,
-      issues: [
-        ...(a.lunaJudge?.issues || []),
-        ...(a.terraJudge?.issues || []),
-      ].map((i) => i.code),
+      issues: [...(a.lunaJudge?.issues || []), ...(a.terraJudge?.issues || [])].map((i) => i.code),
     })),
   });
   return { plot: null, attempts, skipped: 'generation_failed' };
@@ -700,6 +748,286 @@ export async function seedOpeningPlots({ config, runtime, domain, world, log: pa
     titles: seeded.map((s) => s.plot.title),
   });
   return seeded;
+}
+
+async function askMysteryCore({
+  runtime,
+  domain,
+  world,
+  tags,
+  log,
+  draft,
+  fromClosed = null,
+  opening = false,
+  seedNames = [],
+  nodeCount = 4,
+  anchors = [],
+  graphShape = null,
+  sideOpen = false,
+}) {
+  const tools = [
+    {
+      name: 'submit_mystery_core',
+      description: 'Истинный причинный граф тайны. Экспозицию и closeWhen не пиши.',
+      parameters: {
+        type: 'object',
+        required: ['title', 'nodes', 'edges', 'observedFacts', 'resolutionFacts', 'asksSequel', 'newCharacters'],
+        properties: {
+          title: { type: 'string', description: 'Название, 1–4 слова' },
+          nodes: {
+            type: 'array',
+            description: `Ровно ${nodeCount} узлов истины. Последний главной цепи — X. Текст узла до ${NODE_TEXT_MAX} символов, не обрывай.`,
+            items: {
+              type: 'object',
+              required: ['id', 'text'],
+              properties: {
+                id: {
+                  type: 'string',
+                  description: 'Короткий id. Главная цепь кончается на X.',
+                },
+                text: {
+                  type: 'string',
+                  maxLength: NODE_TEXT_MAX,
+                  description:
+                    `Полное событие: кто, что, зачем, откуда знает и предмет. До ${NODE_TEXT_MAX} символов. Не обрывай фразу.`,
+                },
+              },
+            },
+          },
+          edges: {
+            type: 'array',
+            description: `Причинные связи шаблона. reason — два коротких предложения, до ${EDGE_REASON_MAX} символов.`,
+            items: {
+              type: 'object',
+              required: ['from', 'to', 'reason'],
+              properties: {
+                from: { type: 'string' },
+                to: { type: 'string' },
+                reason: {
+                  type: 'string',
+                  maxLength: EDGE_REASON_MAX,
+                  description:
+                    '1) механизм parent→child. 2) counterfactual: что было бы без parent. Без новых сущностей.',
+                },
+              },
+            },
+          },
+          observedFacts: {
+            type: 'array',
+            minItems: 2,
+            maxItems: 5,
+            items: { type: 'string', maxLength: OBSERVED_FACT_MAX },
+            description:
+              '2–4 коротких факта, которые город уже заметил. Каждый должен быть сказан в X. Не из A/B/C.',
+          },
+          resolutionFacts: {
+            type: 'array',
+            minItems: 2,
+            maxItems: 5,
+            items: { type: 'string', maxLength: RESOLUTION_FACT_MAX },
+            description:
+              '2–4 неизвестных, уже названных в графе: кого/что/какой механизм установить. Не ответы и не новые объекты.',
+          },
+          asksSequel: {
+            type: 'boolean',
+            description:
+              'true только если сама разгадка вскрывает новую неизвестную проблему. Иначе false.',
+          },
+          newCharacters: CHARACTERS_SCHEMA,
+        },
+      },
+      handler: async (args) => {
+        const overflow = graphOverflows(args);
+        if (overflow) {
+          return toolFail(overflow, 'Укороти текст узла или ребра, не обрывай фразу посередине.');
+        }
+        const graph = normalizeTruthGraph(args);
+        const shapeReason = judgeTruthGraph(graph, {
+          minNodes: nodeCount,
+          maxNodes: nodeCount,
+          shape: graphShape,
+        });
+        if (shapeReason) return toolFail(shapeReason, mysteryGraphShapeHint(graphShape));
+        applySeedVisibility(graph, { shape: graphShape, sideOpen });
+        const observed = normalizeFactList(args.observedFacts, { maxLen: OBSERVED_FACT_MAX });
+        const resolution = normalizeFactList(args.resolutionFacts, { maxLen: RESOLUTION_FACT_MAX });
+        const factsReason =
+          observed.reason ||
+          resolution.reason ||
+          observedFactsIssue(observed.facts, graph) ||
+          resolutionFactsIssue(resolution.facts, graph);
+        if (factsReason) {
+          return toolFail(
+            factsReason,
+            'observedFacts — только из X, 2–4 пункта. resolutionFacts — неизвестные уже из узлов, не новые объекты.',
+          );
+        }
+        args.truthGraph = graph;
+        args.observedFacts = observed.facts;
+        args.resolutionFacts = resolution.facts;
+        draft.data = args;
+        return { ok: true };
+      },
+    },
+  ];
+
+  const city = cityStoryContext(domain);
+  const ruler = rulerName(domain);
+
+  await runtime.run({
+    agentId: 'mysteryStart',
+    tools,
+    maxTurns: 3,
+    toolChoice: { type: 'function', function: { name: 'submit_mystery_core' } },
+    log,
+    scene: 'mystery_core',
+    domainId: domain.id,
+    extraSystem: `Город «${domain.name}».\n${city.genesis}`,
+    userMessages: [
+      {
+        role: 'user',
+        content: [
+          `Построй CORE новой тайны города (${world.gameDate.label}). Тип уже выбран движком.`,
+          formatMysteryGraphShapeForPrompt(graphShape),
+          formatMysteryMaskForPrompt(graphShape, { sideOpen, forCore: true }),
+          'Не пиши synopsis, entry и closeWhen. Только истину, observedFacts из X и resolutionFacts из графа.',
+          '`asksSequel` — true, только если разгадка вскрывает новую неизвестную проблему.',
+          opening
+            ? 'Масштаб — квартал или большая группа, ставки ощутимы. Не канцелярия и не конец острова.'
+            : 'Масштаб — весь город или несущая жизнь острова.',
+          'Тип тайны ниже обязателен. Ассоциативное поле — слабый импульс.',
+          anchors.length
+            ? 'Якоря ниже обязательны: причинная модель висит на них, а не на самом громком риске из описания города.'
+            : null,
+          fromClosed
+            ? [
+                `Только что закрылась история «${fromClosed.title}».`,
+                fromClosed.reason ? `Развязка: ${fromClosed.reason}` : null,
+                `Что осталось нерешённым: ${fromClosed.hook}`,
+                'Новая тайна растёт из этого остатка, не повтор уже закрытого.',
+              ]
+                .filter(Boolean)
+                .join('\n')
+            : null,
+          '',
+          formatMysteryAxesForPrompt(tags, { opening }),
+          '',
+          anchors.length ? formatMysteryAnchorsForPrompt(anchors) : null,
+          'Имена для завязки (бери только их). Заведи этих людей в newCharacters:',
+          formatSeedNamesForPrompt(seedNames),
+          ruler
+            ? `Правитель города — ${ruler}. Этого человека двигателем не ставь и второго с тем же именем не заводи.`
+            : null,
+          'Вызови submit_mystery_core.',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      },
+    ],
+  });
+
+  return draft.data;
+}
+
+async function askMysteryPresentation({
+  runtime,
+  domain,
+  world,
+  tags,
+  log,
+  draft,
+  core,
+  maxChars,
+  statIds,
+  opening = false,
+}) {
+  const x = (core.truthGraph?.nodes || []).find((n) => String(n.id).toUpperCase() === 'X');
+  const tools = [
+    {
+      name: 'submit_mystery_presentation',
+      description: 'Экспозиция тайны только из уже данных публичных фактов. Новых фактов не создавай.',
+      parameters: {
+        type: 'object',
+        required: ['synopsis', 'entry', 'closeWhen', 'maxAgeMonths', 'relatedStats'],
+        properties: {
+          synopsis: {
+            type: 'string',
+            description: `Как город сейчас понимает уже замеченное, до ${PLOT_SUMMARY_MAX} символов. Только FACTS ALLOWED.`,
+          },
+          entry: {
+            type: 'string',
+            description: `Первая хроника жреца, до ${maxChars} символов. Только FACTS ALLOWED.`,
+          },
+          closeWhen: {
+            type: 'string',
+            description: `Одна фраза: projection resolutionFacts, до ${PLOT_HOOK_MAX} символов. Без разгадки и новых объектов.`,
+          },
+          maxAgeMonths: {
+            type: 'number',
+            description: 'Сколько месяцев история живёт без внимания (1–12).',
+          },
+          relatedStats: {
+            type: 'array',
+            items: { type: 'string' },
+            description: `Каких сторон жизни касается, 1–3 из: ${statIds}. Первый — главный.`,
+          },
+        },
+      },
+      handler: async (args) => {
+        if (!String(args.synopsis || '').trim() || !String(args.entry || '').trim() || !String(args.closeWhen || '').trim()) {
+          return toolFail('empty', 'Нужны synopsis, entry и closeWhen.');
+        }
+        const reason = presentationIssue({
+          synopsis: args.synopsis,
+          entry: args.entry,
+          closeWhen: args.closeWhen,
+          graph: core.truthGraph,
+        });
+        if (reason) {
+          return toolFail(reason, 'Не раскрывай скрытые узлы и не добавляй фактов вне списка.');
+        }
+        draft.data = args;
+        return { ok: true };
+      },
+    },
+  ];
+
+  await runtime.run({
+    agentId: 'mysteryPresentation',
+    tools,
+    maxTurns: 3,
+    toolChoice: { type: 'function', function: { name: 'submit_mystery_presentation' } },
+    log,
+    scene: 'mystery_presentation',
+    domainId: domain.id,
+    extraSystem: `Город «${domain.name}». ${cityBrief(domain)}`,
+    userMessages: [
+      {
+        role: 'user',
+        content: [
+          `Подача уже готовой тайны «${core.title}» (${world.gameDate.label}). Новых фактов не создавай.`,
+          opening ? 'Старт города: срок 2–5 месяцев, масштаб соседства или нескольких человек.' : null,
+          formatMysteryAxesForPrompt(tags, { opening }),
+          '',
+          'FACTS ALLOWED BELOW — единственный источник synopsis и entry:',
+          `X: ${x?.text || '—'}`,
+          'observedFacts:',
+          ...(core.observedFacts || []).map((f) => `- ${f}`),
+          '',
+          'closeWhen — только перефразировка resolutionFacts:',
+          ...(core.resolutionFacts || []).map((f) => `- ${f}`),
+          '',
+          'Можно сокращать, менять порядок, перефразировать, писать голосом жреца.',
+          'Нельзя: новый предмет, след, реакцию города, гипотезу как факт, вывод из скрытого.',
+          'Вызови submit_mystery_presentation.',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      },
+    ],
+  });
+
+  return draft.data;
 }
 
 async function askPlotSeed({

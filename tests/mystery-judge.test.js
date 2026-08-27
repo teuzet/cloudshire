@@ -49,9 +49,8 @@ test('пакет judge компактный: якоря и граф, без оп
     graphShape: 'linear_4',
     graph: graph(),
     draft: {
-      synopsis: 'Колокол звонил сам.',
-      entry: 'После удара звон не стих.',
-      closeWhen: 'Установлена причина самозвона.',
+      observedFacts: ['Колокол звонил сам.', 'После удара звон не стих.'],
+      resolutionFacts: ['Кто трогал язык колокола', 'Почему звон не затих'],
       asksSequel: false,
       newCharacters: [{ name: 'Эрвен', role: 'литейщик', about: 'держит артель' }],
     },
@@ -61,8 +60,13 @@ test('пакет judge компактный: якоря и граф, без оп
   assert.match(text, /Соляной Колокол/);
   assert.match(text, /Эрвен/);
   assert.match(text, /Ярус слышит знамение/);
+  assert.match(text, /observedFacts:/);
+  assert.match(text, /Колокол звонил сам/);
+  assert.match(text, /resolutionFacts:/);
+  assert.match(text, /язык колокола/);
   assert.equal(text.includes('летающий остров'), false);
   assert.equal(text.includes('domain.description'), false);
+  assert.equal(text.includes('closeWhen'), false);
 });
 
 function runtimeQueue(replies) {
@@ -79,12 +83,15 @@ function runtimeQueue(replies) {
   };
 }
 
-test('каскад: Luna PASS принимает без Terra', async () => {
-  const { runtime, seen } = runtimeQueue([{ verdict: 'PASS', issues: [], summary: 'ок' }]);
+test('каскад: Luna PASS всё равно зовёт Terra', async () => {
+  const { runtime, seen } = runtimeQueue([
+    { verdict: 'PASS', issues: [], summary: 'ок' },
+    { verdict: 'PASS', issues: [], summary: 'состоятельно' },
+  ]);
   const out = await judgeMysteryCascade({ runtime, caseText: 'пакет' });
   assert.equal(out.accepted, true);
-  assert.deepEqual(seen, ['mysteryJudge']);
-  assert.equal(out.terra, null);
+  assert.deepEqual(seen, ['mysteryJudge', 'mysteryJudgeTerra']);
+  assert.equal(out.terra.verdict, 'PASS');
 });
 
 test('каскад: Luna FAIL отклоняет без Terra', async () => {
@@ -120,14 +127,31 @@ test('каскад: Terra UNCERTAIN считается FAIL', async () => {
   assert.deepEqual(seen, ['mysteryJudge', 'mysteryJudgeTerra']);
 });
 
+test('каскад: Luna PASS и Terra FAIL отклоняет', async () => {
+  const { runtime, seen } = runtimeQueue([
+    { verdict: 'PASS', issues: [], summary: 'ок' },
+    {
+      verdict: 'FAIL',
+      issues: [{ code: 'IMPLAUSIBLE_ACTION', location: 'B', reason: 'поступок только ради следующего узла' }],
+      summary: 'авторский механизм',
+    },
+  ]);
+  const out = await judgeMysteryCascade({ runtime, caseText: 'пакет' });
+  assert.equal(out.accepted, false);
+  assert.deepEqual(seen, ['mysteryJudge', 'mysteryJudgeTerra']);
+});
+
 test('конфиг каскада и агенты judge на месте', () => {
   const config = loadConfig();
   const cfg = plotConfig(config);
   assert.equal(cfg.mysteryGraph.judgeAttempts, 3);
   assert.equal(cfg.mysteryGraph.generateTries, 6);
+  assert.equal(cfg.mysteryGraph.presentationTries, 3);
   assert.equal(config.agents.mysteryJudge.model, 'gpt-5.6-luna');
   assert.equal(config.agents.mysteryJudgeTerra.model, 'gpt-5.6-terra');
+  assert.equal(config.agents.mysteryPresentation.model, 'gpt-5.6-luna');
   assert.equal(config.agents.mysteryStart.reasoningEffort, undefined);
+  assert.equal(config.agents.mysteryPresentation.reasoningEffort, undefined);
 });
 
 test('ассоциация в промпте — слабый импульс', () => {

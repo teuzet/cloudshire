@@ -1,6 +1,6 @@
 import { newId } from './ids.js';
 import { textsLookSame } from './processes.js';
-import { normalizeTruthGraph, judgeTruthGraph, parseMysteryShapes } from './mysteryGraph.js';
+import { normalizeTruthGraph, judgeTruthGraph, parseMysteryShapes, normalizeFactList, RESOLUTION_FACT_MAX } from './mysteryGraph.js';
 
 /**
  * Сюжетные нити — ядро мира: событий вне нитей не бывает.
@@ -101,6 +101,8 @@ function storyActState(p = {}) {
       maxEscalations: null,
       truth: '',
       truthGraph: null,
+      observedFacts: [],
+      resolutionFacts: [],
       ending: null,
       asksSequel: false,
     };
@@ -120,6 +122,9 @@ function storyActState(p = {}) {
     maxEscalations: maxEsc,
     truth: type === 'mystery' && !graph ? String(p.truth || '') : '',
     truthGraph: graph,
+    observedFacts: type === 'mystery' ? normalizeFactList(p.observedFacts).facts : [],
+    resolutionFacts:
+      type === 'mystery' ? normalizeFactList(p.resolutionFacts, { maxLen: RESOLUTION_FACT_MAX }).facts : [],
     ending: ['crit', 'ok', 'fail'].includes(p.ending) ? p.ending : null,
     asksSequel: Boolean(p.asksSequel),
   };
@@ -219,6 +224,7 @@ export function plotConfig(config) {
       shapes: parseMysteryShapes(p.mystery?.graph?.shapes),
       judgeAttempts: Math.max(1, Math.min(8, Math.round(Number(p.mystery?.graph?.judgeAttempts ?? 3)))),
       generateTries: Math.max(1, Math.min(12, Math.round(Number(p.mystery?.graph?.generateTries ?? 6)))),
+      presentationTries: Math.max(1, Math.min(6, Math.round(Number(p.mystery?.graph?.presentationTries ?? 3)))),
     },
     mysteryEntities: (() => {
       const minCatalog = Math.max(4, Math.round(Number(p.mystery?.entities?.minCatalog ?? 32)));
@@ -338,6 +344,8 @@ export function createPlotline({
   maxEscalations = 3,
   truth = '',
   truthGraph = null,
+  observedFacts = [],
+  resolutionFacts = [],
   ending = null,
   asksSequel = false,
   config = null,
@@ -389,6 +397,8 @@ export function createPlotline({
       maxEscalations,
       truth,
       truthGraph,
+      observedFacts,
+      resolutionFacts,
       ending,
       asksSequel,
       kind: resolvedKind,
@@ -801,8 +811,9 @@ export function judgePlotSeed(domain, draft, { storyType } = {}) {
       maxNodes: 8,
     });
     if (reason) return reason;
+  } else if (synopsis.length < SEED_HOOK_MIN) {
+    return 'thin_hook';
   }
-  if (synopsis.length < SEED_HOOK_MIN) return 'thin_hook';
   const twin = (domain.plotlines || []).find((p) =>
     textsLookSame(`${p.title} ${p.synopsis}`, `${title} ${synopsis}`, { minShared: 7 }),
   );
@@ -813,7 +824,7 @@ export function judgePlotSeed(domain, draft, { storyType } = {}) {
 /** Разгадка тайны не для доски, речи и инспектора. */
 export function stripPlotSecrets(plot) {
   if (!plot || typeof plot !== 'object') return plot;
-  const { truth: _truth, truthGraph: _graph, ...rest } = plot;
+  const { truth: _truth, truthGraph: _graph, resolutionFacts: _res, ...rest } = plot;
   return rest;
 }
 

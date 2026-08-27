@@ -1,6 +1,6 @@
 /**
- * Каскад валидации посева тайны: Luna → при UNCERTAIN Terra.
- * Judge не чинит историю и не видит полный лор города.
+ * Каскад валидации CORE тайны: Luna — дешёвый rejector, иначе Terra — acceptor.
+ * Judge не чинит историю, не видит лор города и не оценивает подачу.
  */
 
 import { getLogger } from '../log.js';
@@ -126,9 +126,14 @@ export function formatMysteryJudgeCase({
     '',
     formatTruthGraphForPrompt(graph || draft.truthGraph || draft) || '(графа нет)',
     '',
-    `synopsis: ${clip(draft.synopsis, 900)}`,
-    `entry: ${clip(draft.entry, 900)}`,
-    `closeWhen: ${clip(draft.closeWhen, 240)}`,
+    'observedFacts:',
+    ...(draft.observedFacts || []).length
+      ? draft.observedFacts.map((f, i) => `${i + 1}. ${f}`)
+      : ['- (нет)'],
+    'resolutionFacts:',
+    ...(draft.resolutionFacts || []).length
+      ? draft.resolutionFacts.map((f, i) => `${i + 1}. ${f}`)
+      : ['- (нет)'],
     `asksSequel: ${asks}`,
   ]
     .filter((line) => line != null)
@@ -218,9 +223,8 @@ export async function runMysteryJudge({
 }
 
 /**
- * Luna PASS → принять.
- * Luna FAIL → отклонить, Terra не звать.
- * Luna UNCERTAIN → Terra; её UNCERTAIN = FAIL.
+ * Luna — дешёвый rejector: только FAIL отсекает.
+ * Иначе Terra — финальный acceptor. Terra UNCERTAIN = FAIL.
  */
 export async function judgeMysteryCascade({
   runtime,
@@ -233,13 +237,11 @@ export async function judgeMysteryCascade({
     runtime,
     agentId: 'mysteryJudge',
     caseText,
+    extraUser:
+      'FAIL только на доказуемой жёсткой ошибке из списка. Спорное и тонкое — не FAIL: финальный судья решит.',
     log,
     domainId,
   });
-  if (luna.verdict === 'PASS') {
-    log.info('mystery.judge.luna', { verdict: luna.verdict, summary: luna.summary });
-    return { accepted: true, luna, terra: null };
-  }
   if (luna.verdict === 'FAIL') {
     log.info('mystery.judge.luna', {
       verdict: luna.verdict,
@@ -248,13 +250,13 @@ export async function judgeMysteryCascade({
     });
     return { accepted: false, luna, terra: null };
   }
-  log.info('mystery.judge.luna', { verdict: luna.verdict, summary: luna.summary });
+  log.info('mystery.judge.luna', { verdict: luna.verdict, summary: luna.summary, passToTerra: true });
   const terra = await runMysteryJudge({
     runtime,
     agentId: 'mysteryJudgeTerra',
     caseText,
     extraUser:
-      'Дешёвый валидатор вернул UNCERTAIN и не смог уверенно решить. Проверь самостоятельно с нуля. Его замечания тебе не передаём.',
+      'Ты финальный acceptor core. Дешёвый rejector не нашёл жёсткой ошибки. Проверь самостоятельно с нуля: причинность, время, поступки, X, type. Подачу (synopsis/entry) не оценивай — её ещё нет.',
     log,
     domainId,
   });

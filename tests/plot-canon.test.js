@@ -271,8 +271,12 @@ test('стартер тайны может пометить, что истори
     title: 'Гул в трубах',
     storyType: 'mystery',
     asksSequel: true,
+    observedFacts: ['Ярус слышит гул.', 'На площади спорят, колокол это или вода.'],
+    resolutionFacts: ['Почему гудит цистерна', 'Кто перестал её чистить'],
   });
   assert.equal(seeded.asksSequel, true);
+  assert.equal(seeded.observedFacts.length, 2);
+  assert.equal(seeded.resolutionFacts.length, 2);
   const domain = { plotlines: [seeded], closedPlotlines: [] };
   normalizePlotlines(domain);
   assert.equal(domain.plotlines[0].asksSequel, true);
@@ -315,7 +319,7 @@ test('каталог тайны: поле и тип', async () => {
   const byShape = Object.fromEntries(cfg.mysteryGraph.shapes.map((s) => [s.id || s, Number(s.weight)]));
   assert.equal(byShape.linear_5, 0);
   assert.ok(byShape.linear_4 > 0);
-  assert.equal(byShape.linear_4, byShape.linear_side);
+  assert.equal(byShape.linear_side, 0);
   assert.equal(cfg.mysteryGraph.sideRevealChance, 0.5);
   assert.ok(cfg.mysteryEntities.minCatalog >= 24);
   assert.equal(cfg.mysteryEntities.pickMin, 1);

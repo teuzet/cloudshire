@@ -363,6 +363,8 @@ test('разгадка не попадает на доску и снимаетс
     storyType: 'mystery',
     truth: 'это был садовник',
     truthGraph: mysteryGraph(),
+    observedFacts: ['Нижний ярус слышит гул как знамение.'],
+    resolutionFacts: ['Почему цистерну перестали чистить'],
   });
   const board = formatBoardForPrompt({ plotlines: [plot] });
   assert.equal(board.includes('садовник'), false);
@@ -371,6 +373,8 @@ test('разгадка не попадает на доску и снимаетс
   const publicCard = stripPlotSecrets(plot);
   assert.equal(publicCard.truth, undefined);
   assert.equal(publicCard.truthGraph, undefined);
+  assert.equal(publicCard.resolutionFacts, undefined);
+  assert.deepEqual(publicCard.observedFacts, ['Нижний ярус слышит гул как знамение.']);
   assert.equal(publicCard.title, plot.title);
 });
 

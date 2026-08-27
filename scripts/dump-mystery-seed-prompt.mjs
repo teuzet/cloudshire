@@ -76,7 +76,7 @@ function renderDump({ snapshot, world, captured, tags }) {
     `- модель: ${captured.model}`,
     `- reasoning: ${captured.reasoningEffort || captured.agent?.reasoningEffort || '—'}`,
     `- сцена: ${captured.scene || 'plot_seed'}`,
-    `- tool: ${toolChoice || 'submit_plot_seed'}`,
+    `- tool: ${toolChoice || 'submit_mystery_core'}`,
     `- живых нитей на снимке: ${(snapshot.plotlines || []).length}`,
     '',
     'Жребий направления в этом дампе случаен, как у настоящего посева:',
