@@ -163,6 +163,40 @@ export function isOrderPlot(plot) {
   return plot?.kind === 'order';
 }
 
+/** Бинарная осведомлённость города о нити как о полной линии. */
+export function refreshPlotAwareness(plot) {
+  if (!plot || typeof plot !== 'object') return plot;
+  plot.plotAwareness = normalizePlotAwarenessMap(plot);
+  return plot;
+}
+
+function normalizePlotAwarenessMap(plot) {
+  const raw = plot?.plotAwareness;
+  const hadField = raw && typeof raw === 'object' && !Array.isArray(raw);
+  const next = {};
+  if (hadField) {
+    for (const [k, v] of Object.entries(raw)) {
+      if (v) next[String(k)] = true;
+    }
+  }
+  const host = plot?.hostDomainId ? String(plot.hostDomainId) : null;
+  if (host) next[host] = true;
+  if (plot?.isMainConflux) {
+    for (const id of Array.isArray(plot.concernsDomainIds) ? plot.concernsDomainIds : []) {
+      if (id) next[String(id)] = true;
+    }
+  }
+  // Старые сохранения и карточки без поля: участники concerns уже знали линию.
+  if (!hadField || !Object.keys(next).length) {
+    if (Array.isArray(plot?.concernsDomainIds)) {
+      for (const id of plot.concernsDomainIds) {
+        if (id) next[String(id)] = true;
+      }
+    }
+  }
+  return next;
+}
+
 function clampChance(n, fallback = 0.2) {
   const v = Number(n);
   if (!Number.isFinite(v)) return fallback;
@@ -337,6 +371,7 @@ export function normalizePlotlines(domain, config = null) {
       shared: Boolean(p.shared),
       isMainConflux: Boolean(p.isMainConflux),
       sharedReason: p.sharedReason ? String(p.sharedReason) : null,
+      plotAwareness: normalizePlotAwarenessMap(p),
       status: 'open',
       createdTick: p.createdTick == null ? null : Number(p.createdTick),
       lastBeatTick: p.lastBeatTick == null ? null : Number(p.lastBeatTick),
@@ -400,7 +435,7 @@ export function createPlotline({
   config = null,
 }) {
   const resolvedKind = PLOT_KINDS.includes(kind) ? kind : 'story';
-  return {
+  const plot = {
     id: newId('plot'),
     title: clipText(title || (resolvedKind === 'order' ? 'Порядок' : 'Сюжет'), PLOT_TITLE_MAX),
     synopsis: clipText(synopsis || summary, PLOT_SUMMARY_MAX),
@@ -424,6 +459,7 @@ export function createPlotline({
     shared: Boolean(shared),
     isMainConflux: Boolean(isMainConflux),
     sharedReason: null,
+    plotAwareness: {},
     partnerGone: false,
     status: 'open',
     createdTick: tick,
@@ -468,6 +504,7 @@ export function createPlotline({
       confluxId,
     }),
   };
+  return refreshPlotAwareness(plot);
 }
 
 /** Нить-заглушка для дела: у каждого процесса есть своя нить. */
@@ -602,6 +639,7 @@ function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } =
     shared: Boolean(plot.shared),
     isMainConflux: Boolean(plot.isMainConflux),
     sharedReason: plot.sharedReason || null,
+    plotAwareness: normalizePlotAwarenessMap(plot),
     ...storyActState(plot),
     ...(plot.kind === 'order'
       ? {
@@ -663,6 +701,7 @@ export function reopenClosedPlotline(domain, closedOrId) {
     shared: Boolean(closed.shared),
     isMainConflux: Boolean(closed.isMainConflux),
     sharedReason: closed.sharedReason || null,
+    plotAwareness: normalizePlotAwarenessMap(closed),
     status: 'open',
     createdTick: closed.createdTick == null ? null : Number(closed.createdTick),
     lastBeatTick: closed.lastBeatTick == null ? null : Number(closed.lastBeatTick),
@@ -747,7 +786,7 @@ function pickWeightedTag(tags, rng) {
 
 /**
  * Жребий завязки: по одному тегу из каждой группы, все обязательны.
- * Группы саспенса: тон, сфера, источник (причинная сила), ситуация, динамика.
+ * Группы саспенса: тон, источник (причинная сила), ситуация, динамика.
  */
 function tagFromGroup(group, rng) {
   if (!group?.tags?.length) return null;
@@ -1006,19 +1045,22 @@ export function formatBoardForSpeech(domain, { statsFeel = null, max = 8, viewer
     .map((p) => {
       const feel =
         statsFeel && p.relatedStats.length ? ` Упирается в: ${statsFeel(p.relatedStats)}.` : '';
+      const viewerKnows = Boolean(p.plotAwareness?.[viewer]);
       const foreign =
+        Boolean(p.confluxId) &&
+        !p.isMainConflux &&
+        !isOrderPlot(p) &&
         (p.concernsDomainIds || []).length > 0 &&
-        !(p.concernsDomainIds || []).includes(viewer) &&
-        !p.isMainConflux;
+        !(p.concernsDomainIds || []).includes(viewer);
       const kind = p.kind === 'errand'
         ? 'поручение'
         : p.kind === 'order'
           ? 'порядок'
           : p.isMainConflux
             ? 'сопряжение'
-            : p.shared
+            : p.shared && viewerKnows
               ? 'общая история'
-              : foreign
+              : foreign && viewerKnows
                 ? 'история соседа'
                 : 'история';
       const duty = (p.relatedProcessIds || []).length

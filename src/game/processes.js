@@ -47,6 +47,7 @@ export function normalizeProcess(action, config = null) {
   if (!action.status) action.status = 'active';
   if (!action.initiative) action.initiative = 'patron';
   action.blessed = Boolean(action.blessed);
+  action.intel = Boolean(action.intel);
   if (action.objectiveMonths == null) {
     action.objectiveMonths = action.expectedMonths;
   } else {
@@ -340,6 +341,8 @@ export function applyEngineProgress(domain, rolls, { tick = null, config = null,
       finishLabel,
       blessed,
       ownerDomainId: r.ownerDomainId || process.ownerDomainId || null,
+      intel: Boolean(process.intel),
+      plotlineId: process.plotlineId || null,
       plotEngagement: process.plotEngagement || null,
       plotAligned: process.plotEngagement === 'DIRECT' || process.plotAligned === true,
       // Обычный ход без завершения — фон, о нём отдельную запись не пишем.

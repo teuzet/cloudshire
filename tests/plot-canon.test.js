@@ -287,20 +287,25 @@ test('стартер тайны может пометить, что истори
   assert.equal(allowSequelAfter({ kind: 'errand' }), false);
 });
 
-test('каталог завязки: тон, сфера, причинная сила, ситуация, динамика', async () => {
+test('каталог завязки: тон, причинная сила, ситуация, динамика', async () => {
   const { loadConfig } = await import('../src/config.js');
   const config = loadConfig();
   const cfg = plotConfig(config);
   const byId = Object.fromEntries(cfg.tagGroups.map((g) => [g.id, g]));
-  assert.ok(byId.tone && byId.sphere && byId.source && byId.situation && byId.dynamic);
+  assert.ok(byId.tone && byId.source && byId.situation && byId.dynamic);
+  assert.equal(byId.sphere, undefined);
   assert.equal(byId.scale, undefined);
   assert.equal(byId.character, undefined);
   assert.equal(byId.spark, undefined);
-  assert.ok(byId.sphere.tags.length >= 6);
   assert.equal(byId.source.tags.find((t) => t.id === 'any'), undefined);
   assert.ok(byId.source.tags.find((t) => t.id === 'unknown'));
   assert.ok(cfg.suspense.gravityFloor >= 20);
   assert.equal(cfg.suspense.legacyMinGravity, 25);
+  const tags = pickSeedTags(cfg, { storyType: 'suspense', rng: () => 0.5 });
+  assert.deepEqual(
+    tags.map((t) => t.groupId).sort(),
+    ['dynamic', 'situation', 'source', 'tone'],
+  );
 });
 
 test('каталог тайны: поле и тип', async () => {

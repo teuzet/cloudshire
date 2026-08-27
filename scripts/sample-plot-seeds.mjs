@@ -18,6 +18,7 @@ import { AgentRuntime } from '../src/agents/runtime.js';
 import { seedPlot } from '../src/game/storyteller.js';
 import { formatPlotTagsForPrompt, pickSeedTags, plotConfig } from '../src/game/plotlines.js';
 import { formatTruthGraphForPrompt } from '../src/game/mysteryGraph.js';
+import { formatLadderForPrompt } from '../src/game/suspenseGraph.js';
 import { ensureCityEntities, formatMysteryAnchorsForPrompt } from '../src/game/cityEntities.js';
 
 function parseArgs(argv) {
@@ -243,6 +244,7 @@ function renderCard(row) {
       row.terraJudge ? `Terra ${row.terraJudge}` : null,
       row.urgency != null ? `urgency ${row.urgency}` : null,
       row.gravity != null ? `gravity ${row.gravity}` : null,
+      row.depth != null ? `depth ${row.depth}` : null,
       row.importance != null ? `важность ${row.importance}` : null,
       row.maxAgeMonths != null ? `срок ${row.maxAgeMonths}` : null,
       row.relatedStats.length ? `статы ${row.relatedStats.join(', ')}` : null,
@@ -274,6 +276,23 @@ function renderCard(row) {
     lines.push('');
     lines.push('resolutionFacts:');
     for (const f of row.resolutionFacts) lines.push(`- ${f}`);
+  }
+  if (row.discoveryLadder?.length) {
+    lines.push('');
+    lines.push('discoveryLadder:');
+    lines.push(formatLadderForPrompt(row.discoveryLadder));
+  } else if (row.storyType === 'suspense' && row.ok && Number(row.depth) <= 1) {
+    lines.push('');
+    lines.push('discoveryLadder: (нет — короткая история, depth 1)');
+  }
+  if (row.hiddenPremises?.length) {
+    lines.push('');
+    lines.push('hiddenPremises:');
+    for (const h of row.hiddenPremises) lines.push(`- ${h}`);
+  }
+  if (row.closureGate) {
+    lines.push('');
+    lines.push(`closureGate: ${row.closureGate}`);
   }
   if (row.cast.length) lines.push(`люди: ${row.cast.join(', ')}`);
   lines.push('');
@@ -358,6 +377,10 @@ async function runBatch({
       importance: plot?.importance ?? null,
       urgency: plot?.urgency ?? null,
       gravity: plot?.gravity ?? null,
+      depth: plot?.depth ?? null,
+      discoveryLadder: plot?.discoveryLadder || [],
+      hiddenPremises: plot?.hiddenPremises || [],
+      closureGate: plot?.closureGate || '',
       maxAgeMonths: plot?.maxAgeMonths ?? null,
       relatedStats: plot?.relatedStats || [],
       entry: result?.fact?.text || null,
@@ -482,17 +505,17 @@ try {
     '',
     '## Жребий саспенса',
     '',
-    '### Характер',
-    tagFreq(suspenseRows, 'character') || '- (нет)',
-    '',
-    '### Сфера',
-    tagFreq(suspenseRows, 'sphere') || '- (нет)',
+    '### Тон',
+    tagFreq(suspenseRows, 'tone', { all: true }) || '- (нет)',
     '',
     '### Источник',
     tagFreq(suspenseRows, 'source') || '- (нет)',
     '',
-    '### Масштаб',
-    tagFreq(suspenseRows, 'scale') || '- (нет)',
+    '### Ситуация',
+    tagFreq(suspenseRows, 'situation') || '- (нет)',
+    '',
+    '### Динамика',
+    tagFreq(suspenseRows, 'dynamic') || '- (нет)',
     '',
     '## Тайны',
     '',

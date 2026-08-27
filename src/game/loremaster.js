@@ -3,7 +3,7 @@ import { createLoreFact, formatCastForPrompt, chronicleEntries } from './models.
 import { formatFullChronicleForPrompt, formatFactsForPrompt } from './memory.js';
 import { findActiveConfluxForDomain, monthsUntilDock } from './conflux.js';
 import { isOrderPlot } from './plotlines.js';
-import { plotConcerns, plotVisibleToRuler } from './confluxBoard.js';
+import { plotVisibleToRuler } from './confluxBoard.js';
 import { formatTruthGraphForPrompt } from './mysteryGraph.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
@@ -23,7 +23,7 @@ export function storiesForLoremaster(domain, conflux = null) {
   if (conflux) {
     for (const p of conflux.plotlines || []) {
       if (!p || isOrderPlot(p)) continue;
-      if (p.isMainConflux || plotConcerns(p, domain.id) || plotVisibleToRuler(p, domain.id, conflux)) {
+      if (plotVisibleToRuler(p, domain.id, conflux)) {
         if (!byId.has(p.id)) byId.set(p.id, p);
       }
     }
@@ -31,12 +31,14 @@ export function storiesForLoremaster(domain, conflux = null) {
   return [...byId.values()];
 }
 
-export function formatStoriesForLoremaster(plots = []) {
+export function formatStoriesForLoremaster(plots = [], { viewerId = null } = {}) {
   if (!plots.length) return 'Открытых историй нет.';
-  return plots.map(formatStoryForLoremaster).join('\n\n');
+  return plots.map((p) => formatStoryForLoremaster(p, viewerId)).join('\n\n');
 }
 
-function formatStoryForLoremaster(p) {
+function formatStoryForLoremaster(p, viewerId = null) {
+  const host = p.hostDomainId || (p.concernsDomainIds || [])[0] || null;
+  const own = !viewerId || p.isMainConflux || String(host) === String(viewerId);
   const kind =
     p.storyType === 'mystery'
       ? 'ТАЙНА'
@@ -50,7 +52,11 @@ function formatStoryForLoremaster(p) {
     p.synopsis ? `Как сейчас: ${p.synopsis}` : null,
     p.closeWhen ? `Закроется, когда: ${p.closeWhen}` : null,
   ];
-  if (p.storyType === 'mystery' && (p.truthGraph || p.truth)) {
+  if (!own) {
+    lines.push(
+      'Чужая история: канон истины и скрытые посылки этому городу не открыты. Не раскрывай, не достраивай и не записывай их в fact.',
+    );
+  } else if (p.storyType === 'mystery' && (p.truthGraph || p.truth)) {
     lines.push(
       'ЭТА ТАЙНА ЗАЩИЩЕНА. Канон истины ниже — его нельзя раскрывать, достраивать, объяснять или записывать в fact.',
     );
@@ -172,7 +178,9 @@ export async function askLoremaster({
               monthsLeft: a.monthsLeft,
               expectedMonths: a.expectedMonths,
             })),
-          openStories: formatStoriesForLoremaster(storiesForLoremaster(working, conflux)),
+          openStories: formatStoriesForLoremaster(storiesForLoremaster(working, conflux), {
+            viewerId: working.id,
+          }),
           reminder:
             'Хроника приложена целиком — это твой главный источник, рядом с ним knownPeople: ' +
             'судьбы названных людей записаны там, даже если хроника о них молчит. Ты их только читаешь: ' +

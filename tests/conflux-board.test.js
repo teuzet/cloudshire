@@ -104,21 +104,35 @@ test('известные факты монотонны и не берут secret
   assert.deepEqual(c.knownLoreIds.a, ['lore_1']);
 });
 
-test('гидратация правителя показывает чужую нить, если хроника известна', () => {
+test('гидратация правителя не показывает чужую нить из одной известной хроники', () => {
   const plot = createPlotline({ title: 'Чужой храм', kind: 'story' });
   plot.concernsDomainIds = ['b'];
   plot.hostDomainId = 'b';
   plot.confluxId = 'conflux_1';
   plot.chronicleIds = ['lore_1'];
+  plot.plotAwareness = { b: true };
   const c = conflux({ status: 'docked' });
   c.plotlines = [plot];
   c.knownLoreIds.a = ['lore_1'];
   const a = domain('a');
   hydrateDomainFromConflux(a, c, { mode: 'ruler' });
-  assert.equal(a.plotlines.some((p) => p.id === plot.id), true);
+  assert.equal(a.plotlines.some((p) => p.id === plot.id), false);
   dehydrateDomainToConflux(a, c);
   assert.equal(a.plotlines.every(isOrderPlot), true);
   assert.equal(c.plotlines.length, 1);
+});
+
+test('гидратация правителя показывает нить после plotAwareness', () => {
+  const plot = createPlotline({ title: 'Чужой храм', kind: 'story' });
+  plot.concernsDomainIds = ['b'];
+  plot.hostDomainId = 'b';
+  plot.confluxId = 'conflux_1';
+  plot.plotAwareness = { b: true, a: true };
+  const c = conflux({ status: 'docked' });
+  c.plotlines = [plot];
+  const a = domain('a');
+  hydrateDomainFromConflux(a, c, { mode: 'ruler' });
+  assert.equal(a.plotlines.some((p) => p.id === plot.id), true);
 });
 
 test('главная нить стыка задевает оба города', () => {
@@ -134,7 +148,7 @@ test('главная нить стыка задевает оба города', 
   assert.deepEqual(main.concernsDomainIds.sort(), ['a', 'b']);
 });
 
-test('расстыковка: shared копируется обоим, чужие дела отрезаны; указы не трогаем', () => {
+test('расстыковка: shared копируется обоим, чужие дела отрезаны; указы не трогаем', async () => {
   const shared = createPlotline({ title: 'Общая драка', kind: 'story' });
   shared.concernsDomainIds = ['a', 'b'];
   shared.shared = true;
@@ -148,7 +162,7 @@ test('расстыковка: shared копируется обоим, чужие
     { id: 'act_a', ownerDomainId: 'a', status: 'active', confluxId: c.id },
     { id: 'act_b', ownerDomainId: 'b', status: 'active', confluxId: c.id },
   ];
-  returnBoardsOnUndock(c, new Map([['a', a], ['b', b]]));
+  await returnBoardsOnUndock(c, new Map([['a', a], ['b', b]]));
   assert.equal(a.plotlines.filter((p) => p.kind === 'order').length, 1);
   assert.equal(a.plotlines.filter((p) => p.title === 'Общая драка').length, 1);
   assert.equal(b.plotlines.filter((p) => p.title === 'Общая драка').length, 1);

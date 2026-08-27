@@ -26,6 +26,10 @@ import {
   dehydrateDomainToConflux,
   sharePlotWithDomain,
   plotConcerns,
+  cityKnowsPlot,
+  findPlotByChronicleId,
+  leakedTracesForViewer,
+  takeIntelOffer,
 } from './confluxBoard.js';
 import { askInformant } from './informant.js';
 import {
@@ -371,6 +375,7 @@ function characterTools(domain, storage, character, ctx) {
           fresh: processIsFresh(a),
           progress: processProgressFeel(a),
           blessed: Boolean(a.blessed),
+          intel: Boolean(a.intel),
         })),
         pausedProcesses: pausedProcesses(domain, ctx.config).map((a) => ({
           id: a.id,
@@ -393,6 +398,10 @@ function characterTools(domain, storage, character, ctx) {
               !plotConcerns(p, domain.id),
           ),
         })),
+        leakedTraces:
+          ctx.conflux && ctx.partner
+            ? leakedTracesForViewer(ctx.conflux, domain.id, [domain, ctx.partner])
+            : [],
         guidanceProcesses:
           'processes[].progress — как дело шло в прошлом месяце: так и отвечай, если спрашивают. ' +
           'objectiveMonths — честная оценка срока, monthsLeft — сколько ещё ждут. ' +
@@ -409,10 +418,13 @@ function characterTools(domain, storage, character, ctx) {
           'Общий храм, общий двор или общие имена — не дубль и не повод слить РАЗНЫЕ работы. ' +
           'initiative=ruler — это дело ты завёл сам, пока покровитель молчал; на вопрос «что ты решал» называй их.',
         guidancePlots:
-          'plots[] — живые нити. kind=errand уже привязана к делу; kind=story может быть без поручения; kind=order — постоянный порядок, дело на него не заводи. ' +
-          'foreign=true — история СОСЕДА, ещё не общая: если покровитель в неё вмешивается, declare_process с её plotId — тогда она станет общей. ' +
+          'plots[] — живые нити, которые этот город знает как линии. kind=errand уже привязана к делу; kind=story может быть без поручения; kind=order — постоянный порядок, дело на него не заводи. ' +
+          'foreign=true — история соседа, уже раскрытая нам: дело с plotId вмешивается в неё по существу. ' +
           'shared=true — общая история сопряжения, дело можно заводить с обеих сторон. ' +
-          'Приказ по истории без дела — declare_process с plotId этой истории. ' +
+          'leakedTraces[] — голые факты о соседе, сюжетной карточки нет. Не называй это историей по имени. ' +
+          'Если покровитель хочет «узнать, что это» — declare_process с intel=true и chronicleId (или plotId, если карточка уже известна). ' +
+          'intel нельзя на указ и на уже раскрытую нить. Шпионы «на остров вообще» — обычное дело без intel и без plotId. ' +
+          'Приказ по известной истории без дела — declare_process с plotId этой истории. ' +
           'Не бери id соседней нити из-за общего места или общих людей.',
       }),
     },
@@ -563,13 +575,28 @@ function characterTools(domain, storage, character, ctx) {
           partner: ctx.partner,
           questions: questions || [],
         });
+        const traces = leakedTracesForViewer(ctx.conflux, domain.id, [domain, ctx.partner]);
+        const knownHit = (result.answers || []).some((a) => a && a.known);
+        const freshOffers = [];
+        if (knownHit) {
+          for (const t of traces) {
+            if (takeIntelOffer(ctx.conflux, domain.id, t.plotId || t.chronicleId)) {
+              freshOffers.push(t);
+            }
+          }
+        }
+        if (freshOffers.length) await save();
         return {
           ok: true,
           answers: result.answers,
           summary: result.summary,
+          leakedTraces: traces,
           hint:
             'Перескажи своими словами. Если informant сказал «неизвестно» — так и скажи покровителю. ' +
-            'Предположение помечай как догадку, не как факт.',
+            'Предположение помечай как догадку, не как факт.' +
+            (freshOffers.length
+              ? ' Покровитель задел чужой след, сюжетной карточки ещё нет. ОДИН раз предложи узнать больше: declare_process с intel=true и chronicleId из leakedTraces. Не предлагай это каждый ход и не называй чужое дело по титулу.'
+              : ''),
         };
       },
     },
@@ -623,6 +650,18 @@ function characterTools(domain, storage, character, ctx) {
               'Не подставляй соседнюю нить из-за общего места или общих людей. ' +
               'Если приказ не про живую историю — оставь пустым, дело заведёт свою нить само.',
           },
+          chronicleId: {
+            type: 'string',
+            description:
+              'id просочившейся записи из leakedTraces[] или известной хроники соседа. ' +
+              'Для intel=true, если карточки сюжета ещё нет — передай chronicleId вместо plotId.',
+          },
+          intel: {
+            type: 'boolean',
+            description:
+              'true — целенаправленно разведать конкретный чужой сюжет (нужен plotId или chronicleId). ' +
+              'Не для вмешательства и не для «пошлите шпионов на остров вообще».',
+          },
         },
       },
       handler: async ({
@@ -634,6 +673,8 @@ function characterTools(domain, storage, character, ctx) {
         onBehalfOf = 'patron',
         characterNote,
         plotId,
+        chronicleId,
+        intel = false,
         goal,
       }) => {
         const slots = canStartProcess(domain, ctx.config);
@@ -691,6 +732,48 @@ function characterTools(domain, storage, character, ctx) {
               : hard
                 ? 1
                 : null;
+        const wantIntel = Boolean(intel);
+        const partners = ctx.conflux && ctx.partner ? [domain, ctx.partner] : [domain];
+        let targetPlot = null;
+        if (plotId) {
+          targetPlot =
+            findPlotline(domain, String(plotId)) ||
+            (ctx.conflux?.plotlines || []).find((p) => String(p.id) === String(plotId)) ||
+            null;
+        } else if (chronicleId && ctx.conflux) {
+          targetPlot = findPlotByChronicleId(ctx.conflux, String(chronicleId), partners);
+        }
+        if (wantIntel) {
+          if (!ctx.conflux) {
+            return toolFail('intel_needs_conflux', 'Разведка конкретного сюжета только во время сопряжения.');
+          }
+          if (!targetPlot) {
+            return toolFail(
+              'intel_needs_target',
+              'Для intel=true нужен plotId известной нити или chronicleId просочившейся записи.',
+            );
+          }
+          if (isOrderPlot(targetPlot)) {
+            return toolFail('intel_forbidden_order', 'Целенаправленная разведка указов запрещена.');
+          }
+          if (cityKnowsPlot(targetPlot, domain.id)) {
+            return toolFail(
+              'intel_already_known',
+              'Эта история уже известна городу как линия. intel не нужен — заведи обычное дело, если вмешиваетесь.',
+            );
+          }
+          const traces = leakedTracesForViewer(ctx.conflux, domain.id, partners);
+          const heard =
+            traces.some((t) => t.plotId === targetPlot.id) ||
+            traces.some((t) => String(t.chronicleId) === String(chronicleId || '')) ||
+            Boolean(chronicleId && findPlotByChronicleId(ctx.conflux, String(chronicleId), partners));
+          if (!heard) {
+            return toolFail(
+              'plot_unknown',
+              'Город не знает эту нить. Для разведки возьми chronicleId из leakedTraces.',
+            );
+          }
+        }
         const action = {
           id: newId('act'),
           summary,
@@ -708,6 +791,7 @@ function characterTools(domain, storage, character, ctx) {
           hardDeadline: hard,
           status: 'active',
           initiative: 'patron',
+          intel: wantIntel,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -721,8 +805,16 @@ function characterTools(domain, storage, character, ctx) {
           log: ctx.log,
         });
         applyObjectiveSchedule(action, estimated.months, askedRemaining);
-        // У каждого дела есть нить: либо та, что назвал правитель, либо проходная.
-        let plot = plotId ? linkProcessToPlotline(domain, action.id, String(plotId)) : null;
+        let plot = null;
+        if (targetPlot) {
+          targetPlot.relatedProcessIds = targetPlot.relatedProcessIds || [];
+          if (!targetPlot.relatedProcessIds.includes(action.id)) {
+            targetPlot.relatedProcessIds.push(action.id);
+          }
+          plot = targetPlot;
+        } else if (plotId) {
+          plot = linkProcessToPlotline(domain, action.id, String(plotId));
+        }
         if (!plot) {
           plot = ensureErrandForProcess(domain, action, {
             tick: world?.tickIndex ?? null,
@@ -730,7 +822,7 @@ function characterTools(domain, storage, character, ctx) {
           }).plot;
         }
         action.plotlineId = plot?.id || null;
-        if (plot && isThreeActPlot(plot)) {
+        if (plot && isThreeActPlot(plot) && !wantIntel) {
           await judgeProcessAlignment({
             runtime: ctx.runtime,
             domain,
@@ -742,8 +834,12 @@ function characterTools(domain, storage, character, ctx) {
         if (ctx.conflux && plot && !isOrderPlot(plot)) {
           action.confluxId = ctx.conflux.id;
           action.ownerDomainId = domain.id;
-          if (!plotConcerns(plot, domain.id) && !plot.isMainConflux) {
-            sharePlotWithDomain(plot, domain.id, { reason: 'process' });
+          if (!wantIntel && !plotConcerns(plot, domain.id) && !plot.isMainConflux) {
+            sharePlotWithDomain(plot, domain.id, {
+              reason: 'process',
+              conflux: ctx.conflux,
+              domains: partners,
+            });
           }
         }
         await save();
@@ -2193,7 +2289,7 @@ export class GameApp {
             'Каждая нить сама по себе. Общее место или общие люди не делают их одним делом.',
             'Приказ по истории без поручения — новое дело с plotId этой истории, не правка соседнего.',
             conflux
-              ? 'Чужая нить соседа, ещё не общая: если покровитель в неё вмешивается — declare_process с её plotId, и она станет общей.'
+              ? 'Чужой след без карточки — не история. Если покровитель хочет знать, что это, intel=true с chronicleId. Вмешательство в уже раскрытую чужую нить — обычное дело с plotId.'
               : '',
           ]
             .filter(Boolean)

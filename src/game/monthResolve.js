@@ -48,9 +48,9 @@ import { realignFinishedOutcomes } from './plotAlign.js';
 import {
   hydrateDomainFromConflux,
   dehydrateDomainToConflux,
-  maybeLeakPlot,
+  maybeLeakChronicle,
   otherDomainId,
-  isSharedPlot,
+  copyChronicleToAwareCities,
 } from './confluxBoard.js';
 
 /**
@@ -66,6 +66,7 @@ export async function resolveDomainMonth({
   confluxId = null,
   conflux = null,
   skipPlotClocks = false,
+  extraProcessOutcomes = [],
   log: parentLog,
 }) {
   const log = (parentLog || getLogger()).child({
@@ -83,6 +84,7 @@ export async function resolveDomainMonth({
   const cfg = plotConfig(config);
   const chronicleAdds = [];
   const mirrorAdds = [];
+  const flowAdds = [];
   const budget = createStatBudget(config);
 
   // 0. С четвёртого тихого месяца стюард заводит дело до хода месяца.
@@ -117,11 +119,21 @@ export async function resolveDomainMonth({
   for (const process of activeProcesses(working, config)) {
     ensureErrandForProcess(working, process, { tick: world.tickIndex, config });
   }
-  const processRolls = rollAllProcessAdvances(working, config);
-  const processOutcomes = applyEngineProgress(working, processRolls, {
+  const processRolls = rollAllProcessAdvances(working, config).filter((r) => {
+    const proc = (working.state?.pendingActions || []).find((p) => p.id === r.processId);
+    return !proc?.confluxId;
+  });
+  const localOutcomes = applyEngineProgress(working, processRolls, {
     tick: world.tickIndex,
     config,
   });
+  const extra = (extraProcessOutcomes || []).filter((o) => {
+    const plots = (working.plotlines || []).filter((p) =>
+      (p.relatedProcessIds || []).includes(String(o.processId)),
+    );
+    return plots.length > 0 && !o.intel;
+  });
+  const processOutcomes = [...localOutcomes, ...extra];
   await realignFinishedOutcomes({ runtime, domain: working, outcomes: processOutcomes, log });
 
   // 2. Часы доски (нити указов не стареют). На конфлюксе часы shared/локальных уже тикнули.
@@ -173,10 +185,31 @@ export async function resolveDomainMonth({
       log,
     });
     if (result?.mirror?.fact) mirrorAdds.push(result.mirror.fact);
-    if (conflux && result?.fact && plot && !isSharedPlot(plot)) {
+    if (conflux && result?.fact && plot) {
+      const flowed = copyChronicleToAwareCities({
+        plot,
+        fact: result.fact,
+        conflux,
+        domains: partner ? [working, partner] : [working],
+      });
+      for (const row of flowed) flowAdds.push(row);
       const other = otherDomainId(conflux, working.id);
-      if (other && maybeLeakPlot(plot, conflux, other)) {
-        log.info('conflux.plot_leaked', { plotId: plot.id, title: plot.title, to: other });
+      const otherDomain = partner && String(partner.id) === String(other) ? partner : null;
+      if (
+        other &&
+        otherDomain &&
+        maybeLeakChronicle({
+          plot,
+          fact: result.fact,
+          conflux,
+          viewerId: other,
+          viewerDomain: otherDomain,
+          domains: partner ? [working, partner] : [working],
+        })
+      ) {
+        log.info('conflux.chronicle_leaked', { plotId: plot.id, title: plot.title, to: other });
+        const leaked = (otherDomain.lore || []).filter((f) => f.leakedFromId === result.fact.id);
+        for (const fact of leaked) flowAdds.push({ domainId: other, fact });
       }
     }
     if (result?.fact) {
@@ -374,5 +407,5 @@ export async function resolveDomainMonth({
 
   if (conflux) dehydrateDomainToConflux(working, conflux);
 
-  return { domain: working, chronicleAdds, mirrorAdds, highlight, stewardActs: steward?.act ? [steward.act] : [] };
+  return { domain: working, chronicleAdds, mirrorAdds, flowAdds, highlight, stewardActs: steward?.act ? [steward.act] : [] };
 }

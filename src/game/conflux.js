@@ -11,6 +11,7 @@ import {
   approachMonthText,
   returnBoardsOnUndock,
 } from './confluxBoard.js';
+import { decideUndockContinuation } from './undockContinuation.js';
 
 /** Ширина прохода: ГСЧ выбирает kind; LLM только описывает. control — можно ли закрыть. */
 export const CONTACT_KINDS = {
@@ -820,7 +821,17 @@ export async function advanceDockedConfluxes({ storage, runtime, world }, docked
         });
       }
       const byId = new Map(domains.map((d) => [d.id, d]));
-      returnBoardsOnUndock(conflux, byId);
+      await returnBoardsOnUndock(conflux, byId, {
+        decideContinuation: async ({ plot, domainId, domain }) =>
+          decideUndockContinuation({
+            runtime,
+            plot,
+            domain,
+            partner: domains.find((x) => x.id !== domainId) || null,
+            world,
+            log,
+          }),
+      });
       for (const d of byId.values()) {
         await storage.saveDomain(d);
       }

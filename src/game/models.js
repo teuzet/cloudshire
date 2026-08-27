@@ -368,6 +368,7 @@ export function createLoreFact({
   importance = null,
   relatedPendingId = null,
   relatedPlotlineIds = null,
+  sourcePlotId = null,
   processFinish = null,
   statChanges = null,
   secret = false,
@@ -390,6 +391,8 @@ export function createLoreFact({
   if (Array.isArray(relatedPlotlineIds) && relatedPlotlineIds.length) {
     fact.relatedPlotlineIds = [...new Set(relatedPlotlineIds.map(String))];
   }
+  const source = sourcePlotId || fact.relatedPlotlineIds?.[0] || null;
+  if (source) fact.sourcePlotId = String(source);
   if (processFinish) fact.processFinish = String(processFinish);
   if (statChanges && Object.keys(statChanges).length) fact.statChanges = statChanges;
   if (secret) {

@@ -1,10 +1,10 @@
 import { getLogger } from '../log.js';
 import {
-  normalizePlotlines,
   plotConfig,
   findPlotline,
   closePlotline,
   plotHasActiveProcess,
+  isOrderPlot,
 } from './plotlines.js';
 import {
   advancePlotMonth,
@@ -20,16 +20,20 @@ import {
 } from './processes.js';
 import {
   normalizeConfluxBoard,
-  sharedPlots,
   processesForPlots,
+  confluxMonthPlots,
+  applyIntelFinishes,
 } from './confluxBoard.js';
 import { beatSharedPlot } from './confluxBeat.js';
 import { fadeQuietPlot, keepSharedStories } from './storyteller.js';
 import { scoreMonthStats, factsForStatJudge } from './statJudge.js';
 import { realignFinishedOutcomes } from './plotAlign.js';
 
-function boardFromShared(conflux, domains) {
-  const plots = sharedPlots(conflux);
+function storyPlots(conflux) {
+  return (conflux?.plotlines || []).filter((p) => p && !isOrderPlot(p));
+}
+
+function boardFromPlots(conflux, domains, plots) {
   const processes = processesForPlots(conflux, plots);
   const stats = {};
   for (const d of domains) Object.assign(stats, d.stats || {});
@@ -46,8 +50,8 @@ function boardFromShared(conflux, domains) {
   };
 }
 
-function rollSharedProcesses(conflux, plots, domainsById, config, rng = Math.random) {
-  const list = processesForPlots(conflux, plots);
+function rollConfluxProcesses(conflux, domainsById, config, rng = Math.random) {
+  const list = (conflux.processes || []).filter((p) => !p.status || p.status === 'active');
   return list.map((p) => {
     normalizeProcess(p, config);
     const owner = domainsById.get(p.ownerDomainId) || [...domainsById.values()][0];
@@ -64,8 +68,17 @@ function rollSharedProcesses(conflux, plots, domainsById, config, rng = Math.ran
   });
 }
 
+function outcomesForPlots(outcomes, plots) {
+  const ids = new Set();
+  for (const p of plots || []) {
+    for (const id of p.relatedProcessIds || []) ids.add(String(id));
+  }
+  return (outcomes || []).filter((o) => ids.has(String(o.processId)));
+}
+
 /**
- * Один ход shared-нитей (включая главную нить стыка). Вызывать раз за мировой тик.
+ * Ход нитей сопряжения: часы всех нитей; биты — главная встреча и contested.
+ * Остальные процессы тоже двигаются здесь, чтобы хозяин не крутил их второй раз.
  */
 export async function resolveConfluxSharedMonth({
   config,
@@ -78,29 +91,40 @@ export async function resolveConfluxSharedMonth({
   const log = (parentLog || getLogger()).child({ scope: 'conflux.month', confluxId: conflux.id });
   normalizeConfluxBoard(conflux);
   const cfg = plotConfig(config);
-  // Часы всех нитей сопряжения (локальных и shared) — всегда, даже если shared ещё нет.
   advancePlotMonth(conflux, cfg);
-  const plots = sharedPlots(conflux);
+
   const addsByDomain = new Map((domains || []).map((d) => [d.id, []]));
-  if (!plots.length) {
-    return { conflux, domains, chronicleAddsByDomain: addsByDomain };
+  const domainsById = new Map((domains || []).map((d) => [d.id, d]));
+  const allPlots = storyPlots(conflux);
+  const fullBoard = boardFromPlots(conflux, domains, allPlots);
+
+  const processOutcomes = applyEngineProgress(
+    fullBoard,
+    rollConfluxProcesses(conflux, domainsById, config),
+    { tick: world.tickIndex, config },
+  );
+  const intelAdds = applyIntelFinishes({ conflux, domains, world, outcomes: processOutcomes });
+  for (const row of intelAdds) {
+    if (!addsByDomain.has(row.domainId)) addsByDomain.set(row.domainId, []);
+    addsByDomain.get(row.domainId).push(row.fact);
   }
-
-  const domainsById = new Map(domains.map((d) => [d.id, d]));
-  const board = boardFromShared(conflux, domains);
-
-  const processOutcomes = applyEngineProgress(board, rollSharedProcesses(conflux, plots, domainsById, config), {
-    tick: world.tickIndex,
-    config,
-  });
-  await realignFinishedOutcomes({ runtime, domain: board, outcomes: processOutcomes, log });
   conflux.processes = (conflux.processes || []).map((pr) => {
-    const updated = (board.state.pendingActions || []).find((x) => x.id === pr.id);
+    const updated = (fullBoard.state.pendingActions || []).find((x) => x.id === pr.id);
     return updated || pr;
   });
 
+  const storyOutcomes = processOutcomes.filter((o) => !o.intel);
+  const plots = confluxMonthPlots(conflux);
+  if (!plots.length) {
+    return { conflux, domains, chronicleAddsByDomain: addsByDomain, processOutcomes: storyOutcomes };
+  }
+
+  const board = boardFromPlots(conflux, domains, plots);
+  const beatOutcomes = outcomesForPlots(storyOutcomes, plots);
+  await realignFinishedOutcomes({ runtime, domain: board, outcomes: beatOutcomes, log });
+
   const mainId = conflux.mainPlotId;
-  processOutcomes.sort((a, b) => {
+  beatOutcomes.sort((a, b) => {
     const pa = plots.find((p) => (p.relatedProcessIds || []).includes(a.processId));
     const pb = plots.find((p) => (p.relatedProcessIds || []).includes(b.processId));
     return Number(Boolean(pb?.isMainConflux)) - Number(Boolean(pa?.isMainConflux));
@@ -109,12 +133,12 @@ export async function resolveConfluxSharedMonth({
   const { beats } = planBeats({
     domain: board,
     config,
-    processOutcomes,
+    processOutcomes: beatOutcomes,
     piercePlotIds: mainId ? [mainId] : [],
   });
 
   log.info('conflux.month.plan', {
-    shared: plots.length,
+    contested: plots.length,
     beats: beats.length,
     plan: beats.map((b) => `${b.title}:${b.reason}`),
   });
@@ -186,5 +210,5 @@ export async function resolveConfluxSharedMonth({
     });
   }
 
-  return { conflux, domains, chronicleAddsByDomain: addsByDomain };
+  return { conflux, domains, chronicleAddsByDomain: addsByDomain, processOutcomes: storyOutcomes };
 }

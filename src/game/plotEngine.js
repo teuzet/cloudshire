@@ -154,9 +154,10 @@ export function planBeats({
     return true;
   };
 
-  // 1. Процессы — всегда, даже сверх потолка. Прыжок такта — только на финише.
+  // 1. Процессы — всегда, даже сверх потолка. Прыжок такта — только на финише. Intel не двигает сюжет.
   for (const outcome of processOutcomes) {
     if (!outcome?.mustNarrate) continue;
+    if (outcome.intel) continue;
     for (const plot of plotsForProcess(domain, outcome.processId)) {
       let actMove = null;
       if (isThreeActPlot(plot) && outcome.finished) {
