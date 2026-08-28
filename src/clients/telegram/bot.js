@@ -34,8 +34,8 @@ async function sendChunks(bot, chatId, text) {
   }
 }
 
-async function syncBotMenu(bot, commands) {
-  const list = (commands || [])
+function botCommandList(commands) {
+  return (commands || [])
     .map((c) => ({
       command: String(c.command || '')
         .replace(/^\//, '')
@@ -44,13 +44,52 @@ async function syncBotMenu(bot, commands) {
       description: String(c.description || '').trim().slice(0, 256),
     }))
     .filter((c) => c.command && c.description);
-  if (!list.length) return;
-  try {
-    await bot.setMyCommands(list);
-    console.log(`[telegram] menu: ${list.map((c) => `/${c.command}`).join(' ')}`);
-  } catch (err) {
-    console.warn('[telegram] setMyCommands failed:', err.message);
+}
+
+function uniqueChatIds(ids) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of ids || []) {
+    const n = Number(raw);
+    const id = Number.isFinite(n) && n !== 0 ? n : String(raw || '').trim();
+    if (!id || seen.has(String(id))) continue;
+    seen.add(String(id));
+    out.push(id);
   }
+  return out;
+}
+
+/**
+ * Старые списки могли висеть в scope чата ( fortcetick ) и перекрывать дефолт.
+ * Снимаем их и ставим один и тот же короткий список везде.
+ */
+async function syncBotMenu(bot, commands, chatIds = []) {
+  const list = botCommandList(commands);
+  if (!list.length) return;
+
+  const scopes = [
+    null,
+    { type: 'all_private_chats' },
+    { type: 'all_group_chats' },
+    { type: 'all_chat_administrators' },
+    ...uniqueChatIds(chatIds).map((chat_id) => ({ type: 'chat', chat_id })),
+  ];
+
+  for (const scope of scopes) {
+    try {
+      if (scope) {
+        await bot.deleteMyCommands({ scope: JSON.stringify(scope) });
+      }
+    } catch (err) {
+      console.warn('[telegram] deleteMyCommands failed:', err.message);
+    }
+    try {
+      await bot.setMyCommands(list, scope ? { scope } : {});
+    } catch (err) {
+      console.warn('[telegram] setMyCommands failed:', err.message);
+    }
+  }
+  console.log(`[telegram] menu: ${list.map((c) => `/${c.command}`).join(' ')}`);
 }
 
 async function syncMiniAppMenu(bot, config) {
@@ -111,7 +150,7 @@ export function startTelegramBot({ config, app, storage, runTick }) {
   }
 
   const bot = new TelegramBot(token, { polling: true });
-  void syncBotMenu(bot, tg.commands)
+  void syncBotMenu(bot, tg.commands, [...(tg.allowIds || []), ...(tg.forceTickIds || [])])
     .then(() => syncMiniAppMenu(bot, config));
   /** @type {Map<string, number|string>} */
   const chatByUser = new Map();
