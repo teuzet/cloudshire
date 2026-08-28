@@ -183,6 +183,7 @@ export async function askLoremaster({
   asker = 'agent',
   plotId = null,
   conflux: confluxArg = null,
+  maxTurns = 10,
 }) {
   const log = getLogger().child({
     scope: 'loremaster',
@@ -515,7 +516,7 @@ export async function askLoremaster({
       },
     ],
     tools,
-    maxTurns: 10,
+    maxTurns,
     toolChoice: { type: 'function', function: { name: 'read_lore' } },
     log,
     scene: 'loremaster',

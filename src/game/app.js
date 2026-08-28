@@ -612,6 +612,7 @@ function characterTools(domain, storage, character, ctx) {
           asker: `ruler:${character.name}`,
           plotId: plotId || null,
           conflux: ctx.conflux || null,
+          maxTurns: 4,
         });
         const wanted = String(plotId || '').trim();
         const focused = Boolean(result.focusPlotId);
@@ -2525,6 +2526,7 @@ export class GameApp {
       submitReplyTool(turn, character),
     ];
 
+    const deadlineAt = Date.now() + (Number(this.config.agents?.ruler?.turnBudgetMs) || 70_000);
     const result = await this.runtime.run({
       agentId: 'ruler',
       userMessages: [...history, { role: 'user', content: text }],
@@ -2534,9 +2536,10 @@ export class GameApp {
       log,
       scene: 'ruler',
       domainId: domain.id,
+      deadlineAt,
     });
 
-    if (!turn.reply) {
+    if (!turn.reply && Date.now() < deadlineAt - 5000) {
       log.warn('ruler.no_submit_reply', { preview: truncate(result.text, 200) });
       await this.runtime.run({
         agentId: 'ruler',
@@ -2559,7 +2562,10 @@ export class GameApp {
         log,
         scene: 'ruler_submit_retry',
         domainId: domain.id,
+        deadlineAt,
       });
+    } else if (!turn.reply) {
+      log.warn('ruler.no_submit_reply', { preview: truncate(result.text, 200) });
     }
 
     let reply = turn.reply || result.text || '';

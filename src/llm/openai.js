@@ -81,7 +81,7 @@ export class OpenAiProvider {
    * @param {array} [opts.tools]
    * @param {string|object} [opts.toolChoice]
    */
-  async chat({ model, messages, tools, toolChoice, maxTokens, reasoningEffort }) {
+  async chat({ model, messages, tools, toolChoice, maxTokens, reasoningEffort, timeoutMs }) {
     this.ensureClient();
     try {
       const body = {
@@ -102,7 +102,10 @@ export class OpenAiProvider {
         if (/^gpt-5/i.test(body.model || '')) body.max_completion_tokens = maxTokens;
         else body.max_tokens = maxTokens;
       }
-      const completion = await this.client.chat.completions.create(body);
+      const completion = await this.client.chat.completions.create(
+        body,
+        timeoutMs ? { timeout: timeoutMs, maxRetries: 0 } : undefined,
+      );
       const message = completion.choices[0]?.message;
       if (!message) throw new LlmError('Empty completion from OpenAI');
       return {

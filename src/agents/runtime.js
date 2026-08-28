@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createLlmProvider } from '../llm/index.js';
 import { getLogger, truncate } from '../log.js';
 import {
@@ -9,6 +10,25 @@ import {
   recordUsageEvent,
   getCurrentWorldId,
 } from '../llm/usage.js';
+
+const deadlineStore = new AsyncLocalStorage();
+
+export function runDeadlineAt() {
+  const at = deadlineStore.getStore();
+  return Number.isFinite(at) ? at : null;
+}
+
+export function deadlineRemainingMs() {
+  const at = runDeadlineAt();
+  if (at == null) return null;
+  return at - Date.now();
+}
+
+function llmTimeoutMs() {
+  const left = deadlineRemainingMs();
+  if (left == null) return undefined;
+  return Math.max(2500, Math.min(180_000, left - 200));
+}
 
 export function toOpenAiTools(toolDefs = []) {
   return toolDefs.map((t) => ({
@@ -88,7 +108,32 @@ export class AgentRuntime {
     log: parentLog,
     scene = null,
     domainId = null,
+    deadlineAt = null,
   }) {
+    const inherited = runDeadlineAt();
+    const nextDeadline = [deadlineAt, inherited]
+      .map((n) => Number(n))
+      .filter((n) => Number.isFinite(n) && n > 0)
+      .reduce((a, b) => Math.min(a, b), Infinity);
+    const bound = Number.isFinite(nextDeadline) ? nextDeadline : null;
+    if (bound != null && bound !== inherited) {
+      return deadlineStore.run(bound, () =>
+        this.run({
+          agentId,
+          userMessages,
+          tools,
+          maxTurns,
+          extraSystem,
+          toolChoice,
+          maxTokens,
+          reasoningEffort,
+          log: parentLog,
+          scene,
+          domainId,
+        }),
+      );
+    }
+
     const assembled = this.assembleChat({ agentId, userMessages, extraSystem, tools });
     const agent = assembled.agent;
     const provider = this.getProvider(agent.provider);
@@ -144,6 +189,11 @@ export class AgentRuntime {
       for (let turn = 0; turn < maxTurns; turn += 1) {
         let lastToolFailed = false;
         const tlog = slog.child({ turn });
+        const left = deadlineRemainingMs();
+        if (left != null && left < 2500) {
+          tlog.warn('agent.llm.deadline', { remainingMs: left });
+          break;
+        }
 
         tlog.debug('agent.llm.request', {
           messageCount: messages.length,
@@ -162,6 +212,7 @@ export class AgentRuntime {
             toolChoice: openAiTools.length ? choice : undefined,
             maxTokens: tokens,
             reasoningEffort: effort,
+            timeoutMs: llmTimeoutMs(),
           });
           message = resp.message;
           usage = normalizeUsage(resp.usage);

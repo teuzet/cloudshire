@@ -7,6 +7,7 @@ import { qualitativeStatsBrief, qualitativePopulation } from './stats.js';
 import { guessProcessDuration } from './processes.js';
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
+import { deadlineRemainingMs } from '../agents/runtime.js';
 
 function cityBrief(domain) {
   return String(domain.description || '').trim() || '(описание пусто)';
@@ -59,6 +60,12 @@ export async function estimateProcessDuration({
   ];
 
   try {
+    const left = deadlineRemainingMs();
+    if (left != null && left < 8000) {
+      log.warn('durationJudge.skipped_deadline', { remainingMs: left, summary });
+      const fallback = guessProcessDuration(summary, detail, 2);
+      return { months: fallback, note: null, source: 'fallback' };
+    }
     await runtime.run({
       agentId: 'durationJudge',
       tools,

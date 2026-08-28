@@ -1290,6 +1290,8 @@ agents:
     provider: openai
     model: gpt-5.6-luna
     safety: true
+    # Сколько миллисекунд жрец может крутить инструменты до ответа. Дальше — «мысль сбилась».
+    turnBudgetMs: 70000
     canon: [world, patron, ruler, time, foreign]
     styles: [names, priestVoice]
     instructions: |
