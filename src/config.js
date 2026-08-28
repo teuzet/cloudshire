@@ -102,6 +102,12 @@ export function loadConfig(configPath = process.env.CLOUDSHIRE_CONFIG || 'config
     config.telegram.closedTestReply =
       'Сейчас идёт закрытый тест. Если тебя ждали — напиши тому, кто пригласил.';
   }
+  if (process.env.TELEGRAM_MINI_APP_URL) {
+    config.telegram.miniAppUrl = String(process.env.TELEGRAM_MINI_APP_URL).trim();
+  }
+  if (process.env.TELEGRAM_MINI_APP_MENU) {
+    config.telegram.miniAppMenu = String(process.env.TELEGRAM_MINI_APP_MENU).trim();
+  }
 
   return config;
 }

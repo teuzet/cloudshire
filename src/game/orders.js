@@ -136,6 +136,7 @@ export function listStandingOrders(domain, { tick = null } = {}) {
       plotlineId: m.plotlineId || null,
       kind: m.kind || 'order',
       since: m.since || null,
+      declaredTick: Number.isInteger(Number(m.declaredTick)) ? Number(m.declaredTick) : null,
       initiative: m.initiative || 'patron',
       ...orderTermView(src, tick),
     };
@@ -149,6 +150,7 @@ export function listStandingOrders(domain, { tick = null } = {}) {
       action: 'create',
       kind: 'order',
       since: null,
+      declaredTick: Number.isInteger(Number(r.requestedTick)) ? Number(r.requestedTick) : null,
       initiative: r.initiative || 'patron',
       ...orderTermView(r, tick),
     }));

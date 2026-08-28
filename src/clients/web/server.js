@@ -19,6 +19,12 @@ import { resolveIslandImage } from '../../game/islandImage.js';
 import { knownPartnerLore } from '../../game/confluxBoard.js';
 import { genesisTutorialText } from '../../game/progressBar.js';
 import { orderMonthsLeft } from '../../game/orders.js';
+import { miniCityPayload } from '../../game/miniCity.js';
+import {
+  validateTelegramInitData,
+  telegramBotToken,
+} from '../telegram/initData.js';
+import { isTelegramAllowed, closedTestReply } from '../telegram/access.js';
 
 function slimLore(f) {
   if (!f) return null;
@@ -233,7 +239,7 @@ export function createWebServer({ config, app, runtime, storage }) {
   server.use(express.json({ limit: '1mb' }));
 
   server.get('/health', (_req, res) => {
-    res.json({ ok: true, play: playEnabled, admin: adminEnabled });
+    res.json({ ok: true, play: playEnabled, admin: adminEnabled, mini: true });
   });
 
   // Корень — публичный указатель: игра важнее админки, если включена.
@@ -278,6 +284,71 @@ export function createWebServer({ config, app, runtime, storage }) {
       at: new Date().toISOString(),
     });
     pushLogs.set(String(userId), list.slice(-100));
+  });
+
+  function readInitData(req) {
+    return String(
+      req.get('x-telegram-init-data') || req.query.initData || req.body?.initData || '',
+    ).trim();
+  }
+
+  function resolveMiniUser(req) {
+    const initData = readInitData(req);
+    const token = telegramBotToken(config);
+    if (initData && token) {
+      const checked = validateTelegramInitData(initData, token);
+      if (!checked.ok) return { ok: false, status: 401, error: checked.error };
+      if (!isTelegramAllowed(config, checked.userId)) {
+        return { ok: false, status: 403, error: 'closed_test', message: closedTestReply(config) };
+      }
+      return { ok: true, userId: checked.userId };
+    }
+    if (playDevEnabled) {
+      const userId = String(req.query.userId || req.body?.userId || '').trim();
+      if (userId) return { ok: true, userId, preview: true };
+    }
+    return { ok: false, status: 401, error: 'need_telegram' };
+  }
+
+  server.get('/mini', (_req, res) => res.redirect(302, '/mini/'));
+  server.use('/mini', express.static(path.join(projectRoot(), 'public', 'mini')));
+
+  server.get('/api/mini/state', async (req, res) => {
+    try {
+      const who = resolveMiniUser(req);
+      if (!who.ok) return res.status(who.status).json({ error: who.error, message: who.message || null });
+      const world = await storage.getWorld();
+      const domain = await storage.getDomainForUser(who.userId, world.id);
+      const conflux = domain ? await findActiveConfluxForDomain(storage, domain.id) : null;
+      const payload = miniCityPayload({
+        domain,
+        conflux,
+        world,
+        config,
+        generating: app.isGenerating(who.userId),
+      });
+      res.json(payload);
+    } catch (err) {
+      req.log?.error('http.error', { error: err.message });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  server.get('/api/mini/island-image', async (req, res) => {
+    try {
+      const who = resolveMiniUser(req);
+      if (!who.ok) return res.status(who.status).end();
+      const world = await storage.getWorld();
+      const domain = await storage.getDomainForUser(who.userId, world.id);
+      if (!domain?.imagePath && !domain?.imageBase64) return res.status(404).end();
+      const picture = await resolveIslandImage({ domain, config });
+      if (!picture?.abs) return res.status(404).end();
+      res.type('png').sendFile(picture.abs);
+    } catch (err) {
+      if (err.code === 'ENOENT') return res.status(404).end();
+      req.log?.error('http.error', { error: err.message });
+      res.status(500).end();
+    }
   });
 
   // ------------------------------------------------------------------

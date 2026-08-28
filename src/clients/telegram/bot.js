@@ -8,6 +8,7 @@ import {
   parseSlashCommand,
 } from './access.js';
 import { formatIslandPlotlines, formatIslandStats } from './views.js';
+import { miniAppUrl, miniAppMenuText } from './initData.js';
 
 const TG_MAX = 4096;
 
@@ -49,6 +50,23 @@ async function syncBotMenu(bot, commands) {
     console.log(`[telegram] menu: ${list.map((c) => `/${c.command}`).join(' ')}`);
   } catch (err) {
     console.warn('[telegram] setMyCommands failed:', err.message);
+  }
+}
+
+async function syncMiniAppMenu(bot, config) {
+  const url = miniAppUrl(config);
+  const text = miniAppMenuText(config).slice(0, 16);
+  if (!url) {
+    console.log('[telegram] mini-app menu skipped: no TELEGRAM_MINI_APP_URL / RAILWAY_PUBLIC_DOMAIN');
+    return;
+  }
+  try {
+    await bot.setChatMenuButton({
+      menu_button: { type: 'web_app', text, web_app: { url } },
+    });
+    console.log(`[telegram] mini-app menu: ${text} → ${url}`);
+  } catch (err) {
+    console.warn('[telegram] setChatMenuButton failed:', err.message);
   }
 }
 
@@ -118,9 +136,9 @@ export function startTelegramBot({ config, app, storage, runTick }) {
   }
 
   const bot = new TelegramBot(token, { polling: true });
-  void syncBotMenu(bot, tg.commands).then(() =>
-    syncForceTickMenu(bot, tg.commands, tg.forceTickIds),
-  );
+  void syncBotMenu(bot, tg.commands)
+    .then(() => syncForceTickMenu(bot, tg.commands, tg.forceTickIds))
+    .then(() => syncMiniAppMenu(bot, config));
   /** @type {Map<string, number|string>} */
   const chatByUser = new Map();
   /** @type {Map<string, { name: string }>} */
@@ -245,6 +263,19 @@ export function startTelegramBot({ config, app, storage, runTick }) {
 
     pendingDelete.delete(userId);
 
+    if (command.name === 'city') {
+      const url = miniAppUrl(config);
+      if (!url) {
+        return 'Справочник города сейчас недоступен: у бота нет публичного адреса мини-аппки.';
+      }
+      await bot.sendMessage(chatId, 'Справочник твоего города — статы, истории, дела и указы.', {
+        reply_markup: {
+          inline_keyboard: [[{ text: miniAppMenuText(config), web_app: { url } }]],
+        },
+      });
+      return null;
+    }
+
     if (command.name === 'stats') {
       const domain = await app.getOwnDomain(userId);
       if (!domain) return 'У тебя ещё нет острова.';
@@ -292,7 +323,7 @@ export function startTelegramBot({ config, app, storage, runTick }) {
     const command = parseSlashCommand(raw);
     if (
       command &&
-      (['delete', 'stats', 'plotlines'].includes(command.name) ||
+      (['delete', 'stats', 'plotlines', 'city'].includes(command.name) ||
         (isForceTickCommand(command) && isTelegramForceTickAllowed(config, userId)))
     ) {
       try {

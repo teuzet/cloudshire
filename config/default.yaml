@@ -37,12 +37,17 @@ telegram:
   commands:
     - command: start
       description: Начать или создать остров
+    - command: city
+      description: Справочник города
     - command: stats
       description: Состояние города
     - command: plotlines
       description: Открытые истории
     - command: delete
       description: Удалить свой остров
+  # HTTPS-адрес мини-аппки. Пусто — берётся TELEGRAM_MINI_APP_URL или https://$RAILWAY_PUBLIC_DOMAIN/mini/
+  miniAppUrl: ''
+  miniAppMenu: Город
 
 tick:
   # 1 реальные сутки = 1 игровой год → тик = 1 игровой месяц
