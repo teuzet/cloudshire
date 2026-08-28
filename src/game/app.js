@@ -35,8 +35,12 @@ import { askInformant } from './informant.js';
 import {
   emptyOnboardingDraft,
   normalizeOnboardingDraft,
-  validateCityName,
+  validateCityNameAvailable,
   validatePatronName,
+  collectOccupiedCityNames,
+  isCityNameOccupied,
+  occupiedCityNameError,
+  extractUserCityName,
   listTagCatalog,
   formatPlayerBrief,
   formatTagCatalogForPrompt,
@@ -60,6 +64,7 @@ import {
   clipOnboardingBrief,
   appendNeedNameNote,
   appendNeedPatronNote,
+  appendNameTakenNote,
   ONBOARDING_NEED_NAME_NOTE,
   ONBOARDING_BUSY_REPLY,
   ONBOARDING_HISTORY_MESSAGES,
@@ -1409,6 +1414,11 @@ export class GameApp {
           tagChoices: forcedTagChoices || {},
           playerBrief: truncate(playerBrief, 500),
         });
+        if (forcedName) {
+          const occupied = await this.occupiedCityNames(uid);
+          const taken = validateCityNameAvailable(forcedName, occupied);
+          if (!taken.ok) throw new Error(taken.reason);
+        }
         const total = 5;
         const pushProgress = async (step, label) => {
           const text = formatProgressBar(step, total, label);
@@ -1530,11 +1540,18 @@ export class GameApp {
     const binding = await this.getOrCreateOnboardingBinding(userId);
     const draft = binding.onboarding;
     let startedGenerating = false;
+    const occupiedByKey = await this.occupiedCityNames(userId);
 
     const rawUser = String(text || '').trim();
+    let takenAttempt = null;
     if (!bootstrap && rawUser) {
       maybeSwitchToDossier(draft, rawUser);
-      applyUserNamedCity(draft, rawUser);
+      const proposed = extractUserCityName(rawUser);
+      if (proposed && isCityNameOccupied(proposed, occupiedByKey)) {
+        takenAttempt = proposed;
+      } else {
+        applyUserNamedCity(draft, rawUser, occupiedByKey);
+      }
       applyUserNamedPatron(draft, rawUser);
     }
     draft.phase = deriveOnboardingPhase(draft, { generating: this.isGenerating(userId) });
@@ -1638,7 +1655,8 @@ export class GameApp {
             chosen: draft.tagChoices,
             forPlayer,
             next:
-              'Запиши атмосферу и правителя в set_player_brief. Сам придумай звучный топоним (не из списка — списка нет). ' +
+              'Запиши атмосферу и правителя в set_player_brief. Сам придумай звучный топоним. ' +
+              'Перед речью игроку — check_city_name; если занято, другое имя, чужие города не перечисляй. ' +
               'В речи игроку: имя + ВСЕ черты из forPlayer своими словами + атмосфера + правитель. ' +
               'Без слов «теги/изюминка/пакет/рандом». Этот набор держи, пока игрок не попросит другой город.',
           };
@@ -1691,9 +1709,9 @@ export class GameApp {
         },
       },
       {
-        name: 'set_city_name',
+        name: 'check_city_name',
         description:
-          'Проверить и зафиксировать имя города (ты сам его придумал или игрок предложил). После согласия / в конце онбординга.',
+          'Проверить имя города: форма и свободно ли. Вызови до речи игроку и до set_city_name. Не возвращает чужие имена.',
         parameters: {
           type: 'object',
           required: ['name'],
@@ -1702,11 +1720,41 @@ export class GameApp {
           },
         },
         handler: async ({ name }) => {
-          const v = validateCityName(name);
+          const occupied = await this.occupiedCityNames(userId);
+          const v = validateCityNameAvailable(name, occupied);
+          if (!v.ok) {
+            return {
+              ok: true,
+              available: false,
+              name: String(name || '').trim(),
+              reason: v.reason,
+            };
+          }
+          return { ok: true, available: true, name: v.name };
+        },
+      },
+      {
+        name: 'set_city_name',
+        description:
+          'Зафиксировать имя города после check_city_name (available=true) и согласия игрока.',
+        parameters: {
+          type: 'object',
+          required: ['name'],
+          properties: {
+            name: { type: 'string' },
+          },
+        },
+        handler: async ({ name }) => {
+          const occupied = await this.occupiedCityNames(userId);
+          const v = validateCityNameAvailable(name, occupied);
           if (!v.ok) {
             draft.cityNameApproved = false;
             await saveDraft();
-            return toolFail('invalid_city_name', v.reason, { reason: v.reason });
+            return toolFail(
+              isCityNameOccupied(name, occupied) ? 'city_name_taken' : 'invalid_city_name',
+              v.reason,
+              { reason: v.reason },
+            );
           }
           draft.cityName = v.name;
           draft.cityNameApproved = true;
@@ -1909,16 +1957,34 @@ export class GameApp {
             );
           }
           if (!draft.cityNameApproved || !draft.cityName) {
+            const occupied = await this.occupiedCityNames(userId);
             const fallback = lastPitchedCityName(draft);
-            const v = fallback ? validateCityName(fallback) : { ok: false };
+            const v = fallback ? validateCityNameAvailable(fallback, occupied) : { ok: false };
             if (v.ok) {
               draft.cityName = v.name;
               draft.cityNameApproved = true;
               await saveDraft();
             } else {
               return toolFail(
-                'city_name_required',
-                'Сначала утверди имя города через set_city_name (с согласия игрока), затем start_new_game.',
+                fallback && isCityNameOccupied(fallback, occupied)
+                  ? 'city_name_taken'
+                  : 'city_name_required',
+                fallback && isCityNameOccupied(fallback, occupied)
+                  ? occupiedCityNameError(fallback)
+                  : 'Сначала утверди имя города через set_city_name (с согласия игрока), затем start_new_game.',
+              );
+            }
+          } else {
+            const occupied = await this.occupiedCityNames(userId);
+            const v = validateCityNameAvailable(draft.cityName, occupied);
+            if (!v.ok) {
+              draft.cityNameApproved = false;
+              await saveDraft();
+              return toolFail(
+                isCityNameOccupied(draft.cityName, occupied)
+                  ? 'city_name_taken'
+                  : 'invalid_city_name',
+                v.reason,
               );
             }
           }
@@ -1994,7 +2060,13 @@ export class GameApp {
             'или пусть пришлёт готовое подробное описание — тогда не стартуй, а разбери его.',
             'Не вызывай start_new_game и не рандомь теги в питче.',
           ].join(' ')
-        : formatOnboardingStatusCard(draft, this.config, { generating: this.isGenerating(userId) }),
+        : formatOnboardingStatusCard(draft, this.config, {
+            generating: this.isGenerating(userId),
+            occupiedByKey,
+          }),
+      takenAttempt
+        ? `\nИгрок назвал «${takenAttempt}», но оно уже занято. Скажи, что имя занято, и предложи или спроси другое. Чужие города не перечисляй.`
+        : '',
     ].join('\n');
     const result = await this.runtime.run({
       agentId: 'onboarding',
@@ -2047,6 +2119,7 @@ export class GameApp {
       draft,
       usedStart: usedTools.has('start_new_game'),
       generating: this.isGenerating(userId),
+      occupiedByKey,
     });
     if (auto.start) {
       if (usedTools.has('randomize_all_tags') && Object.keys(draft.pitchedTagChoices || {}).length) {
@@ -2101,6 +2174,19 @@ export class GameApp {
         draft.pitched = true;
       }
       reply = appendNeedPatronNote(rawReply);
+    } else if (auto.appendNameTaken) {
+      log.warn('onboarding.name_taken', {
+        reason: auto.reason,
+        takenName: auto.takenName,
+      });
+      if (draft.cityName && isCityNameOccupied(draft.cityName, occupiedByKey)) {
+        draft.cityNameApproved = false;
+      }
+      if (draft.pitchedName && isCityNameOccupied(draft.pitchedName, occupiedByKey)) {
+        draft.pitchedName = null;
+        draft.pitched = false;
+      }
+      reply = appendNameTakenNote(rawReply, auto.takenName);
     }
 
     // Нельзя говорить «уже создан», пока генезис только стартовал.
@@ -2826,6 +2912,14 @@ export class GameApp {
 
   async listDomains() {
     return this.storage.listDomains();
+  }
+
+  async occupiedCityNames(excludeUserId) {
+    const [domains, bindings] = await Promise.all([
+      this.storage.listDomains(),
+      this.storage.listUserBindings(),
+    ]);
+    return collectOccupiedCityNames({ domains, bindings, excludeUserId });
   }
 
   async getOwnDomain(userId) {
