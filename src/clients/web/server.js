@@ -310,8 +310,13 @@ export function createWebServer({ config, app, runtime, storage }) {
     return { ok: false, status: 401, error: 'need_telegram' };
   }
 
-  server.get('/mini', (_req, res) => res.redirect(302, '/mini/'));
-  server.use('/mini', express.static(path.join(projectRoot(), 'public', 'mini')));
+  // Без redirect: Express по умолчанию считает /mini и /mini/ одним маршрутом,
+  // и 302 на /mini/ зацикливается (ERR_TOO_MANY_REDIRECTS в Telegram).
+  const miniDir = path.join(projectRoot(), 'public', 'mini');
+  server.use('/mini', express.static(miniDir, { redirect: false, index: false }));
+  server.get('/mini', (_req, res) => {
+    res.sendFile(path.join(miniDir, 'index.html'));
+  });
 
   server.get('/api/mini/state', async (req, res) => {
     try {

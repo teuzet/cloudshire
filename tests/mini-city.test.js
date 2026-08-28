@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { miniCityPayload, gameDateLabelAtTick } from '../src/game/miniCity.js';
 import { validateTelegramInitData, miniAppUrl } from '../src/clients/telegram/initData.js';
+import { createWebServer } from '../src/clients/web/server.js';
 
 const statsCfg = {
   stats: [
@@ -150,4 +151,29 @@ test('мини-аппка: свои истории и участие в сопр
   assert.equal(view.orders[0].remainingMonths, 2);
   assert.match(view.orders[0].since, /Год 1, месяц 4/);
   assert.equal('loyalty' in (view.city || {}), false);
+});
+
+test('GET /mini и /mini/ отдают страницу без редиректа', async () => {
+  const server = createWebServer({
+    config: { web: { play: false, admin: false }, telegram: {} },
+    app: { onOutbound() {} },
+    runtime: {},
+    storage: {},
+  });
+  const http = await new Promise((resolve) => {
+    const s = server.listen(0, '127.0.0.1', () => resolve(s));
+  });
+  try {
+    const port = http.address().port;
+    for (const path of ['/mini', '/mini/']) {
+      const res = await fetch(`http://127.0.0.1:${port}${path}`, { redirect: 'manual' });
+      assert.equal(res.status, 200, path);
+      assert.equal(res.headers.get('location'), null);
+      assert.match(await res.text(), /<title>Город<\/title>/);
+    }
+    const css = await fetch(`http://127.0.0.1:${port}/mini/style.css`, { redirect: 'manual' });
+    assert.equal(css.status, 200);
+  } finally {
+    await new Promise((resolve, reject) => http.close((err) => (err ? reject(err) : resolve())));
+  }
 });
