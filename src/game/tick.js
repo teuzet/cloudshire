@@ -14,6 +14,7 @@ import {
   normalizeConfluxBoard,
   revealKnownLore,
   otherDomainId,
+  maybeGrantAwarenessFromKnownLore,
 } from './confluxBoard.js';
 import { resolveIslandImage } from './islandImage.js';
 import { getLogger } from '../log.js';
@@ -136,6 +137,7 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
   const results = [];
   const confluxNotes = [...(matchmake.notes || []), ...(confluxPhase.notes || [])];
   const sharedAdds = new Map();
+  const extraOutcomesByConflux = new Map();
 
   const active = await storage.listConfluxes({ status: ['approaching', 'docked'] });
   for (const conflux of active) {
@@ -168,6 +170,10 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
     for (const [id, adds] of shared.chronicleAddsByDomain || []) {
       sharedAdds.set(id, [...(sharedAdds.get(id) || []), ...(adds || [])]);
     }
+    extraOutcomesByConflux.set(conflux.id, shared.processOutcomes || []);
+    if (conflux.status === 'docked') {
+      maybeGrantAwarenessFromKnownLore(conflux, pair);
+    }
     await storage.saveConflux(conflux);
     for (const d of pair) {
       await storage.saveDomain(d);
@@ -198,11 +204,21 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
       conflux,
       confluxId: conflux?.id || null,
       skipPlotClocks: Boolean(conflux),
+      extraProcessOutcomes: conflux ? extraOutcomesByConflux.get(conflux.id) || [] : [],
     });
     monthById.set(live.id, resolved);
     byId.set(live.id, resolved.domain);
+    for (const row of resolved.flowAdds || []) {
+      sharedAdds.set(row.domainId, [...(sharedAdds.get(row.domainId) || []), row.fact]);
+    }
     await storage.saveDomain(resolved.domain);
-    if (conflux) await storage.saveConflux(conflux);
+    if (conflux) {
+      if (conflux.status === 'docked') {
+        const pair = (conflux.domainIds || []).map((id) => byId.get(id)).filter(Boolean);
+        maybeGrantAwarenessFromKnownLore(conflux, pair);
+      }
+      await storage.saveConflux(conflux);
+    }
   }
 
   const dockedNow = (await storage.listConfluxes({ status: ['docked'] })) || [];

@@ -17,6 +17,9 @@ import {
   rememberLongUserBrief,
   emptyOnboardingDraft,
   formatPlayerBrief,
+  collectOccupiedCityNames,
+  isCityNameOccupied,
+  validateCityNameAvailable,
   ONBOARDING_NEED_NAME_NOTE,
 } from '../src/game/onboarding.js';
 
@@ -114,6 +117,8 @@ test('«Начинаем» после питча и имени бога стар
     stripFalseStart: false,
     appendNeedName: false,
     appendNeedPatron: false,
+    appendNameTaken: false,
+    takenName: null,
     reason: 'player_consent',
   });
 });
@@ -264,4 +269,59 @@ test('игрок сам называет имя бога', () => {
   assert.equal(applyUserNamedPatron(draft, 'зови меня Астра'), 'Астра');
   assert.equal(draft.patronName, 'Астра');
   assert.equal(draft.patronNameApproved, true);
+});
+
+test('занятое имя: уникальность без списка чужих городов', () => {
+  const occupied = collectOccupiedCityNames({
+    domains: [{ name: 'Севрайн' }],
+    bindings: [
+      { userId: 'other', onboarding: { cityName: 'Варкен', cityNameApproved: true } },
+      { userId: 'other2', onboarding: { pitchedName: 'Нарвел', cityNameApproved: false } },
+      { userId: 'me', onboarding: { pitchedName: 'Элвар', cityNameApproved: false } },
+    ],
+    excludeUserId: 'me',
+  });
+  assert.equal(isCityNameOccupied('севрайн', occupied), true);
+  assert.equal(isCityNameOccupied('  Севрайн  ', occupied), true);
+  assert.equal(isCityNameOccupied('Варкен', occupied), true);
+  assert.equal(isCityNameOccupied('Нарвел', occupied), false);
+  assert.equal(isCityNameOccupied('Элвар', occupied), false);
+
+  const taken = validateCityNameAvailable('Севрайн', occupied);
+  assert.equal(taken.ok, false);
+  assert.match(taken.reason, /занято/);
+  const free = validateCityNameAvailable('Элвар', occupied);
+  assert.equal(free.ok, true);
+  assert.equal(free.name, 'Элвар');
+
+  assert.equal(extractPitchedCityName('Твой город — **Севрайн**.', occupied), null);
+  assert.equal(extractPitchedCityName('Твой город — **Элвар**.', occupied), 'Элвар');
+
+  const draft = emptyOnboardingDraft();
+  assert.equal(applyUserNamedCity(draft, 'город называется Севрайн', occupied), null);
+  assert.equal(applyUserNamedCity(draft, 'город называется Элвар', occupied), 'Элвар');
+
+  const plan = planOnboardingAutoStart({
+    userText: 'создавай',
+    reply: 'Хорошо, фиксирую имя.',
+    draft: {
+      pitched: true,
+      pitchedName: 'Севрайн',
+      patronName: 'Нокс',
+      patronNameApproved: true,
+    },
+    occupiedByKey: occupied,
+  });
+  assert.equal(plan.start, false);
+  assert.equal(plan.appendNameTaken, true);
+  assert.equal(plan.takenName, 'Севрайн');
+
+  const card = formatOnboardingStatusCard(
+    { pitchedName: 'Севрайн', pitched: true },
+    { genesis: { tagGroups: [] } },
+    { occupiedByKey: occupied },
+  );
+  assert.match(card, /Севрайн/);
+  assert.match(card, /занят/);
+  assert.equal(card.includes('Варкен'), false);
 });

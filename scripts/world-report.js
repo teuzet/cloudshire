@@ -171,6 +171,7 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
     const c = m.meta.commitment;
     commitments[c] = (commitments[c] || 0) + 1;
     if (m.meta.requestKind === 'order_long' || m.meta.requestKind === 'order_instant') {
+      if (c === 'clarify') continue;
       orders += 1;
       if (c !== 'none') ordersHonored += 1;
     }
@@ -361,7 +362,10 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
     plotlines: plots.map((p) => ({
       title: p.title,
       temperature: p.temperature,
-      importance: p.importance,
+      gravity: p.gravity,
+      urgency: p.urgency,
+      escalationLevel: p.escalationLevel,
+      act: p.act,
       kind: p.kind,
       age: plotlineAge(p),
       maxAge: p.maxAgeMonths,
@@ -458,7 +462,9 @@ function printDomain(rep, { dialogTail = 0, dialog = [] } = {}) {
     for (const p of rep.plotlines) {
       console.log(
         `  • «${p.title}»${p.kind === 'errand' ? ' (дело)' : ''} T=${p.temperature} ` +
-          `важность=${p.importance} возраст=${p.age ?? '?'}/${p.maxAge ?? '?'}`,
+          (p.gravity != null ? `gravity=${p.gravity} urgency=${p.urgency} ` : '') +
+          (p.escalationLevel != null ? `эск=${p.escalationLevel} такт=${p.act} ` : '') +
+          `возраст=${p.age ?? '?'}/${p.maxAge ?? '?'}`,
       );
     }
   } else {

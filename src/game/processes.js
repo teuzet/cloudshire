@@ -47,10 +47,27 @@ export function normalizeProcess(action, config = null) {
   if (!action.status) action.status = 'active';
   if (!action.initiative) action.initiative = 'patron';
   action.blessed = Boolean(action.blessed);
+  action.intel = Boolean(action.intel);
+  if (action.sourceOrderId) action.sourceOrderId = String(action.sourceOrderId);
+  else action.sourceOrderId = null;
+  action.slotless = Boolean(action.slotless) || Boolean(action.sourceOrderId);
   if (action.objectiveMonths == null) {
     action.objectiveMonths = action.expectedMonths;
   } else {
     action.objectiveMonths = Math.max(1, Math.min(12, Math.round(Number(action.objectiveMonths) || 1)));
+  }
+  if (action.plotEngagement != null || action.plotAligned != null) {
+    const raw = String(action.plotEngagement || '').toUpperCase();
+    if (raw === 'DIRECT' || raw === 'RELEVANT' || raw === 'UNRELATED') {
+      action.plotEngagement = raw;
+    } else if (action.plotAligned === true) {
+      action.plotEngagement = 'DIRECT';
+    } else if (action.plotAligned === false) {
+      action.plotEngagement = 'RELEVANT';
+    } else {
+      action.plotEngagement = 'UNRELATED';
+    }
+    action.plotAligned = action.plotEngagement === 'DIRECT';
   }
   return action;
 }
@@ -327,6 +344,10 @@ export function applyEngineProgress(domain, rolls, { tick = null, config = null,
       finishLabel,
       blessed,
       ownerDomainId: r.ownerDomainId || process.ownerDomainId || null,
+      intel: Boolean(process.intel),
+      plotlineId: process.plotlineId || null,
+      plotEngagement: process.plotEngagement || null,
+      plotAligned: process.plotEngagement === 'DIRECT' || process.plotAligned === true,
       // Обычный ход без завершения — фон, о нём отдельную запись не пишем.
       mustNarrate: finished || r.kind !== 'normal',
     });
@@ -453,12 +474,12 @@ export function recentlyClosedProcesses(domain, currentTick, { withinTicks = 2 }
 
 export function canStartProcess(domain, config = null) {
   const max = maxActiveProcesses(config);
-  const active = activeProcesses(domain, config);
+  const occupying = activeProcesses(domain, config).filter((a) => !a.slotless);
   return {
-    ok: active.length < max,
-    active: active.length,
+    ok: occupying.length < max,
+    active: occupying.length,
     max,
-    busy: active.map((a) => a.summary),
+    busy: occupying.map((a) => a.summary),
   };
 }
 

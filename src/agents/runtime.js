@@ -41,6 +41,41 @@ export class AgentRuntime {
     return agent;
   }
 
+  /** Пакет, который уйдёт в модель: system, user, схема tool. Без вызова провайдера. */
+  assembleChat({ agentId, userMessages = [], extraSystem = '', tools = [] } = {}) {
+    const agent = this.getAgentConfig(agentId);
+    const provider = this.getProvider(agent.provider);
+    const model = agent.model || provider.defaultModel;
+    const canon = (Array.isArray(agent.canon) ? agent.canon : [])
+      .map((key) => this.config.canon?.[key])
+      .filter(Boolean)
+      .join('\n\n');
+    const styles = (Array.isArray(agent.styles) ? agent.styles : [])
+      .map((key) => this.config.styles?.[key])
+      .filter(Boolean)
+      .join('\n\n');
+    const systemContent = [
+      agent.safety ? this.config.agentSafety || '' : '',
+      canon,
+      styles,
+      agent.instructions,
+      extraSystem,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+    return {
+      agent,
+      agentId,
+      model,
+      provider: agent.provider,
+      reasoningEffort: agent.reasoningEffort || null,
+      maxTokens: agent.maxTokens || null,
+      systemContent,
+      messages: [{ role: 'system', content: systemContent }, ...userMessages],
+      tools: toOpenAiTools(tools),
+    };
+  }
+
   async run({
     agentId,
     userMessages = [],
@@ -49,14 +84,17 @@ export class AgentRuntime {
     extraSystem = '',
     toolChoice,
     maxTokens,
+    reasoningEffort,
     log: parentLog,
     scene = null,
     domainId = null,
   }) {
-    const agent = this.getAgentConfig(agentId);
+    const assembled = this.assembleChat({ agentId, userMessages, extraSystem, tools });
+    const agent = assembled.agent;
     const provider = this.getProvider(agent.provider);
-    const model = agent.model || provider.defaultModel;
+    const model = assembled.model;
     const tokens = maxTokens ?? agent.maxTokens;
+    const effort = reasoningEffort ?? agent.reasoningEffort;
     let choice = toolChoice;
 
     const log = (parentLog || getLogger()).child({
@@ -69,32 +107,9 @@ export class AgentRuntime {
     const slog = log.child({ runId });
     const runStarted = Date.now();
 
-    // Контракт безопасности нужен только агентам, говорящим с игроком.
-    // Системные агенты (resolver/director/genesis/loremaster) общаются с движком.
-    // Канон мира раздаётся блоками из config.canon по списку agent.canon.
-    const canon = (Array.isArray(agent.canon) ? agent.canon : [])
-      .map((key) => this.config.canon?.[key])
-      .filter(Boolean)
-      .join('\n\n');
-
-    const styles = (Array.isArray(agent.styles) ? agent.styles : [])
-      .map((key) => this.config.styles?.[key])
-      .filter(Boolean)
-      .join('\n\n');
-
-    const systemContent = [
-      agent.safety ? this.config.agentSafety || '' : '',
-      canon,
-      styles,
-      agent.instructions,
-      extraSystem,
-    ]
-      .filter(Boolean)
-      .join('\n\n');
-
-    const messages = [{ role: 'system', content: systemContent }, ...userMessages];
-
-    const openAiTools = toOpenAiTools(tools);
+    const messages = assembled.messages;
+    const openAiTools = assembled.tools;
+    const systemContent = assembled.systemContent;
     const handlers = Object.fromEntries(tools.map((t) => [t.name, t.handler]));
 
     const toolTrace = [];
@@ -114,6 +129,7 @@ export class AgentRuntime {
       maxTurns,
       scene: scene || null,
       domainId: domainId || null,
+      reasoningEffort: effort || null,
       toolNames: tools.map((t) => t.name),
       forcedTool,
       userPreview: truncate(
@@ -132,6 +148,7 @@ export class AgentRuntime {
         tlog.debug('agent.llm.request', {
           messageCount: messages.length,
           toolChoice: forcedTool && choice ? forcedTool : null,
+          reasoningEffort: effort || null,
         });
 
         const started = Date.now();
@@ -144,6 +161,7 @@ export class AgentRuntime {
             tools: openAiTools.length ? openAiTools : undefined,
             toolChoice: openAiTools.length ? choice : undefined,
             maxTokens: tokens,
+            reasoningEffort: effort,
           });
           message = resp.message;
           usage = normalizeUsage(resp.usage);

@@ -21,6 +21,7 @@ import {
   plotConfig,
   plotSeedChance,
   pickSequelSeed,
+  allowSequelAfter,
   findPlotline,
   closePlotline,
   plotHasActiveProcess,
@@ -36,18 +37,21 @@ import {
   formatBeatPlanForLog,
   clearMonthLog,
 } from './plotEngine.js';
-import { planOrderTicks, pickOrderOutcome } from './orders.js';
+import { planOrderTicks, pickOrderOutcome, expireTimedOrders } from './orders.js';
 import { resolvePendingOrders } from './orderSmith.js';
+import { fireConfluxDockOrder } from './orderDock.js';
 import { seedPlot, beatPlot, tickOrder, quietMonth, keepStories, fadeQuietPlot } from './storyteller.js';
+import { resolveSuspenseLegacy } from './legacyResolver.js';
 import { scoreMonthStats, factsForStatJudge } from './statJudge.js';
 import { runSteward } from './steward.js';
 import { getLogger } from '../log.js';
+import { realignFinishedOutcomes } from './plotAlign.js';
 import {
   hydrateDomainFromConflux,
   dehydrateDomainToConflux,
-  maybeLeakPlot,
+  maybeLeakChronicle,
   otherDomainId,
-  isSharedPlot,
+  copyChronicleToAwareCities,
 } from './confluxBoard.js';
 
 /**
@@ -63,6 +67,7 @@ export async function resolveDomainMonth({
   confluxId = null,
   conflux = null,
   skipPlotClocks = false,
+  extraProcessOutcomes = [],
   log: parentLog,
 }) {
   const log = (parentLog || getLogger()).child({
@@ -80,6 +85,7 @@ export async function resolveDomainMonth({
   const cfg = plotConfig(config);
   const chronicleAdds = [];
   const mirrorAdds = [];
+  const flowAdds = [];
   const budget = createStatBudget(config);
 
   // 0. С четвёртого тихого месяца стюард заводит дело до хода месяца.
@@ -101,6 +107,24 @@ export async function resolveDomainMonth({
     world,
     log,
   });
+  const expiredOrders = expireTimedOrders(working, world.tickIndex);
+  for (const row of expiredOrders) {
+    const title = row.plot?.title || 'порядок';
+    const rule = String(row.modifier?.text || title).trim();
+    const fact = createLoreFact({
+      id: newId('lore'),
+      text: `Срок порядка «${title}» истёк. Правило больше не действует: ${rule}`,
+      tags: ['chronicle', 'order', 'expired'],
+      gameDateLabel: world.gameDate?.label,
+      tick: world.tickIndex,
+      author: 'order-expire',
+      importance: 'minor',
+      relatedPlotlineIds: row.plot?.id ? [row.plot.id] : [],
+    });
+    working.lore = working.lore || [];
+    working.lore.push(fact);
+    chronicleAdds.push(fact);
+  }
 
   // Пик месяца: то, с чего правитель начнёт письмо. Без него развязка тонет
   // в ряду обычных записей и большое дело проходит незамеченным.
@@ -114,11 +138,22 @@ export async function resolveDomainMonth({
   for (const process of activeProcesses(working, config)) {
     ensureErrandForProcess(working, process, { tick: world.tickIndex, config });
   }
-  const processRolls = rollAllProcessAdvances(working, config);
-  const processOutcomes = applyEngineProgress(working, processRolls, {
+  const processRolls = rollAllProcessAdvances(working, config).filter((r) => {
+    const proc = (working.state?.pendingActions || []).find((p) => p.id === r.processId);
+    return !proc?.confluxId;
+  });
+  const localOutcomes = applyEngineProgress(working, processRolls, {
     tick: world.tickIndex,
     config,
   });
+  const extra = (extraProcessOutcomes || []).filter((o) => {
+    const plots = (working.plotlines || []).filter((p) =>
+      (p.relatedProcessIds || []).includes(String(o.processId)),
+    );
+    return plots.length > 0 && !o.intel;
+  });
+  const processOutcomes = [...localOutcomes, ...extra];
+  await realignFinishedOutcomes({ runtime, domain: working, outcomes: processOutcomes, log });
 
   // 2. Часы доски (нити указов не стареют). На конфлюксе часы shared/локальных уже тикнули.
   if (!skipPlotClocks) advancePlotMonth(working, cfg);
@@ -141,11 +176,13 @@ export async function resolveDomainMonth({
       finished: o.finished,
     })),
     orderCards: orderCards.map((r) => r.action),
+    expiredOrders: expiredOrders.length,
     budget: { world: budget.world, player: budget.player },
   });
 
   // 4. Биты процессов и историй.
   const sequelOffers = [];
+  const suspenseClosures = [];
   for (const beat of beats) {
     const plot = findPlotline(working, beat.plotId);
     if (!plot) continue;
@@ -168,10 +205,31 @@ export async function resolveDomainMonth({
       log,
     });
     if (result?.mirror?.fact) mirrorAdds.push(result.mirror.fact);
-    if (conflux && result?.fact && plot && !isSharedPlot(plot)) {
+    if (conflux && result?.fact && plot) {
+      const flowed = copyChronicleToAwareCities({
+        plot,
+        fact: result.fact,
+        conflux,
+        domains: partner ? [working, partner] : [working],
+      });
+      for (const row of flowed) flowAdds.push(row);
       const other = otherDomainId(conflux, working.id);
-      if (other && maybeLeakPlot(plot, conflux, other)) {
-        log.info('conflux.plot_leaked', { plotId: plot.id, title: plot.title, to: other });
+      const otherDomain = partner && String(partner.id) === String(other) ? partner : null;
+      if (
+        other &&
+        otherDomain &&
+        maybeLeakChronicle({
+          plot,
+          fact: result.fact,
+          conflux,
+          viewerId: other,
+          viewerDomain: otherDomain,
+          domains: partner ? [working, partner] : [working],
+        })
+      ) {
+        log.info('conflux.chronicle_leaked', { plotId: plot.id, title: plot.title, to: other });
+        const leaked = (otherDomain.lore || []).filter((f) => f.leakedFromId === result.fact.id);
+        for (const fact of leaked) flowAdds.push({ domainId: other, fact });
       }
     }
     if (result?.fact) {
@@ -181,9 +239,22 @@ export async function resolveDomainMonth({
           kind: 'finale',
           title: plot.title,
           text: result.fact.text,
-          note: `история «${plot.title}» кончилась`,
+          note: result.closeReason || 'история дошла до конца',
         });
-        if (result.sequelHook) {
+        if (plot.storyType === 'suspense') {
+          suspenseClosures.push({
+            id: plot.id,
+            title: plot.title,
+            synopsis: plot.synopsis,
+            gravity: plot.gravity,
+            depth: plot.depth,
+            ending: plot.ending,
+            lastEntry: result.fact.text,
+            closeReason: result.closeReason || '',
+            hook: result.sequelHook || '',
+          });
+        }
+        if (result.sequelHook && allowSequelAfter(plot)) {
           sequelOffers.push({
             id: plot.id,
             title: plot.title,
@@ -192,6 +263,8 @@ export async function resolveDomainMonth({
             reason: result.closeReason || '',
             hook: result.sequelHook,
             lastEntry: result.fact.text,
+            gravity: plot.gravity,
+            storyType: plot.storyType,
           });
         }
       }
@@ -227,16 +300,34 @@ export async function resolveDomainMonth({
     }
   }
 
-  // 5. Указы: расписание — всегда, даже сверх лимита; вероятность — только в остаток слотов.
+  // 5. Указы: расписание и сопряжение — всегда, даже сверх лимита; вероятность — только в остаток слотов.
   const orderPlan = planOrderTicks({
     domain: working,
     config,
     slotsLeft: Math.max(0, cap - used),
     tick: world.tickIndex,
+    conflux,
   });
   for (const item of orderPlan) {
     const plot = findPlotline(working, item.plotId);
     if (!plot) continue;
+    if (item.event === 'conflux_dock') {
+      const result = await fireConfluxDockOrder({
+        config,
+        runtime,
+        domain: working,
+        world,
+        plot,
+        conflux,
+        partner,
+        log,
+      });
+      if (result?.fact) {
+        chronicleAdds.push(result.fact);
+        used += 1;
+      }
+      continue;
+    }
     const mode = pickOrderOutcome(working, cfg);
     const result = await tickOrder({
       config,
@@ -253,7 +344,7 @@ export async function resolveDomainMonth({
     }
   }
 
-  // 6. Посев мира: после указов, только в остаток слота и если живых историй нет.
+  // 6. Посев мира: сиквел занимает освободившийся слот; иначе обычный посев, если живых историй нет.
   const { stories } = countOpen(working);
   const sequel = pickSequelSeed(working, sequelOffers, cfg);
   const seedChance = sequel ? 1 : plotSeedChance(working, cfg, world.tickIndex);
@@ -261,6 +352,7 @@ export async function resolveDomainMonth({
     cap - used > 0 &&
     (Boolean(sequel) || stories === 0) &&
     (Boolean(sequel) || Math.random() < seedChance);
+  let sequelledId = null;
   if (wantSeed) {
     const seeded = await seedPlot({
       config,
@@ -268,12 +360,28 @@ export async function resolveDomainMonth({
       domain: working,
       world,
       fromClosed: sequel,
+      storyType:
+        sequel?.storyType === 'mystery' || sequel?.storyType === 'suspense' ? sequel.storyType : null,
       log,
     });
     if (seeded?.fact) {
       chronicleAdds.push(seeded.fact);
       used += 1;
     }
+    if (seeded?.plot && sequel?.id) sequelledId = sequel.id;
+  }
+
+  for (const closed of suspenseClosures) {
+    if (closed.id === sequelledId) continue;
+    const legacy = await resolveSuspenseLegacy({
+      runtime,
+      domain: working,
+      world,
+      closed,
+      config,
+      log,
+    });
+    if (legacy?.facts?.length) chronicleAdds.push(...legacy.facts);
   }
 
   // 7. Тихий месяц: без сюжета, но город всё равно жил.
@@ -327,7 +435,7 @@ export async function resolveDomainMonth({
     seeded: wantSeed,
     sequelOf: sequel?.id || null,
     ordersPlanned: orderPlan.length,
-    kept: kept ? { updated: kept.updated, surfaced: kept.surfaced } : null,
+    kept: kept ? { updated: kept.updated } : null,
     statsScored: scored?.scored ?? 0,
     steward: steward?.act || null,
     highlight: highlight ? `${highlight.kind}: ${highlight.title}` : null,
@@ -337,5 +445,5 @@ export async function resolveDomainMonth({
 
   if (conflux) dehydrateDomainToConflux(working, conflux);
 
-  return { domain: working, chronicleAdds, mirrorAdds, highlight, stewardActs: steward?.act ? [steward.act] : [] };
+  return { domain: working, chronicleAdds, mirrorAdds, flowAdds, highlight, stewardActs: steward?.act ? [steward.act] : [] };
 }

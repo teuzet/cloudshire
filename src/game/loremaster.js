@@ -1,7 +1,11 @@
 import { newId } from './ids.js';
-import { createLoreFact, formatCastForPrompt } from './models.js';
+import { createLoreFact, formatCastForPrompt, chronicleEntries } from './models.js';
 import { formatFullChronicleForPrompt, formatFactsForPrompt } from './memory.js';
 import { findActiveConfluxForDomain, monthsUntilDock } from './conflux.js';
+import { attachFactToPlotlines, isOrderPlot } from './plotlines.js';
+import { dehydrateDomainToConflux, hydrateDomainFromConflux, plotVisibleToRuler } from './confluxBoard.js';
+import { formatTruthGraphForPrompt } from './mysteryGraph.js';
+import { formatLadderForPrompt } from './suspenseGraph.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 
@@ -9,6 +13,139 @@ function visibleLoreForDomain(lore, domainId) {
   return (lore || []).filter((f) => {
     if (!f?.secret) return true;
     return String(f.secretForDomainId || '') === String(domainId);
+  });
+}
+
+export function storiesForLoremaster(domain, conflux = null) {
+  const byId = new Map();
+  for (const p of domain?.plotlines || []) {
+    if (p && !isOrderPlot(p)) byId.set(p.id, p);
+  }
+  if (conflux) {
+    for (const p of conflux.plotlines || []) {
+      if (!p || isOrderPlot(p)) continue;
+      if (plotVisibleToRuler(p, domain.id, conflux)) {
+        if (!byId.has(p.id)) byId.set(p.id, p);
+      }
+    }
+  }
+  return [...byId.values()];
+}
+
+/** Идущая история с доски или конфлюкса; закрытая и указ — null. */
+export function resolveLoremasterStory(domain, plotId, conflux = null) {
+  const id = String(plotId || '').trim();
+  if (!id) return null;
+  return storiesForLoremaster(domain, conflux).find((p) => String(p.id) === id) || null;
+}
+
+export function formatOpenStoriesBrief(plots = []) {
+  if (!plots.length) return 'Открытых историй нет.';
+  const lines = plots.map((p) => {
+    const kind =
+      p.storyType === 'mystery'
+        ? 'тайна'
+        : p.kind === 'errand'
+          ? 'поручение'
+          : p.isMainConflux || p.shared
+            ? 'общая история сопряжения'
+            : 'история';
+    const syn = p.synopsis ? ` — ${p.synopsis}` : '';
+    return `- ${p.id} (${kind})${syn}`;
+  });
+  return [
+    'Открытые истории (не решай их и не выдумывай развязку, виновника, скрытую причину):',
+    ...lines,
+    'Канон истины и скрытые посылки здесь не приведены. Если вопрос про конкретную идущую нить — её должен передать спрашивающий как plotId.',
+  ].join('\n');
+}
+
+/** @deprecated краткие карточки без канона; полный канон — formatFocusedStoryForLoremaster */
+export function formatStoriesForLoremaster(plots = [], { viewerId = null, focusId = null } = {}) {
+  if (focusId) {
+    const focused = plots.find((p) => String(p.id) === String(focusId));
+    if (focused) return formatFocusedStoryForLoremaster(focused, { viewerId });
+  }
+  return formatOpenStoriesBrief(plots);
+}
+
+export function formatFocusedStoryForLoremaster(p, { viewerId = null } = {}) {
+  if (!p) return '';
+  const host = p.hostDomainId || null;
+  const own = !viewerId || p.isMainConflux || !host || String(host) === String(viewerId);
+  const kind =
+    p.storyType === 'mystery'
+      ? 'ТАЙНА'
+      : p.kind === 'errand'
+        ? 'поручение'
+        : p.isMainConflux || p.shared
+          ? 'общая история сопряжения'
+          : 'история';
+  const lines = [
+    `ФОКУС: нить ${p.id} (${kind}). Это идущая история — не закрытая.`,
+    p.synopsis ? `Как сейчас: ${p.synopsis}` : null,
+    p.closeWhen ? `Успешный исход: ${p.closeWhen}` : null,
+    p.mootWhen ? `Теряет смысл, когда: ${p.mootWhen}` : null,
+    'Можно дописать мелкие детали места, обычая, материала, имени фона — если они не заводят новое направление сюжета и не ломают повествование.',
+    'Нельзя: раскрывать скрытое, ставить исход, виновника, мотив, причину странности; заводить новую интригу, конфликт или расследование.',
+  ];
+  if (!own) {
+    lines.push(
+      'Чужая история: канон истины и скрытые посылки этому городу не открыты. Отвечай по видимой хронике. Не раскрывай, не достраивай скрытое и не записывай его в fact.',
+    );
+    return lines.filter(Boolean).join('\n');
+  }
+  if (p.storyType === 'mystery' && (p.truthGraph || p.truth)) {
+    lines.push(
+      'КАНОН ТАЙНЫ (только чтобы не противоречить). Скрытое нельзя раскрывать, объяснять или писать в fact/ответы.',
+    );
+    if (p.truthGraph) {
+      lines.push(
+        formatTruthGraphForPrompt(p.truthGraph).replace(
+          'ПРИЧИННЫЙ ГРАФ (канон истины; узлы и рёбра не переписывай, меняй только статусы знания):',
+          'ПРИЧИННЫЙ ГРАФ (канон истины; только читать. Скрытое не раскрывай и не достраивай.):',
+        ),
+      );
+    } else if (p.truth) {
+      lines.push(`Канон (не раскрывай): ${p.truth}`);
+    }
+    lines.push(
+      'В ответы и add_fact — только уже «замеченное» или «понятое», плюс нейтральные детали фона, которые не намекают на скрытые узлы.',
+    );
+  } else if (p.storyType === 'suspense' && (p.hiddenPremises?.length || p.discoveryLadder?.length)) {
+    lines.push(
+      'СКРЫТАЯ ПРИРОДА НАСТОЯЩЕГО (только чтобы не противоречить). Не раскрывай, не пересказывай игроку/правителю и не пиши в fact.',
+    );
+    if (p.hiddenPremises?.length) {
+      lines.push('hiddenPremises:');
+      lines.push(formatHiddenPremisesForLoremaster(p.hiddenPremises));
+    }
+    if (p.discoveryLadder?.length) {
+      lines.push('Лестница открытия:');
+      lines.push(formatLadderForPrompt(p.discoveryLadder));
+    }
+  } else {
+    lines.push(
+      'Не выдумывай исход, виновника, скрытый мотив или причину нерешённого в этой истории.',
+    );
+  }
+  return lines.filter(Boolean).join('\n');
+}
+
+function formatHiddenPremisesForLoremaster(premises = []) {
+  return premises.map((text, i) => `- [${i}] СКРЫТО (не в ответы, не в fact): ${text}`).join('\n');
+}
+
+function loreLinkedToPlot(lore, plot) {
+  if (!plot?.id) return [];
+  const chron = new Set((plot.chronicleIds || []).map(String));
+  const facts = new Set((plot.factIds || []).map(String));
+  const pid = String(plot.id);
+  return (lore || []).filter((e) => {
+    const id = String(e?.id || '');
+    if (chron.has(id) || facts.has(id)) return true;
+    if (String(e.sourcePlotId || '') === pid) return true;
+    return (e.relatedPlotlineIds || []).map(String).includes(pid);
   });
 }
 
@@ -44,6 +181,8 @@ export async function askLoremaster({
   domain,
   questions,
   asker = 'agent',
+  plotId = null,
+  conflux: confluxArg = null,
 }) {
   const log = getLogger().child({
     scope: 'loremaster',
@@ -56,13 +195,15 @@ export async function askLoremaster({
   let answers = null;
 
   // approaching тоже канон: сближение чужого острова — подтверждённый факт мира.
-  const conflux = await findActiveConfluxForDomain(storage, working.id);
+  const conflux = confluxArg || (await findActiveConfluxForDomain(storage, working.id));
   const docked = conflux?.status === 'docked';
   let partner = null;
   if (conflux) {
     const otherId = (conflux.domainIds || []).find((id) => id !== working.id);
     if (otherId) partner = await storage.getDomain(otherId);
   }
+  const openStories = storiesForLoremaster(working, conflux);
+  const focusPlot = resolveLoremasterStory(working, plotId, conflux);
 
   const description =
     String(working.description || '').slice(0, 3000) ||
@@ -104,14 +245,33 @@ export async function askLoremaster({
               monthsLeft: a.monthsLeft,
               expectedMonths: a.expectedMonths,
             })),
-          reminder:
-            'Хроника приложена целиком — это твой главный источник, рядом с ним knownPeople: ' +
-            'судьбы названных людей записаны там, даже если хроника о них молчит. Ты их только читаешь: ' +
-            'писать и менять записи хроники нельзя, твой инструмент — факты. ' +
-            'Если хроника упоминает явление без деталей — add_fact с конкретными именами/деталями. ' +
-            '«Неизвестно» при уже упомянутом явлении запрещено. ' +
-            'Факт, противоречащий хронике или текущему состоянию, — устарел: update_fact или retire_fact.',
+          openStories: formatOpenStoriesBrief(openStories),
+          reminder: focusPlot
+            ? 'Хроника — главный источник произошедшего; ты её только читаешь. Инструмент — факты. ' +
+              'focusStory — идущая нить, о которой спросили: канон дан, чтобы не противоречить и не разрушить повествование. ' +
+              'Дописывай только мелкие детали фона. Не заводи новое направление сюжета. Скрытое не раскрывай и не пиши в fact. ' +
+              'Новый fact по этой нити система сама привяжет к истории.'
+            : 'Хроника приложена целиком — это твой главный источник, рядом с ним knownPeople. Ты хронику только читаешь: ' +
+              'писать её нельзя, инструмент — факты. ' +
+              'openStories — краткие карточки идущих историй без канона истины. Не решай их и не выдумывай скрытое. ' +
+              'Сыгранную историю читай только по хронике. ' +
+              'Если хроника упоминает явление без деталей и это не защищённый вопрос — add_fact. ' +
+              '«Неизвестно» — редко: только когда ответ защищён или противоречил бы канону. ' +
+              'Факт, противоречащий хронике или состоянию, — устарел: update_fact или retire_fact.',
         };
+        if (focusPlot) {
+          const linked = loreLinkedToPlot(visible, focusPlot);
+          payload.focusStory = formatFocusedStoryForLoremaster(focusPlot, {
+            viewerId: working.id,
+          });
+          const chronLines = chronicleEntries(linked).map(
+            (f) => `- (${f.gameDateLabel || '?'}) ${f.text}`,
+          );
+          payload.storyChronicle = chronLines.length
+            ? chronLines.join('\n')
+            : '(по этой нити в хронике пока пусто)';
+          payload.storyFacts = formatFactsForPrompt(linked, { limit: 40 });
+        }
 
         if (conflux) {
           payload.conflux = {
@@ -182,11 +342,21 @@ export async function askLoremaster({
           gameDateLabel: world.gameDate.label,
           tick: world.tickIndex,
           author: `loremaster:${asker}`,
+          relatedPlotlineIds: focusPlot ? [focusPlot.id] : null,
+          sourcePlotId: focusPlot ? focusPlot.id : null,
         });
         working.lore.push(fact);
+        if (focusPlot) {
+          attachFactToPlotlines(working, fact.id, [focusPlot.id]);
+          if (conflux) attachFactToPlotlines(conflux, fact.id, [focusPlot.id]);
+        }
         addedFacts.push(fact);
-        log.info('loremaster.add_fact', { factId: fact.id, text: truncate(body, 300) });
-        return { ok: true, factId: fact.id };
+        log.info('loremaster.add_fact', {
+          factId: fact.id,
+          plotId: focusPlot?.id || null,
+          text: truncate(body, 300),
+        });
+        return { ok: true, factId: fact.id, plotId: focusPlot?.id || null };
       },
     },
     {
@@ -299,6 +469,8 @@ export async function askLoremaster({
   log.info('loremaster.ask', {
     questions: questions || [],
     confluxId: conflux?.id || null,
+    plotId: plotId || null,
+    focusPlotId: focusPlot?.id || null,
   });
 
   const dockHint = !conflux
@@ -331,8 +503,11 @@ export async function askLoremaster({
           'Вопросы:',
           qText || '(нет вопросов)',
           '',
+          focusPlot
+            ? `Фокус — идущая история ${focusPlot.id}. Канон и инструкция — в read_lore.focusStory. Детали фона можно дописать; новое направление сюжета — нельзя. Скрытое не раскрывай.`
+            : 'Фокуса на идущей истории нет: канон тайн не дан. Сыгранное читай только по хронике. Не решай открытые истории.',
           'Порядок: read_lore → при пробелах add_fact (СУХО, без пафоса), при противоречиях update_fact / retire_fact → submit_answers.',
-          'Перед ответом сверь факты с хроникой и состоянием: устаревшие обнови или сними, не пересказывай их как правду.',
+          'Перед ответом сверь факты с хроникой, openStories и состоянием: устаревшие обнови или сними, не пересказывай их как правду.',
           'Факты как справочник, не проза. Пример: «Местный продукт — виноград; сладкий, тонкая кожица.»',
         ]
           .filter((line) => line !== undefined)
@@ -347,17 +522,26 @@ export async function askLoremaster({
     domainId: working.id,
   });
 
-  await storage.saveDomain(working);
+  if (conflux) {
+    dehydrateDomainToConflux(working, conflux);
+    await storage.saveDomain(working);
+    await storage.saveConflux(conflux);
+    hydrateDomainFromConflux(working, conflux, { mode: 'ruler' });
+  } else {
+    await storage.saveDomain(working);
+  }
 
   log.info('loremaster.done', {
     answerCount: (answers || []).length,
     newFacts: addedFacts.length,
+    focusPlotId: focusPlot?.id || null,
     answers: truncate(answers, 800),
   });
 
   return {
     answers: answers || [],
     addedFacts,
+    focusPlotId: focusPlot?.id || null,
     loreTextForAsker: (answers || [])
       .map((a) => `Q: ${a.question}\nA: ${a.answer}${a.invented ? ' (уточнено)' : ''}`)
       .join('\n\n'),

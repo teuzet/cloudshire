@@ -15,9 +15,10 @@ import {
   resumeProcess,
 } from './processes.js';
 import { estimateProcessDuration } from './durationJudge.js';
-import { formatBoardForPrompt } from './plotlines.js';
+import { formatBoardForPrompt, isThreeActPlot } from './plotlines.js';
 import { queueOrderRequest, listStandingOrders } from './orders.js';
 import { ensureErrandForProcess, linkProcessToPlotline } from './plotEngine.js';
+import { judgeProcessAlignment } from './plotAlign.js';
 import { qualitativeStatsBrief, qualitativePopulation } from './stats.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
@@ -137,6 +138,9 @@ async function applyProcess(domain, args, { config, runtime, world, character, l
     }).plot;
   }
   action.plotlineId = plot?.id || null;
+  if (plot && isThreeActPlot(plot)) {
+    await judgeProcessAlignment({ runtime, domain, process: action, plot, log });
+  }
   rememberFact(domain, {
     world,
     character,

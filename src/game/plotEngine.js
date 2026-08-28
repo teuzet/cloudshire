@@ -11,11 +11,14 @@ import {
   findClosedPlotline,
   reopenClosedPlotline,
   plotCanFade,
+  plotHasAttendingProcess,
+  plotsForProcess,
   createErrandPlotline,
   boardHasRoom,
   plotConfig,
   clipPlotText,
   PLOT_SUMMARY_MAX,
+  isThreeActPlot,
 } from './plotlines.js';
 import {
   beatChance,
@@ -24,6 +27,7 @@ import {
   tintFromProcessOutcome,
   TINT_LABELS,
 } from './rolls.js';
+import { applyStoryActMove } from './storyActs.js';
 
 /** Месячные часы доски: возраст растёт, интерес остывает. */
 export function advancePlotMonth(domain, cfg) {
@@ -87,11 +91,6 @@ export function linkProcessToPlotline(domain, processId, plotlineId) {
   return plot;
 }
 
-function plotsForProcess(domain, processId) {
-  const id = String(processId);
-  return (domain.plotlines || []).filter((p) => (p.relatedProcessIds || []).includes(id));
-}
-
 function statValue(domain, statId) {
   const v = Number(domain?.stats?.[statId]);
   return Number.isFinite(v) ? v : 50;
@@ -117,7 +116,7 @@ export function planBeats({
   const beats = [];
   const taken = new Set();
 
-  const addBeat = (plot, { mandatory, reason, tint, finale = false, fade = false, outcome = null }) => {
+  const addBeat = (plot, { mandatory, reason, tint, finale = false, fade = false, outcome = null, actMove = null, skipTint = false }) => {
     if (!plot) return false;
     const processKey = outcome?.processId ? `${plot.id}:${outcome.processId}` : null;
     if (processKey) {
@@ -129,17 +128,19 @@ export function planBeats({
     taken.add(plot.id);
     const rolled =
       tint ||
-      (() => {
-        const statId = pickRollStat(plot.relatedStats, rng, cfg.roll);
-        const r = rollTint(statValue(domain, statId), rng, cfg.roll);
-        return { ...r, statId };
-      })();
+      (skipTint
+        ? 'dual'
+        : (() => {
+            const statId = pickRollStat(plot.relatedStats, rng, cfg.roll);
+            const r = rollTint(statValue(domain, statId), rng, cfg.roll);
+            return { ...r, statId };
+          })());
     beats.push({
       plotId: plot.id,
       title: plot.title,
       mandatory,
       reason,
-      finale: Boolean(finale),
+      finale: Boolean(finale || actMove?.ending),
       fade: Boolean(fade),
       tint: typeof rolled === 'string' ? rolled : rolled.tint,
       tintLabel: TINT_LABELS[typeof rolled === 'string' ? rolled : rolled.tint],
@@ -147,27 +148,44 @@ export function planBeats({
       roll: typeof rolled === 'string' ? null : rolled.roll ?? null,
       chance: typeof rolled === 'string' ? null : rolled.chance ?? null,
       processOutcome: outcome,
+      actMove: actMove || null,
+      skipTint: Boolean(skipTint),
     });
     return true;
   };
 
-  // 1. Процессы — всегда, даже сверх потолка.
+  // 1. Процессы — всегда, даже сверх потолка. Прыжок такта — только на финише. Intel не двигает сюжет.
   for (const outcome of processOutcomes) {
     if (!outcome?.mustNarrate) continue;
+    if (outcome.intel) continue;
     for (const plot of plotsForProcess(domain, outcome.processId)) {
+      let actMove = null;
+      if (isThreeActPlot(plot) && outcome.finished) {
+        actMove = applyStoryActMove(plot, {
+          trigger: 'process_finished',
+          relation: outcome.plotEngagement,
+          aligned: outcome.plotAligned === true,
+          finish: outcome.finish || 'ok',
+          rng,
+          config: cfg,
+        });
+      }
       addBeat(plot, {
         mandatory: true,
         reason: outcome.finished ? 'process_finished' : `process_${outcome.kind}`,
         tint: tintFromProcessOutcome(outcome),
-        finale: outcome.finished && plot.kind === 'errand',
+        finale: (outcome.finished && plot.kind === 'errand') || Boolean(actMove?.ending),
         outcome,
+        actMove,
+        skipTint: isThreeActPlot(plot),
       });
     }
   }
 
-  // 2. Сход забытой нити — служебное закрытие, слот не занимает.
+  // 2. Сход забытой нити — служебное закрытие, слот не занимает. Трёхтактные так не гаснут.
   for (const plot of domain.plotlines) {
     if (plot.kind === 'order') continue;
+    if (isThreeActPlot(plot)) continue;
     if (!plotCanFade(domain, plot, cfg)) continue;
     addBeat(plot, { mandatory: true, reason: 'fade', fade: true, tint: 'dual' });
   }
@@ -185,13 +203,29 @@ export function planBeats({
   }
 
   // 3. Случайные тики живых историй — только в остаток.
+  // Трёхтактные: только если нет ни одного активного дела; без окраски.
   for (const plot of domain.plotlines) {
     if (plot.kind !== 'story') continue;
     if (taken.has(plot.id)) continue;
     if (slotsUsed >= cap) break;
+    if (isThreeActPlot(plot) && plotHasAttendingProcess(domain, plot)) continue;
     const chance = beatChance(plot, cfg);
     if (rng() >= chance) continue;
-    if (addBeat(plot, { mandatory: false, reason: 'roll' })) slotsUsed += 1;
+    let actMove = null;
+    if (isThreeActPlot(plot)) {
+      actMove = applyStoryActMove(plot, { trigger: 'auto', rng, config: cfg });
+    }
+    if (
+      addBeat(plot, {
+        mandatory: false,
+        reason: isThreeActPlot(plot) ? 'auto' : 'roll',
+        actMove,
+        skipTint: isThreeActPlot(plot),
+        finale: Boolean(actMove?.ending),
+      })
+    ) {
+      slotsUsed += 1;
+    }
   }
 
   return { beats, slotsUsed, cap };

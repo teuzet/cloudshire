@@ -15,9 +15,17 @@ export function formatIslandPlotlines(domain) {
   const list = domain?.plotlines || [];
   if (!list.length) return `${domain?.name || 'Остров'}: открытых историй нет.`;
   const blocks = list.map((p) => {
-    const kind = p.kind === 'errand' ? 'поручение' : 'история';
-    const age = `${p.ageMonths}/${p.maxAgeMonths} мес.`;
-    const head = `«${p.title}» (${kind}) · важность ${p.importance} · ${age}`;
+    const kind = p.kind === 'errand' ? 'поручение' : p.kind === 'order' ? 'порядок' : 'история';
+    const age =
+      p.kind === 'order'
+        ? p.durationMonths
+          ? `${p.durationMonths} мес.`
+          : 'бессрочно'
+        : `${p.ageMonths}/${p.maxAgeMonths} мес.`;
+    const head =
+      p.urgency != null || p.gravity != null
+        ? `«${p.title}» (${kind}) · срочность ${p.urgency ?? '—'} · масштаб ${p.gravity ?? '—'} · ${age}`
+        : `«${p.title}» (${kind}) · ${age}`;
     const parts = [head];
     if (p.synopsis) parts.push(p.synopsis);
     if (p.closeWhen) parts.push(`закроется, когда: ${p.closeWhen}`);

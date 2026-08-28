@@ -3,7 +3,7 @@
  * Указы (kind: order) остаются на домене.
  */
 
-import { createPlotline, isOrderPlot, clipPlotText, PLOT_SUMMARY_MAX, PLOT_TITLE_MAX } from './plotlines.js';
+import { createPlotline, isOrderPlot, clipPlotText, plotScale, PLOT_SUMMARY_MAX, PLOT_TITLE_MAX, refreshPlotAwareness } from './plotlines.js';
 import { newId } from './ids.js';
 import { createLoreFact } from './models.js';
 
@@ -31,14 +31,242 @@ export function plotHostId(plot) {
   return plot?.hostDomainId ? String(plot.hostDomainId) : asIdList(plot?.concernsDomainIds)[0] || null;
 }
 
+export function cityKnowsPlot(plot, domainId) {
+  if (!plot || isOrderPlot(plot)) return false;
+  refreshPlotAwareness(plot);
+  const id = String(domainId);
+  if (plot.isMainConflux) return true;
+  if (plot.plotAwareness?.[id]) return true;
+  if (plotHostId(plot) === id) return true;
+  return false;
+}
+
+export function grantPlotAwareness(plot, domainId, conflux = null, domains = []) {
+  if (!plot || isOrderPlot(plot)) return plot;
+  refreshPlotAwareness(plot);
+  const id = String(domainId);
+  plot.plotAwareness[id] = true;
+  if (conflux) backfillPlotChronicles(plot, id, conflux, domains);
+  return plot;
+}
+
+function plotFacts(plot, conflux, domains = []) {
+  const ids = new Set(asIdList(plot?.chronicleIds));
+  const bags = [conflux?.lore, ...(domains || []).map((d) => d?.lore)];
+  const out = [];
+  const seen = new Set();
+  for (const lore of bags) {
+    for (const fact of lore || []) {
+      if (!fact?.id) continue;
+      const fid = String(fact.id);
+      if (seen.has(fid)) continue;
+      if (ids.has(fid) || String(fact.sourcePlotId || '') === String(plot.id)) {
+        if (fact.secret) continue;
+        seen.add(fid);
+        out.push(fact);
+      }
+    }
+  }
+  return out;
+}
+
+export function backfillPlotChronicles(plot, domainId, conflux, domains = []) {
+  normalizeConfluxBoard(conflux);
+  const viewer = (domains || []).find((d) => String(d.id) === String(domainId));
+  const alreadyKnown = knownSetFor(conflux, domainId);
+  const hostId = plotHostId(plot);
+  for (const fact of plotFacts(plot, conflux, domains)) {
+    if (fact.secret) continue;
+    const wasKnown = alreadyKnown.has(String(fact.id));
+    markLoreKnown(conflux, domainId, fact.id);
+    if (!viewer || String(viewer.id) === String(hostId)) continue;
+    if (wasKnown) continue;
+    const already = (viewer.lore || []).some(
+      (f) => String(f.id) === String(fact.id) || String(f.leakedFromId || '') === String(fact.id),
+    );
+    if (already) continue;
+    viewer.lore = viewer.lore || [];
+    const copy = createLoreFact({
+      id: newId('lore'),
+      text: fact.text,
+      tags: ['chronicle', 'conflux-backfill'],
+      gameDateLabel: fact.gameDateLabel,
+      tick: fact.tick,
+      author: 'conflux-backfill',
+      importance: fact.importance || 'minor',
+      sourcePlotId: plot.id,
+      relatedPlotlineIds: [plot.id],
+    });
+    copy.leakedFromId = fact.id;
+    viewer.lore.push(copy);
+  }
+}
+
+export function allPlotChroniclesKnown(plot, conflux, domainId) {
+  const ids = asIdList(plot?.chronicleIds);
+  if (!ids.length) return false;
+  const known = knownSetFor(conflux, domainId);
+  return ids.every((id) => known.has(id));
+}
+
+export function maybeGrantAwarenessFromKnownLore(conflux, domains = []) {
+  normalizeConfluxBoard(conflux);
+  let granted = 0;
+  for (const plot of conflux.plotlines || []) {
+    if (isOrderPlot(plot)) continue;
+    for (const domain of domains) {
+      if (cityKnowsPlot(plot, domain.id)) continue;
+      if (!allPlotChroniclesKnown(plot, conflux, domain.id)) continue;
+      grantPlotAwareness(plot, domain.id, conflux, domains);
+      granted += 1;
+    }
+  }
+  return granted;
+}
+
+export function activeNonIntelOwners(plot, conflux) {
+  const related = new Set(asIdList(plot?.relatedProcessIds));
+  const owners = new Set();
+  for (const pr of conflux?.processes || []) {
+    if (!related.has(String(pr.id))) continue;
+    if (pr.status && pr.status !== 'active') continue;
+    if (pr.intel) continue;
+    const owner = String(pr.ownerDomainId || plotHostId(plot) || '');
+    if (owner) owners.add(owner);
+  }
+  return [...owners];
+}
+
+/** Derived: два города реально действуют в нити (не разведка). */
+export function isContested(plot, conflux) {
+  if (!plot || isOrderPlot(plot)) return false;
+  return activeNonIntelOwners(plot, conflux).length >= 2;
+}
+
+export function contestedPlots(conflux) {
+  return (conflux?.plotlines || []).filter((p) => isContested(p, conflux));
+}
+
+export function confluxMonthPlots(conflux) {
+  return (conflux?.plotlines || []).filter((p) => {
+    if (isOrderPlot(p)) return false;
+    return Boolean(p.isMainConflux) || isContested(p, conflux);
+  });
+}
+
+export function nativePlotsForMonth(conflux, domainId) {
+  const id = String(domainId);
+  return (conflux?.plotlines || []).filter((p) => {
+    if (isOrderPlot(p)) return false;
+    if (p.isMainConflux) return false;
+    if (isContested(p, conflux)) return false;
+    return plotHostId(p) === id;
+  });
+}
+
+export function findPlotByChronicleId(conflux, chronicleId, domains = []) {
+  const id = String(chronicleId || '');
+  if (!id) return null;
+  for (const plot of conflux?.plotlines || []) {
+    if (asIdList(plot.chronicleIds).includes(id)) return plot;
+  }
+  for (const lore of [conflux?.lore, ...(domains || []).map((d) => d?.lore)]) {
+    const fact = (lore || []).find((f) => String(f.id) === id || String(f.leakedFromId || '') === id);
+    if (!fact) continue;
+    const source = String(fact.sourcePlotId || fact.relatedPlotlineIds?.[0] || '');
+    if (!source) continue;
+    const plot = (conflux?.plotlines || []).find((p) => p.id === source);
+    if (plot) return plot;
+  }
+  return null;
+}
+
+export function leakedTracesForViewer(conflux, viewerId, domains = []) {
+  normalizeConfluxBoard(conflux);
+  const known = knownSetFor(conflux, viewerId);
+  const traces = [];
+  const seen = new Set();
+  const consider = [];
+  for (const d of domains || []) {
+    if (String(d.id) === String(viewerId)) {
+      for (const f of d?.lore || []) {
+        if (f?.sourcePlotId || (f.tags || []).includes('leaked')) consider.push(f);
+      }
+    } else {
+      for (const f of d?.lore || []) {
+        if (known.has(String(f.id)) && !f.secret) consider.push(f);
+      }
+    }
+  }
+  for (const fact of consider) {
+    const plot =
+      findPlotByChronicleId(conflux, fact.leakedFromId || fact.id, domains) ||
+      ((conflux.plotlines || []).find((p) => p.id === fact.sourcePlotId) || null);
+    if (!plot || isOrderPlot(plot) || cityKnowsPlot(plot, viewerId)) continue;
+    const key = `${plot.id}:${fact.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    traces.push({
+      chronicleId: fact.id,
+      text: fact.text,
+      plotId: plot.id,
+      plotHidden: true,
+    });
+  }
+  return traces;
+}
+
+export function takeIntelOffer(conflux, viewerId, key) {
+  normalizeConfluxBoard(conflux);
+  const id = String(viewerId);
+  const k = String(key);
+  const list = conflux.intelOffers[id] || [];
+  if (list.includes(k)) return false;
+  list.push(k);
+  conflux.intelOffers[id] = list;
+  return true;
+}
+
+export function copyChronicleToAwareCities({ plot, fact, conflux, domains, author = 'conflux-flow' }) {
+  if (!plot || !fact) return [];
+  const added = [];
+  const hostId = plotHostId(plot);
+  for (const domain of domains || []) {
+    if (!cityKnowsPlot(plot, domain.id)) continue;
+    if (hostId && String(domain.id) === String(hostId)) continue;
+    const already = (domain.lore || []).some(
+      (f) => String(f.leakedFromId || '') === String(fact.id) || (f.sourcePlotId === plot.id && f.text === fact.text && Number(f.tick) === Number(fact.tick)),
+    );
+    if (already) continue;
+    domain.lore = domain.lore || [];
+    const copy = createLoreFact({
+      id: newId('lore'),
+      text: fact.text,
+      tags: ['chronicle', 'conflux', `conflux:${conflux.id}`, 'aware-flow'],
+      gameDateLabel: fact.gameDateLabel,
+      tick: fact.tick,
+      author,
+      importance: fact.importance || 'minor',
+      sourcePlotId: plot.id,
+      relatedPlotlineIds: [plot.id],
+    });
+    domain.lore.push(copy);
+    markLoreKnown(conflux, domain.id, fact.id);
+    added.push({ domainId: domain.id, fact: copy });
+  }
+  return added;
+}
+
 /**
  * Кому из городов писать хронику этого бита.
  * До стыковки чужой берег не виден: запись только хозяину дела или нити.
  */
 export function chronicleReceiversForBeat(conflux, plot, beat, domains) {
   const list = domains || [];
-  const concerned = list.filter((d) => plot?.isMainConflux || plotConcerns(plot, d.id));
-  if (conflux?.status === 'docked') return concerned;
+  const aware = list.filter((d) => cityKnowsPlot(plot, d.id));
+  if (conflux?.status === 'docked') {
+    return aware.length ? aware : list.filter((d) => plot?.isMainConflux || plotConcerns(plot, d.id));
+  }
 
   const processId = beat?.processOutcome?.processId;
   const ownerId =
@@ -68,7 +296,7 @@ export function averageAwareness(conflux) {
   return sum / ids.length;
 }
 
-export function sharePlotWithDomain(plot, domainId, { reason = 'leak' } = {}) {
+export function sharePlotWithDomain(plot, domainId, { reason = 'process', conflux = null, domains = [] } = {}) {
   if (!plot || isOrderPlot(plot)) return plot;
   const id = String(domainId);
   plot.concernsDomainIds = asIdList(plot.concernsDomainIds);
@@ -77,16 +305,54 @@ export function sharePlotWithDomain(plot, domainId, { reason = 'leak' } = {}) {
     plot.shared = true;
     plot.sharedReason = reason;
   }
+  grantPlotAwareness(plot, id, conflux, domains);
   return plot;
 }
 
-export function maybeLeakPlot(plot, conflux, otherDomainId, rng = Math.random) {
-  if (!plot || isSharedPlot(plot) || isOrderPlot(plot)) return false;
+/**
+ * Голая хроника соседу: без карточки сюжета. Полное знание — только если известны все записи нити.
+ */
+export function maybeLeakChronicle({ plot, fact, conflux, viewerId, viewerDomain = null, domains = [], rng = Math.random } = {}) {
+  if (!plot || !fact || isOrderPlot(plot)) return false;
   if (conflux?.status !== 'docked') return false;
-  const chance = leakChanceFromImportance(plot.importance, averageAwareness(conflux));
+  if (cityKnowsPlot(plot, viewerId)) return false;
+  const chance = leakChanceFromImportance(plotScale(plot), averageAwareness(conflux));
   if (chance <= 0 || rng() >= chance) return false;
-  sharePlotWithDomain(plot, otherDomainId, { reason: 'leak' });
+  markLoreKnown(conflux, viewerId, fact.id);
+  if (viewerDomain) {
+    viewerDomain.lore = viewerDomain.lore || [];
+    const exists = viewerDomain.lore.some(
+      (f) => String(f.id) === String(fact.id) || String(f.leakedFromId || '') === String(fact.id),
+    );
+    if (!exists) {
+      const copy = createLoreFact({
+        id: newId('lore'),
+        text: fact.text,
+        tags: ['chronicle', 'leaked', `conflux:${conflux.id}`],
+        gameDateLabel: fact.gameDateLabel,
+        tick: fact.tick,
+        author: 'conflux-leak',
+        importance: 'minor',
+        sourcePlotId: plot.id,
+      });
+      copy.leakedFromId = fact.id;
+      viewerDomain.lore.push(copy);
+    }
+  }
+  if (allPlotChroniclesKnown(plot, conflux, viewerId)) {
+    const all = [...new Set([...(domains || []), viewerDomain].filter(Boolean))];
+    grantPlotAwareness(plot, viewerId, conflux, all);
+  }
   return true;
+}
+
+/** Совместимость: бросок «просочится ли что-то», без шаринга карточки. */
+export function maybeLeakPlot(plot, conflux, otherDomainId, rng = Math.random) {
+  if (!plot || isOrderPlot(plot)) return false;
+  if (conflux?.status !== 'docked') return false;
+  if (cityKnowsPlot(plot, otherDomainId)) return false;
+  const chance = leakChanceFromImportance(plotScale(plot), averageAwareness(conflux));
+  return chance > 0 && rng() < chance;
 }
 
 export function stampPlotOnConflux(plot, conflux, domainId) {
@@ -97,6 +363,7 @@ export function stampPlotOnConflux(plot, conflux, domainId) {
   if (!plot.concernsDomainIds.length) plot.concernsDomainIds = [String(domainId)];
   plot.shared = isSharedPlot(plot);
   plot.isMainConflux = Boolean(plot.isMainConflux);
+  refreshPlotAwareness(plot);
   return plot;
 }
 
@@ -111,6 +378,7 @@ export function normalizeConfluxBoard(conflux) {
   if (!conflux || typeof conflux !== 'object') return conflux;
   if (!conflux.awareness || typeof conflux.awareness !== 'object') conflux.awareness = {};
   if (!conflux.knownLoreIds || typeof conflux.knownLoreIds !== 'object') conflux.knownLoreIds = {};
+  if (!conflux.intelOffers || typeof conflux.intelOffers !== 'object') conflux.intelOffers = {};
   if (!Array.isArray(conflux.plotlines)) conflux.plotlines = [];
   if (!Array.isArray(conflux.closedPlotlines)) conflux.closedPlotlines = [];
   if (!Array.isArray(conflux.processes)) conflux.processes = [];
@@ -118,6 +386,7 @@ export function normalizeConfluxBoard(conflux) {
   for (const id of asIdList(conflux.domainIds)) {
     if (!Number.isFinite(Number(conflux.awareness[id]))) conflux.awareness[id] = 0;
     if (!Array.isArray(conflux.knownLoreIds[id])) conflux.knownLoreIds[id] = [];
+    if (!Array.isArray(conflux.intelOffers[id])) conflux.intelOffers[id] = [];
   }
   if (conflux.mainPlotId == null) conflux.mainPlotId = null;
   return conflux;
@@ -158,16 +427,12 @@ export function revealKnownLore({ conflux, viewerId, partner, rng = Math.random 
 
 export function plotVisibleToRuler(plot, domainId, conflux) {
   if (!plot || isOrderPlot(plot)) return false;
-  if (plot.isMainConflux) return true;
-  if (plotConcerns(plot, domainId)) return true;
-  const known = knownSetFor(conflux, domainId);
-  return asIdList(plot.chronicleIds).some((id) => known.has(id));
+  void conflux;
+  return cityKnowsPlot(plot, domainId);
 }
 
 export function localPlotsForMonth(conflux, domainId) {
-  return (conflux?.plotlines || []).filter(
-    (p) => !isOrderPlot(p) && !isSharedPlot(p) && plotConcerns(p, domainId),
-  );
+  return nativePlotsForMonth(conflux, domainId);
 }
 
 export function sharedPlots(conflux) {
@@ -194,14 +459,16 @@ export function processesOwnedBy(conflux, domainId) {
 export function hydrateDomainFromConflux(domain, conflux, { mode = 'month' } = {}) {
   if (!domain || !conflux) return domain;
   normalizeConfluxBoard(conflux);
+  const closedIds = new Set((conflux.closedPlotlines || []).map((p) => p?.id).filter(Boolean));
   const orders = (domain.plotlines || []).filter((p) => isOrderPlot(p));
-  const extra =
+  const extra = (
     mode === 'ruler'
       ? (conflux.plotlines || []).filter((p) => plotVisibleToRuler(p, domain.id, conflux))
-      : localPlotsForMonth(conflux, domain.id);
-  domain.plotlines = [...orders, ...extra];
+      : localPlotsForMonth(conflux, domain.id)
+  ).filter((p) => p && !closedIds.has(p.id));
+  const seenPlots = new Set(orders.map((p) => p.id));
+  domain.plotlines = [...orders, ...extra.filter((p) => !seenPlots.has(p.id))];
 
-  const extraIds = new Set(extra.map((p) => p.id));
   const extraProcIds = new Set();
   for (const p of extra) {
     for (const id of asIdList(p.relatedProcessIds)) extraProcIds.add(id);
@@ -251,8 +518,27 @@ export function dehydrateDomainToConflux(domain, conflux) {
   }
   domain.plotlines = orders;
 
-  const plotById = new Map((conflux.plotlines || []).map((p) => [p.id, p]));
-  for (const p of movedPlots) plotById.set(p.id, p);
+  const closedById = new Map();
+  for (const p of conflux.closedPlotlines || []) {
+    if (p?.id) closedById.set(p.id, p);
+  }
+  for (const p of domain.closedPlotlines || []) {
+    if (isOrderPlot(p)) continue;
+    if (!p?.id) continue;
+    closedById.set(p.id, p);
+  }
+  conflux.closedPlotlines = [...closedById.values()];
+  const skipOpen = new Set(closedById.keys());
+
+  const plotById = new Map();
+  for (const p of conflux.plotlines || []) {
+    if (!p?.id || skipOpen.has(p.id) || p.status === 'closed') continue;
+    plotById.set(p.id, p);
+  }
+  for (const p of movedPlots) {
+    if (!p?.id || skipOpen.has(p.id) || p.status === 'closed') continue;
+    plotById.set(p.id, p);
+  }
   conflux.plotlines = [...plotById.values()];
 
   const stay = [];
@@ -265,27 +551,23 @@ export function dehydrateDomainToConflux(domain, conflux) {
   const procById = new Map((conflux.processes || []).map((p) => [p.id, p]));
   for (const pr of movedProcs) procById.set(pr.id, pr);
   conflux.processes = [...procById.values()];
-
-  const keepClosed = [];
-  for (const p of domain.closedPlotlines || []) {
-    if (isOrderPlot(p)) keepClosed.push(p);
-    else {
-      if (!conflux.closedPlotlines.some((x) => x.id === p.id)) conflux.closedPlotlines.push(p);
-    }
-  }
-  domain.closedPlotlines = keepClosed;
+  domain.closedPlotlines = (domain.closedPlotlines || []).filter((p) => isOrderPlot(p));
 }
 
 export function takeDomainBoardIntoConflux(domain, conflux) {
   normalizeConfluxBoard(conflux);
   const keepPlots = [];
+  const existingPlotIds = new Set((conflux.plotlines || []).map((p) => p.id));
   for (const p of domain.plotlines || []) {
     if (isOrderPlot(p)) {
       keepPlots.push(p);
       continue;
     }
     stampPlotOnConflux(p, conflux, domain.id);
-    conflux.plotlines.push(p);
+    if (!existingPlotIds.has(p.id)) {
+      conflux.plotlines.push(p);
+      existingPlotIds.add(p.id);
+    }
   }
   domain.plotlines = keepPlots;
 
@@ -294,7 +576,7 @@ export function takeDomainBoardIntoConflux(domain, conflux) {
     if (isOrderPlot(p)) keepClosed.push(p);
     else {
       p.confluxId = conflux.id;
-      conflux.closedPlotlines.push(p);
+      if (!conflux.closedPlotlines.some((x) => x.id === p.id)) conflux.closedPlotlines.push(p);
     }
   }
   domain.closedPlotlines = keepClosed;
@@ -307,7 +589,7 @@ export function takeDomainBoardIntoConflux(domain, conflux) {
   for (const pr of domain.state?.pendingActions || []) {
     if (movedPlotProcIds.has(String(pr.id))) {
       stampProcessOnConflux(pr, conflux, domain.id);
-      conflux.processes.push(pr);
+      if (!conflux.processes.some((x) => x.id === pr.id)) conflux.processes.push(pr);
     } else keepProcs.push(pr);
   }
   domain.state.pendingActions = keepProcs;
@@ -334,6 +616,7 @@ export function createMainConfluxPlot({ a, b, conflux, world, config }) {
   plot.shared = true;
   plot.hostDomainId = null;
   plot.concernsDomainIds = [a.id, b.id];
+  refreshPlotAwareness(plot);
   return plot;
 }
 
@@ -369,6 +652,7 @@ function clonePlotForReturn(plot, domainId, ownProcessIds) {
     hostDomainId: String(domainId),
     concernsDomainIds: [String(domainId)],
     relatedProcessIds: ownProcessIds.map(String),
+    plotAwareness: { [String(domainId)]: true },
     title: clipPlotText(plot.title, PLOT_TITLE_MAX),
     synopsis: clipPlotText(plot.synopsis, PLOT_SUMMARY_MAX),
     partnerGone: true,
@@ -380,17 +664,32 @@ function clonePlotForReturn(plot, domainId, ownProcessIds) {
 function unstampLocal(plot) {
   const next = { ...plot, confluxId: null, shared: false };
   delete next.sharedReason;
+  refreshPlotAwareness(next);
   return next;
 }
 
+function returnOwnProcesses(domain, procs) {
+  domain.state.pendingActions = domain.state.pendingActions || [];
+  for (const pr of procs) {
+    const next = { ...pr };
+    delete next.confluxId;
+    domain.state.pendingActions.push(next);
+  }
+}
+
 /**
- * Расстыковка: shared копируются обоим (чужие дела отрезаны);
- * главная нить — только городам, у которых на ней остались процессы;
- * локальные возвращаются хозяину.
+ * Расстыковка: нераскрытая нить городу не отдаётся;
+ * раскрытая — только если предпосылка может жить здесь без соседа.
+ * Главная нить встречи — только городам с живыми делами на ней.
  */
-export function returnBoardsOnUndock(conflux, domainsById) {
+export async function returnBoardsOnUndock(conflux, domainsById, { decideContinuation = null } = {}) {
   normalizeConfluxBoard(conflux);
   const leftover = [];
+  const cityIds = asIdList(conflux.domainIds);
+  const decide =
+    decideContinuation ||
+    (async ({ plot, domainId }) => cityKnowsPlot(plot, domainId));
+
   for (const plot of conflux.plotlines || []) {
     const related = asIdList(plot.relatedProcessIds);
     const procs = (conflux.processes || []).filter((pr) => related.includes(String(pr.id)));
@@ -404,51 +703,37 @@ export function returnBoardsOnUndock(conflux, domainsById) {
         const copy = clonePlotForReturn(plot, domainId, own.map((p) => p.id));
         domain.plotlines = domain.plotlines || [];
         domain.plotlines.push(copy);
-        for (const pr of own) {
-          const next = { ...pr };
-          delete next.confluxId;
-          domain.state.pendingActions.push(next);
-        }
+        returnOwnProcesses(domain, own);
       }
       leftover.push(plot);
       continue;
     }
 
-    if (isSharedPlot(plot)) {
-      for (const domainId of asIdList(plot.concernsDomainIds)) {
-        const domain = domainsById.get(domainId);
-        if (!domain) continue;
-        const own = procs.filter((pr) => String(pr.ownerDomainId || plotHostId(plot) || '') === String(domainId));
-        const copy = clonePlotForReturn(plot, domainId, own.map((p) => p.id));
-        domain.plotlines = domain.plotlines || [];
-        domain.plotlines.push(copy);
-        for (const pr of own) {
-          const next = { ...pr };
-          delete next.confluxId;
-          domain.state.pendingActions.push(next);
-        }
+    for (const domainId of cityIds) {
+      const domain = domainsById.get(domainId);
+      if (!domain) continue;
+      const own = procs.filter((pr) => String(pr.ownerDomainId || '') === String(domainId));
+      if (!cityKnowsPlot(plot, domainId)) {
+        returnOwnProcesses(domain, own);
+        continue;
       }
-      leftover.push(plot);
-      continue;
-    }
-
-    const hostId = plotHostId(plot);
-    const host = hostId ? domainsById.get(hostId) : null;
-    if (host) {
-      host.plotlines = host.plotlines || [];
-      host.plotlines.push(unstampLocal(plot));
-      for (const pr of procs) {
-        const next = { ...pr };
-        delete next.confluxId;
-        host.state.pendingActions.push(next);
+      const keep = await decide({ plot, domainId, domain, conflux });
+      if (!keep) {
+        returnOwnProcesses(domain, own);
+        continue;
       }
+      const copy = clonePlotForReturn(plot, domainId, own.map((p) => p.id));
+      domain.plotlines = domain.plotlines || [];
+      domain.plotlines.push(copy);
+      returnOwnProcesses(domain, own);
     }
+    leftover.push(plot);
   }
 
   for (const closed of conflux.closedPlotlines || []) {
     const hostId = plotHostId(closed) || asIdList(closed.concernsDomainIds)[0];
     const host = hostId ? domainsById.get(hostId) : null;
-    if (host && !isSharedPlot(closed)) {
+    if (host && cityKnowsPlot(closed, hostId) && !isSharedPlot(closed)) {
       host.closedPlotlines = host.closedPlotlines || [];
       host.closedPlotlines.push({ ...closed, confluxId: null });
     }
@@ -515,4 +800,44 @@ export function knownPartnerLore(partner, conflux, viewerId) {
 
 export function otherDomainId(conflux, domainId) {
   return asIdList(conflux?.domainIds).find((id) => id !== String(domainId)) || null;
+}
+
+/** Успех targeted-intel: карточка открывается; лестницу и тайну не двигаем. CRITICAL = SUCCESS. */
+export function applyIntelFinishes({ conflux, domains = [], world, outcomes = [] }) {
+  const adds = [];
+  for (const o of outcomes || []) {
+    if (!o?.intel || !o.finished) continue;
+    const plot =
+      (conflux.plotlines || []).find((p) => p.id === o.plotlineId) ||
+      (conflux.plotlines || []).find((p) => asIdList(p.relatedProcessIds).includes(String(o.processId)));
+    const owner = (domains || []).find((d) => String(d.id) === String(o.ownerDomainId));
+    if (!owner) continue;
+    const success = o.finish === 'ok' || o.finish === 'crit';
+    if (success && plot) grantPlotAwareness(plot, owner.id, conflux, domains);
+    const text =
+      success && plot
+        ? `Лазутчики собрали связную картину: «${plot.title}». ${String(plot.synopsis || '').trim()}`.trim()
+        : 'Лазутчики не собрали ясной картины.';
+    const fact = createLoreFact({
+      id: newId('lore'),
+      text,
+      tags: ['chronicle', 'intel', `conflux:${conflux.id}`],
+      gameDateLabel: world?.gameDate?.label,
+      tick: world?.tickIndex,
+      author: 'conflux-intel',
+      importance: success ? 'major' : 'minor',
+      sourcePlotId: plot?.id || null,
+      relatedPlotlineIds: success && plot ? [plot.id] : null,
+      processFinish: o.finish || null,
+      relatedPendingId: o.processId || null,
+    });
+    owner.lore = owner.lore || [];
+    owner.lore.push(fact);
+    if (success && plot) {
+      plot.chronicleIds = asIdList(plot.chronicleIds);
+      if (!plot.chronicleIds.includes(fact.id)) plot.chronicleIds.push(fact.id);
+    }
+    adds.push({ domainId: owner.id, fact });
+  }
+  return adds;
 }

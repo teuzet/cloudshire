@@ -26,13 +26,21 @@ import {
   dehydrateDomainToConflux,
   sharePlotWithDomain,
   plotConcerns,
+  cityKnowsPlot,
+  findPlotByChronicleId,
+  leakedTracesForViewer,
+  takeIntelOffer,
 } from './confluxBoard.js';
 import { askInformant } from './informant.js';
 import {
   emptyOnboardingDraft,
   normalizeOnboardingDraft,
-  validateCityName,
+  validateCityNameAvailable,
   validatePatronName,
+  collectOccupiedCityNames,
+  isCityNameOccupied,
+  occupiedCityNameError,
+  extractUserCityName,
   listTagCatalog,
   formatPlayerBrief,
   formatTagCatalogForPrompt,
@@ -56,6 +64,7 @@ import {
   clipOnboardingBrief,
   appendNeedNameNote,
   appendNeedPatronNote,
+  appendNameTakenNote,
   ONBOARDING_NEED_NAME_NOTE,
   ONBOARDING_BUSY_REPLY,
   ONBOARDING_HISTORY_MESSAGES,
@@ -87,14 +96,15 @@ import {
   resumeProcess,
   pausedProcesses,
 } from './processes.js';
-import { formatBoardForSpeech, warmPlotlines, plotConfig, findPlotline, clipPlotText, PLOT_TITLE_MAX, PLOT_SUMMARY_MAX, isOrderPlot } from './plotlines.js';
+import { formatBoardForSpeech, warmPlotlines, plotConfig, findPlotline, clipPlotText, PLOT_TITLE_MAX, PLOT_SUMMARY_MAX, isOrderPlot, isThreeActPlot } from './plotlines.js';
 import { queueOrderRequest, listStandingOrders } from './orders.js';
 import { islandDeleteCheck } from '../clients/telegram/access.js';
 import { generateIslandImage, removeIslandImage } from './islandImage.js';
 import { formatIslandReveal } from './islandReveal.js';
-import { formatProgressBar } from './progressBar.js';
+import { formatProgressBar, genesisTutorialText } from './progressBar.js';
 import { estimateProcessDuration } from './durationJudge.js';
 import { ensureErrandForProcess, linkProcessToPlotline } from './plotEngine.js';
+import { judgeProcessAlignment } from './plotAlign.js';
 import { dialogHistoryForPrompt } from './memory.js';
 import {
   newsScheduleOf,
@@ -103,7 +113,7 @@ import {
   tickNewsStyleHint,
 } from './newsSchedule.js';
 import {
-  formatRulerMemoryForPrompt,
+  formatRulerVoiceForPrompt,
   writeRulerMemory,
   forgetRulerMemory,
   shouldRulerAskPatron,
@@ -193,13 +203,112 @@ function stripSpeakerPrefix(text, characterName) {
  * Речь правителя уходит через submit_reply, поэтому обещание дела проверяется
  * структурно: заявленный commitment сверяется с успешными вызовами хода.
  */
+export function rulerReplyCommitError({
+  requestKind,
+  commitment,
+  text = '',
+  okTools = new Set(),
+} = {}) {
+  const succeeded = (...names) => names.some((n) => okTools.has(n));
+  const asked = /[?]/.test(String(text || ''));
+  if (commitment === 'process' && !succeeded('declare_process', 'update_process')) {
+    return {
+      error: 'process_missing',
+      message:
+        'Ты заявил commitment=process, но дело не создано: declare_process/update_process не выполнен успешно. ' +
+        'Либо вызови declare_process сейчас, либо смени commitment (refused — если отговариваешь, ' +
+        'clarify — если сначала нужно уточнить волю, none — если дела не нужно) ' +
+        'и убери из речи обещание долгого дела.',
+    };
+  }
+  if (commitment === 'standing_order' && !succeeded('declare_standing_order')) {
+    return {
+      error: 'order_missing',
+      message:
+        'commitment=standing_order, но declare_standing_order не выполнен. Объяви порядок через tool или смени commitment.',
+    };
+  }
+  if (commitment === 'revoked' && !succeeded('revoke_order', 'revoke_process')) {
+    return {
+      error: 'revoke_missing',
+      message:
+        'commitment=revoked, но отмена не выполнена. Вызови revoke_order (указ) или revoke_process (дело), либо смени commitment.',
+    };
+  }
+  if (commitment === 'clarify') {
+    if (succeeded('declare_process', 'update_process', 'declare_standing_order')) {
+      return {
+        error: 'clarify_after_act',
+        message:
+          'Дело или порядок уже заведены этим ходом. commitment=process или standing_order, не clarify.',
+      };
+    }
+    if (requestKind === 'order_impossible') {
+      return {
+        error: 'impossible_not_refused',
+        message:
+          'Такой приказ смертному не исполнить. Поставь commitment=refused, не уточняй, как его выполнить.',
+      };
+    }
+    if (requestKind !== 'order_long' && requestKind !== 'order_instant') {
+      return {
+        error: 'clarify_not_order',
+        message:
+          'clarify — только когда покровитель отдал приказ, который ещё нельзя облечь в дело или порядок. ' +
+          'Для беседы и вопросов — commitment=none.',
+      };
+    }
+    if (!asked) {
+      return {
+        error: 'clarify_no_question',
+        message:
+          'commitment=clarify: в речи должен быть вопрос покровителю (со знаком вопроса). ' +
+          'Не додумывай недостающее и не обещай, что дело уже начато.',
+      };
+    }
+    return null;
+  }
+  if (requestKind === 'order_long' && commitment === 'none') {
+    return {
+      error: 'order_ignored',
+      message:
+        'Покровитель отдал долгий приказ, а ты ничего не предпринял. ' +
+        'Либо declare_process / update_process (commitment=process), ' +
+        'либо спроси, чего не хватает, чтобы исполнить (commitment=clarify), ' +
+        'либо честно откажи в речи и поставь commitment=refused.',
+    };
+  }
+  if (requestKind === 'order_instant' && commitment === 'none') {
+    return {
+      error: 'instant_ignored',
+      message:
+        'Покровитель велел решение сейчас, а в мире ничего не заведено. ' +
+        'declare_standing_order — если это порядок, который теперь соблюдают всегда; ' +
+        'declare_process на 1 месяц — если это дело с исходом. ' +
+        'Если воля ещё неясна (разовое это или всегда, кого, до какой меры) — спроси, commitment=clarify. ' +
+        'Либо откажи в речи с commitment=refused.',
+    };
+  }
+  if (requestKind === 'order_impossible' && commitment !== 'refused') {
+    return {
+      error: 'impossible_not_refused',
+      message:
+        'Такой приказ смертному не исполнить. Поставь commitment=refused. ' +
+        'В речи — не объяснение устройства мира, а твоё простое «не умею», «не понимаю этих слов», ' +
+        '«там ветер и бездна»; предложи то, что можешь: послать людей, объявить обряд, начать дело. ' +
+        'Сцену, будто это происходит, не отыгрывай.',
+    };
+  }
+  return null;
+}
+
 function submitReplyTool(turn, character) {
-  const succeeded = (...names) => names.some((n) => turn.okTools.has(n));
   return {
     name: 'submit_reply',
     description:
       'ЕДИНСТВЕННЫЙ способ ответить покровителю. Вызывай последним, когда все нужные действия уже сделаны. ' +
-      'text — сама речь; requestKind — чего просил покровитель; commitment — что ты реально сделал этим ходом.',
+      'text — сама речь; requestKind — чего просил покровитель; commitment — что ты реально сделал этим ходом. ' +
+      'Если приказ ещё нельзя облечь в дело или порядок — спроси и поставь commitment=clarify.',
     parameters: {
       type: 'object',
       required: ['text', 'requestKind', 'commitment'],
@@ -235,14 +344,15 @@ function submitReplyTool(turn, character) {
           type: 'string',
           description:
             'Одна короткая фраза: что произошло сегодня в мире — появился человек, отдан приказ, ' +
-            'кто-то отказался, куда-то сходили. Пусто, если был только разговор.',
+            'кто-то отказался, куда-то сходили. Пусто, если был только разговор или уточняющий вопрос.',
         },
         commitment: {
           type: 'string',
-          enum: ['none', 'process', 'standing_order', 'revoked', 'refused'],
+          enum: ['none', 'process', 'standing_order', 'revoked', 'refused', 'clarify'],
           description:
             'Что сделано этим ходом: process (declare_process/update_process), standing_order, ' +
             'revoked (отменил указ или свернул дело), refused (честно отказал или отговорил), ' +
+            'clarify (приказ есть, но воля неясна — спросил, дело ещё не заводил), ' +
             'none (действий не требовалось).',
         },
       },
@@ -252,53 +362,13 @@ function submitReplyTool(turn, character) {
       if (body.length < 2) {
         return toolFail('too_short', 'Речь пустая. Напиши ответ покровителю в text.');
       }
-      if (commitment === 'process' && !succeeded('declare_process', 'update_process')) {
-        return toolFail(
-          'process_missing',
-          'Ты заявил commitment=process, но дело не создано: declare_process/update_process не выполнен успешно. ' +
-            'Либо вызови declare_process сейчас, либо смени commitment (refused — если отговариваешь, none — если дела не нужно) ' +
-            'и убери из речи обещание долгого дела.',
-        );
-      }
-      if (commitment === 'standing_order' && !succeeded('declare_standing_order')) {
-        return toolFail(
-          'order_missing',
-          'commitment=standing_order, но declare_standing_order не выполнен. Объяви порядок через tool или смени commitment.',
-        );
-      }
-      if (commitment === 'revoked' && !succeeded('revoke_order', 'revoke_process')) {
-        return toolFail(
-          'revoke_missing',
-          'commitment=revoked, но отмена не выполнена. Вызови revoke_order (указ) или revoke_process (дело), либо смени commitment.',
-        );
-      }
-      if (requestKind === 'order_long' && commitment === 'none') {
-        return toolFail(
-          'order_ignored',
-          'Покровитель отдал долгий приказ, а ты ничего не предпринял. Либо declare_process / update_process (и commitment=process), ' +
-          'либо честно откажи/отговори в речи и поставь commitment=refused.',
-        );
-      }
-      if (requestKind === 'order_instant' && commitment === 'none') {
-        return toolFail(
-          'instant_ignored',
-          'Покровитель велел решение сейчас, а в мире ничего не заведено. У тебя два способа: ' +
-            'declare_standing_order — если это порядок, который теперь соблюдают всегда; ' +
-            'declare_process на 1 месяц — если это дело, у которого будет исход (послать людей, ' +
-            'разобрать спор, провести обряд, найти виновного). Разовых «сделал и забыли» не бывает: ' +
-            'у любого приказа есть последствия, и город должен их отследить. ' +
-            'Либо откажи в речи с commitment=refused.',
-        );
-      }
-      if (requestKind === 'order_impossible' && commitment !== 'refused') {
-        return toolFail(
-          'impossible_not_refused',
-          'Такой приказ смертному не исполнить. Поставь commitment=refused. ' +
-            'В речи — не объяснение устройства мира, а твоё простое «не умею», «не понимаю этих слов», ' +
-            '«там ветер и бездна»; предложи то, что можешь: послать людей, объявить обряд, начать дело. ' +
-            'Сцену, будто это происходит, не отыгрывай.',
-        );
-      }
+      const commitErr = rulerReplyCommitError({
+        requestKind,
+        commitment,
+        text: body,
+        okTools: turn.okTools,
+      });
+      if (commitErr) return toolFail(commitErr.error, commitErr.message);
       turn.reply = body;
       turn.meta = {
         requestKind,
@@ -351,9 +421,10 @@ function characterTools(domain, storage, character, ctx) {
           'knownPeople — люди, которых город уже знает: имя, пол, ремесло и что о них известно. ' +
           'Это правда, а не слухи. Не переспрашивай о том, что здесь написано, и не придумывай ' +
           'им другую судьбу.',
-        standingOrders: listStandingOrders(domain),
+        standingOrders: listStandingOrders(domain, { tick: world?.tickIndex ?? null }),
         guidanceOrders:
           'standingOrders — действующие указы/порядки. pending=create/edit/revoke — заявка ещё не вступила, вступит с новостями месяца. ' +
+          'indefinite=true — бессрочно; durationMonths и remainingMonths — срок в игровых месяцах, если он задан. ' +
           'Для отмены — revoke_order с этим id или кратким смыслом. Не объявляй новый указ, если он противоречит действующему: ' +
           'сначала отмени старый или обнови его.',
         processes: activeProcesses(domain, ctx.config).map((a) => ({
@@ -370,6 +441,7 @@ function characterTools(domain, storage, character, ctx) {
           fresh: processIsFresh(a),
           progress: processProgressFeel(a),
           blessed: Boolean(a.blessed),
+          intel: Boolean(a.intel),
         })),
         pausedProcesses: pausedProcesses(domain, ctx.config).map((a) => ({
           id: a.id,
@@ -392,6 +464,10 @@ function characterTools(domain, storage, character, ctx) {
               !plotConcerns(p, domain.id),
           ),
         })),
+        leakedTraces:
+          ctx.conflux && ctx.partner
+            ? leakedTracesForViewer(ctx.conflux, domain.id, [domain, ctx.partner])
+            : [],
         guidanceProcesses:
           'processes[].progress — как дело шло в прошлом месяце: так и отвечай, если спрашивают. ' +
           'objectiveMonths — честная оценка срока, monthsLeft — сколько ещё ждут. ' +
@@ -408,10 +484,13 @@ function characterTools(domain, storage, character, ctx) {
           'Общий храм, общий двор или общие имена — не дубль и не повод слить РАЗНЫЕ работы. ' +
           'initiative=ruler — это дело ты завёл сам, пока покровитель молчал; на вопрос «что ты решал» называй их.',
         guidancePlots:
-          'plots[] — живые нити. kind=errand уже привязана к делу; kind=story может быть без поручения; kind=order — постоянный порядок, дело на него не заводи. ' +
-          'foreign=true — история СОСЕДА, ещё не общая: если покровитель в неё вмешивается, declare_process с её plotId — тогда она станет общей. ' +
+          'plots[] — живые нити, которые этот город знает как линии. kind=errand уже привязана к делу; kind=story может быть без поручения; kind=order — постоянный порядок, дело на него не заводи. ' +
+          'foreign=true — история соседа, уже раскрытая нам: дело с plotId вмешивается в неё по существу. ' +
           'shared=true — общая история сопряжения, дело можно заводить с обеих сторон. ' +
-          'Приказ по истории без дела — declare_process с plotId этой истории. ' +
+          'leakedTraces[] — голые факты о соседе, сюжетной карточки нет. Не называй это историей по имени. ' +
+          'Если покровитель хочет «узнать, что это» — declare_process с intel=true и chronicleId (или plotId, если карточка уже известна). ' +
+          'intel нельзя на указ и на уже раскрытую нить. Шпионы «на остров вообще» — обычное дело без intel и без plotId. ' +
+          'Приказ по известной истории без дела — declare_process с plotId этой истории. ' +
           'Не бери id соседней нити из-за общего места или общих людей.',
       }),
     },
@@ -502,7 +581,10 @@ function characterTools(domain, storage, character, ctx) {
     {
       name: 'consult_loremaster',
       description:
-        'Спросить лормастера о фактах мира (имена, места, детали недавних событий, слухи…). Обязательно, когда покровитель просит подробности.',
+        'Справка о фактах мира: имена, места, устройство города, прошлое, уже установленный канон. ' +
+        'Если вопрос про идущую историю с доски — передай plotId этой нити: лормастер увидит её канон и сможет дописать детали, не ломая повествование. ' +
+        'Закрытую или сыгранную нить не передавай — тогда он читает только хронику. ' +
+        'Не расследование: то, что уже является тайной или предметом текущего выбора, он может оставить неизвестным.',
       parameters: {
         type: 'object',
         required: ['questions'],
@@ -512,9 +594,14 @@ function characterTools(domain, storage, character, ctx) {
             items: { type: 'string' },
             description: '1–5 конкретных вопросов',
           },
+          plotId: {
+            type: 'string',
+            description:
+              'id идущей истории с доски (или сопряжения). Только открытая нить: закрытую не передавай.',
+          },
         },
       },
-      handler: async ({ questions }) => {
+      handler: async ({ questions, plotId }) => {
         const result = await askLoremaster({
           config: ctx.config,
           runtime: ctx.runtime,
@@ -522,16 +609,27 @@ function characterTools(domain, storage, character, ctx) {
           domain,
           questions: questions || [],
           asker: `ruler:${character.name}`,
+          plotId: plotId || null,
+          conflux: ctx.conflux || null,
         });
+        const wanted = String(plotId || '').trim();
+        const focused = Boolean(result.focusPlotId);
         return {
           ok: true,
           answers: result.answers,
           summary: result.loreTextForAsker,
           newFactsCount: result.addedFacts.length,
           newFactTexts: result.addedFacts.map((f) => f.text),
+          plotId: result.focusPlotId,
+          focusNote:
+            wanted && !focused
+              ? 'Эта нить сейчас не на доске. Лормастер ответил по хронике и общим фактам, без канона тайны.'
+              : null,
           hint:
             'Перескажи суть своими словами и своим тоном, не цитируя карточки фактов. ' +
-            'Если answers заполнены, «неизвестно» покровителю не говори.',
+            'Если Лормастер установил новый факт — считай его реальным. ' +
+            'Если он оставил конкретную вещь неизвестной: не додумывай, не превращай гипотезу в факт ' +
+            'и не спрашивай то же самое другими словами. Чтобы установить такое — declare_process (розыск, осмотр, исследование).',
         };
       },
     },
@@ -559,13 +657,28 @@ function characterTools(domain, storage, character, ctx) {
           partner: ctx.partner,
           questions: questions || [],
         });
+        const traces = leakedTracesForViewer(ctx.conflux, domain.id, [domain, ctx.partner]);
+        const knownHit = (result.answers || []).some((a) => a && a.known);
+        const freshOffers = [];
+        if (knownHit) {
+          for (const t of traces) {
+            if (takeIntelOffer(ctx.conflux, domain.id, t.plotId || t.chronicleId)) {
+              freshOffers.push(t);
+            }
+          }
+        }
+        if (freshOffers.length) await save();
         return {
           ok: true,
           answers: result.answers,
           summary: result.summary,
+          leakedTraces: traces,
           hint:
             'Перескажи своими словами. Если informant сказал «неизвестно» — так и скажи покровителю. ' +
-            'Предположение помечай как догадку, не как факт.',
+            'Предположение помечай как догадку, не как факт.' +
+            (freshOffers.length
+              ? ' Покровитель задел чужой след, сюжетной карточки ещё нет. ОДИН раз предложи узнать больше: declare_process с intel=true и chronicleId из leakedTraces. Не предлагай это каждый ход и не называй чужое дело по титулу.'
+              : ''),
         };
       },
     },
@@ -573,6 +686,7 @@ function characterTools(domain, storage, character, ctx) {
       name: 'declare_process',
       description:
         'Длительное дело: стройка, суд, поход, снабжение. Не для мгновенных постоянных приказов — declare_standing_order. ' +
+        'Если воля ещё неясна — не вызывай, спроси покровителя (commitment=clarify). ' +
         'Срок сам не оценивай: его посчитает отдельный оценщик. ' +
         'Отказы: too_many_processes (лимит слотов) vs duplicate_process (та же нить) — разные отговорки в речи.',
       parameters: {
@@ -619,6 +733,18 @@ function characterTools(domain, storage, character, ctx) {
               'Не подставляй соседнюю нить из-за общего места или общих людей. ' +
               'Если приказ не про живую историю — оставь пустым, дело заведёт свою нить само.',
           },
+          chronicleId: {
+            type: 'string',
+            description:
+              'id просочившейся записи из leakedTraces[] или известной хроники соседа. ' +
+              'Для intel=true, если карточки сюжета ещё нет — передай chronicleId вместо plotId.',
+          },
+          intel: {
+            type: 'boolean',
+            description:
+              'true — целенаправленно разведать конкретный чужой сюжет (нужен plotId или chronicleId). ' +
+              'Не для вмешательства и не для «пошлите шпионов на остров вообще».',
+          },
         },
       },
       handler: async ({
@@ -630,6 +756,8 @@ function characterTools(domain, storage, character, ctx) {
         onBehalfOf = 'patron',
         characterNote,
         plotId,
+        chronicleId,
+        intel = false,
         goal,
       }) => {
         const slots = canStartProcess(domain, ctx.config);
@@ -687,6 +815,48 @@ function characterTools(domain, storage, character, ctx) {
               : hard
                 ? 1
                 : null;
+        const wantIntel = Boolean(intel);
+        const partners = ctx.conflux && ctx.partner ? [domain, ctx.partner] : [domain];
+        let targetPlot = null;
+        if (plotId) {
+          targetPlot =
+            findPlotline(domain, String(plotId)) ||
+            (ctx.conflux?.plotlines || []).find((p) => String(p.id) === String(plotId)) ||
+            null;
+        } else if (chronicleId && ctx.conflux) {
+          targetPlot = findPlotByChronicleId(ctx.conflux, String(chronicleId), partners);
+        }
+        if (wantIntel) {
+          if (!ctx.conflux) {
+            return toolFail('intel_needs_conflux', 'Разведка конкретного сюжета только во время сопряжения.');
+          }
+          if (!targetPlot) {
+            return toolFail(
+              'intel_needs_target',
+              'Для intel=true нужен plotId известной нити или chronicleId просочившейся записи.',
+            );
+          }
+          if (isOrderPlot(targetPlot)) {
+            return toolFail('intel_forbidden_order', 'Целенаправленная разведка указов запрещена.');
+          }
+          if (cityKnowsPlot(targetPlot, domain.id)) {
+            return toolFail(
+              'intel_already_known',
+              'Эта история уже известна городу как линия. intel не нужен — заведи обычное дело, если вмешиваетесь.',
+            );
+          }
+          const traces = leakedTracesForViewer(ctx.conflux, domain.id, partners);
+          const heard =
+            traces.some((t) => t.plotId === targetPlot.id) ||
+            traces.some((t) => String(t.chronicleId) === String(chronicleId || '')) ||
+            Boolean(chronicleId && findPlotByChronicleId(ctx.conflux, String(chronicleId), partners));
+          if (!heard) {
+            return toolFail(
+              'plot_unknown',
+              'Город не знает эту нить. Для разведки возьми chronicleId из leakedTraces.',
+            );
+          }
+        }
         const action = {
           id: newId('act'),
           summary,
@@ -704,6 +874,7 @@ function characterTools(domain, storage, character, ctx) {
           hardDeadline: hard,
           status: 'active',
           initiative: 'patron',
+          intel: wantIntel,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -717,8 +888,16 @@ function characterTools(domain, storage, character, ctx) {
           log: ctx.log,
         });
         applyObjectiveSchedule(action, estimated.months, askedRemaining);
-        // У каждого дела есть нить: либо та, что назвал правитель, либо проходная.
-        let plot = plotId ? linkProcessToPlotline(domain, action.id, String(plotId)) : null;
+        let plot = null;
+        if (targetPlot) {
+          targetPlot.relatedProcessIds = targetPlot.relatedProcessIds || [];
+          if (!targetPlot.relatedProcessIds.includes(action.id)) {
+            targetPlot.relatedProcessIds.push(action.id);
+          }
+          plot = targetPlot;
+        } else if (plotId) {
+          plot = linkProcessToPlotline(domain, action.id, String(plotId));
+        }
         if (!plot) {
           plot = ensureErrandForProcess(domain, action, {
             tick: world?.tickIndex ?? null,
@@ -726,11 +905,24 @@ function characterTools(domain, storage, character, ctx) {
           }).plot;
         }
         action.plotlineId = plot?.id || null;
+        if (plot && isThreeActPlot(plot) && !wantIntel) {
+          await judgeProcessAlignment({
+            runtime: ctx.runtime,
+            domain,
+            process: action,
+            plot,
+            log: ctx.log,
+          });
+        }
         if (ctx.conflux && plot && !isOrderPlot(plot)) {
           action.confluxId = ctx.conflux.id;
           action.ownerDomainId = domain.id;
-          if (!plotConcerns(plot, domain.id) && !plot.isMainConflux) {
-            sharePlotWithDomain(plot, domain.id, { reason: 'process' });
+          if (!wantIntel && !plotConcerns(plot, domain.id) && !plot.isMainConflux) {
+            sharePlotWithDomain(plot, domain.id, {
+              reason: 'process',
+              conflux: ctx.conflux,
+              domains: partners,
+            });
           }
         }
         await save();
@@ -747,8 +939,10 @@ function characterTools(domain, storage, character, ctx) {
     {
       name: 'declare_standing_order',
       description:
-        'Заявка на постоянный порядок / правило (запрет, осмотр, регулярный обряд). ' +
-        'Карточку и каденс соберёт город к новостям месяца. Не для строек, судов, походов — те через declare_process.',
+        'Заявка на постоянный порядок / правило (запрет, осмотр, регулярный обряд, «при каждом сопряжении делайте X»). ' +
+        'Карточку и каденс соберёт город к новостям месяца. Не для разовой стройки, суда, похода — те через declare_process. ' +
+        'Если неясно, разовый это труд или всегдашнее правило — спроси (commitment=clarify), не выбирай сам. ' +
+        'Срок (durationMonths) ставь только если покровитель его назвал; иначе бессрочно.',
       parameters: {
         type: 'object',
         required: ['text'],
@@ -761,9 +955,16 @@ function characterTools(domain, storage, character, ctx) {
             type: 'string',
             description: 'Id существующего порядка при обновлении',
           },
+          durationMonths: {
+            type: 'number',
+            description:
+              'Сколько игровых месяцев порядок действует. Не передавай — бессрочно. ' +
+              '0 — сделать бессрочным (при правке). Ставь число только если покровитель явно назвал срок ' +
+              '(три месяца, год = 12, сезон = 3). Сам срок не выдумывай.',
+          },
         },
       },
-      handler: async ({ text, id }) => {
+      handler: async ({ text, id, durationMonths }) => {
         const body = String(text || '').trim().slice(0, 400);
         if (body.length < 3) {
           return toolFail(
@@ -778,6 +979,7 @@ function characterTools(domain, storage, character, ctx) {
           by: character.name,
           initiative: 'patron',
           tick: world?.tickIndex ?? null,
+          durationMonths,
         });
         if (queued.error === 'order_not_found') {
           return {
@@ -793,13 +995,20 @@ function characterTools(domain, storage, character, ctx) {
           return toolFail(queued.error, queued.message || 'Не удалось принять порядок.');
         }
         await save();
+        const term = queued.request?.durationMonths;
+        const termHint =
+          term
+            ? `будут соблюдать ${term} мес., затем порядок сам спадёт. Срок в речи назови, механику нет. `
+            : queued.request?.durationSet
+              ? 'бессрочно, пока не отменят. Не назначай срок, если покровитель его не назвал. '
+              : 'как постоянный порядок без срока, начнут соблюдать. Не назначай срок, если покровитель его не назвал. ';
         return {
           ok: true,
           created: Boolean(queued.created),
           request: queued.request,
           hint:
-            'В речи: принял как постоянный порядок, начнут соблюдать. Не объявляй многомесячный срок и не говори «процесс». ' +
-            'Последствия указа город увидит к концу месяца.',
+            `В речи: принял порядок — ${termHint}` +
+            'Не говори «процесс». Последствия указа город увидит к концу месяца.',
         };
       },
     },
@@ -925,6 +1134,20 @@ function characterTools(domain, storage, character, ctx) {
           applyObjectiveSchedule(action, estimated.months, remainingMonths);
         }
         syncErrandFromProcess(domain, action);
+        const plot = findPlotline(domain, action.plotlineId);
+        if (
+          plot &&
+          isThreeActPlot(plot) &&
+          (goal != null || revised.rewritten || summary || detail || addDetail)
+        ) {
+          await judgeProcessAlignment({
+            runtime: ctx.runtime,
+            domain,
+            process: action,
+            plot,
+            log: ctx.log,
+          });
+        }
         await save();
         const mode = revised.fresh ? 'дело ещё не сдвинулось, можно было переписать' : 'дело уже шло, текст только дополнен';
         return {
@@ -1286,6 +1509,19 @@ export class GameApp {
           tagChoices: forcedTagChoices || {},
           playerBrief: truncate(playerBrief, 500),
         });
+        const tutorial = genesisTutorialText(this.config);
+        if (tutorial) {
+          await this.emitOutbound(uid, tutorial, {
+            channel,
+            agent: 'onboarding',
+            kind: 'genesis_tutorial',
+          });
+        }
+        if (forcedName) {
+          const occupied = await this.occupiedCityNames(uid);
+          const taken = validateCityNameAvailable(forcedName, occupied);
+          if (!taken.ok) throw new Error(taken.reason);
+        }
         const total = 5;
         const pushProgress = async (step, label) => {
           const text = formatProgressBar(step, total, label);
@@ -1407,11 +1643,18 @@ export class GameApp {
     const binding = await this.getOrCreateOnboardingBinding(userId);
     const draft = binding.onboarding;
     let startedGenerating = false;
+    const occupiedByKey = await this.occupiedCityNames(userId);
 
     const rawUser = String(text || '').trim();
+    let takenAttempt = null;
     if (!bootstrap && rawUser) {
       maybeSwitchToDossier(draft, rawUser);
-      applyUserNamedCity(draft, rawUser);
+      const proposed = extractUserCityName(rawUser);
+      if (proposed && isCityNameOccupied(proposed, occupiedByKey)) {
+        takenAttempt = proposed;
+      } else {
+        applyUserNamedCity(draft, rawUser, occupiedByKey);
+      }
       applyUserNamedPatron(draft, rawUser);
     }
     draft.phase = deriveOnboardingPhase(draft, { generating: this.isGenerating(userId) });
@@ -1515,7 +1758,8 @@ export class GameApp {
             chosen: draft.tagChoices,
             forPlayer,
             next:
-              'Запиши атмосферу и правителя в set_player_brief. Сам придумай звучный топоним (не из списка — списка нет). ' +
+              'Запиши атмосферу и правителя в set_player_brief. Сам придумай звучный топоним. ' +
+              'Перед речью игроку — check_city_name; если занято, другое имя, чужие города не перечисляй. ' +
               'В речи игроку: имя + ВСЕ черты из forPlayer своими словами + атмосфера + правитель. ' +
               'Без слов «теги/изюминка/пакет/рандом». Этот набор держи, пока игрок не попросит другой город.',
           };
@@ -1568,9 +1812,9 @@ export class GameApp {
         },
       },
       {
-        name: 'set_city_name',
+        name: 'check_city_name',
         description:
-          'Проверить и зафиксировать имя города (ты сам его придумал или игрок предложил). После согласия / в конце онбординга.',
+          'Проверить имя города: форма и свободно ли. Вызови до речи игроку и до set_city_name. Не возвращает чужие имена.',
         parameters: {
           type: 'object',
           required: ['name'],
@@ -1579,11 +1823,41 @@ export class GameApp {
           },
         },
         handler: async ({ name }) => {
-          const v = validateCityName(name);
+          const occupied = await this.occupiedCityNames(userId);
+          const v = validateCityNameAvailable(name, occupied);
+          if (!v.ok) {
+            return {
+              ok: true,
+              available: false,
+              name: String(name || '').trim(),
+              reason: v.reason,
+            };
+          }
+          return { ok: true, available: true, name: v.name };
+        },
+      },
+      {
+        name: 'set_city_name',
+        description:
+          'Зафиксировать имя города после check_city_name (available=true) и согласия игрока.',
+        parameters: {
+          type: 'object',
+          required: ['name'],
+          properties: {
+            name: { type: 'string' },
+          },
+        },
+        handler: async ({ name }) => {
+          const occupied = await this.occupiedCityNames(userId);
+          const v = validateCityNameAvailable(name, occupied);
           if (!v.ok) {
             draft.cityNameApproved = false;
             await saveDraft();
-            return toolFail('invalid_city_name', v.reason, { reason: v.reason });
+            return toolFail(
+              isCityNameOccupied(name, occupied) ? 'city_name_taken' : 'invalid_city_name',
+              v.reason,
+              { reason: v.reason },
+            );
           }
           draft.cityName = v.name;
           draft.cityNameApproved = true;
@@ -1786,16 +2060,34 @@ export class GameApp {
             );
           }
           if (!draft.cityNameApproved || !draft.cityName) {
+            const occupied = await this.occupiedCityNames(userId);
             const fallback = lastPitchedCityName(draft);
-            const v = fallback ? validateCityName(fallback) : { ok: false };
+            const v = fallback ? validateCityNameAvailable(fallback, occupied) : { ok: false };
             if (v.ok) {
               draft.cityName = v.name;
               draft.cityNameApproved = true;
               await saveDraft();
             } else {
               return toolFail(
-                'city_name_required',
-                'Сначала утверди имя города через set_city_name (с согласия игрока), затем start_new_game.',
+                fallback && isCityNameOccupied(fallback, occupied)
+                  ? 'city_name_taken'
+                  : 'city_name_required',
+                fallback && isCityNameOccupied(fallback, occupied)
+                  ? occupiedCityNameError(fallback)
+                  : 'Сначала утверди имя города через set_city_name (с согласия игрока), затем start_new_game.',
+              );
+            }
+          } else {
+            const occupied = await this.occupiedCityNames(userId);
+            const v = validateCityNameAvailable(draft.cityName, occupied);
+            if (!v.ok) {
+              draft.cityNameApproved = false;
+              await saveDraft();
+              return toolFail(
+                isCityNameOccupied(draft.cityName, occupied)
+                  ? 'city_name_taken'
+                  : 'invalid_city_name',
+                v.reason,
               );
             }
           }
@@ -1871,7 +2163,13 @@ export class GameApp {
             'или пусть пришлёт готовое подробное описание — тогда не стартуй, а разбери его.',
             'Не вызывай start_new_game и не рандомь теги в питче.',
           ].join(' ')
-        : formatOnboardingStatusCard(draft, this.config, { generating: this.isGenerating(userId) }),
+        : formatOnboardingStatusCard(draft, this.config, {
+            generating: this.isGenerating(userId),
+            occupiedByKey,
+          }),
+      takenAttempt
+        ? `\nИгрок назвал «${takenAttempt}», но оно уже занято. Скажи, что имя занято, и предложи или спроси другое. Чужие города не перечисляй.`
+        : '',
     ].join('\n');
     const result = await this.runtime.run({
       agentId: 'onboarding',
@@ -1924,6 +2222,7 @@ export class GameApp {
       draft,
       usedStart: usedTools.has('start_new_game'),
       generating: this.isGenerating(userId),
+      occupiedByKey,
     });
     if (auto.start) {
       if (usedTools.has('randomize_all_tags') && Object.keys(draft.pitchedTagChoices || {}).length) {
@@ -1978,6 +2277,19 @@ export class GameApp {
         draft.pitched = true;
       }
       reply = appendNeedPatronNote(rawReply);
+    } else if (auto.appendNameTaken) {
+      log.warn('onboarding.name_taken', {
+        reason: auto.reason,
+        takenName: auto.takenName,
+      });
+      if (draft.cityName && isCityNameOccupied(draft.cityName, occupiedByKey)) {
+        draft.cityNameApproved = false;
+      }
+      if (draft.pitchedName && isCityNameOccupied(draft.pitchedName, occupiedByKey)) {
+        draft.pitchedName = null;
+        draft.pitched = false;
+      }
+      reply = appendNameTakenNote(rawReply, auto.takenName);
     }
 
     // Нельзя говорить «уже создан», пока генезис только стартовал.
@@ -2141,13 +2453,11 @@ export class GameApp {
 
     // Здесь только данные хода. Правила поведения живут в instructions агента.
     const extraSystem = [
-      `Ты ${character.name}, ${character.title || 'правитель'} города «${domain.name}».`,
-      character.description,
+      formatRulerVoiceForPrompt(domain, { writable: true }),
       world?.gameDate?.label ? `ДАТА СЕЙЧАС: ${world.gameDate.label}.` : '',
       patronLine,
       confluxCanon,
       undockCanon,
-      formatRulerMemoryForPrompt(domain),
       `Письма о месяце (движок шлёт сам): ${newsMonths}` +
         `${newsSched.alsoOnCritical ? '; также если случится совсем важное' : ''}. ` +
         'Покровитель просит иначе — set_news_schedule. Сближение островов не глуши.',
@@ -2163,10 +2473,11 @@ export class GameApp {
         ? [
             'ЖИВЫЕ НИТИ СЮЖЕТА (внутренняя правда; вплетай в речь, не рапортуй списком):',
             plotBrief,
+            'id нити — только в инструменты (plotId). В речи не называй историю заголовком и не бери название в кавычки: говори о месте, людях и случившемся.',
             'Каждая нить сама по себе. Общее место или общие люди не делают их одним делом.',
             'Приказ по истории без поручения — новое дело с plotId этой истории, не правка соседнего.',
             conflux
-              ? 'Чужая нить соседа, ещё не общая: если покровитель в неё вмешивается — declare_process с её plotId, и она станет общей.'
+              ? 'Чужой след без карточки — не история. Если покровитель хочет знать, что это, intel=true с chronicleId. Вмешательство в уже раскрытую чужую нить — обычное дело с plotId.'
               : '',
           ]
             .filter(Boolean)
@@ -2227,7 +2538,8 @@ export class GameApp {
             role: 'user',
             content:
               'Ответ не принят: речь передаётся только через submit_reply. Вызови его сейчас. ' +
-              'Если дела ты не заводил — commitment=none (или refused, если отговариваешь), ' +
+              'Если дела ты не заводил — commitment=none (или refused, если отговариваешь; ' +
+              'clarify — если приказ есть, но нужно уточнить волю), ' +
               'и в речи не обещай долгих работ.',
           },
         ],
@@ -2353,10 +2665,9 @@ export class GameApp {
 
     const scopeHint = foreign.length
       ? [
-          'О делах соседнего города НЕ отчитывайся покровителю: это чужое хозяйство, не твоя служба.',
-          'Упомянуть можно одной фразой — как слух с той стороны и только если это задевает нас',
-          '(проход, вода, торговля, чужие люди на нашем краю). Иначе просто опусти.',
-          'Не называй чужие тяготы «вестью» и не разбирай их подробно.',
+          'Пиши о своём городе.',
+          'О соседнем — только если там произошло действительно важное: угроза, разрыв, общая беда, крупный переворот, то, что нельзя не заметить с вашего берега.',
+          'Чужие рутинные дела, мелкие поручения и быт соседа не пересказывай и не разбирай подробно.',
         ].join(' ')
       : '';
 
@@ -2531,8 +2842,7 @@ export class GameApp {
         tools: [],
         maxTurns: 1,
         extraSystem: [
-          `Ты ${character.name}, ${character.title || 'правитель'} города «${domain.name}».`,
-          character.description,
+          formatRulerVoiceForPrompt(domain, { writable: false }),
           addressHint,
           undockSystem,
           'Ты пишешь покровителю новости месяца живой речью, как человек, а не сводку событий.',
@@ -2543,7 +2853,9 @@ export class GameApp {
             const board = formatBoardForSpeech(domain, {
               statsFeel: (ids) => statEpithetsShort(domain.stats || {}, this.config, ids),
             });
-            return board ? `Живые нити города (для памяти, не пересказывай списком):\n${board}` : '';
+            return board
+              ? `Живые нити города (для памяти, не пересказывай списком; в речи без заголовков в кавычках):\n${board}`
+              : '';
           })(),
         ]
           .filter(Boolean)
@@ -2613,8 +2925,7 @@ export class GameApp {
         scene: firstSight ? 'conflux_announce' : 'conflux_approach',
         domainId: domain.id,
         extraSystem: [
-          `Ты ${character.name}, ${character.title || 'правитель'} города «${domain.name}».`,
-          character.description || '',
+          formatRulerVoiceForPrompt(domain, { writable: false }),
           addressHint,
           'Ты пишешь покровителю живой речью, как человек, а не сводку.',
           `Не начинай письмо с «${character.name}:».`,
@@ -2705,6 +3016,14 @@ export class GameApp {
 
   async listDomains() {
     return this.storage.listDomains();
+  }
+
+  async occupiedCityNames(excludeUserId) {
+    const [domains, bindings] = await Promise.all([
+      this.storage.listDomains(),
+      this.storage.listUserBindings(),
+    ]);
+    return collectOccupiedCityNames({ domains, bindings, excludeUserId });
   }
 
   async getOwnDomain(userId) {

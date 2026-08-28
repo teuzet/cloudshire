@@ -157,7 +157,7 @@ export function canStartOnboarding(draft) {
   return Boolean(draft?.cityNameApproved && draft?.cityName && hasPatronName(draft));
 }
 
-export function formatOnboardingStatusCard(draft, config, { generating = false } = {}) {
+export function formatOnboardingStatusCard(draft, config, { generating = false, occupiedByKey = null } = {}) {
   const d = draft || emptyOnboardingDraft();
   const phase = deriveOnboardingPhase(d, { generating });
   const tagCount = Object.keys(d.tagChoices || {}).length;
@@ -200,6 +200,12 @@ export function formatOnboardingStatusCard(draft, config, { generating = false }
   }
   if (d.mode === 'questions') {
     lines.push('Режим questions: 1–2 живых вопроса за ход. Имя предложи сам, когда картина сложилась.');
+  }
+  if (d.pitchedName && isCityNameOccupied(d.pitchedName, occupiedByKey)) {
+    lines.push(`Питч «${d.pitchedName}» уже занят — не подтверждай его, предложи другое имя.`);
+  }
+  if (d.cityName && isCityNameOccupied(d.cityName, occupiedByKey)) {
+    lines.push(`Имя «${d.cityName}» уже занято — сбрось и выбери другое.`);
   }
   return lines.join('\n');
 }
@@ -288,6 +294,75 @@ export function validateCityName(raw) {
     }
   }
   return { ok: true, name };
+}
+
+/** Ключ уникальности имени города: trim, схлопнутые пробелы, нижний регистр. */
+export function cityNameKey(name) {
+  return String(name || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+export function occupiedCityNameError(name) {
+  const n = String(name || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return n
+    ? `Имя «${n}» уже занято. Выберите другое.`
+    : 'Это имя уже занято. Выберите другое.';
+}
+
+export function isCityNameOccupied(name, occupiedByKey) {
+  if (!occupiedByKey) return false;
+  const key = cityNameKey(name);
+  if (!key) return false;
+  return occupiedByKey.has(key);
+}
+
+/**
+ * Занятые имена: живые и генерирующиеся домены + имена, уже закреплённые
+ * в онбординге других игроков.
+ */
+export function collectOccupiedCityNames({
+  domains = [],
+  bindings = [],
+  excludeUserId = null,
+} = {}) {
+  const byKey = new Map();
+  const add = (raw) => {
+    const name = String(raw || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (!byKey.has(key)) byKey.set(key, name);
+  };
+  for (const domain of domains) add(domain?.name);
+  for (const binding of bindings) {
+    if (excludeUserId && String(binding.userId) === String(excludeUserId)) continue;
+    const draft = binding.onboarding || {};
+    add(draft.cityName);
+    if (draft.cityNameApproved) add(draft.pitchedName);
+  }
+  return byKey;
+}
+
+export function validateCityNameAvailable(raw, occupiedByKey) {
+  const v = validateCityName(raw);
+  if (!v.ok) return v;
+  if (isCityNameOccupied(v.name, occupiedByKey)) {
+    return { ok: false, reason: occupiedCityNameError(v.name) };
+  }
+  return v;
+}
+
+export function appendNameTakenNote(reply, name) {
+  const note = occupiedCityNameError(name);
+  const text = String(reply || '').trim();
+  if (!text) return note;
+  if (text.includes('уже занято')) return text;
+  return `${text}\n\n${note}`;
 }
 
 /** Случайно заполнить все группы тегов из каталога (перезаписывает текущие). */
@@ -575,7 +650,7 @@ export function claimsOnboardingAlreadyCreated(text) {
   return /успешно\s+создан|уже\s+создан|остров\s+(?:уже\s+)?готов(?!\p{L})|был\s+создан/i.test(raw);
 }
 
-function looksLikeToponym(raw) {
+function looksLikeToponym(raw, occupiedByKey = null) {
   const name = String(raw || '')
     .replace(/\*+/g, '')
     .replace(/[«»""]/g, '')
@@ -585,7 +660,7 @@ function looksLikeToponym(raw) {
   const words = name.split(/\s+/).filter(Boolean);
   if (!words.length || words.length > 3) return null;
   if (!/^\p{Lu}/u.test(words[0])) return null;
-  const v = validateCityName(name);
+  const v = validateCityNameAvailable(name, occupiedByKey);
   return v.ok ? v.name : null;
 }
 
@@ -609,36 +684,36 @@ const USER_NAME_RES = [
 ];
 
 /** Имя города из речи агента, не имя правителя. */
-export function extractPitchedCityName(text) {
+export function extractPitchedCityName(text, occupiedByKey = null) {
   const raw = String(text || '');
   if (!raw.trim()) return null;
   for (const re of PITCHED_NAME_RES) {
     re.lastIndex = 0;
     const m = re.exec(raw);
     if (!m) continue;
-    const name = looksLikeToponym(m[1]);
+    const name = looksLikeToponym(m[1], occupiedByKey);
     if (name) return name;
   }
   return null;
 }
 
 /** Имя, которое игрок сам назвал («город называется X»). */
-export function extractUserCityName(text) {
+export function extractUserCityName(text, occupiedByKey = null) {
   const raw = String(text || '');
   if (!raw.trim()) return null;
   for (const re of USER_NAME_RES) {
     re.lastIndex = 0;
     const m = re.exec(raw);
     if (!m) continue;
-    const name = looksLikeToponym(m[1]);
+    const name = looksLikeToponym(m[1], occupiedByKey);
     if (name) return name;
   }
   return null;
 }
 
-export function applyUserNamedCity(draft, text) {
+export function applyUserNamedCity(draft, text, occupiedByKey = null) {
   if (!draft || draft.cityNameApproved) return null;
-  const name = extractUserCityName(text);
+  const name = extractUserCityName(text, occupiedByKey);
   if (!name) return null;
   draft.pitchedName = name;
   draft.pitched = true;
@@ -690,13 +765,13 @@ export function applyUserNamedPatron(draft, text) {
   return v.name;
 }
 
-export function lastPitchedCityName(draft) {
+export function lastPitchedCityName(draft, occupiedByKey = null) {
   if (draft?.cityName) {
-    const v = validateCityName(draft.cityName);
+    const v = validateCityNameAvailable(draft.cityName, occupiedByKey);
     if (v.ok) return v.name;
   }
   if (draft?.pitchedName) {
-    const v = validateCityName(draft.pitchedName);
+    const v = validateCityNameAvailable(draft.pitchedName, occupiedByKey);
     if (v.ok) return v.name;
   }
   const messages = draft?.messages || [];
@@ -704,10 +779,10 @@ export function lastPitchedCityName(draft) {
     const m = messages[i];
     if (!m?.content) continue;
     if (m.role === 'assistant') {
-      const name = extractPitchedCityName(m.content);
+      const name = extractPitchedCityName(m.content, occupiedByKey);
       if (name) return name;
     } else if (m.role === 'user') {
-      const name = extractUserCityName(m.content);
+      const name = extractUserCityName(m.content, occupiedByKey);
       if (name) return name;
     }
   }
@@ -755,9 +830,27 @@ export function playerAsksReroll(text) {
 function withNeedNameFlags(reply, reason) {
   const len = String(reply || '').trim().length;
   if (len > 0 && len <= FALSE_START_STRIP_MAX) {
-    return { start: false, name: null, stripFalseStart: true, appendNeedName: false, appendNeedPatron: false, reason };
+    return {
+      start: false,
+      name: null,
+      stripFalseStart: true,
+      appendNeedName: false,
+      appendNeedPatron: false,
+      appendNameTaken: false,
+      takenName: null,
+      reason,
+    };
   }
-  return { start: false, name: null, stripFalseStart: false, appendNeedName: true, appendNeedPatron: false, reason };
+  return {
+    start: false,
+    name: null,
+    stripFalseStart: false,
+    appendNeedName: true,
+    appendNeedPatron: false,
+    appendNameTaken: false,
+    takenName: null,
+    reason,
+  };
 }
 
 /**
@@ -770,9 +863,19 @@ export function planOnboardingAutoStart({
   draft,
   usedStart = false,
   generating = false,
+  occupiedByKey = null,
 } = {}) {
   if (usedStart || generating) {
-    return { start: false, name: null, stripFalseStart: false, appendNeedName: false, appendNeedPatron: false, reason: null };
+    return {
+      start: false,
+      name: null,
+      stripFalseStart: false,
+      appendNeedName: false,
+      appendNeedPatron: false,
+      appendNameTaken: false,
+      takenName: null,
+      reason: null,
+    };
   }
   const historyName = lastPitchedCityName(draft);
   const replyName = extractPitchedCityName(reply);
@@ -785,6 +888,18 @@ export function planOnboardingAutoStart({
     const name = historyName || replyName;
     const v = name ? validateCityName(name) : { ok: false };
     if (!v.ok) return withNeedNameFlags(reply, 'consent_without_name');
+    if (isCityNameOccupied(v.name, occupiedByKey)) {
+      return {
+        start: false,
+        name: null,
+        stripFalseStart: false,
+        appendNeedName: false,
+        appendNeedPatron: false,
+        appendNameTaken: true,
+        takenName: v.name,
+        reason: 'consent_name_taken',
+      };
+    }
     if (!hasPatronName(draft)) {
       return {
         start: false,
@@ -792,6 +907,8 @@ export function planOnboardingAutoStart({
         stripFalseStart: false,
         appendNeedName: false,
         appendNeedPatron: true,
+        appendNameTaken: false,
+        takenName: null,
         reason: 'consent_without_patron',
       };
     }
@@ -801,13 +918,24 @@ export function planOnboardingAutoStart({
       stripFalseStart: false,
       appendNeedName: false,
       appendNeedPatron: false,
+      appendNameTaken: false,
+      takenName: null,
       reason: 'player_consent',
     };
   }
   if (claimed) {
     return withNeedNameFlags(reply, 'false_start_claim');
   }
-  return { start: false, name: null, stripFalseStart: false, appendNeedName: false, appendNeedPatron: false, reason: null };
+  return {
+    start: false,
+    name: null,
+    stripFalseStart: false,
+    appendNeedName: false,
+    appendNeedPatron: false,
+    appendNameTaken: false,
+    takenName: null,
+    reason: null,
+  };
 }
 
 export function maybeSwitchToDossier(draft, userText) {

@@ -11,6 +11,7 @@ import {
   approachMonthText,
   returnBoardsOnUndock,
 } from './confluxBoard.js';
+import { decideUndockContinuation } from './undockContinuation.js';
 
 /** Ширина прохода: ГСЧ выбирает kind; LLM только описывает. control — можно ли закрыть. */
 export const CONTACT_KINDS = {
@@ -820,7 +821,17 @@ export async function advanceDockedConfluxes({ storage, runtime, world }, docked
         });
       }
       const byId = new Map(domains.map((d) => [d.id, d]));
-      returnBoardsOnUndock(conflux, byId);
+      await returnBoardsOnUndock(conflux, byId, {
+        decideContinuation: async ({ plot, domainId, domain }) =>
+          decideUndockContinuation({
+            runtime,
+            plot,
+            domain,
+            partner: domains.find((x) => x.id !== domainId) || null,
+            world,
+            log,
+          }),
+      });
       for (const d of byId.values()) {
         await storage.saveDomain(d);
       }
@@ -865,7 +876,7 @@ async function generateUndockChronicle({ runtime, conflux, domains, world, log }
     {
       name: 'submit_undock',
       description:
-        'Канон расстыковки: ОСТРОВА разошлись в небе. Не «мостик сломался» — именно разлёт островов.',
+        'Канон конца сопряжения: ОСТРОВА разошлись в небе. Не «мостик сломался» — именно разлёт островов.',
       parameters: {
         type: 'object',
         required: ['text'],
@@ -922,7 +933,7 @@ async function generateUndockChronicle({ runtime, conflux, domains, world, log }
         {
           role: 'user',
           content: [
-            `Расстыковка. Дата: ${world.gameDate?.label || ''}.`,
+            `Сопряжение кончается. Дата: ${world.gameDate?.label || ''}.`,
             `Летающие острова городов «${nameA}» и «${nameB}» расходятся.`,
             contactHint,
             '',
@@ -1021,7 +1032,7 @@ async function generateContact({ config, runtime, conflux, domains, world, log }
               `Геометрия уже задана (${kind} — ${meta.label}): ${meta.hint} ` +
               `Рельеф: ${relief.label} — ${relief.hint} ` +
               `Можно ли закрыть проход: ${meta.control} Впиши это в описание, не противореча. ` +
-              `Встречу называй сопряжением, не стыком.`,
+              `Встречу называй сопряжением.`,
           },
         },
       },
@@ -1073,7 +1084,7 @@ async function generateContact({ config, runtime, conflux, domains, world, log }
             `Рельеф УЖЕ ВЫБРАН: ${relief.label} — ${relief.hint}`,
             `Можно ли закрыть или перекрыть этот проход: ${meta.control}`,
             'Это правда геометрии — впиши в описание своими словами и не противоречь. Не выдумывай ворота, створы и засовы, если их здесь быть не может.',
-            'НЕ меняй ширину и рельеф на другие. Встречу называй сопряжением, не стыком.',
+            'НЕ меняй ширину и рельеф на другие. Встречу называй сопряжением.',
             rematchLine,
             '',
             'Вызови submit_contact только с description.',

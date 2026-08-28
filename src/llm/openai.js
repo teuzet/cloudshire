@@ -28,6 +28,21 @@ export class LlmError extends Error {
   }
 }
 
+export const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+
+export function normalizeReasoningEffort(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  return REASONING_EFFORTS.includes(s) ? s : null;
+}
+
+/** Явная настройка агента; иначе gpt-5 + tools остаётся none. */
+export function resolveReasoningEffort({ model, tools, reasoningEffort } = {}) {
+  const requested = normalizeReasoningEffort(reasoningEffort);
+  if (requested) return requested;
+  if (tools?.length && /^gpt-5/i.test(model || '')) return 'none';
+  return undefined;
+}
+
 export function createLlmProvider(config, providerName = 'openai') {
   if (providerName === 'openai') {
     return new OpenAiProvider(config);
@@ -66,7 +81,7 @@ export class OpenAiProvider {
    * @param {array} [opts.tools]
    * @param {string|object} [opts.toolChoice]
    */
-  async chat({ model, messages, tools, toolChoice, maxTokens }) {
+  async chat({ model, messages, tools, toolChoice, maxTokens, reasoningEffort }) {
     this.ensureClient();
     try {
       const body = {
@@ -76,13 +91,14 @@ export class OpenAiProvider {
       if (tools?.length) {
         body.tools = tools;
         if (toolChoice) body.tool_choice = toolChoice;
-        // gpt-5.x chat/completions + tools require reasoning_effort none
-        if (/^gpt-5/i.test(body.model || '')) {
-          body.reasoning_effort = 'none';
-        }
       }
+      const effort = resolveReasoningEffort({
+        model: body.model,
+        tools,
+        reasoningEffort,
+      });
+      if (effort) body.reasoning_effort = effort;
       if (maxTokens) {
-        // GPT-5+ chat completions expect max_completion_tokens
         if (/^gpt-5/i.test(body.model || '')) body.max_completion_tokens = maxTokens;
         else body.max_tokens = maxTokens;
       }

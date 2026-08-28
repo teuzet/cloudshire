@@ -1,16 +1,20 @@
 import { newId } from './ids.js';
 import { textsLookSame } from './processes.js';
+import { normalizeTruthGraph, judgeTruthGraph, parseMysteryShapes, normalizeFactList, RESOLUTION_FACT_MAX } from './mysteryGraph.js';
+import { normalizeDiscoveryLadder, normalizeHiddenPremises, judgeSuspenseCore } from './suspenseGraph.js';
 
 /**
  * Сюжетные нити — ядро мира: событий вне нитей не бывает.
  * Здесь только модель и формат; отбор битов, окраска и часы — в движке тика.
  *
  * Механика (см. docs/PIVOT_PLOTLINES.md):
- *   temperature — интерес к нити (растёт от внимания игрока, падает со временем)
- *   importance  — судьбоносность для города, задаёт масштаб последствий
+ *   gravity     — масштаб последствий; у саспенса сеет движок, у тайны ставит plotStakes
+ *   urgency     — шанс, что история сама сдвинется в месяц без дела
+ *   temperature — интерес (старые нити, указы, сопряжение; греет внимание игрока)
+ *   importance  — внутренний масштаб дельт; у трёхтактных зеркало gravity, агенты не ставят
  *   maxAgeMonths / ageMonths — сколько месяцев история живёт без внимания;
  *     срок сам по себе не развязка: выдохшаяся нить гаснет, только если нет дел и упоминаний
- *   closeWhen — что должно случиться, чтобы историю закрыть по существу, не «что писать в последний месяц»
+ *   closeWhen — успешный исход; mootWhen — когда задача потеряла смысл
  *   relatedStats — какие стороны города сейчас в игре (по ним кидается окраска бита)
  */
 
@@ -36,13 +40,163 @@ export const PLOT_TITLE_MAX = 120;
 export { clipText as clipPlotText };
 
 export const PLOT_KINDS = ['story', 'errand', 'order'];
+export const THREE_ACT_TYPES = ['suspense', 'mystery'];
+export const STORY_TYPES = ['suspense', 'mystery', 'default'];
 
 export function isStoryPlot(plot) {
   return plot?.kind === 'story';
 }
 
+/** Только для посева городской истории. Поручения, указы и сопряжение движок ставит в default. */
+export function pickStoryType(rng = Math.random) {
+  return rng() < 0.5 ? 'mystery' : 'suspense';
+}
+
+/**
+ * Тип, который выставил движок: suspense | mystery | default.
+ * Default — поручение, указ, главная нить стыка, наследие без типа.
+ * Нативная городская история остаётся трёхтактной и на доске сопряжения,
+ * пока не станет главной нитью встречи. Contested меняет рассказчика, не тип.
+ */
+export function storyTypeOf(plot) {
+  if (!plot || plot.kind !== 'story' || plot.isMainConflux) {
+    return 'default';
+  }
+  if (THREE_ACT_TYPES.includes(plot.storyType)) return plot.storyType;
+  return 'default';
+}
+
+export function isThreeActPlot(plot) {
+  const t = storyTypeOf(plot);
+  return t === 'suspense' || t === 'mystery';
+}
+
+/** Масштаб истории для механики: у трёхтактных gravity, иначе внутренний importance. */
+export function plotScale(plot) {
+  if (isThreeActPlot(plot)) return clamp100(plot?.gravity, 40);
+  return clamp100(plot?.importance, 40);
+}
+
+export function plotBeatAgentId(plot) {
+  const t = storyTypeOf(plot);
+  if (t === 'mystery') return 'mysteryBeat';
+  if (t === 'suspense') return 'suspenseBeat';
+  return 'storyBeat';
+}
+
+function clampStakes(n, fallback = 40) {
+  const v = Math.round(Number(n));
+  if (!Number.isFinite(v)) return fallback;
+  return Math.max(0, Math.min(100, v));
+}
+
+function storyActState(p = {}) {
+  const type = storyTypeOf(p);
+  if (type === 'default') {
+    return {
+      storyType: 'default',
+      act: null,
+      urgency: null,
+      gravity: null,
+      urgency0: null,
+      gravity0: null,
+      escalationLevel: null,
+      maxEscalations: null,
+      truth: '',
+      truthGraph: null,
+      observedFacts: [],
+      resolutionFacts: [],
+      ending: null,
+      asksSequel: false,
+      depth: null,
+      hiddenPremises: [],
+      discoveryLadder: null,
+      closureGate: '',
+      closureUnlocked: null,
+      tonePrimary: null,
+      toneSecondary: null,
+      source: null,
+      situation: null,
+      dynamic: null,
+      legacyAxes: [],
+      unattendedBeats: null,
+    };
+  }
+  const urgency = clampStakes(p.urgency, 40);
+  const gravity = clampStakes(p.gravity, 40);
+  const graph = type === 'mystery' ? normalizeTruthGraph(p.truthGraph) : null;
+  const maxEsc = Math.max(1, Math.round(Number(p.maxEscalations ?? 3)));
+  const depth =
+    type === 'suspense' ? Math.max(1, Math.min(4, Math.round(Number(p.depth) || 1))) : null;
+  const ladder =
+    type === 'suspense' ? normalizeDiscoveryLadder(p.discoveryLadder, depth) : null;
+  return {
+    storyType: type,
+    act: Number(p.act) === 2 ? 2 : 1,
+    urgency,
+    gravity,
+    urgency0: clampStakes(p.urgency0 ?? urgency, urgency),
+    gravity0: clampStakes(p.gravity0 ?? gravity, gravity),
+    escalationLevel: Math.max(0, Math.min(maxEsc, Math.round(Number(p.escalationLevel) || 0))),
+    maxEscalations: maxEsc,
+    truth: type === 'mystery' && !graph ? String(p.truth || '') : '',
+    truthGraph: graph,
+    observedFacts: type === 'mystery' ? normalizeFactList(p.observedFacts).facts : [],
+    resolutionFacts:
+      type === 'mystery' ? normalizeFactList(p.resolutionFacts, { maxLen: RESOLUTION_FACT_MAX }).facts : [],
+    ending: ['crit', 'ok', 'fail'].includes(p.ending) ? p.ending : null,
+    asksSequel: Boolean(p.asksSequel),
+    depth,
+    hiddenPremises: type === 'suspense' ? normalizeHiddenPremises(p.hiddenPremises, depth) : [],
+    discoveryLadder: ladder,
+    closureGate: type === 'suspense' ? clipText(p.closureGate, PLOT_HOOK_MAX * 2) : '',
+    closureUnlocked: type === 'suspense' ? (depth <= 1 ? true : Boolean(p.closureUnlocked)) : null,
+    tonePrimary: type === 'suspense' ? String(p.tonePrimary || '').trim() || null : null,
+    toneSecondary: type === 'suspense' ? String(p.toneSecondary || '').trim() || null : null,
+    source: type === 'suspense' ? String(p.source || '').trim() || null : null,
+    situation: type === 'suspense' ? String(p.situation || '').trim() || null : null,
+    dynamic: type === 'suspense' ? String(p.dynamic || '').trim() || null : null,
+    legacyAxes: type === 'suspense' && Array.isArray(p.legacyAxes) ? p.legacyAxes.map(String).filter(Boolean) : [],
+    unattendedBeats: type === 'suspense' ? Math.max(0, Math.round(Number(p.unattendedBeats) || 0)) : null,
+  };
+}
+
 export function isOrderPlot(plot) {
   return plot?.kind === 'order';
+}
+
+/** Бинарная осведомлённость города о нити как о полной линии. */
+export function refreshPlotAwareness(plot) {
+  if (!plot || typeof plot !== 'object') return plot;
+  plot.plotAwareness = normalizePlotAwarenessMap(plot);
+  return plot;
+}
+
+function normalizePlotAwarenessMap(plot) {
+  const raw = plot?.plotAwareness;
+  const hadField = raw && typeof raw === 'object' && !Array.isArray(raw);
+  const next = {};
+  if (hadField) {
+    for (const [k, v] of Object.entries(raw)) {
+      if (v) next[String(k)] = true;
+    }
+  }
+  const host = plot?.hostDomainId ? String(plot.hostDomainId) : null;
+  if (host) next[host] = true;
+  if (plot?.isMainConflux) {
+    for (const id of Array.isArray(plot.concernsDomainIds) ? plot.concernsDomainIds : []) {
+      if (id) next[String(id)] = true;
+    }
+  }
+  // Старые сохранения и карточки без поля: участники concerns уже знали линию.
+  if (!hadField || !Object.keys(next).length) {
+    if (Array.isArray(plot?.concernsDomainIds)) {
+      for (const id of plot.concernsDomainIds) {
+        if (id) next[String(id)] = true;
+      }
+    }
+  }
+  return next;
 }
 
 function clampChance(n, fallback = 0.2) {
@@ -53,15 +207,29 @@ function clampChance(n, fallback = 0.2) {
 
 function orderCadence(p, config = null) {
   const fallback = Number(config?.tick?.plot?.orders?.defaultChance ?? 0.2);
+  const fireOn = p?.fireOn === 'conflux_dock' ? 'conflux_dock' : null;
   const every = Math.round(Number(p?.scheduleEveryMonths));
-  const scheduled = Number.isInteger(every) && every >= 1 && every <= 12;
+  const scheduled = !fireOn && Number.isInteger(every) && every >= 1 && every <= 12;
   const due = Number(p?.nextDueTick);
+  const lastFired = p?.lastFiredConfluxId ? String(p.lastFiredConfluxId) : null;
   return {
     modifierId: p?.modifierId ? String(p.modifierId) : null,
-    // Регулярность и вероятность взаимоисключающи: расписание = гарантия, шанс = лотерея.
-    fireChance: scheduled ? 0 : clampChance(p?.fireChance, Number.isFinite(fallback) ? fallback : 0.2),
+    fireOn,
+    lastFiredConfluxId: fireOn ? lastFired : null,
+    // Регулярность, вероятность и сопряжение взаимоисключающи.
+    fireChance: fireOn || scheduled ? 0 : clampChance(p?.fireChance, Number.isFinite(fallback) ? fallback : 0.2),
     scheduleEveryMonths: scheduled ? every : null,
-    nextDueTick: Number.isInteger(due) ? due : null,
+    nextDueTick: fireOn ? null : Number.isInteger(due) ? due : null,
+    durationMonths: (() => {
+      const n = Math.round(Number(p?.durationMonths));
+      return Number.isInteger(n) && n >= 1 ? Math.min(36, n) : null;
+    })(),
+    expiresTick: (() => {
+      const n = Math.round(Number(p?.durationMonths));
+      if (!(Number.isInteger(n) && n >= 1) || p?.expiresTick == null || p.expiresTick === '') return null;
+      const exp = Number(p.expiresTick);
+      return Number.isInteger(exp) ? exp : null;
+    })(),
   };
 }
 
@@ -124,8 +292,57 @@ export function plotConfig(config) {
       avoidRepeat: Math.max(0, Math.min(10, Number(p.quiet?.avoidRepeat ?? 4))),
     },
     tagGroups: Array.isArray(p.tagGroups) ? p.tagGroups : [],
+    mysteryTagGroups: Array.isArray(p.mystery?.tagGroups) ? p.mystery.tagGroups : [],
+    mysteryGraph: {
+      minNodes: Math.max(3, Math.round(Number(p.mystery?.graph?.minNodes ?? 4))),
+      maxNodes: Math.max(
+        Math.max(3, Math.round(Number(p.mystery?.graph?.minNodes ?? 4))),
+        Math.round(Number(p.mystery?.graph?.maxNodes ?? 5)),
+      ),
+      sideRevealChance: Math.max(0, Math.min(1, Number(p.mystery?.graph?.sideRevealChance ?? 0.5))),
+      shapes: parseMysteryShapes(p.mystery?.graph?.shapes),
+      judgeAttempts: Math.max(1, Math.min(8, Math.round(Number(p.mystery?.graph?.judgeAttempts ?? 3)))),
+      generateTries: Math.max(1, Math.min(12, Math.round(Number(p.mystery?.graph?.generateTries ?? 6)))),
+      presentationTries: Math.max(1, Math.min(6, Math.round(Number(p.mystery?.graph?.presentationTries ?? 3)))),
+    },
+    mysteryEntities: (() => {
+      const minCatalog = Math.max(4, Math.round(Number(p.mystery?.entities?.minCatalog ?? 32)));
+      const pickMin = Math.max(1, Math.min(2, Math.round(Number(p.mystery?.entities?.pickMin ?? 1))));
+      return {
+        minCatalog,
+        maxCatalog: Math.max(minCatalog, Math.round(Number(p.mystery?.entities?.maxCatalog ?? 48))),
+        pickMin,
+        pickMax: Math.max(pickMin, Math.min(2, Math.round(Number(p.mystery?.entities?.pickMax ?? 2)))),
+        twoChance: Math.max(0, Math.min(1, Number(p.mystery?.entities?.twoChance ?? 0.12))),
+        inventChance: Math.max(0, Math.min(1, Number(p.mystery?.entities?.inventChance ?? 0.15))),
+      };
+    })(),
+    seedRoles: Array.isArray(p.seedRoles)
+      ? p.seedRoles
+          .map((r) => ({
+            role: String(r?.role || '').trim(),
+            about: String(r?.about || '').trim(),
+          }))
+          .filter((r) => r.role)
+      : [],
     orders: {
       defaultChance: Math.max(0, Math.min(1, Number(p.orders?.defaultChance ?? 0.2))),
+    },
+    acts: {
+      maxEscalations: Math.max(1, Math.round(Number(p.acts?.maxEscalations ?? 3))),
+      worsenMin: Number(p.acts?.worsenMin ?? 1),
+      worsenMax: Number(p.acts?.worsenMax ?? 1.5),
+      dampMin: Number(p.acts?.dampMin ?? 0.8),
+      dampMax: Number(p.acts?.dampMax ?? 1),
+    },
+    suspense: {
+      gravityFloor: Math.max(5, Math.min(40, Math.round(Number(p.suspense?.gravityFloor ?? 20)))),
+      openingGravityMin: Math.max(5, Math.min(40, Math.round(Number(p.suspense?.openingGravityMin ?? 20)))),
+      openingGravityMax: Math.max(20, Math.min(60, Math.round(Number(p.suspense?.openingGravityMax ?? 40)))),
+      depth4Chance: Math.max(0, Math.min(0.2, Number(p.suspense?.depth4Chance ?? 0.03))),
+      depth4MinGravity: Math.max(50, Math.min(100, Math.round(Number(p.suspense?.depth4MinGravity ?? 75)))),
+      legacyMinGravity: Math.max(0, Math.min(100, Math.round(Number(p.suspense?.legacyMinGravity ?? 25)))),
+      judgeAttempts: Math.max(1, Math.min(6, Math.round(Number(p.suspense?.judgeAttempts ?? 3)))),
     },
   };
 }
@@ -137,46 +354,63 @@ function normalizeStatIds(raw, config = null) {
   return allowed.size ? uniq.filter((id) => allowed.has(id)) : uniq;
 }
 
+function closedPlotIds(domain) {
+  return new Set((domain?.closedPlotlines || []).map((p) => p?.id).filter(Boolean));
+}
+
+/** Форма карточки на месте: тот же объект, без второй копии. */
+function applyPlotShape(p, config = null) {
+  p.id = p.id || newId('plot');
+  p.title = clipText(p.title || 'Сюжет', PLOT_TITLE_MAX);
+  p.synopsis = clipText(p.synopsis ?? p.summary ?? '', PLOT_SUMMARY_MAX);
+  p.closeWhen = clipText(p.closeWhen, PLOT_HOOK_MAX);
+  p.mootWhen = clipText(p.mootWhen, PLOT_HOOK_MAX);
+  p.kind = PLOT_KINDS.includes(p.kind) ? p.kind : 'story';
+  p.tags = Array.isArray(p.tags) ? p.tags : [];
+  p.relatedStats = normalizeStatIds(p.relatedStats, config);
+  p.chronicleIds = Array.isArray(p.chronicleIds) ? p.chronicleIds.map(String) : [];
+  p.factIds = Array.isArray(p.factIds) ? p.factIds.map(String) : [];
+  p.relatedProcessIds = Array.isArray(p.relatedProcessIds) ? p.relatedProcessIds.map(String) : [];
+  p.relatedPlotlineIds = Array.isArray(p.relatedPlotlineIds) ? p.relatedPlotlineIds.map(String) : [];
+  p.importance = clamp100(p.importance, 40);
+  p.maxAgeMonths = Math.max(1, Math.min(36, Math.round(Number(p.maxAgeMonths) || 6)));
+  p.ageMonths = Math.max(0, Math.round(Number(p.ageMonths) || 0));
+  p.temperature = clamp100(p.temperature, 30);
+  p.mirrorOf = p.mirrorOf ? String(p.mirrorOf) : null;
+  p.confluxId = p.confluxId ? String(p.confluxId) : null;
+  p.partnerGone = Boolean(p.partnerGone);
+  p.hostDomainId = p.hostDomainId ? String(p.hostDomainId) : null;
+  p.concernsDomainIds = Array.isArray(p.concernsDomainIds)
+    ? [...new Set(p.concernsDomainIds.map(String))]
+    : [];
+  p.shared = Boolean(p.shared);
+  p.isMainConflux = Boolean(p.isMainConflux);
+  p.sharedReason = p.sharedReason ? String(p.sharedReason) : null;
+  p.plotAwareness = normalizePlotAwarenessMap(p);
+  p.status = 'open';
+  p.createdTick = p.createdTick == null ? null : Number(p.createdTick);
+  p.lastBeatTick = p.lastBeatTick == null ? null : Number(p.lastBeatTick);
+  p.beatCount = Math.max(0, Math.round(Number(p.beatCount) || 0));
+  Object.assign(p, storyActState(p));
+  if (p.kind === 'order') Object.assign(p, orderCadence(p, config));
+  return p;
+}
+
 export function normalizePlotlines(domain, config = null) {
   if (!domain || typeof domain !== 'object') return domain;
   if (!Array.isArray(domain.plotlines)) domain.plotlines = [];
-  domain.plotlines = domain.plotlines
-    .filter((p) => p && typeof p === 'object' && p.status !== 'closed')
-    .map((p) => ({
-      id: p.id || newId('plot'),
-      title: clipText(p.title || 'Сюжет', PLOT_TITLE_MAX),
-      synopsis: clipText(p.synopsis ?? p.summary ?? '', PLOT_SUMMARY_MAX),
-      closeWhen: clipText(p.closeWhen, PLOT_HOOK_MAX),
-      kind: PLOT_KINDS.includes(p.kind) ? p.kind : 'story',
-      tags: Array.isArray(p.tags) ? p.tags : [],
-      relatedStats: normalizeStatIds(p.relatedStats, config),
-      chronicleIds: Array.isArray(p.chronicleIds) ? p.chronicleIds.map(String) : [],
-      relatedProcessIds: Array.isArray(p.relatedProcessIds)
-        ? p.relatedProcessIds.map(String)
-        : [],
-      relatedPlotlineIds: Array.isArray(p.relatedPlotlineIds)
-        ? p.relatedPlotlineIds.map(String)
-        : [],
-      importance: clamp100(p.importance, 40),
-      maxAgeMonths: Math.max(1, Math.min(36, Math.round(Number(p.maxAgeMonths) || 6))),
-      ageMonths: Math.max(0, Math.round(Number(p.ageMonths) || 0)),
-      temperature: clamp100(p.temperature, 30),
-      mirrorOf: p.mirrorOf ? String(p.mirrorOf) : null,
-      confluxId: p.confluxId ? String(p.confluxId) : null,
-      partnerGone: Boolean(p.partnerGone),
-      hostDomainId: p.hostDomainId ? String(p.hostDomainId) : null,
-      concernsDomainIds: Array.isArray(p.concernsDomainIds)
-        ? [...new Set(p.concernsDomainIds.map(String))]
-        : [],
-      shared: Boolean(p.shared),
-      isMainConflux: Boolean(p.isMainConflux),
-      sharedReason: p.sharedReason ? String(p.sharedReason) : null,
-      status: 'open',
-      createdTick: p.createdTick == null ? null : Number(p.createdTick),
-      lastBeatTick: p.lastBeatTick == null ? null : Number(p.lastBeatTick),
-      beatCount: Math.max(0, Math.round(Number(p.beatCount) || 0)),
-      ...(p.kind === 'order' ? orderCadence(p, config) : {}),
-    }));
+  const closedIds = closedPlotIds(domain);
+  const seen = new Set();
+  const next = [];
+  for (const p of domain.plotlines) {
+    if (!p || typeof p !== 'object' || p.status === 'closed') continue;
+    if (p.id && closedIds.has(p.id)) continue;
+    if (p.id && seen.has(p.id)) continue;
+    applyPlotShape(p, config);
+    if (p.id) seen.add(p.id);
+    next.push(p);
+  }
+  domain.plotlines = next;
   return domain;
 }
 
@@ -185,6 +419,7 @@ export function createPlotline({
   synopsis = '',
   summary = '', // legacy-алиас, уйдёт вместе со старым режиссёром
   closeWhen = '',
+  mootWhen = '',
   kind = 'story',
   tags = [],
   relatedStats = [],
@@ -204,18 +439,50 @@ export function createPlotline({
   fireChance = null,
   scheduleEveryMonths = null,
   nextDueTick = null,
+  fireOn = null,
+  lastFiredConfluxId = null,
+  durationMonths = null,
+  expiresTick = null,
+  storyType = null,
+  act = 1,
+  urgency = null,
+  gravity = null,
+  urgency0 = null,
+  gravity0 = null,
+  escalationLevel = 0,
+  maxEscalations = 3,
+  truth = '',
+  truthGraph = null,
+  observedFacts = [],
+  resolutionFacts = [],
+  ending = null,
+  asksSequel = false,
+  depth = null,
+  hiddenPremises = [],
+  discoveryLadder = null,
+  closureGate = '',
+  closureUnlocked = null,
+  tonePrimary = null,
+  toneSecondary = null,
+  source = null,
+  situation = null,
+  dynamic = null,
+  legacyAxes = [],
+  unattendedBeats = 0,
   config = null,
 }) {
   const resolvedKind = PLOT_KINDS.includes(kind) ? kind : 'story';
-  return {
+  const plot = {
     id: newId('plot'),
     title: clipText(title || (resolvedKind === 'order' ? 'Порядок' : 'Сюжет'), PLOT_TITLE_MAX),
     synopsis: clipText(synopsis || summary, PLOT_SUMMARY_MAX),
     closeWhen: clipText(closeWhen, PLOT_HOOK_MAX),
+    mootWhen: clipText(mootWhen, PLOT_HOOK_MAX),
     kind: resolvedKind,
     tags: Array.isArray(tags) ? tags : [],
     relatedStats: normalizeStatIds(relatedStats, config),
     chronicleIds: [],
+    factIds: [],
     relatedProcessIds: (relatedProcessIds || []).map(String),
     relatedPlotlineIds: (relatedPlotlineIds || []).map(String),
     importance: clamp100(importance, resolvedKind === 'order' ? 20 : 40),
@@ -231,6 +498,7 @@ export function createPlotline({
     shared: Boolean(shared),
     isMainConflux: Boolean(isMainConflux),
     sharedReason: null,
+    plotAwareness: {},
     partnerGone: false,
     status: 'open',
     createdTick: tick,
@@ -238,11 +506,44 @@ export function createPlotline({
     beatCount: 0,
     ...(resolvedKind === 'order'
       ? orderCadence(
-          { modifierId, fireChance, scheduleEveryMonths, nextDueTick },
+          { modifierId, fireChance, scheduleEveryMonths, nextDueTick, fireOn, lastFiredConfluxId, durationMonths, expiresTick },
           config,
         )
       : {}),
+    ...storyActState({
+      storyType,
+      act,
+      urgency,
+      gravity,
+      urgency0,
+      gravity0,
+      escalationLevel,
+      maxEscalations,
+      truth,
+      truthGraph,
+      observedFacts,
+      resolutionFacts,
+      ending,
+      asksSequel,
+      depth,
+      hiddenPremises,
+      discoveryLadder,
+      closureGate,
+      closureUnlocked,
+      tonePrimary,
+      toneSecondary,
+      source,
+      situation,
+      dynamic,
+      legacyAxes,
+      unattendedBeats,
+      kind: resolvedKind,
+      isMainConflux,
+      shared,
+      confluxId,
+    }),
   };
+  return refreshPlotAwareness(plot);
 }
 
 /** Нить-заглушка для дела: у каждого процесса есть своя нить. */
@@ -277,6 +578,7 @@ export function isOverdue(plotline) {
  */
 export function plotCanFade(domain, plot, cfg) {
   if (isOrderPlot(plot)) return false;
+  if (isThreeActPlot(plot)) return false;
   if (!isOverdue(plot)) return false;
   if (plotHasActiveProcess(domain, plot)) return false;
   const floor = Number(cfg?.temperature?.fadeBelow ?? 18);
@@ -316,6 +618,12 @@ export function findClosedPlotline(domain, plotlineId) {
   return (domain?.closedPlotlines || []).find((p) => p.id === id) || null;
 }
 
+export function plotsForProcess(domain, processId) {
+  const id = String(processId || '');
+  if (!id) return [];
+  return (domain?.plotlines || []).filter((p) => (p.relatedProcessIds || []).includes(id));
+}
+
 /** Поручение ещё идёт — нить рано убирать с доски, иначе дело получит пустую карточку. */
 export function plotHasActiveProcess(domain, plot) {
   const ids = new Set((plot?.relatedProcessIds || []).map(String));
@@ -323,6 +631,25 @@ export function plotHasActiveProcess(domain, plot) {
   return (domain?.state?.pendingActions || []).some(
     (a) => ids.has(String(a.id)) && (!a.status || a.status === 'active'),
   );
+}
+
+function processEngagement(action) {
+  const raw = String(action?.plotEngagement || '').toUpperCase();
+  if (raw === 'DIRECT' || raw === 'RELEVANT' || raw === 'UNRELATED') return raw;
+  if (action?.plotAligned === true) return 'DIRECT';
+  if (action?.plotAligned === false) return 'RELEVANT';
+  return 'UNRELATED';
+}
+
+/** DIRECT/RELEVANT дело глушит автотик; UNRELATED — нет. */
+export function plotHasAttendingProcess(domain, plot) {
+  const ids = new Set((plot?.relatedProcessIds || []).map(String));
+  if (!ids.size) return false;
+  return (domain?.state?.pendingActions || []).some((a) => {
+    if (!ids.has(String(a.id)) || (a.status && a.status !== 'active')) return false;
+    const eng = processEngagement(a);
+    return eng === 'DIRECT' || eng === 'RELEVANT';
+  });
 }
 
 function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } = {}) {
@@ -333,10 +660,12 @@ function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } =
     title: plot.title,
     synopsis: plot.synopsis || '',
     closeWhen: plot.closeWhen || '',
+    mootWhen: plot.mootWhen || '',
     kind: plot.kind || 'story',
     tags: Array.isArray(plot.tags) ? plot.tags : [],
     relatedStats: Array.isArray(plot.relatedStats) ? [...plot.relatedStats] : [],
     chronicleIds: Array.isArray(plot.chronicleIds) ? [...plot.chronicleIds] : [],
+    factIds: Array.isArray(plot.factIds) ? [...plot.factIds] : [],
     relatedProcessIds: Array.isArray(plot.relatedProcessIds) ? [...plot.relatedProcessIds] : [],
     relatedPlotlineIds: Array.isArray(plot.relatedPlotlineIds) ? [...plot.relatedPlotlineIds] : [],
     importance: plot.importance,
@@ -351,12 +680,18 @@ function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } =
     shared: Boolean(plot.shared),
     isMainConflux: Boolean(plot.isMainConflux),
     sharedReason: plot.sharedReason || null,
+    plotAwareness: normalizePlotAwarenessMap(plot),
+    ...storyActState(plot),
     ...(plot.kind === 'order'
       ? {
           modifierId: plot.modifierId || null,
           fireChance: plot.fireChance,
           scheduleEveryMonths: plot.scheduleEveryMonths ?? null,
           nextDueTick: plot.nextDueTick ?? null,
+          fireOn: plot.fireOn || null,
+          lastFiredConfluxId: plot.lastFiredConfluxId || null,
+          durationMonths: plot.durationMonths ?? null,
+          expiresTick: plot.expiresTick ?? null,
         }
       : {}),
     status: 'closed',
@@ -387,10 +722,12 @@ export function reopenClosedPlotline(domain, closedOrId) {
       PLOT_SUMMARY_MAX,
     ),
     closeWhen: clipText(closed.closeWhen, PLOT_HOOK_MAX),
+    mootWhen: clipText(closed.mootWhen, PLOT_HOOK_MAX),
     kind: PLOT_KINDS.includes(closed.kind) ? closed.kind : 'story',
     tags: Array.isArray(closed.tags) ? closed.tags : [],
     relatedStats: Array.isArray(closed.relatedStats) ? [...closed.relatedStats] : [],
     chronicleIds: Array.isArray(closed.chronicleIds) ? closed.chronicleIds.map(String) : [],
+    factIds: Array.isArray(closed.factIds) ? closed.factIds.map(String) : [],
     relatedProcessIds: Array.isArray(closed.relatedProcessIds)
       ? closed.relatedProcessIds.map(String)
       : [],
@@ -411,10 +748,12 @@ export function reopenClosedPlotline(domain, closedOrId) {
     shared: Boolean(closed.shared),
     isMainConflux: Boolean(closed.isMainConflux),
     sharedReason: closed.sharedReason || null,
+    plotAwareness: normalizePlotAwarenessMap(closed),
     status: 'open',
     createdTick: closed.createdTick == null ? null : Number(closed.createdTick),
     lastBeatTick: closed.lastBeatTick == null ? null : Number(closed.lastBeatTick),
     beatCount: Math.max(0, Math.round(Number(closed.beatCount) || 0)),
+    ...storyActState(closed),
     ...(closed.kind === 'order' ? orderCadence(closed) : {}),
   };
   domain.plotlines = domain.plotlines || [];
@@ -445,17 +784,27 @@ export function advancePlotClocks(domain, cfg) {
   for (const p of domain.plotlines) {
     if (p.kind === 'order') continue;
     p.ageMonths += 1;
-    p.temperature = clamp100(p.temperature - decay);
+    if (!isThreeActPlot(p)) p.temperature = clamp100(p.temperature - decay);
   }
   return domain.plotlines;
 }
 
 export function attachChronicleToPlotlines(domain, factId, plotlineIds) {
+  attachIdsToPlotlines(domain, 'chronicleIds', factId, plotlineIds);
+}
+
+export function attachFactToPlotlines(domain, factId, plotlineIds) {
+  attachIdsToPlotlines(domain, 'factIds', factId, plotlineIds);
+}
+
+function attachIdsToPlotlines(domain, field, factId, plotlineIds) {
   if (!factId) return;
   for (const id of [...new Set((plotlineIds || []).map(String))]) {
     const p = findPlotline(domain, id);
     if (!p) continue;
-    if (!p.chronicleIds.includes(String(factId))) p.chronicleIds.push(String(factId));
+    if (!Array.isArray(p[field])) p[field] = [];
+    const sid = String(factId);
+    if (!p[field].includes(sid)) p[field].push(sid);
   }
 }
 
@@ -494,35 +843,103 @@ function pickWeightedTag(tags, rng) {
 
 /**
  * Жребий завязки: по одному тегу из каждой группы, все обязательны.
- * Группы сами по себе узкие и абстрактные — тон, сфера, источник, масштаб.
- * У тега может быть weight: больше — чаще выпадает.
+ * Группы саспенса: тон, источник (причинная сила), ситуация, динамика.
  */
+function tagFromGroup(group, rng) {
+  if (!group?.tags?.length) return null;
+  const tag = pickWeightedTag(group.tags, rng);
+  if (!tag) return null;
+  const people = Math.round(Number(tag.people));
+  const inventKind = String(tag.kind || '').trim();
+  const about = String(tag.about || '').trim();
+  return {
+    groupId: group.id,
+    groupName: group.name || group.id,
+    tagId: tag.id,
+    tagName: tag.name,
+    ...(inventKind ? { kind: inventKind } : {}),
+    ...(about ? { about } : {}),
+    ...(people === 1 || people === 2 ? { people } : {}),
+  };
+}
+
 export function pickPlotTags(cfg, rng = Math.random) {
   const groups = cfg?.tagGroups || [];
-  return groups
-    .map((g) => {
-      if (!g?.tags?.length) return null;
-      const tag = pickWeightedTag(g.tags, rng);
-      if (!tag) return null;
-      return { groupId: g.id, groupName: g.name || g.id, tagId: tag.id, tagName: tag.name };
-    })
-    .filter(Boolean);
+  return groups.map((g) => tagFromGroup(g, rng)).filter(Boolean);
+}
+
+const MYSTERY_GROUP_IDS = ['association', 'type'];
+
+/** Жребий тайны: окраска (ассоциация) и жёсткий тип произошедшего. */
+export function pickMysteryPlotTags(cfg, rng = Math.random) {
+  const mystery = cfg?.mysteryTagGroups || [];
+  const byId = (id) => (mystery || []).find((g) => g.id === id);
+  return MYSTERY_GROUP_IDS.map((id) => tagFromGroup(byId(id), rng)).filter(Boolean);
+}
+
+export function mysteryTypeTag(tags = []) {
+  return (tags || []).find((t) => t.groupId === 'type') || null;
+}
+
+export function mysteryAssociationTag(tags = []) {
+  return (tags || []).find((t) => t.groupId === 'association') || null;
+}
+
+/** Тип обязателен; ассоциация должна читаться в графе, не как табличка. */
+export function formatMysteryAxesForPrompt(tags, { opening = false } = {}) {
+  const type = mysteryTypeTag(tags);
+  const assoc = mysteryAssociationTag(tags);
+  const lines = [];
+  if (type) {
+    const about = type.about ? ` — ${type.about}` : '';
+    lines.push(`ТИП ТАЙНЫ (обязателен): ${type.tagName}${about}`);
+    lines.push('Это форма произошедшего. Не подменяй канцелярией, учётом и историей кладки, если тип про другое.');
+  }
+  if (assoc) {
+    lines.push('');
+    lines.push(`АССОЦИАТИВНОЕ ПОЛЕ (очень слабый импульс): «${assoc.tagName}».`);
+    lines.push(
+      'Не факт мира и не обязательная тема. Может слегка коснуться связи, следа или X. Не создавай ради него сущность, событие или вторую линию. Слабый резонанс — нормально.',
+    );
+  }
+  if (type || assoc) {
+    lines.push(
+      opening
+        ? 'Даже на старте это должно задеть квартал или большую группу, не двор и не описная книга. Не конец острова.'
+        : 'Масштаб — весь город или несущая жизнь острова: много людей, общая судьба, не двор и не описная книга.',
+    );
+  }
+  return lines.join('\n');
 }
 
 const OPENING_SCALES = new Set(['neighborhood', 'person']);
 
-/** Стартовый посев: тот же жребий, но масштаб только соседство или несколько человек. */
-export function pickOpeningPlotTags(cfg, rng = Math.random) {
-  const tags = pickPlotTags(cfg, rng);
-  const scaleGroup = (cfg?.tagGroups || []).find((g) => g.id === 'scale');
+function applyOpeningScale(cfg, tags, rng) {
+  const mystery = (tags || []).some((t) => t.groupId === 'association' || t.groupId === 'type');
+  const scaleGroup = mystery
+    ? (cfg?.mysteryTagGroups || []).find((g) => g.id === 'scale')
+    : (cfg?.tagGroups || []).find((g) => g.id === 'scale');
   const small = (scaleGroup?.tags || []).filter((t) => OPENING_SCALES.has(t.id));
   if (!small.length) return tags;
   const pick = pickWeightedTag(small, rng);
-  return tags.map((t) =>
+  return (tags || []).map((t) =>
     t.groupId === 'scale' && pick
       ? { ...t, tagId: pick.id, tagName: pick.name }
       : t,
   );
+}
+
+/** Стартовый посев: тот же жребий, но масштаб только соседство или несколько человек. */
+export function pickOpeningPlotTags(cfg, rng = Math.random) {
+  return applyOpeningScale(cfg, pickPlotTags(cfg, rng), rng);
+}
+
+export function pickSeedTags(cfg, { storyType = 'suspense', opening = false, rng = Math.random } = {}) {
+  if (storyType === 'mystery') {
+    const tags = pickMysteryPlotTags(cfg, rng);
+    return opening ? applyOpeningScale(cfg, tags, rng) : tags;
+  }
+  return pickPlotTags(cfg, rng);
 }
 
 export function openingPlotCount(config, rng = Math.random) {
@@ -538,13 +955,23 @@ const SEED_HOOK_MIN = 220;
 /**
  * Отсев пустышки и близнеца. Форму «кто хочет / что мешает» не проверяем.
  */
-export function judgePlotSeed(domain, draft) {
+export function judgePlotSeed(domain, draft, { storyType, depth = 1 } = {}) {
   if (!draft) return 'empty';
   const title = String(draft.title || '').trim();
   const entry = String(draft.entry || '').trim();
   const synopsis = String(draft.synopsis || '').trim();
   if (!title || !entry || !synopsis) return 'empty';
-  if (synopsis.length < SEED_HOOK_MIN) return 'thin_hook';
+  if (storyType === 'mystery') {
+    const reason = judgeTruthGraph(draft.truthGraph || draft, {
+      minNodes: 3,
+      maxNodes: 8,
+    });
+    if (reason) return reason;
+  } else {
+    if (synopsis.length < SEED_HOOK_MIN) return 'thin_hook';
+    const reason = judgeSuspenseCore(draft, depth);
+    if (reason) return reason;
+  }
   const twin = (domain.plotlines || []).find((p) =>
     textsLookSame(`${p.title} ${p.synopsis}`, `${title} ${synopsis}`, { minShared: 7 }),
   );
@@ -552,11 +979,26 @@ export function judgePlotSeed(domain, draft) {
   return null;
 }
 
-/** Сумма важности живых историй. Дела не считаются. */
+/** Разгадка тайны не для доски, речи и инспектора. */
+export function stripPlotSecrets(plot) {
+  if (!plot || typeof plot !== 'object') return plot;
+  const {
+    truth: _truth,
+    truthGraph: _graph,
+    resolutionFacts: _res,
+    hiddenPremises: _hidden,
+    discoveryLadder: _ladder,
+    closureGate: _gate,
+    ...rest
+  } = plot;
+  return rest;
+}
+
+/** Сумма масштаба живых историй. Дела не считаются. */
 export function liveStoryImportance(domain) {
   return (domain?.plotlines || [])
     .filter((p) => p && p.kind === 'story')
-    .reduce((sum, p) => sum + clamp100(p.importance, 0), 0);
+    .reduce((sum, p) => sum + plotScale(p), 0);
 }
 
 /**
@@ -591,21 +1033,36 @@ export function plotSeedChance(domain, cfg, tick = null) {
 }
 
 /**
- * Продолжение сразу после развязки: только если живых историй не осталось
- * и закрытие оставило крючок. Шанс — sequelChance; иначе обычный посев.
+ * Продолжение в освободившийся слот: крючок есть, доска не полна.
+ * Другие живые истории не мешают. Шанс — sequelChance.
  */
 export function pickSequelSeed(domain, offers, cfg, rng = Math.random) {
-  const { stories, total } = countOpen(domain);
-  if (stories > 0 || total >= cfg.board.maxOpen) return null;
+  const { total } = countOpen(domain);
+  if (total >= cfg.board.maxOpen) return null;
   const viable = (offers || []).filter((o) => o && String(o.hook || '').trim());
   if (!viable.length) return null;
   if (rng() >= Number(cfg.board.sequelChance ?? 0)) return null;
   return viable[viable.length - 1];
 }
 
-export function formatPlotTagsForPrompt(tags) {
+/** Тайна даёт сиквел только если стартер пометил, что разгадка вскрывает новую проблему. */
+export function allowSequelAfter(plot) {
+  if (!plot || plot.kind === 'errand') return false;
+  if (plot.storyType === 'mystery') return Boolean(plot.asksSequel);
+  return true;
+}
+
+export function formatPlotTagsForPrompt(tags, { soft = false } = {}) {
   if (!tags?.length) return '(без посева)';
-  return tags.map((t) => `${t.groupName}: «${t.tagName}»`).join(' · ');
+  const hints = tags.filter((t) => t.groupId === 'hint');
+  const rest = tags.filter((t) => t.groupId !== 'hint');
+  const parts = rest.map((t) => `${t.groupName}: «${t.tagName}»`);
+  if (hints.length) {
+    parts.push(`Ассоциации (очень мягко): ${hints.map((t) => t.tagName).join(', ')}`);
+  }
+  const body = parts.join(' · ');
+  if (!soft) return body;
+  return `всё мягко, ассоциации, не указания — ${body}`;
 }
 
 /** Служебный вид доски — для движка и логов, не для речи. */
@@ -617,9 +1074,19 @@ export function formatBoardForPrompt(domain) {
       const stats = p.relatedStats.length ? ` | в игре: ${p.relatedStats.join('+')}` : '';
       const proc = p.relatedProcessIds.length ? ` | дела: ${p.relatedProcessIds.join(', ')}` : '';
       const kindLabel = p.kind === 'errand' ? '(дело)' : p.kind === 'order' ? '(порядок)' : '';
+      const term =
+        p.kind === 'order'
+          ? p.durationMonths
+            ? `срок=${p.durationMonths}мес.${p.expiresTick != null ? ` до тика ${p.expiresTick}` : ''}`
+            : 'бессрочно'
+          : `возраст=${p.ageMonths}/${p.maxAgeMonths}`;
+      const three = isThreeActPlot(p);
+      const meters = three
+        ? `urgency=${p.urgency} gravity=${p.gravity} эск=${p.escalationLevel}/${p.maxEscalations} такт=${p.act} тип=${p.storyType}` +
+          (p.storyType === 'suspense' && p.depth ? ` depth=${p.depth}` : '')
+        : `T=${p.temperature} тип=${p.storyType || 'default'}`;
       return (
-        `- [${p.id}] «${p.title}» ${kindLabel} ` +
-        `T=${p.temperature} важность=${p.importance} возраст=${p.ageMonths}/${p.maxAgeMonths}` +
+        `- [${p.id}] «${p.title}» ${kindLabel} ${meters} ${term}` +
         stats +
         proc +
         (p.synopsis ? `\n  ${p.synopsis}` : '')
@@ -629,7 +1096,7 @@ export function formatBoardForPrompt(domain) {
 }
 
 /**
- * Компактная доска для речи: без id, температур и прочей механики.
+ * Компактная доска для речи правителя: id для инструментов, без заголовка нити.
  * @param {(ids: string[]) => string} statsFeel — качественное описание статов
  */
 export function formatBoardForSpeech(domain, { statsFeel = null, max = 8, viewerId = null } = {}) {
@@ -641,30 +1108,35 @@ export function formatBoardForSpeech(domain, { statsFeel = null, max = 8, viewer
     .map((p) => {
       const feel =
         statsFeel && p.relatedStats.length ? ` Упирается в: ${statsFeel(p.relatedStats)}.` : '';
+      const viewerKnows = Boolean(p.plotAwareness?.[viewer]);
       const foreign =
+        Boolean(p.confluxId) &&
+        !p.isMainConflux &&
+        !isOrderPlot(p) &&
         (p.concernsDomainIds || []).length > 0 &&
-        !(p.concernsDomainIds || []).includes(viewer) &&
-        !p.isMainConflux;
+        !(p.concernsDomainIds || []).includes(viewer);
       const kind = p.kind === 'errand'
         ? 'поручение'
         : p.kind === 'order'
           ? 'порядок'
           : p.isMainConflux
             ? 'сопряжение'
-            : p.shared
+            : p.shared && viewerKnows
               ? 'общая история'
-              : foreign
+              : foreign && viewerKnows
                 ? 'история соседа'
                 : 'история';
       const duty = (p.relatedProcessIds || []).length
         ? 'дело уже идёт'
         : p.kind === 'order'
-          ? 'действует'
+          ? p.durationMonths
+            ? `действует ${p.durationMonths} мес.`
+            : 'действует бессрочно'
           : p.kind === 'errand'
             ? 'дела нет'
             : 'поручения ещё нет';
       const syn = clipText(p.synopsis || 'только началось', 180);
-      return `«${p.title}» [${p.id}] (${kind}, ${duty}): ${syn}${feel}`;
+      return `[${p.id}] (${kind}, ${duty}): ${syn}${feel}`;
     })
     .join('\n');
 }

@@ -16,6 +16,7 @@ import {
 } from './models.js';
 import { formatPlayerBrief } from './onboarding.js';
 import { seedOpeningPlots } from './storyteller.js';
+import { ensureCityEntities } from './cityEntities.js';
 import { takeName } from './names.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
@@ -39,6 +40,7 @@ function cosmologyBlock() {
     '- Не выдумывай чужие народы у ворот и торговлю с чужими островами.',
     '- Хозяйство, вера, праздники, торговля — внутри СВОЕГО острова (~20 км до обрыва).',
     '- «Паломничество» бывает только местным (свой храм, свой край), не с других островов.',
+    '- Low-magic: магия есть, но не повсеместна. Не делай школы заклинаний и магические пропитки нормой быта.',
   ].join('\n');
 }
 
@@ -635,6 +637,9 @@ export async function generateDomain({
       : defaultGreeting(domain.name, forcedPatronName);
 
   await onProgress?.(`остров «${domain.name}» собран`);
+  await onProgress?.('якоря города');
+  await ensureCityEntities({ domain, config, runtime, log });
+  await storage.saveDomain(domain);
   await onProgress?.('первые истории');
   await seedOpeningPlots({ config, runtime, domain, world, log });
   await storage.saveDomain(domain);
@@ -646,6 +651,7 @@ export async function generateDomain({
       Object.entries(aspects).map(([k, v]) => [k, String(v).length]),
     ),
     openingPlots: (domain.plotlines || []).map((p) => p.title),
+    cityEntities: (domain.cityEntities || []).length,
   });
   return domain;
 }

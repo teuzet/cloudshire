@@ -34,6 +34,12 @@ export function normalizeUsage(raw) {
   if (cached != null && Number.isFinite(Number(cached))) {
     out.cached_tokens = Number(cached);
   }
+  const reasoning =
+    raw.output_tokens_details?.reasoning_tokens ??
+    raw.completion_tokens_details?.reasoning_tokens;
+  if (reasoning != null && Number.isFinite(Number(reasoning))) {
+    out.reasoning_tokens = Number(reasoning);
+  }
   return out;
 }
 
@@ -47,6 +53,8 @@ export function addUsage(a, b) {
   };
   const cached = (x.cached_tokens || 0) + (y.cached_tokens || 0);
   if (cached) out.cached_tokens = cached;
+  const reasoning = (x.reasoning_tokens || 0) + (y.reasoning_tokens || 0);
+  if (reasoning) out.reasoning_tokens = reasoning;
   return out;
 }
 

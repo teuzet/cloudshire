@@ -3,7 +3,7 @@
  * записи месяца и ставит, какие стороны города задеты. Величину считает движок.
  */
 
-import { findPlotline } from './plotlines.js';
+import { findPlotline, plotScale } from './plotlines.js';
 import { resolveStatDeltas, planQuietDrift } from './plotEngine.js';
 import { applyStatDeltas, statEpithet } from './stats.js';
 import { getLogger, truncate } from '../log.js';
@@ -41,10 +41,26 @@ export function factsForStatJudge(chronicleAdds = []) {
 
 function importanceForFact(domain, fact) {
   const plot = plotForFact(domain, fact);
-  if (plot) return plot.importance;
+  if (plot) return plotScale(plot);
   if (PLAYER_AUTHORS.has(fact?.author)) return 45;
   if (fact?.importance === 'major' || fact?.importance === 'critical') return 70;
   return 40;
+}
+
+/** Концовка дела/истории задаёт знак следа: crit без минусов, fail без плюсов. */
+export function enforceFinishPolarity(deltas, finish) {
+  if (!deltas || !finish) return deltas;
+  const next = { ...deltas };
+  if (finish === 'crit') {
+    for (const k of Object.keys(next)) {
+      if (next[k] < 0) delete next[k];
+    }
+  } else if (finish === 'fail') {
+    for (const k of Object.keys(next)) {
+      if (next[k] > 0) delete next[k];
+    }
+  }
+  return next;
 }
 
 /** Если оценщик пропустил запись, движок всё равно оставляет лёгкий след. */
@@ -64,12 +80,15 @@ export function applyFallbackStatDrift({
   for (const fact of pending) {
     const drift = planQuietDrift(domain, config, rng, { force: true });
     if (!drift) continue;
-    const deltas = resolveStatDeltas(domain, [drift], {
-      importance: importanceForFact(domain, fact),
-      source: sourceForFact(fact),
-      budget,
-      config,
-    });
+    const deltas = enforceFinishPolarity(
+      resolveStatDeltas(domain, [drift], {
+        importance: importanceForFact(domain, fact),
+        source: sourceForFact(fact),
+        budget,
+        config,
+      }),
+      fact.processFinish,
+    );
     const changes = applyStatDeltas(domain.stats, deltas);
     if (!Object.keys(changes).length) continue;
     fact.statChanges = changes;
@@ -186,7 +205,8 @@ export async function scoreMonthStats({
   const listing = toScore
     .map((f, i) => {
       const kind = entryKind(f, domain);
-      return `${i + 1}. id ${f.id} [${kind}]\n${f.text}`;
+      const finish = f.processFinish ? ` исход: ${f.processFinish}` : '';
+      return `${i + 1}. id ${f.id} [${kind}]${finish}\n${f.text}`;
     })
     .join('\n\n');
 
@@ -208,7 +228,9 @@ export async function scoreMonthStats({
           'Направление и грубую силу называй ты. Насколько сдвинуть — решит система, не ты.',
           'Каждая запись задевает хотя бы одну сторону.',
           'Несколько сторон — только если запись реально про несколько.',
-          'Не добивай сторону, которая уже в бедственном положении, мелкой бытовой записью.',
+          'Если исход записи crit / [КРИТИЧЕСКИЙ УСПЕХ] — только плюсы, без down.',
+          'Если fail / [ПРОВАЛ] — без плюсов, город теряет.',
+          'Если ok / [УСПЕХ] — плюсы есть, небольшая негативная побочка обязательна.',
           '',
           'Сейчас в городе:',
           statsBrief(domain, config),
@@ -234,14 +256,17 @@ export async function scoreMonthStats({
     seen.add(id);
 
     const note = String(mark.catastrophe || '').trim();
-    const deltas = resolveStatDeltas(domain, mark.affects || [], {
-      importance: importanceForFact(domain, fact),
-      finale: closedThisTick(domain, fact, world.tickIndex),
-      source: sourceForFact(fact),
-      budget,
-      config,
-      catastrophe: Boolean(note),
-    });
+    const deltas = enforceFinishPolarity(
+      resolveStatDeltas(domain, mark.affects || [], {
+        importance: importanceForFact(domain, fact),
+        finale: closedThisTick(domain, fact, world.tickIndex),
+        source: sourceForFact(fact),
+        budget,
+        config,
+        catastrophe: Boolean(note),
+      }),
+      fact.processFinish,
+    );
     if (!deltas || !Object.keys(deltas).length) {
       if (note) {
         fact.importance = 'critical';

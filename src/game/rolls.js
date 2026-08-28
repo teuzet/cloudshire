@@ -4,6 +4,8 @@
  * чтобы крутить его числами, а не формулировками в промптах.
  */
 
+import { isThreeActPlot } from './plotlines.js';
+
 function clampStat(n) {
   const v = Number(n);
   if (!Number.isFinite(v)) return 50;
@@ -166,9 +168,13 @@ export const TINT_LABELS = {
   bad: 'против города',
 };
 
-/** Вероятность добровольного бита: интерес, важность и подпирающий возраст. */
+/** Вероятность добровольного бита: у трёхтактных — urgency, иначе жар и важность. */
 export function beatChance(plot, cfg) {
   const b = cfg?.beats || {};
+  if (isThreeActPlot(plot)) {
+    const raw = Number(plot.urgency) / 100;
+    return Math.max(b.minChance ?? 0.05, Math.min(b.maxChance ?? 0.8, Number.isFinite(raw) ? raw : 0));
+  }
   const temp = clampStat(plot?.temperature) / 100;
   const imp = clampStat(plot?.importance) / 100;
   const maxAge = Math.max(1, Number(plot?.maxAgeMonths) || 6);

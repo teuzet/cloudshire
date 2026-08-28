@@ -4,6 +4,7 @@ const STORE_KEY = 'cloudshire.play.userId';
 let userId = localStorage.getItem(STORE_KEY) || 'local-user';
 let lastStats = {};
 let renderedCount = -1;
+let lastGenerating = false;
 let busy = false;
 let inspectTab = 'city';
 let inspectData = null;
@@ -47,10 +48,10 @@ function renderStats(stats) {
   lastStats = Object.fromEntries((stats || []).map((s) => [s.id, s.value]));
 }
 
-function renderHistory(history) {
+function renderHistory(history, tutorial = null) {
   const box = $('messages');
   box.innerHTML = '';
-  if (!history.length) {
+  if (!history.length && !tutorial) {
     box.appendChild(
       bubble('ruler', 'Скажи что-нибудь — проводник поможет создать город и познакомит с правителем.', 'начало'),
     );
@@ -65,11 +66,16 @@ function renderHistory(history) {
       box.appendChild(bubble('news', m.content, 'сопряжение на горизонте'));
     } else if (m.kind === 'conflux_approach') {
       box.appendChild(bubble('news', m.content, 'остров близко'));
+    } else if (m.kind === 'genesis_tutorial') {
+      box.appendChild(bubble('news', m.content, 'пока остров собирается'));
     } else if (m.kind === 'onboarding') {
       box.appendChild(bubble('ruler', m.content, 'проводник'));
     } else {
       box.appendChild(bubble('ruler', m.content));
     }
+  }
+  if (tutorial) {
+    box.appendChild(bubble('news', tutorial, 'пока остров собирается'));
   }
   box.scrollTop = box.scrollHeight;
 }
@@ -185,9 +191,11 @@ async function refresh({ force = false } = {}) {
       img.classList.add('hidden');
     }
 
-    if (force || state.history.length !== renderedCount) {
-      renderHistory(state.history);
+    const tutorial = state.generating ? state.genesisTutorial || null : null;
+    if (force || state.history.length !== renderedCount || state.generating !== lastGenerating) {
+      renderHistory(state.history, tutorial);
       renderedCount = state.history.length;
+      lastGenerating = Boolean(state.generating);
     }
 
     $('btnTick').classList.toggle('hidden', !state.canForceTick);
@@ -345,12 +353,16 @@ function plotCard(p, names = {}) {
   const host = p.hostDomainId ? names[p.hostDomainId] || p.hostDomainId : null;
   const meta = [
     p.kind,
+    p.storyType === 'mystery' ? 'тайна' : p.storyType === 'suspense' ? 'саспенс' : null,
+    p.act ? `такт ${p.act}` : null,
+    p.escalationLevel != null ? `кризис ${p.escalationLevel}/${p.maxEscalations ?? 3}` : null,
+    p.urgency != null ? `срочность ${p.urgency}` : null,
+    p.gravity != null ? `масштаб ${p.gravity}` : null,
     p.isMainConflux ? 'главная нить сопряжения' : null,
     p.shared ? 'общая' : concerns.length ? 'локальная' : null,
     p.sharedReason ? `стала общей: ${p.sharedReason}` : null,
     host ? `хозяин: ${host}` : null,
     concerns.length ? `касается: ${concerns.join(', ')}` : null,
-    `важность ${p.importance}`,
     `жар ${p.temperature}`,
     `возраст ${p.ageMonths}/${p.maxAgeMonths}`,
     `битов ${p.beatCount}`,
@@ -541,7 +553,15 @@ function renderOrdersBlocks(d) {
           .map(
             (o) =>
               `<li>${esc(o.text)} <span class="muted small">${esc(
-                [o.initiative === 'ruler' ? 'сам правитель' : o.by, o.declaredTick != null ? `тик ${o.declaredTick}` : null].filter(Boolean).join(' · '),
+                [
+                  o.indefinite === false || o.durationMonths
+                    ? o.remainingMonths != null
+                      ? `ещё ${o.remainingMonths} мес.`
+                      : `${o.durationMonths} мес.`
+                    : 'бессрочно',
+                  o.initiative === 'ruler' ? 'сам правитель' : o.by,
+                  o.declaredTick != null ? `тик ${o.declaredTick}` : null,
+                ].filter(Boolean).join(' · '),
               )}</span></li>`,
           )
           .join('')}</ul>`

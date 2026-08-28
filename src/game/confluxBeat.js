@@ -2,20 +2,21 @@ import { newId } from './ids.js';
 import { createLoreFact, createCharacterRecord, formatCastForPrompt, findCharacterByName, newCharactersSchema } from './models.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
-import { attachChronicleToPlotlines, clipPlotText, PLOT_SUMMARY_MAX, PLOT_HOOK_MAX } from './plotlines.js';
-import { mixedChronicleForPrompt, knownPartnerLore, pushInternalChronicle, chronicleReceiversForBeat } from './confluxBoard.js';
+import { attachChronicleToPlotlines, clipPlotText, PLOT_HOOK_MAX } from './plotlines.js';
+import { mixedChronicleForPrompt, knownPartnerLore, pushInternalChronicle, chronicleReceiversForBeat, isContested } from './confluxBoard.js';
 import { priorPlotChronicle } from './storyteller.js';
 import { TINT_LABELS, formatFinishForPrompt } from './rolls.js';
 import { formatContactForPrompt } from './conflux.js';
+import { formatTruthGraphForPrompt } from './mysteryGraph.js';
+import { formatLadderForPrompt, formatHiddenPremisesForPrompt } from './suspenseGraph.js';
 import { offerNames, formatOfferedNamesForPrompt, bindCharacterNames } from './names.js';
 
 function chronicleMaxChars(config) {
   return Math.max(80, Number(config?.tick?.chronicleEntryMaxChars) || 260);
 }
 
-function cityBrief(domain, max = 500) {
-  const text = String(domain?.description || '').trim();
-  return text.length > max ? `${text.slice(0, max)}…` : text || '(описание пусто)';
+function cityBrief(domain) {
+  return String(domain?.description || '').trim() || '(описание пусто)';
 }
 
 function rulerName(domain) {
@@ -116,6 +117,7 @@ export async function beatSharedPlot({
   const entryMax = finale ? Math.round(maxChars * 1.6) : maxChars;
   const draft = { data: null };
   const docked = conflux.status === 'docked';
+  const contested = isContested(plot, conflux);
   const receivers = chronicleReceiversForBeat(conflux, plot, beat, domains);
   if (!docked && !receivers.length) {
     return { fact: null, plot, closed: false, closeReason: '', sequelHook: '', cityFacts: [] };
@@ -129,7 +131,7 @@ export async function beatSharedPlot({
       description: 'Запись этого месяца по истории, которая касается обоих островов.',
       parameters: {
         type: 'object',
-        required: ['entry', 'synopsis'],
+        required: ['entry'],
         properties: {
           entry: {
             type: 'string',
@@ -138,10 +140,6 @@ export async function beatSharedPlot({
               : docked
                 ? `Что случилось в этом месяце, до ${entryMax} символов. Сухой факт. Назови оба города, если задеты оба. Стражу и войско называй с городом, не голое «стража».`
                 : `Что случилось в этом месяце на видимом берегу, до ${entryMax} символов. Сухой факт.`,
-          },
-          synopsis: {
-            type: 'string',
-            description: `Как обстоят дела сейчас, до ${PLOT_SUMMARY_MAX} символов. Сначала что уже было, потом где история стоит.`,
           },
           newCharacters: CHARACTERS_SCHEMA,
           closes: {
@@ -227,11 +225,14 @@ export async function beatSharedPlot({
             docked
               ? plot.isMainConflux
                 ? 'Это главная история встречи двух островов.'
-                : 'Эта история касается обоих городов.'
+                : contested
+                  ? 'РЕЖИМ СПОРА: оба города реально действуют в этой истории. Действия игроков важнее авторской драматургии. Лестница и дозирование — ёмкость, не сценарий.'
+                  : 'Эта история касается обоих городов.'
               : 'Острова ещё не сошлись: внутренней жизни соседнего города не видно, в запись её не пиши.',
+            contested ? contestedCanon(plot) : null,
             `Сейчас: ${plot.synopsis || 'только началась'}`,
             plot.closeWhen
-              ? `Историю можно закрыть, когда случится: ${plot.closeWhen}. Это условие развязки, не срок.`
+              ? `Успешный исход: ${plot.closeWhen}. История теряет смысл, когда: ${plot.mootWhen || '—'}. Это условия развязки, не срок.`
               : null,
             prior.length ? `\nУже записано по этой истории (не отменяй):\n${prior.join('\n')}` : null,
             mixed
@@ -256,7 +257,7 @@ export async function beatSharedPlot({
             '',
             formatOfferedNamesForPrompt(nameOffer),
             '',
-            'Вызови submit_plot_beat. Только запись этого месяца; карточку истории не переписывай, кроме синопсиса.',
+            'Вызови submit_plot_beat. Только запись этого месяца; карточку истории не переписывай. Синопсис не обновляй — это делает confluxStoryKeep.',
           ]
             .filter(Boolean)
             .join('\n'),
@@ -269,16 +270,14 @@ export async function beatSharedPlot({
 
   const d = draft.data;
   const entry = String(d?.entry || '').trim() || fallbackSharedEntry(plot, beat, domains);
-  if (d?.synopsis) plot.synopsis = clipPlotText(d.synopsis, PLOT_SUMMARY_MAX);
   plot.lastBeatTick = world.tickIndex;
   plot.beatCount = Number(plot.beatCount || 0) + 1;
 
   const boundPeople = bindCharacterNames(world, d?.newCharacters || [], {
     offered: nameOffer,
-    texts: [entry, d?.synopsis || ''],
+    texts: [entry],
   });
   const entryBound = boundPeople.texts[0] || entry;
-  if (boundPeople.texts[1] && d?.synopsis) plot.synopsis = clipPlotText(boundPeople.texts[1], PLOT_SUMMARY_MAX);
 
   const hiddenFrom = d?.hiddenFromOther ? domainByCityName(domains, d.hiddenFromCity) : null;
   const secretOwner = hiddenFrom ? (domains || []).find((x) => x.id !== hiddenFrom.id) || null : null;
@@ -357,6 +356,33 @@ export async function beatSharedPlot({
     sequelHook,
     cityFacts,
   };
+}
+
+function contestedCanon(plot) {
+  const lines = [
+    'Инварианты исходного типа нельзя ломать, даже если игроки ведут историю иначе.',
+  ];
+  if (plot.storyType === 'mystery') {
+    lines.push(
+      'ТАЙНА: не переписывай причинный граф, виновника и прошлое. Игроки могут изменить будущее, но не канон прошлого.',
+    );
+    if (plot.truthGraph) lines.push(formatTruthGraphForPrompt(plot.truthGraph));
+    else if (plot.truth) lines.push(`Канон (не раскрывай зря): ${plot.truth}`);
+  }
+  if (plot.storyType === 'suspense') {
+    lines.push(
+      'САСПЕНС: не противоречь установленным hiddenPremises и уже произошедшим discoveries. Не отменяй случившееся.',
+    );
+    if (plot.discoveryLadder?.length) {
+      lines.push('discoveryLadder (ёмкость, не обязательный сценарий):');
+      lines.push(formatLadderForPrompt(plot.discoveryLadder));
+    }
+    if (plot.hiddenPremises?.length) {
+      lines.push('hiddenPremises (не пиши в хронику, пока не открыто действием):');
+      lines.push(formatHiddenPremisesForPrompt(plot.hiddenPremises));
+    }
+  }
+  return lines.join('\n');
 }
 
 function fallbackSharedEntry(plot, beat, domains) {

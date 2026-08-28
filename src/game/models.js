@@ -2,6 +2,7 @@ import { newId } from './ids.js';
 import { seedWorldNamePool, normalizeNamePool } from './names.js';
 import { normalizeOrders } from './orders.js';
 import { stampPersonAge } from './ages.js';
+import { normalizeCityEntities } from './cityEntities.js';
 
 export function emptyState() {
   return {
@@ -48,6 +49,9 @@ export function normalizeDomain(domain) {
   }
   if (typeof domain.imagePath !== 'string') domain.imagePath = domain.imagePath || null;
   if (typeof domain.imageBase64 !== 'string') domain.imageBase64 = domain.imageBase64 || null;
+  domain.cityEntities = normalizeCityEntities(domain.cityEntities);
+  if (domain.cityEntities.length) domain.cityEntitiesReady = true;
+  else if (typeof domain.cityEntitiesReady !== 'boolean') domain.cityEntitiesReady = false;
   ensurePatronFact(domain);
   // pendingActions = длительные процессы; нормализация полей — в processes.normalizeDomainProcesses
   if (Array.isArray(domain.characters)) {
@@ -165,6 +169,8 @@ export function createDomainRecord({
     characters: [character],
     lore,
     plotlines: [],
+    cityEntities: [],
+    cityEntitiesReady: false,
     status: 'playing',
     lastTickAt: null,
     createdTick: Number.isInteger(createdTick) ? createdTick : 0,
@@ -362,6 +368,7 @@ export function createLoreFact({
   importance = null,
   relatedPendingId = null,
   relatedPlotlineIds = null,
+  sourcePlotId = null,
   processFinish = null,
   statChanges = null,
   secret = false,
@@ -384,6 +391,8 @@ export function createLoreFact({
   if (Array.isArray(relatedPlotlineIds) && relatedPlotlineIds.length) {
     fact.relatedPlotlineIds = [...new Set(relatedPlotlineIds.map(String))];
   }
+  const source = sourcePlotId || fact.relatedPlotlineIds?.[0] || null;
+  if (source) fact.sourcePlotId = String(source);
   if (processFinish) fact.processFinish = String(processFinish);
   if (statChanges && Object.keys(statChanges).length) fact.statChanges = statChanges;
   if (secret) {
@@ -486,7 +495,8 @@ export function loreToPromptText(lore = [], { excludeTags = [] } = {}) {
         if (parts.length) stats = ` «статы: ${parts.join(', ')}»`;
       }
       const scope = formatChronicleScope(f);
-      return `#${n} (${date})${tags}${imp}${stats}: ${scope}${f.text}`;
+      const plotRef = f.sourcePlotId ? ` ⟨${f.sourcePlotId}⟩` : '';
+      return `#${n} (${date})${tags}${imp}${stats}: ${scope}${f.text}${plotRef}`;
     })
     .join('\n');
 }

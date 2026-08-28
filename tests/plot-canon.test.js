@@ -7,16 +7,24 @@ import {
   plotConfig,
   plotHasActiveProcess,
   pickPlotTags,
-  pickOpeningPlotTags,
+  pickMysteryPlotTags,
+  pickSeedTags,
+  formatPlotTagsForPrompt,
+  formatMysteryAxesForPrompt,
+  mysteryTypeTag,
   openingPlotCount,
   pickSequelSeed,
+  allowSequelAfter,
+  createPlotline,
+  normalizePlotlines,
   plotSeedChance,
   liveStoryImportance,
   judgePlotSeed,
   reopenClosedPlotline,
+  plotScale,
 } from '../src/game/plotlines.js';
 import { ensureErrandForProcess, planBeats } from '../src/game/plotEngine.js';
-import { peopleUnderWatch, priorPlotChronicle } from '../src/game/storyteller.js';
+import { peopleUnderWatch, priorPlotChronicle, mintSeedCast, offerMysterySeedNames } from '../src/game/storyteller.js';
 
 function plot(id, extra = {}) {
   return {
@@ -257,29 +265,166 @@ test('закрытая нить помнит крючок на продолже�
   assert.match(archived.sequelHook, /угроза/);
 });
 
-test('каталог завязки: характер, сфера-статы, источник, масштаб', async () => {
+test('стартер тайны может пометить, что история просит сиквела', () => {
+  const seeded = createPlotline({
+    title: 'Гул в трубах',
+    storyType: 'mystery',
+    asksSequel: true,
+    observedFacts: ['Ярус слышит гул.', 'На площади спорят, колокол это или вода.'],
+    resolutionFacts: ['Почему гудит цистерна', 'Кто перестал её чистить'],
+  });
+  assert.equal(seeded.asksSequel, true);
+  assert.equal(seeded.observedFacts.length, 2);
+  assert.equal(seeded.resolutionFacts.length, 2);
+  const domain = { plotlines: [seeded], closedPlotlines: [] };
+  normalizePlotlines(domain);
+  assert.equal(domain.plotlines[0].asksSequel, true);
+  closePlotline(domain, seeded.id, { tick: 4, reason: 'Разгадали.', sequelHook: 'Яд шёл из соседней мастерской.' });
+  assert.equal(findClosedPlotline(domain, seeded.id).asksSequel, true);
+  assert.equal(allowSequelAfter({ storyType: 'mystery', asksSequel: true, kind: 'story' }), true);
+  assert.equal(allowSequelAfter({ storyType: 'mystery', asksSequel: false, kind: 'story' }), false);
+  assert.equal(allowSequelAfter({ storyType: 'suspense', kind: 'story' }), true);
+  assert.equal(allowSequelAfter({ kind: 'errand' }), false);
+});
+
+test('каталог завязки: тон, причинная сила, ситуация, динамика', async () => {
   const { loadConfig } = await import('../src/config.js');
   const config = loadConfig();
   const cfg = plotConfig(config);
   const byId = Object.fromEntries(cfg.tagGroups.map((g) => [g.id, g]));
-  assert.ok(byId.character && byId.sphere && byId.source && byId.scale);
+  assert.ok(byId.tone && byId.source && byId.situation && byId.dynamic);
+  assert.equal(byId.sphere, undefined);
+  assert.equal(byId.scale, undefined);
+  assert.equal(byId.character, undefined);
   assert.equal(byId.spark, undefined);
-  assert.ok(byId.sphere.tags.length >= 6);
-  const any = byId.source.tags.find((t) => t.id === 'any');
-  assert.ok(any && Number(any.weight) > 1);
+  assert.equal(byId.source.tags.find((t) => t.id === 'any'), undefined);
+  assert.ok(byId.source.tags.find((t) => t.id === 'unknown'));
+  assert.ok(cfg.suspense.gravityFloor >= 20);
+  assert.equal(cfg.suspense.legacyMinGravity, 25);
+  const tags = pickSeedTags(cfg, { storyType: 'suspense', rng: () => 0.5 });
+  assert.deepEqual(
+    tags.map((t) => t.groupId).sort(),
+    ['dynamic', 'situation', 'source', 'tone'],
+  );
 });
 
-test('жребий масштаба уважает вес: город чаще квартала', () => {
+test('каталог тайны: поле и тип', async () => {
+  const { loadConfig } = await import('../src/config.js');
+  const cfg = plotConfig(loadConfig());
+  const byId = Object.fromEntries(cfg.mysteryTagGroups.map((g) => [g.id, g]));
+  assert.ok(byId.association && byId.type);
+  assert.equal(byId.dynamic, undefined);
+  assert.equal(byId.kind, undefined);
+  assert.ok(byId.association.tags.length >= 16);
+  assert.ok(byId.type.tags.length >= 12);
+  assert.ok(byId.type.tags.length <= 16);
+  assert.ok(cfg.mysteryGraph.minNodes >= 3);
+  assert.ok(cfg.mysteryGraph.maxNodes >= cfg.mysteryGraph.minNodes);
+  const shapeIds = cfg.mysteryGraph.shapes.map((s) => s.id || s);
+  assert.ok(shapeIds.includes('linear_4'));
+  assert.ok(shapeIds.includes('linear_5'));
+  assert.ok(shapeIds.includes('linear_side'));
+  const byShape = Object.fromEntries(cfg.mysteryGraph.shapes.map((s) => [s.id || s, Number(s.weight)]));
+  assert.equal(byShape.linear_5, 0);
+  assert.ok(byShape.linear_4 > 0);
+  assert.equal(byShape.linear_side, 0);
+  assert.equal(cfg.mysteryGraph.sideRevealChance, 0.5);
+  assert.ok(cfg.mysteryEntities.minCatalog >= 24);
+  assert.equal(cfg.mysteryEntities.pickMin, 1);
+  assert.equal(cfg.mysteryEntities.pickMax, 2);
+  assert.ok(cfg.mysteryEntities.twoChance > 0);
+  assert.ok(cfg.mysteryEntities.twoChance < 0.5);
+  const raw = loadConfig();
+  assert.match(String(raw.world?.cosmology || ''), /low-magic/);
+  assert.match(String(raw.world?.cosmology || ''), /не проявляется повсеместно/);
+  assert.match(String(raw.world?.cosmology || ''), /священного алтаря/);
+  assert.match(String(raw.canon?.world || ''), /low-magic/);
+  assert.match(String(raw.canon?.world || ''), /священного алтаря/);
+  const tags = pickMysteryPlotTags(cfg, () => 0.1);
+  assert.deepEqual(
+    tags.map((t) => t.groupId).sort(),
+    ['association', 'type'],
+  );
+  assert.ok(mysteryTypeTag(tags)?.tagName);
+  const opening = pickSeedTags(cfg, { storyType: 'mystery', opening: true, rng: () => 0.01 });
+  assert.equal(opening.some((t) => t.groupId === 'scale'), false);
+  const known = new Set(['id', 'name', 'weight', 'people', 'kind', 'about']);
+  for (const g of cfg.mysteryTagGroups) {
+    for (const t of g.tags) {
+      const extra = Object.keys(t).filter((k) => !known.has(k));
+      assert.deepEqual(extra, [], `${g.id}/${t.id}: YAML разрезал имя на лишние ключи`);
+    }
+  }
+  const formatted = formatMysteryAxesForPrompt([
+    { groupId: 'association', groupName: 'Ассоциативное поле', tagName: 'остаток' },
+    { groupId: 'type', groupName: 'Тип тайны', tagName: 'заговор', about: 'скрытая воля' },
+  ]);
+  assert.match(formatted, /ТИП ТАЙНЫ \(обязателен\): заговор/);
+  assert.match(formatted, /АССОЦИАТИВНОЕ ПОЛЕ \(очень слабый импульс\): «остаток»/);
+  assert.equal(formatted.includes('всё мягко'), false);
+  const hard = formatPlotTagsForPrompt([
+    { groupId: 'tone', groupName: 'Тон', tagName: 'Жуткие странности' },
+  ]);
+  assert.equal(hard.includes('ассоциации'), false);
+});
+
+test('посев тайны даёт 1–2 имени без готовых карточек', () => {
+  const domain = { characters: [{ name: 'Паэла' }], lore: [] };
+  const one = offerMysterySeedNames({
+    world: { namePool: { female: ['Айра', 'Найра', 'Вера'], male: ['Кален', 'Норвел'] } },
+    domain,
+    rng: () => 0.1,
+  });
+  assert.equal(one.length, 1);
+  assert.ok(one[0].name);
+  assert.notEqual(String(one[0].name).toLowerCase(), 'паэла');
+  assert.ok(['male', 'female'].includes(one[0].gender));
+  assert.equal(one[0].role, undefined);
+  assert.equal(one[0].about, undefined);
+  const two = offerMysterySeedNames({
+    world: { namePool: { female: ['Айра', 'Найра'], male: ['Кален', 'Норвел'] } },
+    domain,
+    rng: () => 0.9,
+  });
+  assert.equal(two.length, 2);
+  assert.notEqual(two[0].name, two[1].name);
+});
+
+test('посев даёт 1–2 готовых человека из пула', () => {
+  const domain = { characters: [{ name: 'Паэла' }], lore: [] };
+  const one = mintSeedCast({
+    world: { namePool: { female: ['Айра', 'Найра', 'Вера'], male: ['Кален', 'Норвел'] } },
+    domain,
+    rng: () => 0.1,
+  });
+  assert.equal(one.length, 1);
+  assert.ok(one[0].name);
+  assert.notEqual(String(one[0].name).toLowerCase(), 'паэла');
+  assert.ok(['male', 'female'].includes(one[0].gender));
+  assert.ok(one[0].role);
+  assert.ok(one[0].about);
+  assert.ok(one[0].ageYears >= 18);
+  const two = mintSeedCast({
+    world: { namePool: { female: ['Айра', 'Найра'], male: ['Кален', 'Норвел'] } },
+    domain,
+    rng: () => 0.9,
+  });
+  assert.equal(two.length, 2);
+  assert.notEqual(two[0].name, two[1].name);
+  assert.notEqual(two[0].role, two[1].role);
+});
+
+test('жребий источника уважает вес: unknown чаще economic', () => {
   const cfg = plotConfig({
     tick: {
       plot: {
         tagGroups: [
           {
-            id: 'scale',
-            name: 'Масштаб',
+            id: 'source',
+            name: 'Источник',
             tags: [
-              { id: 'quarter', name: 'Квартал', weight: 1 },
-              { id: 'city', name: 'Город', weight: 3 },
+              { id: 'economic', name: 'Экономическая сила', weight: 1 },
+              { id: 'unknown', name: 'Неизвестное', weight: 3 },
             ],
           },
         ],
@@ -287,43 +432,31 @@ test('жребий масштаба уважает вес: город чаще �
     },
   });
   const picks = [0.1, 0.4, 0.7, 0.9].map((r) => pickPlotTags(cfg, () => r)[0].tagId);
-  assert.deepEqual(picks, ['quarter', 'city', 'city', 'city']);
+  assert.deepEqual(picks, ['economic', 'unknown', 'unknown', 'unknown']);
 });
 
-test('стартовый посев держит мелкий масштаб и считает 1–2 истории', () => {
-  const cfg = plotConfig({
-    tick: {
-      plot: {
-        tagGroups: [
-          {
-            id: 'scale',
-            name: 'Масштаб',
-            tags: [
-              { id: 'city', name: 'Город', weight: 10 },
-              { id: 'neighborhood', name: 'Соседство', weight: 1 },
-              { id: 'person', name: 'Человек', weight: 1 },
-            ],
-          },
-        ],
-      },
-    },
-  });
-  for (const r of [0.01, 0.4, 0.8, 0.99]) {
-    const tag = pickOpeningPlotTags(cfg, () => r).find((t) => t.groupId === 'scale');
-    assert.ok(['neighborhood', 'person'].includes(tag.tagId));
-  }
+test('стартовый посев считает 1–2 истории', () => {
   assert.equal(openingPlotCount({ genesis: { openingPlots: { min: 1, max: 1 } } }), 1);
   assert.equal(openingPlotCount({ genesis: { openingPlots: { min: 2, max: 2 } } }), 2);
 });
 
-test('продолжение сеется только с крючком, пустой доской и по шансу', () => {
-  const cfg = plotConfig({ tick: { plot: { board: { sequelChance: 0.55 } } } });
+test('продолжение сеется с крючком в освободившийся слот, даже если другие истории живы', () => {
+  const cfg = plotConfig({ tick: { plot: { board: { sequelChance: 0.55, maxOpen: 5 } } } });
   const offer = { id: 'plot_old', hook: 'Осталась неназванная угроза.' };
   assert.equal(pickSequelSeed({ plotlines: [] }, [offer], cfg, () => 0), offer);
   assert.equal(pickSequelSeed({ plotlines: [] }, [offer], cfg, () => 0.9), null);
   assert.equal(pickSequelSeed({ plotlines: [] }, [{ id: 'plot_old', hook: '' }], cfg, () => 0), null);
   assert.equal(
     pickSequelSeed({ plotlines: [{ kind: 'story' }] }, [offer], cfg, () => 0),
+    offer,
+  );
+  assert.equal(
+    pickSequelSeed(
+      { plotlines: [{ kind: 'story' }, { kind: 'story' }, { kind: 'story' }, { kind: 'story' }, { kind: 'story' }] },
+      [offer],
+      cfg,
+      () => 0,
+    ),
     null,
   );
 });
@@ -352,4 +485,19 @@ test('процессы занимают лимит тика, случайная 
   assert.equal(slotsUsed, 1);
   assert.ok(beats.some((b) => b.plotId === 'p_proc' && b.mandatory));
   assert.equal(beats.some((b) => b.plotId === 'p_story' && !b.fade), false);
+});
+
+test('масштаб трёхтактной истории берётся из gravity, не из importance', () => {
+  assert.equal(plotScale({ kind: 'story', storyType: 'suspense', gravity: 80, importance: 10 }), 80);
+  assert.equal(plotScale({ kind: 'story', importance: 55 }), 55);
+  assert.equal(
+    liveStoryImportance({
+      plotlines: [
+        { kind: 'story', storyType: 'mystery', gravity: 70, importance: 10 },
+        { kind: 'story', importance: 20 },
+        { kind: 'errand', importance: 90 },
+      ],
+    }),
+    90,
+  );
 });

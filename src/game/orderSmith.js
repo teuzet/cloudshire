@@ -15,11 +15,10 @@ import {
   PLOT_TITLE_MAX,
   plotConfig,
 } from './plotlines.js';
-import { closeOrderPair, normalizeOrders } from './orders.js';
+import { closeOrderPair, normalizeOrders, stampOrderTerm } from './orders.js';
 
-function cityBrief(domain, max = 600) {
-  const text = String(domain.description || '').trim();
-  return text.length > max ? `${text.slice(0, max)}…` : text || '(описание пусто)';
+function cityBrief(domain) {
+  return String(domain.description || '').trim() || '(описание пусто)';
 }
 
 function titleFromText(text) {
@@ -39,6 +38,7 @@ function fallbackCard(req, cfg) {
     closeWhen: clipPlotText('Покровитель отменил порядок или город его сверг.', PLOT_HOOK_MAX),
     fireChance: cfg.orders.defaultChance,
     scheduleEveryMonths: 0,
+    fireOn: null,
     dueNow: false,
     relatedStats: [],
     modifierText: text,
@@ -55,16 +55,24 @@ function applyCardToPlot(plot, card, { tick, cfg, modifierId }) {
   plot.title = clipPlotText(card.title || plot.title, PLOT_TITLE_MAX);
   plot.synopsis = clipPlotText(card.synopsis || plot.synopsis, PLOT_SUMMARY_MAX);
   plot.closeWhen = clipPlotText(card.closeWhen || plot.closeWhen, PLOT_HOOK_MAX);
-  const every = Math.round(Number(card.scheduleEveryMonths) || 0);
-  plot.scheduleEveryMonths = every >= 1 && every <= 12 ? every : null;
-  plot.fireChance = plot.scheduleEveryMonths
-    ? 0
-    : clampChance(card.fireChance, cfg.orders.defaultChance);
-  plot.modifierId = modifierId || plot.modifierId || null;
-  if (card.dueNow) plot.nextDueTick = tick;
-  else if (plot.scheduleEveryMonths && plot.nextDueTick == null) {
-    plot.nextDueTick = Number(tick) + plot.scheduleEveryMonths;
+  const fireOn = String(card.fireOn || '').trim() === 'conflux_dock' ? 'conflux_dock' : null;
+  plot.fireOn = fireOn;
+  if (fireOn) {
+    plot.scheduleEveryMonths = null;
+    plot.fireChance = 0;
+    plot.nextDueTick = null;
+  } else {
+    const every = Math.round(Number(card.scheduleEveryMonths) || 0);
+    plot.scheduleEveryMonths = every >= 1 && every <= 12 ? every : null;
+    plot.fireChance = plot.scheduleEveryMonths
+      ? 0
+      : clampChance(card.fireChance, cfg.orders.defaultChance);
+    if (card.dueNow) plot.nextDueTick = tick;
+    else if (plot.scheduleEveryMonths && plot.nextDueTick == null) {
+      plot.nextDueTick = Number(tick) + plot.scheduleEveryMonths;
+    }
   }
+  plot.modifierId = modifierId || plot.modifierId || null;
   if (Array.isArray(card.relatedStats) && card.relatedStats.length) {
     plot.relatedStats = card.relatedStats.map(String);
   }
@@ -116,12 +124,23 @@ async function askOrderCard({ runtime, domain, world, req, log, cfg, statIds }) 
           },
           fireChance: {
             type: 'number',
-            description: '0–1. Шанс, что в обычный месяц порядок даст запись или историю.',
+            description:
+              '0–1. Шанс, что в обычный месяц этот порядок породит отдельное ЗАМЕТНОЕ событие, достойное хроники. ' +
+              'Это не частота применения самого закона. Тихий налог ≈ 0.05–0.15; конфликтный жёсткий порядок ≈ 0.36–0.70. ' +
+              'Если fireOn=conflux_dock — поставь 0.',
           },
           scheduleEveryMonths: {
             type: 'number',
             description:
-              'Каждые N месяцев попытка обязательна (1–12). 0 — только по вероятности, без расписания.',
+              'Каждые N месяцев попытка обязательна (1–12). 0 — только по вероятности, без расписания. ' +
+              'Если fireOn=conflux_dock — поставь 0.',
+          },
+          fireOn: {
+            type: 'string',
+            enum: ['conflux_dock'],
+            description:
+              'conflux_dock — правило срабатывает при сопряжении с соседним островом, не по календарю. ' +
+              'Только если формулировка явно про каждую встречу/сопряжение/когда сойдёмся.',
           },
           dueNow: {
             type: 'boolean',
@@ -167,11 +186,22 @@ async function askOrderCard({ runtime, domain, world, req, log, cfg, statIds }) 
           `${verb} (${world.gameDate?.label || 'этот месяц'}).`,
           `Формулировка: ${req.text}`,
           req.action === 'edit' ? 'Это правка уже действующего порядка: обнови синопсис и каденс под новую норму.' : null,
-          'Ты не пишешь хронику. Ты ставишь, как часто город будет сталкиваться с последствиями этого правила,',
+          req.durationSet
+            ? req.durationMonths
+              ? `Срок действия задан покровителем: ${req.durationMonths} мес., затем движок снимет порядок сам. closeWhen — досрочная отмена, не истечение срока.`
+              : 'Покровитель хочет бессрочный порядок. Срок не ставь.'
+            : 'Срок не задан — порядок бессрочный, пока не отменят. Срок сам не выдумывай.',
+          'Ты не пишешь хронику. Ты ставишь, как часто город будет сталкиваться с ЗАМЕТНЫМИ последствиями этого правила,',
           'и что должно произойти, чтобы правило сняли.',
           'Расписание — если из формулировки ясно «каждый N-й месяц / каждую весну / раз в два месяца».',
-          'Иначе scheduleEveryMonths=0 и живой fireChance (тихий налог — реже, жестокий указ — чаще).',
+          'fireOn=conflux_dock — если правило срабатывает при сопряжении с соседним островом',
+          '(при каждой встрече, когда сойдёмся, на каждый конфлюкс). Тогда scheduleEveryMonths=0 и fireChance=0.',
+          'Не ставь conflux_dock на обычный закон, который просто может коснуться соседа.',
+          'Иначе scheduleEveryMonths=0 и fireChance как частота заметного события, не частота применения закона.',
+          'Тихий рутинный налог — редко; жестокий конфликтный указ — чаще. Важность правила сама по себе fireChance не повышает.',
           'dueNow=true, если порядок уже должен дать след в этом месяце (роль занята с сегодня, налог с этого сбора).',
+          'Для fireOn=conflux_dock dueNow не нужен: движок сам стреляет, когда острова сойдутся, в том числе в текущую встречу.',
+          'closeWhen — когда снимут сам порядок, не когда кончится история, которая из него может вырасти.',
           'Вызови submit_order_card.',
         ]
           .filter(Boolean)
@@ -193,6 +223,7 @@ function applyCreate(domain, req, card, { tick, cfg, config }) {
     relatedStats: card.relatedStats,
     fireChance: card.fireChance,
     scheduleEveryMonths: card.scheduleEveryMonths,
+    fireOn: card.fireOn || null,
     nextDueTick: card.dueNow ? tick : null,
     tick,
     config,
@@ -210,6 +241,8 @@ function applyCreate(domain, req, card, { tick, cfg, config }) {
   });
   plot.modifierId = mod.id;
   mod.plotlineId = plot.id;
+  if (req.durationSet) stampOrderTerm(plot, mod, { months: req.durationMonths, tick });
+  else stampOrderTerm(plot, mod, { months: null, tick });
   return { plot, modifier: mod };
 }
 
@@ -228,6 +261,7 @@ function applyEdit(domain, req, card, { tick, cfg, config }) {
   }
   applyCardToPlot(plot, card, { tick, cfg, modifierId: mod.id });
   mod.plotlineId = plot.id;
+  if (req.durationSet) stampOrderTerm(plot, mod, { months: req.durationMonths, tick });
   return { plot, modifier: mod };
 }
 
@@ -276,6 +310,7 @@ export async function resolvePendingOrders({ config, runtime, domain, world, log
           modifierId: applied.modifier?.id,
           fireChance: applied.plot?.fireChance,
           scheduleEveryMonths: applied.plot?.scheduleEveryMonths,
+          fireOn: applied.plot?.fireOn || null,
           dueNow: applied.plot?.nextDueTick === tick,
         });
       }
