@@ -2,6 +2,7 @@ import { statEpithet } from './stats.js';
 import { plotConcerns } from './confluxBoard.js';
 import { activeProcesses, pausedProcesses, processOwnedBy } from './processes.js';
 import { listStandingOrders } from './orders.js';
+import { gameDateFromTickIndex, worldDateLabel } from './tickClock.js';
 
 function clip(text, max = 800) {
   const t = String(text || '').trim();
@@ -11,10 +12,7 @@ function clip(text, max = 800) {
 
 export function gameDateLabelAtTick(world, tick) {
   if (!Number.isInteger(Number(tick))) return null;
-  const t = Math.max(0, Math.round(Number(tick)));
-  const year = Math.floor(t / 12) + 1;
-  const month = (t % 12) + 1;
-  return `Год ${year}, месяц ${month}`;
+  return gameDateFromTickIndex(tick).label;
 }
 
 function cityParticipates(plot, domainId) {
@@ -88,7 +86,7 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
     return {
       city: null,
       generating: Boolean(generating),
-      gameDate: world?.gameDate?.label || null,
+      gameDate: null,
       stats: [],
       events: [],
       processes: [],
@@ -123,7 +121,7 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
       hasImage: Boolean(domain.imagePath || domain.imageBase64),
     },
     generating: Boolean(generating),
-    gameDate: world?.gameDate?.label || null,
+    gameDate: worldDateLabel(world),
     stats,
     events: collectEvents(domain, conflux, config),
     processes: ownProcesses(domain, conflux).map((p) => slimProcess(p, config)),

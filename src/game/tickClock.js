@@ -36,6 +36,21 @@ export function gameDateFromTickIndex(tick) {
   };
 }
 
+export function worldDateLabel(world) {
+  const y = Number(world?.gameDate?.year);
+  const m = Number(world?.gameDate?.month);
+  if (Number.isInteger(y) && y > 0 && Number.isInteger(m) && m >= 1 && m <= 12) {
+    return `Год ${y}, месяц ${m}`;
+  }
+  const label = String(world?.gameDate?.label || '').trim();
+  if (label) return label;
+  return gameDateFromTickIndex(world?.tickIndex ?? 0).label;
+}
+
+export function genesisDateMessage(world) {
+  return `Сейчас в мире — ${worldDateLabel(world)}.`;
+}
+
 /** Следующая граница интервала строго после now (14:00:00 → 16:00). */
 export function nextAlignedTickAt(now = Date.now(), config) {
   const intervalH = tickIntervalHours(config);

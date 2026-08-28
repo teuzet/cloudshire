@@ -102,6 +102,7 @@ import { islandDeleteCheck } from '../clients/telegram/access.js';
 import { generateIslandImage, removeIslandImage } from './islandImage.js';
 import { formatIslandReveal } from './islandReveal.js';
 import { formatProgressBar, genesisTutorialText } from './progressBar.js';
+import { genesisDateMessage } from './tickClock.js';
 import { estimateProcessDuration } from './durationJudge.js';
 import { ensureErrandForProcess, linkProcessToPlotline } from './plotEngine.js';
 import { judgeProcessAlignment } from './plotAlign.js';
@@ -1585,6 +1586,14 @@ export class GameApp {
           domainId: domain.id,
           kind: 'island_reveal',
           photoPath: picture?.abs || null,
+        });
+        const dateNote = genesisDateMessage(await this.storage.getWorld());
+        await this.persistDialog(domain, 'assistant', dateNote, { kind: 'game_date' });
+        await this.emitOutbound(uid, dateNote, {
+          channel,
+          agent: 'onboarding',
+          domainId: domain.id,
+          kind: 'game_date',
         });
         await this.persistDialog(domain, 'assistant', intro);
         await this.emitOutbound(uid, intro, {

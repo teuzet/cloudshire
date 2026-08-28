@@ -150,6 +150,7 @@ test('мини-аппка: свои истории и участие в сопр
   assert.equal(view.orders[0].indefinite, false);
   assert.equal(view.orders[0].remainingMonths, 2);
   assert.match(view.orders[0].since, /Год 1, месяц 4/);
+  assert.equal(view.gameDate, 'Год 1, месяц 6');
   assert.equal('loyalty' in (view.city || {}), false);
 });
 

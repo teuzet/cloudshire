@@ -68,7 +68,13 @@ h1 {
 }
 
 .muted { color: var(--muted); }
-.top .muted { margin: 0.25rem 0 0; font-size: 0.82rem; }
+.city-date {
+  margin: 0.35rem 0 0;
+  font-size: 0.95rem;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.55);
+}
 
 .panel {
   padding: 0.6rem 1rem 6.2rem;

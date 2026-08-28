@@ -5,6 +5,8 @@ import {
   gameDateFromTickIndex,
   nextAlignedTickAt,
   applyClockAlignedCalendar,
+  worldDateLabel,
+  genesisDateMessage,
 } from '../src/game/tickClock.js';
 import { createWorldFromConfig } from '../src/game/models.js';
 import { recordTickCompleted } from '../src/scheduler/ticks.js';
@@ -64,4 +66,10 @@ test('после тика nextTickAt — следующая граница, да
   assert.equal(next.getHours(), 4);
   assert.equal(next.getMinutes(), 0);
   assert.equal(next.getSeconds(), 0);
+});
+
+test('подпись даты после генезиса берёт год и месяц мира', () => {
+  assert.equal(worldDateLabel({ gameDate: { year: 1, month: 8 } }), 'Год 1, месяц 8');
+  assert.equal(worldDateLabel({ tickIndex: 12 }), 'Год 2, месяц 1');
+  assert.equal(genesisDateMessage({ gameDate: { year: 1, month: 1 } }), 'Сейчас в мире — Год 1, месяц 1.');
 });

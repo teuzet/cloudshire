@@ -68,6 +68,8 @@ function renderHistory(history, tutorial = null) {
       box.appendChild(bubble('news', m.content, 'остров близко'));
     } else if (m.kind === 'genesis_tutorial') {
       box.appendChild(bubble('news', m.content, 'пока остров собирается'));
+    } else if (m.kind === 'game_date') {
+      box.appendChild(bubble('news', m.content, 'календарь'));
     } else if (m.kind === 'onboarding') {
       box.appendChild(bubble('ruler', m.content, 'проводник'));
     } else {
