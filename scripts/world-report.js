@@ -171,6 +171,7 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
     const c = m.meta.commitment;
     commitments[c] = (commitments[c] || 0) + 1;
     if (m.meta.requestKind === 'order_long' || m.meta.requestKind === 'order_instant') {
+      if (c === 'clarify') continue;
       orders += 1;
       if (c !== 'none') ordersHonored += 1;
     }

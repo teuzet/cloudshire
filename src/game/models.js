@@ -495,7 +495,8 @@ export function loreToPromptText(lore = [], { excludeTags = [] } = {}) {
         if (parts.length) stats = ` «статы: ${parts.join(', ')}»`;
       }
       const scope = formatChronicleScope(f);
-      return `#${n} (${date})${tags}${imp}${stats}: ${scope}${f.text}`;
+      const plotRef = f.sourcePlotId ? ` ⟨${f.sourcePlotId}⟩` : '';
+      return `#${n} (${date})${tags}${imp}${stats}: ${scope}${f.text}${plotRef}`;
     })
     .join('\n');
 }

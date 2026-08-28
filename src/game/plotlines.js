@@ -220,6 +220,16 @@ function orderCadence(p, config = null) {
     fireChance: fireOn || scheduled ? 0 : clampChance(p?.fireChance, Number.isFinite(fallback) ? fallback : 0.2),
     scheduleEveryMonths: scheduled ? every : null,
     nextDueTick: fireOn ? null : Number.isInteger(due) ? due : null,
+    durationMonths: (() => {
+      const n = Math.round(Number(p?.durationMonths));
+      return Number.isInteger(n) && n >= 1 ? Math.min(36, n) : null;
+    })(),
+    expiresTick: (() => {
+      const n = Math.round(Number(p?.durationMonths));
+      if (!(Number.isInteger(n) && n >= 1) || p?.expiresTick == null || p.expiresTick === '') return null;
+      const exp = Number(p.expiresTick);
+      return Number.isInteger(exp) ? exp : null;
+    })(),
   };
 }
 
@@ -359,6 +369,7 @@ function applyPlotShape(p, config = null) {
   p.tags = Array.isArray(p.tags) ? p.tags : [];
   p.relatedStats = normalizeStatIds(p.relatedStats, config);
   p.chronicleIds = Array.isArray(p.chronicleIds) ? p.chronicleIds.map(String) : [];
+  p.factIds = Array.isArray(p.factIds) ? p.factIds.map(String) : [];
   p.relatedProcessIds = Array.isArray(p.relatedProcessIds) ? p.relatedProcessIds.map(String) : [];
   p.relatedPlotlineIds = Array.isArray(p.relatedPlotlineIds) ? p.relatedPlotlineIds.map(String) : [];
   p.importance = clamp100(p.importance, 40);
@@ -430,6 +441,8 @@ export function createPlotline({
   nextDueTick = null,
   fireOn = null,
   lastFiredConfluxId = null,
+  durationMonths = null,
+  expiresTick = null,
   storyType = null,
   act = 1,
   urgency = null,
@@ -469,6 +482,7 @@ export function createPlotline({
     tags: Array.isArray(tags) ? tags : [],
     relatedStats: normalizeStatIds(relatedStats, config),
     chronicleIds: [],
+    factIds: [],
     relatedProcessIds: (relatedProcessIds || []).map(String),
     relatedPlotlineIds: (relatedPlotlineIds || []).map(String),
     importance: clamp100(importance, resolvedKind === 'order' ? 20 : 40),
@@ -492,7 +506,7 @@ export function createPlotline({
     beatCount: 0,
     ...(resolvedKind === 'order'
       ? orderCadence(
-          { modifierId, fireChance, scheduleEveryMonths, nextDueTick, fireOn, lastFiredConfluxId },
+          { modifierId, fireChance, scheduleEveryMonths, nextDueTick, fireOn, lastFiredConfluxId, durationMonths, expiresTick },
           config,
         )
       : {}),
@@ -651,6 +665,7 @@ function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } =
     tags: Array.isArray(plot.tags) ? plot.tags : [],
     relatedStats: Array.isArray(plot.relatedStats) ? [...plot.relatedStats] : [],
     chronicleIds: Array.isArray(plot.chronicleIds) ? [...plot.chronicleIds] : [],
+    factIds: Array.isArray(plot.factIds) ? [...plot.factIds] : [],
     relatedProcessIds: Array.isArray(plot.relatedProcessIds) ? [...plot.relatedProcessIds] : [],
     relatedPlotlineIds: Array.isArray(plot.relatedPlotlineIds) ? [...plot.relatedPlotlineIds] : [],
     importance: plot.importance,
@@ -675,6 +690,8 @@ function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } =
           nextDueTick: plot.nextDueTick ?? null,
           fireOn: plot.fireOn || null,
           lastFiredConfluxId: plot.lastFiredConfluxId || null,
+          durationMonths: plot.durationMonths ?? null,
+          expiresTick: plot.expiresTick ?? null,
         }
       : {}),
     status: 'closed',
@@ -710,6 +727,7 @@ export function reopenClosedPlotline(domain, closedOrId) {
     tags: Array.isArray(closed.tags) ? closed.tags : [],
     relatedStats: Array.isArray(closed.relatedStats) ? [...closed.relatedStats] : [],
     chronicleIds: Array.isArray(closed.chronicleIds) ? closed.chronicleIds.map(String) : [],
+    factIds: Array.isArray(closed.factIds) ? closed.factIds.map(String) : [],
     relatedProcessIds: Array.isArray(closed.relatedProcessIds)
       ? closed.relatedProcessIds.map(String)
       : [],
@@ -772,11 +790,21 @@ export function advancePlotClocks(domain, cfg) {
 }
 
 export function attachChronicleToPlotlines(domain, factId, plotlineIds) {
+  attachIdsToPlotlines(domain, 'chronicleIds', factId, plotlineIds);
+}
+
+export function attachFactToPlotlines(domain, factId, plotlineIds) {
+  attachIdsToPlotlines(domain, 'factIds', factId, plotlineIds);
+}
+
+function attachIdsToPlotlines(domain, field, factId, plotlineIds) {
   if (!factId) return;
   for (const id of [...new Set((plotlineIds || []).map(String))]) {
     const p = findPlotline(domain, id);
     if (!p) continue;
-    if (!p.chronicleIds.includes(String(factId))) p.chronicleIds.push(String(factId));
+    if (!Array.isArray(p[field])) p[field] = [];
+    const sid = String(factId);
+    if (!p[field].includes(sid)) p[field].push(sid);
   }
 }
 
@@ -1046,13 +1074,19 @@ export function formatBoardForPrompt(domain) {
       const stats = p.relatedStats.length ? ` | в игре: ${p.relatedStats.join('+')}` : '';
       const proc = p.relatedProcessIds.length ? ` | дела: ${p.relatedProcessIds.join(', ')}` : '';
       const kindLabel = p.kind === 'errand' ? '(дело)' : p.kind === 'order' ? '(порядок)' : '';
+      const term =
+        p.kind === 'order'
+          ? p.durationMonths
+            ? `срок=${p.durationMonths}мес.${p.expiresTick != null ? ` до тика ${p.expiresTick}` : ''}`
+            : 'бессрочно'
+          : `возраст=${p.ageMonths}/${p.maxAgeMonths}`;
       const three = isThreeActPlot(p);
       const meters = three
         ? `urgency=${p.urgency} gravity=${p.gravity} эск=${p.escalationLevel}/${p.maxEscalations} такт=${p.act} тип=${p.storyType}` +
           (p.storyType === 'suspense' && p.depth ? ` depth=${p.depth}` : '')
         : `T=${p.temperature} тип=${p.storyType || 'default'}`;
       return (
-        `- [${p.id}] «${p.title}» ${kindLabel} ${meters} возраст=${p.ageMonths}/${p.maxAgeMonths}` +
+        `- [${p.id}] «${p.title}» ${kindLabel} ${meters} ${term}` +
         stats +
         proc +
         (p.synopsis ? `\n  ${p.synopsis}` : '')
@@ -1095,7 +1129,9 @@ export function formatBoardForSpeech(domain, { statsFeel = null, max = 8, viewer
       const duty = (p.relatedProcessIds || []).length
         ? 'дело уже идёт'
         : p.kind === 'order'
-          ? 'действует'
+          ? p.durationMonths
+            ? `действует ${p.durationMonths} мес.`
+            : 'действует бессрочно'
           : p.kind === 'errand'
             ? 'дела нет'
             : 'поручения ещё нет';

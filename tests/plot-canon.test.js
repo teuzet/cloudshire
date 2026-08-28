@@ -337,7 +337,9 @@ test('каталог тайны: поле и тип', async () => {
   const raw = loadConfig();
   assert.match(String(raw.world?.cosmology || ''), /low-magic/);
   assert.match(String(raw.world?.cosmology || ''), /не проявляется повсеместно/);
+  assert.match(String(raw.world?.cosmology || ''), /священного алтаря/);
   assert.match(String(raw.canon?.world || ''), /low-magic/);
+  assert.match(String(raw.canon?.world || ''), /священного алтаря/);
   const tags = pickMysteryPlotTags(cfg, () => 0.1);
   assert.deepEqual(
     tags.map((t) => t.groupId).sort(),

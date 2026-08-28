@@ -1,5 +1,9 @@
 const BAR = 8;
 
+export function genesisTutorialText(config) {
+  return String(config?.genesis?.tutorial || '').trim();
+}
+
 export function formatProgressBar(step, total, label) {
   const max = Math.max(1, Number(total) || 1);
   const now = Math.max(0, Math.min(max, Number(step) || 0));

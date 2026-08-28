@@ -37,7 +37,7 @@ import {
   formatBeatPlanForLog,
   clearMonthLog,
 } from './plotEngine.js';
-import { planOrderTicks, pickOrderOutcome } from './orders.js';
+import { planOrderTicks, pickOrderOutcome, expireTimedOrders } from './orders.js';
 import { resolvePendingOrders } from './orderSmith.js';
 import { fireConfluxDockOrder } from './orderDock.js';
 import { seedPlot, beatPlot, tickOrder, quietMonth, keepStories, fadeQuietPlot } from './storyteller.js';
@@ -107,6 +107,24 @@ export async function resolveDomainMonth({
     world,
     log,
   });
+  const expiredOrders = expireTimedOrders(working, world.tickIndex);
+  for (const row of expiredOrders) {
+    const title = row.plot?.title || 'порядок';
+    const rule = String(row.modifier?.text || title).trim();
+    const fact = createLoreFact({
+      id: newId('lore'),
+      text: `Срок порядка «${title}» истёк. Правило больше не действует: ${rule}`,
+      tags: ['chronicle', 'order', 'expired'],
+      gameDateLabel: world.gameDate?.label,
+      tick: world.tickIndex,
+      author: 'order-expire',
+      importance: 'minor',
+      relatedPlotlineIds: row.plot?.id ? [row.plot.id] : [],
+    });
+    working.lore = working.lore || [];
+    working.lore.push(fact);
+    chronicleAdds.push(fact);
+  }
 
   // Пик месяца: то, с чего правитель начнёт письмо. Без него развязка тонет
   // в ряду обычных записей и большое дело проходит незамеченным.
@@ -158,6 +176,7 @@ export async function resolveDomainMonth({
       finished: o.finished,
     })),
     orderCards: orderCards.map((r) => r.action),
+    expiredOrders: expiredOrders.length,
     budget: { world: budget.world, player: budget.player },
   });
 

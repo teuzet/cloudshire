@@ -101,7 +101,7 @@ import { queueOrderRequest, listStandingOrders } from './orders.js';
 import { islandDeleteCheck } from '../clients/telegram/access.js';
 import { generateIslandImage, removeIslandImage } from './islandImage.js';
 import { formatIslandReveal } from './islandReveal.js';
-import { formatProgressBar } from './progressBar.js';
+import { formatProgressBar, genesisTutorialText } from './progressBar.js';
 import { estimateProcessDuration } from './durationJudge.js';
 import { ensureErrandForProcess, linkProcessToPlotline } from './plotEngine.js';
 import { judgeProcessAlignment } from './plotAlign.js';
@@ -203,13 +203,112 @@ function stripSpeakerPrefix(text, characterName) {
  * Речь правителя уходит через submit_reply, поэтому обещание дела проверяется
  * структурно: заявленный commitment сверяется с успешными вызовами хода.
  */
+export function rulerReplyCommitError({
+  requestKind,
+  commitment,
+  text = '',
+  okTools = new Set(),
+} = {}) {
+  const succeeded = (...names) => names.some((n) => okTools.has(n));
+  const asked = /[?]/.test(String(text || ''));
+  if (commitment === 'process' && !succeeded('declare_process', 'update_process')) {
+    return {
+      error: 'process_missing',
+      message:
+        'Ты заявил commitment=process, но дело не создано: declare_process/update_process не выполнен успешно. ' +
+        'Либо вызови declare_process сейчас, либо смени commitment (refused — если отговариваешь, ' +
+        'clarify — если сначала нужно уточнить волю, none — если дела не нужно) ' +
+        'и убери из речи обещание долгого дела.',
+    };
+  }
+  if (commitment === 'standing_order' && !succeeded('declare_standing_order')) {
+    return {
+      error: 'order_missing',
+      message:
+        'commitment=standing_order, но declare_standing_order не выполнен. Объяви порядок через tool или смени commitment.',
+    };
+  }
+  if (commitment === 'revoked' && !succeeded('revoke_order', 'revoke_process')) {
+    return {
+      error: 'revoke_missing',
+      message:
+        'commitment=revoked, но отмена не выполнена. Вызови revoke_order (указ) или revoke_process (дело), либо смени commitment.',
+    };
+  }
+  if (commitment === 'clarify') {
+    if (succeeded('declare_process', 'update_process', 'declare_standing_order')) {
+      return {
+        error: 'clarify_after_act',
+        message:
+          'Дело или порядок уже заведены этим ходом. commitment=process или standing_order, не clarify.',
+      };
+    }
+    if (requestKind === 'order_impossible') {
+      return {
+        error: 'impossible_not_refused',
+        message:
+          'Такой приказ смертному не исполнить. Поставь commitment=refused, не уточняй, как его выполнить.',
+      };
+    }
+    if (requestKind !== 'order_long' && requestKind !== 'order_instant') {
+      return {
+        error: 'clarify_not_order',
+        message:
+          'clarify — только когда покровитель отдал приказ, который ещё нельзя облечь в дело или порядок. ' +
+          'Для беседы и вопросов — commitment=none.',
+      };
+    }
+    if (!asked) {
+      return {
+        error: 'clarify_no_question',
+        message:
+          'commitment=clarify: в речи должен быть вопрос покровителю (со знаком вопроса). ' +
+          'Не додумывай недостающее и не обещай, что дело уже начато.',
+      };
+    }
+    return null;
+  }
+  if (requestKind === 'order_long' && commitment === 'none') {
+    return {
+      error: 'order_ignored',
+      message:
+        'Покровитель отдал долгий приказ, а ты ничего не предпринял. ' +
+        'Либо declare_process / update_process (commitment=process), ' +
+        'либо спроси, чего не хватает, чтобы исполнить (commitment=clarify), ' +
+        'либо честно откажи в речи и поставь commitment=refused.',
+    };
+  }
+  if (requestKind === 'order_instant' && commitment === 'none') {
+    return {
+      error: 'instant_ignored',
+      message:
+        'Покровитель велел решение сейчас, а в мире ничего не заведено. ' +
+        'declare_standing_order — если это порядок, который теперь соблюдают всегда; ' +
+        'declare_process на 1 месяц — если это дело с исходом. ' +
+        'Если воля ещё неясна (разовое это или всегда, кого, до какой меры) — спроси, commitment=clarify. ' +
+        'Либо откажи в речи с commitment=refused.',
+    };
+  }
+  if (requestKind === 'order_impossible' && commitment !== 'refused') {
+    return {
+      error: 'impossible_not_refused',
+      message:
+        'Такой приказ смертному не исполнить. Поставь commitment=refused. ' +
+        'В речи — не объяснение устройства мира, а твоё простое «не умею», «не понимаю этих слов», ' +
+        '«там ветер и бездна»; предложи то, что можешь: послать людей, объявить обряд, начать дело. ' +
+        'Сцену, будто это происходит, не отыгрывай.',
+    };
+  }
+  return null;
+}
+
 function submitReplyTool(turn, character) {
-  const succeeded = (...names) => names.some((n) => turn.okTools.has(n));
   return {
     name: 'submit_reply',
     description:
       'ЕДИНСТВЕННЫЙ способ ответить покровителю. Вызывай последним, когда все нужные действия уже сделаны. ' +
-      'text — сама речь; requestKind — чего просил покровитель; commitment — что ты реально сделал этим ходом.',
+      'text — сама речь; requestKind — чего просил покровитель; commitment — что ты реально сделал этим ходом. ' +
+      'Если приказ ещё нельзя облечь в дело или порядок — спроси и поставь commitment=clarify.',
     parameters: {
       type: 'object',
       required: ['text', 'requestKind', 'commitment'],
@@ -245,14 +344,15 @@ function submitReplyTool(turn, character) {
           type: 'string',
           description:
             'Одна короткая фраза: что произошло сегодня в мире — появился человек, отдан приказ, ' +
-            'кто-то отказался, куда-то сходили. Пусто, если был только разговор.',
+            'кто-то отказался, куда-то сходили. Пусто, если был только разговор или уточняющий вопрос.',
         },
         commitment: {
           type: 'string',
-          enum: ['none', 'process', 'standing_order', 'revoked', 'refused'],
+          enum: ['none', 'process', 'standing_order', 'revoked', 'refused', 'clarify'],
           description:
             'Что сделано этим ходом: process (declare_process/update_process), standing_order, ' +
             'revoked (отменил указ или свернул дело), refused (честно отказал или отговорил), ' +
+            'clarify (приказ есть, но воля неясна — спросил, дело ещё не заводил), ' +
             'none (действий не требовалось).',
         },
       },
@@ -262,53 +362,13 @@ function submitReplyTool(turn, character) {
       if (body.length < 2) {
         return toolFail('too_short', 'Речь пустая. Напиши ответ покровителю в text.');
       }
-      if (commitment === 'process' && !succeeded('declare_process', 'update_process')) {
-        return toolFail(
-          'process_missing',
-          'Ты заявил commitment=process, но дело не создано: declare_process/update_process не выполнен успешно. ' +
-            'Либо вызови declare_process сейчас, либо смени commitment (refused — если отговариваешь, none — если дела не нужно) ' +
-            'и убери из речи обещание долгого дела.',
-        );
-      }
-      if (commitment === 'standing_order' && !succeeded('declare_standing_order')) {
-        return toolFail(
-          'order_missing',
-          'commitment=standing_order, но declare_standing_order не выполнен. Объяви порядок через tool или смени commitment.',
-        );
-      }
-      if (commitment === 'revoked' && !succeeded('revoke_order', 'revoke_process')) {
-        return toolFail(
-          'revoke_missing',
-          'commitment=revoked, но отмена не выполнена. Вызови revoke_order (указ) или revoke_process (дело), либо смени commitment.',
-        );
-      }
-      if (requestKind === 'order_long' && commitment === 'none') {
-        return toolFail(
-          'order_ignored',
-          'Покровитель отдал долгий приказ, а ты ничего не предпринял. Либо declare_process / update_process (и commitment=process), ' +
-          'либо честно откажи/отговори в речи и поставь commitment=refused.',
-        );
-      }
-      if (requestKind === 'order_instant' && commitment === 'none') {
-        return toolFail(
-          'instant_ignored',
-          'Покровитель велел решение сейчас, а в мире ничего не заведено. У тебя два способа: ' +
-            'declare_standing_order — если это порядок, который теперь соблюдают всегда; ' +
-            'declare_process на 1 месяц — если это дело, у которого будет исход (послать людей, ' +
-            'разобрать спор, провести обряд, найти виновного). Разовых «сделал и забыли» не бывает: ' +
-            'у любого приказа есть последствия, и город должен их отследить. ' +
-            'Либо откажи в речи с commitment=refused.',
-        );
-      }
-      if (requestKind === 'order_impossible' && commitment !== 'refused') {
-        return toolFail(
-          'impossible_not_refused',
-          'Такой приказ смертному не исполнить. Поставь commitment=refused. ' +
-            'В речи — не объяснение устройства мира, а твоё простое «не умею», «не понимаю этих слов», ' +
-            '«там ветер и бездна»; предложи то, что можешь: послать людей, объявить обряд, начать дело. ' +
-            'Сцену, будто это происходит, не отыгрывай.',
-        );
-      }
+      const commitErr = rulerReplyCommitError({
+        requestKind,
+        commitment,
+        text: body,
+        okTools: turn.okTools,
+      });
+      if (commitErr) return toolFail(commitErr.error, commitErr.message);
       turn.reply = body;
       turn.meta = {
         requestKind,
@@ -361,9 +421,10 @@ function characterTools(domain, storage, character, ctx) {
           'knownPeople — люди, которых город уже знает: имя, пол, ремесло и что о них известно. ' +
           'Это правда, а не слухи. Не переспрашивай о том, что здесь написано, и не придумывай ' +
           'им другую судьбу.',
-        standingOrders: listStandingOrders(domain),
+        standingOrders: listStandingOrders(domain, { tick: world?.tickIndex ?? null }),
         guidanceOrders:
           'standingOrders — действующие указы/порядки. pending=create/edit/revoke — заявка ещё не вступила, вступит с новостями месяца. ' +
+          'indefinite=true — бессрочно; durationMonths и remainingMonths — срок в игровых месяцах, если он задан. ' +
           'Для отмены — revoke_order с этим id или кратким смыслом. Не объявляй новый указ, если он противоречит действующему: ' +
           'сначала отмени старый или обнови его.',
         processes: activeProcesses(domain, ctx.config).map((a) => ({
@@ -521,7 +582,9 @@ function characterTools(domain, storage, character, ctx) {
       name: 'consult_loremaster',
       description:
         'Справка о фактах мира: имена, места, устройство города, прошлое, уже установленный канон. ' +
-        'Не расследование: то, что уже является тайной, незавершённым делом или предметом текущего выбора, лормастер может оставить неизвестным.',
+        'Если вопрос про идущую историю с доски — передай plotId этой нити: лормастер увидит её канон и сможет дописать детали, не ломая повествование. ' +
+        'Закрытую или сыгранную нить не передавай — тогда он читает только хронику. ' +
+        'Не расследование: то, что уже является тайной или предметом текущего выбора, он может оставить неизвестным.',
       parameters: {
         type: 'object',
         required: ['questions'],
@@ -531,9 +594,14 @@ function characterTools(domain, storage, character, ctx) {
             items: { type: 'string' },
             description: '1–5 конкретных вопросов',
           },
+          plotId: {
+            type: 'string',
+            description:
+              'id идущей истории с доски (или сопряжения). Только открытая нить: закрытую не передавай.',
+          },
         },
       },
-      handler: async ({ questions }) => {
+      handler: async ({ questions, plotId }) => {
         const result = await askLoremaster({
           config: ctx.config,
           runtime: ctx.runtime,
@@ -541,13 +609,22 @@ function characterTools(domain, storage, character, ctx) {
           domain,
           questions: questions || [],
           asker: `ruler:${character.name}`,
+          plotId: plotId || null,
+          conflux: ctx.conflux || null,
         });
+        const wanted = String(plotId || '').trim();
+        const focused = Boolean(result.focusPlotId);
         return {
           ok: true,
           answers: result.answers,
           summary: result.loreTextForAsker,
           newFactsCount: result.addedFacts.length,
           newFactTexts: result.addedFacts.map((f) => f.text),
+          plotId: result.focusPlotId,
+          focusNote:
+            wanted && !focused
+              ? 'Эта нить сейчас не на доске. Лормастер ответил по хронике и общим фактам, без канона тайны.'
+              : null,
           hint:
             'Перескажи суть своими словами и своим тоном, не цитируя карточки фактов. ' +
             'Если Лормастер установил новый факт — считай его реальным. ' +
@@ -609,6 +686,7 @@ function characterTools(domain, storage, character, ctx) {
       name: 'declare_process',
       description:
         'Длительное дело: стройка, суд, поход, снабжение. Не для мгновенных постоянных приказов — declare_standing_order. ' +
+        'Если воля ещё неясна — не вызывай, спроси покровителя (commitment=clarify). ' +
         'Срок сам не оценивай: его посчитает отдельный оценщик. ' +
         'Отказы: too_many_processes (лимит слотов) vs duplicate_process (та же нить) — разные отговорки в речи.',
       parameters: {
@@ -862,7 +940,9 @@ function characterTools(domain, storage, character, ctx) {
       name: 'declare_standing_order',
       description:
         'Заявка на постоянный порядок / правило (запрет, осмотр, регулярный обряд, «при каждом сопряжении делайте X»). ' +
-        'Карточку и каденс соберёт город к новостям месяца. Не для разовой стройки, суда, похода — те через declare_process.',
+        'Карточку и каденс соберёт город к новостям месяца. Не для разовой стройки, суда, похода — те через declare_process. ' +
+        'Если неясно, разовый это труд или всегдашнее правило — спроси (commitment=clarify), не выбирай сам. ' +
+        'Срок (durationMonths) ставь только если покровитель его назвал; иначе бессрочно.',
       parameters: {
         type: 'object',
         required: ['text'],
@@ -875,9 +955,16 @@ function characterTools(domain, storage, character, ctx) {
             type: 'string',
             description: 'Id существующего порядка при обновлении',
           },
+          durationMonths: {
+            type: 'number',
+            description:
+              'Сколько игровых месяцев порядок действует. Не передавай — бессрочно. ' +
+              '0 — сделать бессрочным (при правке). Ставь число только если покровитель явно назвал срок ' +
+              '(три месяца, год = 12, сезон = 3). Сам срок не выдумывай.',
+          },
         },
       },
-      handler: async ({ text, id }) => {
+      handler: async ({ text, id, durationMonths }) => {
         const body = String(text || '').trim().slice(0, 400);
         if (body.length < 3) {
           return toolFail(
@@ -892,6 +979,7 @@ function characterTools(domain, storage, character, ctx) {
           by: character.name,
           initiative: 'patron',
           tick: world?.tickIndex ?? null,
+          durationMonths,
         });
         if (queued.error === 'order_not_found') {
           return {
@@ -907,13 +995,20 @@ function characterTools(domain, storage, character, ctx) {
           return toolFail(queued.error, queued.message || 'Не удалось принять порядок.');
         }
         await save();
+        const term = queued.request?.durationMonths;
+        const termHint =
+          term
+            ? `будут соблюдать ${term} мес., затем порядок сам спадёт. Срок в речи назови, механику нет. `
+            : queued.request?.durationSet
+              ? 'бессрочно, пока не отменят. Не назначай срок, если покровитель его не назвал. '
+              : 'как постоянный порядок без срока, начнут соблюдать. Не назначай срок, если покровитель его не назвал. ';
         return {
           ok: true,
           created: Boolean(queued.created),
           request: queued.request,
           hint:
-            'В речи: принял как постоянный порядок, начнут соблюдать. Не объявляй многомесячный срок и не говори «процесс». ' +
-            'Последствия указа город увидит к концу месяца.',
+            `В речи: принял порядок — ${termHint}` +
+            'Не говори «процесс». Последствия указа город увидит к концу месяца.',
         };
       },
     },
@@ -1414,6 +1509,14 @@ export class GameApp {
           tagChoices: forcedTagChoices || {},
           playerBrief: truncate(playerBrief, 500),
         });
+        const tutorial = genesisTutorialText(this.config);
+        if (tutorial) {
+          await this.emitOutbound(uid, tutorial, {
+            channel,
+            agent: 'onboarding',
+            kind: 'genesis_tutorial',
+          });
+        }
         if (forcedName) {
           const occupied = await this.occupiedCityNames(uid);
           const taken = validateCityNameAvailable(forcedName, occupied);
@@ -2435,7 +2538,8 @@ export class GameApp {
             role: 'user',
             content:
               'Ответ не принят: речь передаётся только через submit_reply. Вызови его сейчас. ' +
-              'Если дела ты не заводил — commitment=none (или refused, если отговариваешь), ' +
+              'Если дела ты не заводил — commitment=none (или refused, если отговариваешь; ' +
+              'clarify — если приказ есть, но нужно уточнить волю), ' +
               'и в речи не обещай долгих работ.',
           },
         ],

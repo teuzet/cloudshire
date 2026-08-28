@@ -15,7 +15,7 @@ import {
   PLOT_TITLE_MAX,
   plotConfig,
 } from './plotlines.js';
-import { closeOrderPair, normalizeOrders } from './orders.js';
+import { closeOrderPair, normalizeOrders, stampOrderTerm } from './orders.js';
 
 function cityBrief(domain) {
   return String(domain.description || '').trim() || '(описание пусто)';
@@ -186,6 +186,11 @@ async function askOrderCard({ runtime, domain, world, req, log, cfg, statIds }) 
           `${verb} (${world.gameDate?.label || 'этот месяц'}).`,
           `Формулировка: ${req.text}`,
           req.action === 'edit' ? 'Это правка уже действующего порядка: обнови синопсис и каденс под новую норму.' : null,
+          req.durationSet
+            ? req.durationMonths
+              ? `Срок действия задан покровителем: ${req.durationMonths} мес., затем движок снимет порядок сам. closeWhen — досрочная отмена, не истечение срока.`
+              : 'Покровитель хочет бессрочный порядок. Срок не ставь.'
+            : 'Срок не задан — порядок бессрочный, пока не отменят. Срок сам не выдумывай.',
           'Ты не пишешь хронику. Ты ставишь, как часто город будет сталкиваться с ЗАМЕТНЫМИ последствиями этого правила,',
           'и что должно произойти, чтобы правило сняли.',
           'Расписание — если из формулировки ясно «каждый N-й месяц / каждую весну / раз в два месяца».',
@@ -236,6 +241,8 @@ function applyCreate(domain, req, card, { tick, cfg, config }) {
   });
   plot.modifierId = mod.id;
   mod.plotlineId = plot.id;
+  if (req.durationSet) stampOrderTerm(plot, mod, { months: req.durationMonths, tick });
+  else stampOrderTerm(plot, mod, { months: null, tick });
   return { plot, modifier: mod };
 }
 
@@ -254,6 +261,7 @@ function applyEdit(domain, req, card, { tick, cfg, config }) {
   }
   applyCardToPlot(plot, card, { tick, cfg, modifierId: mod.id });
   mod.plotlineId = plot.id;
+  if (req.durationSet) stampOrderTerm(plot, mod, { months: req.durationMonths, tick });
   return { plot, modifier: mod };
 }
 

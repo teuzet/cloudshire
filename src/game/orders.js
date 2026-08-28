@@ -13,6 +13,60 @@ import {
   closePlotline,
 } from './plotlines.js';
 
+export const ORDER_DURATION_MAX = 36;
+
+/** Срок указа: null — бессрочно. Не заданное поле вызывающий не передаёт. */
+export function parseOrderDuration(raw) {
+  if (raw == null || raw === '') return null;
+  const n = Math.round(Number(raw));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.max(1, Math.min(ORDER_DURATION_MAX, n));
+}
+
+export function orderExpiresAt(tick, durationMonths) {
+  const d = Number(durationMonths);
+  const t = Number(tick);
+  if (!Number.isInteger(d) || d < 1 || !Number.isInteger(t)) return null;
+  return t + d;
+}
+
+export function orderMonthsLeft(expiresTick, tick) {
+  if (expiresTick == null || expiresTick === '') return null;
+  const exp = Number(expiresTick);
+  const t = Number(tick);
+  if (!Number.isInteger(exp) || !Number.isInteger(t)) return null;
+  return Math.max(0, exp - t);
+}
+
+export function stampOrderTerm(plot, mod, { months = null, tick = null } = {}) {
+  const durationMonths = parseOrderDuration(months);
+  const expiresTick = orderExpiresAt(tick, durationMonths);
+  if (plot) {
+    plot.durationMonths = durationMonths;
+    plot.expiresTick = expiresTick;
+  }
+  if (mod) {
+    mod.durationMonths = durationMonths;
+    mod.expiresTick = expiresTick;
+  }
+}
+
+function durationPatch(durationMonths) {
+  if (durationMonths === undefined) return {};
+  return { durationMonths: parseOrderDuration(durationMonths), durationSet: true };
+}
+
+function orderTermView(src, tick = null) {
+  const durationMonths = parseOrderDuration(src?.durationMonths);
+  const expiresTick = Number.isInteger(Number(src?.expiresTick)) ? Number(src.expiresTick) : null;
+  return {
+    durationMonths,
+    expiresTick: durationMonths ? expiresTick : null,
+    remainingMonths: durationMonths ? orderMonthsLeft(expiresTick, tick) : null,
+    indefinite: !durationMonths,
+  };
+}
+
 export function normalizeOrders(domain) {
   if (!domain || typeof domain !== 'object') return domain;
   if (!domain.state || typeof domain.state !== 'object') domain.state = {};
@@ -23,6 +77,10 @@ export function normalizeOrders(domain) {
     if (plot?.kind !== 'order' || !plot.modifierId) continue;
     const mod = domain.state.modifiers.find((m) => m && m.id === plot.modifierId);
     if (mod && !mod.plotlineId) mod.plotlineId = plot.id;
+    if (mod && mod.durationMonths == null && plot.durationMonths) {
+      mod.durationMonths = plot.durationMonths;
+      mod.expiresTick = plot.expiresTick ?? null;
+    }
   }
 
   for (const mod of domain.state.modifiers) {
@@ -64,19 +122,24 @@ export function findStandingOrder(domain, key) {
   );
 }
 
-export function listStandingOrders(domain) {
+export function listStandingOrders(domain, { tick = null } = {}) {
   const pending = domain?.state?.pendingOrderRequests || [];
   const revokeIds = new Set(pending.filter((r) => r.action === 'revoke').map((r) => r.orderId));
   const editIds = new Set(pending.filter((r) => r.action === 'edit').map((r) => r.orderId));
-  const mods = (domain?.state?.modifiers || []).map((m) => ({
-    id: m.id,
-    text: m.text,
-    pending: revokeIds.has(m.id) ? 'revoke' : editIds.has(m.id) ? 'edit' : false,
-    plotlineId: m.plotlineId || null,
-    kind: m.kind || 'order',
-    since: m.since || null,
-    initiative: m.initiative || 'patron',
-  }));
+  const mods = (domain?.state?.modifiers || []).map((m) => {
+    const plot = m.plotlineId ? findPlotline(domain, m.plotlineId) : null;
+    const src = plot || m;
+    return {
+      id: m.id,
+      text: m.text,
+      pending: revokeIds.has(m.id) ? 'revoke' : editIds.has(m.id) ? 'edit' : false,
+      plotlineId: m.plotlineId || null,
+      kind: m.kind || 'order',
+      since: m.since || null,
+      initiative: m.initiative || 'patron',
+      ...orderTermView(src, tick),
+    };
+  });
   const creating = pending
     .filter((r) => r.action === 'create')
     .map((r) => ({
@@ -87,6 +150,7 @@ export function listStandingOrders(domain) {
       kind: 'order',
       since: null,
       initiative: r.initiative || 'patron',
+      ...orderTermView(r, tick),
     }));
   return [...mods, ...creating];
 }
@@ -108,6 +172,7 @@ export function queueOrderRequest(
     initiative = 'patron',
     reason = '',
     tick = null,
+    durationMonths,
   } = {},
 ) {
   normalizeOrders(domain);
@@ -128,6 +193,7 @@ export function queueOrderRequest(
         by,
         initiative,
         tick,
+        durationMonths,
       });
     }
     const dupReq = pending.find((r) => r.action === 'create' && textsLookSame(r.text, body));
@@ -136,6 +202,7 @@ export function queueOrderRequest(
       dupReq.by = by;
       dupReq.initiative = initiative;
       dupReq.requestedTick = tick;
+      Object.assign(dupReq, durationPatch(durationMonths));
       return { request: dupReq, created: false };
     }
     const request = {
@@ -147,6 +214,7 @@ export function queueOrderRequest(
       initiative,
       requestedTick: tick,
       reason: '',
+      ...durationPatch(durationMonths),
     };
     pending.push(request);
     return { request, created: true };
@@ -164,6 +232,7 @@ export function queueOrderRequest(
       createReq.by = by;
       createReq.initiative = initiative;
       createReq.requestedTick = tick;
+      Object.assign(createReq, durationPatch(durationMonths));
       return { request: createReq, created: false };
     }
     const mod = findStandingOrder(domain, orderId) || findStandingOrder(domain, body);
@@ -177,6 +246,7 @@ export function queueOrderRequest(
       initiative,
       requestedTick: tick,
       reason: '',
+      ...durationPatch(durationMonths),
     };
     domain.state.pendingOrderRequests = replacePendingForOrder(pending, mod.id, request);
     return { request, created: false };
@@ -316,6 +386,25 @@ export function unlinkOrderModifier(domain, plot) {
   const id = plot?.modifierId;
   if (!id || !domain?.state?.modifiers) return;
   domain.state.modifiers = domain.state.modifiers.filter((m) => m.id !== id);
+}
+
+export function expireTimedOrders(domain, tick) {
+  normalizeOrders(domain);
+  const expired = [];
+  const mods = [...(domain.state?.modifiers || [])];
+  for (const mod of mods) {
+    if (mod.expiresTick == null || mod.expiresTick === '') continue;
+    const exp = Number(mod.expiresTick);
+    if (!Number.isInteger(exp) || Number(tick) < exp) continue;
+    expired.push(
+      closeOrderPair(domain, {
+        modifierId: mod.id,
+        tick,
+        reason: 'истёк срок порядка',
+      }),
+    );
+  }
+  return expired;
 }
 
 export function closeOrderPair(domain, { modifierId = null, plotlineId = null, tick = null, reason = '' } = {}) {

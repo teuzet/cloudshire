@@ -17,6 +17,8 @@ import { stripPlotSecrets } from '../../game/plotlines.js';
 import { FINISH_SHORT } from '../../game/rolls.js';
 import { resolveIslandImage } from '../../game/islandImage.js';
 import { knownPartnerLore } from '../../game/confluxBoard.js';
+import { genesisTutorialText } from '../../game/progressBar.js';
+import { orderMonthsLeft } from '../../game/orders.js';
 
 function slimLore(f) {
   if (!f) return null;
@@ -307,6 +309,7 @@ export function createWebServer({ config, app, runtime, storage }) {
           scheduler: world.scheduler || null,
           generating: app.isGenerating(userId),
           generatingProgress: app.generatingProgress.get(String(userId)) || null,
+          genesisTutorial: app.isGenerating(userId) ? genesisTutorialText(config) || null : null,
           ticking: app.isWorldTicking(),
           canForceTick: playDevEnabled,
           canWipe: playDevEnabled,
@@ -410,7 +413,10 @@ export function createWebServer({ config, app, runtime, storage }) {
             stats: statsWithEpithets(domain.stats, config),
             tags: (domain.tags || []).map((t) => t.tagName || t.tagId),
             processes: domain.state?.pendingActions || [],
-            standingOrders: domain.state?.modifiers || [],
+            standingOrders: (domain.state?.modifiers || []).map((m) => ({
+              ...m,
+              remainingMonths: orderMonthsLeft(m.expiresTick, world?.tickIndex),
+            })),
             monthLog: domain.state?.monthLog || [],
             plotlines: (domain.plotlines || []).map(stripPlotSecrets),
             closedPlotlines: (domain.closedPlotlines || []).slice(-20).map(stripPlotSecrets),
