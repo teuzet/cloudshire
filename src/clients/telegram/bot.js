@@ -60,7 +60,7 @@ function uniqueChatIds(ids) {
 }
 
 /**
- * Старые списки могли висеть в scope чата ( fortcetick ) и перекрывать дефолт.
+ * Старые списки могли висеть в scope чата (/forcetick) и перекрывать дефолт.
  * Снимаем их и ставим один и тот же короткий список везде.
  */
 async function syncBotMenu(bot, commands, chatIds = []) {
