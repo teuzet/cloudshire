@@ -20,6 +20,8 @@ test('тутор генезиса — статичный текст в конф�
   assert.match(text, /Дело/);
   assert.match(text, /Указ/);
   assert.match(text, /поторопить/);
+  assert.match(text, /\/city/);
+  assert.match(text, /информаци[яи] о городе/i);
   assert.doesNotMatch(text, /^\s*\d+\)/m);
 });
 

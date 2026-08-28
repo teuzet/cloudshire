@@ -1,5 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import yaml from 'js-yaml';
 import {
   closedTestReply,
   islandDeleteCheck,
@@ -10,6 +14,15 @@ import {
   parseSlashCommand,
 } from '../src/clients/telegram/access.js';
 import { formatIslandPlotlines, formatIslandStats } from '../src/clients/telegram/views.js';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const config = yaml.load(fs.readFileSync(path.join(root, 'config/default.yaml'), 'utf8'));
+
+test('в меню бота только /city — информация о городе', () => {
+  const commands = config.telegram.commands.map((c) => c.command);
+  assert.deepEqual(commands, ['city']);
+  assert.match(config.telegram.commands[0].description, /информация о городе/i);
+});
 
 test('закрытый тест пускает только список, пустой список — всех', () => {
   assert.equal(isTelegramAllowed({ telegram: { allowIds: [] } }, '1'), true);

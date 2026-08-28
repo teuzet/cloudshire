@@ -37,6 +37,10 @@ async function main() {
     await recordTickCompleted(storage, config);
     return result;
   });
+  web.set('resyncScheduler', async () => {
+    if (typeof scheduler.resync === 'function') return scheduler.resync();
+    return null;
+  });
 
   const server = web.listen(port, host, () => {
     log.info('server.listen', {

@@ -70,31 +70,6 @@ async function syncMiniAppMenu(bot, config) {
   }
 }
 
-async function syncForceTickMenu(bot, commands, forceTickIds) {
-  const extra = [
-    ...(commands || []),
-    { command: 'forcetick', description: 'Прокрутить месяц' },
-  ];
-  for (const id of forceTickIds || []) {
-    try {
-      await bot.setMyCommands(
-        extra
-          .map((c) => ({
-            command: String(c.command || '')
-              .replace(/^\//, '')
-              .trim()
-              .toLowerCase(),
-            description: String(c.description || '').trim().slice(0, 256),
-          }))
-          .filter((c) => c.command && c.description),
-        { scope: { type: 'chat', chat_id: Number(id) || id } },
-      );
-    } catch (err) {
-      console.warn(`[telegram] setMyCommands(forcetick) failed for ${id}:`, err.message);
-    }
-  }
-}
-
 function deleteAskText(name) {
   return (
     `Чтобы удалить остров «${name}», напиши его имя точно так. ` +
@@ -137,7 +112,6 @@ export function startTelegramBot({ config, app, storage, runTick }) {
 
   const bot = new TelegramBot(token, { polling: true });
   void syncBotMenu(bot, tg.commands)
-    .then(() => syncForceTickMenu(bot, tg.commands, tg.forceTickIds))
     .then(() => syncMiniAppMenu(bot, config));
   /** @type {Map<string, number|string>} */
   const chatByUser = new Map();
@@ -266,9 +240,9 @@ export function startTelegramBot({ config, app, storage, runTick }) {
     if (command.name === 'city') {
       const url = miniAppUrl(config);
       if (!url) {
-        return 'Справочник города сейчас недоступен: у бота нет публичного адреса мини-аппки.';
+        return 'Информация о городе сейчас недоступна: у бота нет публичного адреса мини-аппки.';
       }
-      await bot.sendMessage(chatId, 'Справочник твоего города — статы, истории, дела и указы.', {
+      await bot.sendMessage(chatId, 'Информация о городе — статы, истории, дела и указы.', {
         reply_markup: {
           inline_keyboard: [[{ text: miniAppMenuText(config), web_app: { url } }]],
         },

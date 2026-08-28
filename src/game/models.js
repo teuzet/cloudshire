@@ -3,6 +3,7 @@ import { seedWorldNamePool, normalizeNamePool } from './names.js';
 import { normalizeOrders } from './orders.js';
 import { stampPersonAge } from './ages.js';
 import { normalizeCityEntities } from './cityEntities.js';
+import { applyClockAlignedCalendar } from './tickClock.js';
 
 export function emptyState() {
   return {
@@ -67,8 +68,8 @@ export function normalizeDomain(domain) {
   return domain;
 }
 
-export function createWorldFromConfig(config) {
-  const now = new Date().toISOString();
+export function createWorldFromConfig(config, { now = Date.now() } = {}) {
+  const createdAt = new Date(now).toISOString();
   const world = {
     // Уникальный id экземпляра (один запуск / жизнь мира до wipe).
     id: newId('world'),
@@ -93,10 +94,12 @@ export function createWorldFromConfig(config) {
       nextTickAt: null,
       tickInProgress: false,
       tickStartedAt: null,
+      epochAt: null,
     },
-    createdAt: now,
-    updatedAt: now,
+    createdAt,
+    updatedAt: createdAt,
   };
+  applyClockAlignedCalendar(world, config, now);
   seedWorldNamePool(world, config);
   return world;
 }
@@ -118,12 +121,14 @@ export function normalizeWorld(world, config = null) {
       nextTickAt: null,
       tickInProgress: false,
       tickStartedAt: null,
+      epochAt: null,
     };
   } else {
     if (!('lastTickAt' in world.scheduler)) world.scheduler.lastTickAt = null;
     if (!('nextTickAt' in world.scheduler)) world.scheduler.nextTickAt = null;
     if (!('tickInProgress' in world.scheduler)) world.scheduler.tickInProgress = false;
     if (!('tickStartedAt' in world.scheduler)) world.scheduler.tickStartedAt = null;
+    if (!('epochAt' in world.scheduler)) world.scheduler.epochAt = null;
   }
   seedWorldNamePool(world, config);
   normalizeNamePool(world);

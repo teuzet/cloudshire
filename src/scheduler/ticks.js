@@ -1,11 +1,8 @@
 import { normalizeWorld } from '../game/models.js';
+import { nextAlignedTickAt, tickIntervalHours, tickIntervalMs } from '../game/tickClock.js';
 import { getLogger } from '../log.js';
 
 const STALE_TICK_MS = 45 * 60 * 1000;
-
-function intervalMs(config) {
-  return (Number(config.tick?.intervalHours) || 2) * 60 * 60 * 1000;
-}
 
 async function patchScheduler(storage, patch) {
   const world = await storage.getWorld();
@@ -16,29 +13,35 @@ async function patchScheduler(storage, patch) {
 }
 
 /**
- * После успешного тика: lastTickAt=now, nextTickAt=now+interval.
+ * После успешного тика: lastTickAt=now, nextTickAt=следующая часовая граница.
  */
-export async function recordTickCompleted(storage, config) {
-  const now = Date.now();
-  const next = new Date(now + intervalMs(config)).toISOString();
+export async function recordTickCompleted(storage, config, now = Date.now()) {
   return patchScheduler(storage, {
     tickInProgress: false,
     tickStartedAt: null,
     lastTickAt: new Date(now).toISOString(),
-    nextTickAt: next,
+    nextTickAt: nextAlignedTickAt(now, config),
   });
+}
+
+function pickNextTickAt(sch, config, now = Date.now()) {
+  const aligned = nextAlignedTickAt(now, config);
+  const alignedMs = new Date(aligned).getTime();
+  const savedMs = sch?.nextTickAt ? new Date(sch.nextTickAt).getTime() : NaN;
+  if (!Number.isFinite(savedMs)) return aligned;
+  if (savedMs <= now) return aligned;
+  return savedMs > alignedMs ? aligned : sch.nextTickAt;
 }
 
 /**
  * Расписание тиков с якорем в world.scheduler (Mongo/yaml).
- * Пропущенные тики: максимум один catch-up при старте / по таймеру.
+ * Тики на 00:00 / 02:00 / … по часам сервера. Пропуск: один catch-up.
  */
 export function startTickScheduler({ config, storage, onTick }) {
   if (!config.tick?.enabled) {
-    return { stop() {}, triggerNow: async () => null };
+    return { stop() {}, triggerNow: async () => null, resync: async () => null };
   }
 
-  const ms = intervalMs(config);
   const log = getLogger().child({ scope: 'scheduler' });
   let timer = null;
   let running = false;
@@ -55,7 +58,7 @@ export function startTickScheduler({ config, storage, onTick }) {
     if (stopped) return;
     clearTimer();
     const when = new Date(nextTickAtIso).getTime();
-    const delay = Number.isFinite(when) ? Math.max(1000, when - Date.now()) : ms;
+    const delay = Number.isFinite(when) ? Math.max(1000, when - Date.now()) : tickIntervalMs(config);
     log.info('scheduler.arm', { nextTickAt: nextTickAtIso, delayMs: delay });
     timer = setTimeout(() => {
       void runOne('schedule');
@@ -80,7 +83,7 @@ export function startTickScheduler({ config, storage, onTick }) {
     } catch (err) {
       log.error('scheduler.tick_failed', { reason, error: err.message, stack: err.stack });
       try {
-        const next = new Date(Date.now() + ms).toISOString();
+        const next = nextAlignedTickAt(Date.now(), config);
         await patchScheduler(storage, {
           tickInProgress: false,
           tickStartedAt: null,
@@ -94,6 +97,27 @@ export function startTickScheduler({ config, storage, onTick }) {
     } finally {
       running = false;
     }
+  }
+
+  async function resync() {
+    if (stopped) return null;
+    const world = await storage.getWorld();
+    normalizeWorld(world);
+    const next = pickNextTickAt(world.scheduler, config);
+    if (next !== world.scheduler.nextTickAt) {
+      await patchScheduler(storage, { nextTickAt: next });
+    }
+    const due = new Date(next).getTime() <= Date.now();
+    if (due) {
+      log.info('scheduler.catchup_one', { nextTickAt: next });
+      try {
+        return await runOne('catchup');
+      } catch {
+        return null;
+      }
+    }
+    arm(next);
+    return null;
   }
 
   async function boot() {
@@ -117,39 +141,26 @@ export function startTickScheduler({ config, storage, onTick }) {
       }
     }
 
-    let next = sch.nextTickAt;
-    if (!next) {
-      next = new Date(Date.now() + ms).toISOString();
-      await patchScheduler(storage, { nextTickAt: next });
-      log.info('scheduler.seed_next', { nextTickAt: next, intervalHours: config.tick.intervalHours });
-    }
-
-    const due = new Date(next).getTime() <= Date.now();
-    if (due) {
-      log.info('scheduler.catchup_one', { nextTickAt: next });
-      try {
-        await runOne('catchup');
-      } catch {
-        /* already logged; timer re-armed in runOne */
-      }
-    } else {
-      arm(next);
-    }
+    await resync();
   }
 
   void boot();
 
-  log.info('scheduler.start', { intervalHours: config.tick.intervalHours, intervalMs: ms });
+  log.info('scheduler.start', {
+    intervalHours: tickIntervalHours(config),
+    intervalMs: tickIntervalMs(config),
+  });
 
   return {
     stop() {
       stopped = true;
       clearTimer();
     },
-    /** Force tick (admin/CLI): runs one tick and reschedules from completion. */
+    /** Force tick (admin/CLI): runs one tick and reschedules to the next clock boundary. */
     async triggerNow(reason = 'manual') {
       clearTimer();
       return runOne(reason);
     },
+    resync,
   };
 }

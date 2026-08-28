@@ -590,6 +590,8 @@ export function createWebServer({ config, app, runtime, storage }) {
           }
           const status = await app.wipeAll();
           pushLogs.clear();
+          const resync = req.app.get('resyncScheduler');
+          if (typeof resync === 'function') await resync();
           getLogger().warn('play.wipe', { userId: String(req.body?.userId || ''), status });
           res.json({ ok: true, status });
         } catch (err) {
@@ -703,6 +705,8 @@ export function createWebServer({ config, app, runtime, storage }) {
     try {
       const status = await app.wipeAll();
       pushLogs.clear();
+      const resync = req.app.get('resyncScheduler');
+      if (typeof resync === 'function') await resync();
       getLogger().warn('dev.wipe', { status });
       res.json({ ok: true, status });
     } catch (err) {
