@@ -69,8 +69,7 @@ export function startDockOrderProcess(domain, plot, { conflux, partner, config, 
   if (!main) return { ok: false, error: 'no_main_plot' };
   if (orderAlreadyActing(domain, plot, conflux)) return { ok: false, error: 'already_acting' };
 
-  const modifier = (domain.state.modifiers || []).find((m) => m.id === plot.modifierId);
-  const rule = modifier?.text || plot.synopsis || plot.title;
+  const rule = plot.orderText || plot.synopsis || plot.title;
   const { summary, detail, goal } = processCopy(plot, partner, rule);
   const linked = linkedStatsForOrder(plot, config);
   const character = domain.characters?.[0] || null;
@@ -148,8 +147,7 @@ export async function fireConfluxDockOrder({
     plotId: plot?.id,
     confluxId: conflux?.id,
   });
-  const modifier = (domain.state?.modifiers || []).find((m) => m.id === plot.modifierId);
-  const rule = modifier?.text || plot.synopsis || plot.title;
+  const rule = plot?.orderText || plot?.synopsis || plot?.title;
   const copy = processCopy(plot, partner, rule);
 
   const preview = startDockOrderProcess(domain, plot, {

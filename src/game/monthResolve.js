@@ -63,6 +63,7 @@ export async function resolveDomainMonth({
   runtime,
   domain,
   world,
+  storage = null,
   partner = null,
   confluxId = null,
   conflux = null,
@@ -359,6 +360,7 @@ export async function resolveDomainMonth({
       runtime,
       domain: working,
       world,
+      storage,
       fromClosed: sequel,
       storyType:
         sequel?.storyType === 'mystery' || sequel?.storyType === 'suspense' ? sequel.storyType : null,

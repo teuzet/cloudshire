@@ -2,6 +2,7 @@ import { MongoClient } from 'mongodb';
 import { createWorldFromConfig, normalizeDomain, normalizeWorld } from '../game/models.js';
 import { writeWorldArchive } from './worldArchive.js';
 import { getLogger } from '../log.js';
+import { attachStoryPoolsFromCatalog } from '../game/annotationCatalog.js';
 
 /**
  * Mongo implementation of the same storage surface as YamlStorage.
@@ -27,7 +28,9 @@ export class MongoStorage {
 
     const world = await this.getWorld();
     if (!world) {
-      await this.saveWorld(createWorldFromConfig(this.config));
+      const created = createWorldFromConfig(this.config);
+      await attachStoryPoolsFromCatalog(created, this);
+      await this.saveWorld(created);
     }
   }
 
@@ -39,7 +42,9 @@ export class MongoStorage {
     const doc = await this.col('world').findOne({ _id: 'current' });
     if (!doc) return null;
     const { _id, ...rest } = doc;
-    return normalizeWorld(rest, this.config);
+    const world = normalizeWorld(rest, this.config);
+    await attachStoryPoolsFromCatalog(world, this);
+    return world;
   }
 
   async saveWorld(world) {
@@ -144,6 +149,27 @@ export class MongoStorage {
     return docs.map(({ _id, ...rest }) => rest);
   }
 
+  async getAnnotationCatalog(kind = 'mystery') {
+    const id = kind === 'suspense' ? 'suspense' : 'mystery';
+    const doc = await this.col('annotation_catalog').findOne({ _id: id });
+    return { kind: id, cards: Array.isArray(doc?.cards) ? doc.cards : [] };
+  }
+
+  async saveAnnotationCatalog(doc, kind = 'mystery') {
+    const id = doc?.kind === 'suspense' || kind === 'suspense' ? 'suspense' : 'mystery';
+    await this.col('annotation_catalog').replaceOne(
+      { _id: id },
+      {
+        _id: id,
+        kind: id,
+        cards: Array.isArray(doc?.cards) ? doc.cards : [],
+        updatedAt: new Date().toISOString(),
+      },
+      { upsert: true },
+    );
+    return doc;
+  }
+
   async wipeAll({ reason = 'wipe' } = {}) {
     const world = await this.getWorld();
     const domains = await this.listDomains();
@@ -206,6 +232,7 @@ export class MongoStorage {
     }
 
     const next = createWorldFromConfig(this.config);
+    await attachStoryPoolsFromCatalog(next, this);
     await this.saveWorld(next);
 
     return {

@@ -110,9 +110,25 @@ export function formatMysteryCausalContractForPrompt() {
   ].join('\n');
 }
 
-export function formatMysteryGraphShapeForPrompt(shape, _opts = {}) {
+export function formatMysteryGraphShapeForPrompt(shape, { soft = false } = {}) {
   const xLine = 'X — завязка для игрока: последнее наблюдаемое следствие, к которому всё привело. Этот id обязателен.';
   const contract = formatMysteryCausalContractForPrompt();
+  const preferred =
+    shape === 'linear_5'
+      ? 'Предпочтительная форма: линейный из 5 узлов A → B → C → D → X, 4 ребра, без ответвлений.'
+      : shape === 'linear_side'
+        ? 'Предпочтительная форма: главная цепь A → B → C → X и дополнительная ПРИЧИНА E → B или E → C. 5 узлов, 4 ребра.'
+        : 'Предпочтительная форма: линейный из 4 узлов A → B → C → X, 3 ребра, без ответвлений.';
+  if (soft) {
+    return [
+      'ФОРМА ГРАФА (мягко):',
+      'Базовые шаблоны: linear_4 (A→B→C→X), linear_5 (A→B→C→D→X), linear_side (A→B→C→X + E→B|C).',
+      preferred,
+      'Своя форма допустима: 3–8 узлов, есть узел X, причинная цепь без циклов, все узлы связаны. Судья примет, если история целая.',
+      xLine,
+      contract,
+    ].join('\n');
+  }
   if (shape === 'linear_5') {
     return [
       'ШАБЛОН ГРАФА (обязателен): линейный из 5 узлов. A → B → C → D → X.',
@@ -300,14 +316,15 @@ function hiddenSpanLeaks(pub, raw, minLen = 12) {
   return false;
 }
 
-export function mysteryGraphShapeHint(shape) {
-  if (shape === 'linear_5') {
-    return 'Нужен линейный граф из 5 узлов: A → B → C → D → X, ровно 4 ребра. X — последнее наблюдаемое следствие.';
-  }
-  if (shape === 'linear_side') {
-    return 'Нужна цепь A → B → C → X и дополнительная причина E → B или E → C (не следствие из цепи). Ровно 5 узлов и 4 ребра. X — последнее наблюдаемое следствие.';
-  }
-  return 'Нужен линейный граф из 4 узлов: A → B → C → X, ровно 3 ребра. X — последнее наблюдаемое следствие.';
+export function mysteryGraphShapeHint(shape, { allowCustom = false } = {}) {
+  const hard =
+    shape === 'linear_5'
+      ? 'Нужен линейный граф из 5 узлов: A → B → C → D → X, ровно 4 ребра. X — последнее наблюдаемое следствие.'
+      : shape === 'linear_side'
+        ? 'Нужна цепь A → B → C → X и дополнительная причина E → B или E → C (не следствие из цепи). Ровно 5 узлов и 4 ребра. X — последнее наблюдаемое следствие.'
+        : 'Нужен линейный граф из 4 узлов: A → B → C → X, ровно 3 ребра. X — последнее наблюдаемое следствие.';
+  if (!allowCustom) return hard;
+  return `${hard} Или своя форма: 3–8 узлов, есть X, без циклов, все узлы связаны.`;
 }
 
 function outgoingMap(nodes, edges) {
@@ -372,6 +389,58 @@ export function inspectGraphShape(graph, shape) {
   return null;
 }
 
+function graphHasCycle(g) {
+  const outs = outgoingMap(g.nodes, g.edges);
+  const state = new Map();
+  function dfs(id) {
+    const s = state.get(id) || 0;
+    if (s === 1) return true;
+    if (s === 2) return false;
+    state.set(id, 1);
+    for (const t of outs.get(id) || []) {
+      if (dfs(t)) return true;
+    }
+    state.set(id, 2);
+    return false;
+  }
+  for (const n of g.nodes) {
+    if (!state.has(n.id) && dfs(n.id)) return true;
+  }
+  return false;
+}
+
+function graphWeaklyConnected(g) {
+  if (!g.nodes.length) return false;
+  const adj = new Map(g.nodes.map((n) => [n.id, []]));
+  for (const e of g.edges) {
+    adj.get(e.from)?.push(e.to);
+    adj.get(e.to)?.push(e.from);
+  }
+  const seen = new Set();
+  const stack = [g.nodes[0].id];
+  while (stack.length) {
+    const id = stack.pop();
+    if (seen.has(id)) continue;
+    seen.add(id);
+    for (const t of adj.get(id) || []) stack.push(t);
+  }
+  return seen.size === g.nodes.length;
+}
+
+/** Своя форма: 3–8 узлов, есть X, DAG, связный. */
+export function inspectCustomGraph(graph) {
+  const g = graph?.nodes ? graph : normalizeTruthGraph(graph);
+  if (!g) return null;
+  if (g.nodes.length < 3 || g.nodes.length > 8) return null;
+  const x = g.nodes.find((n) => String(n.id).toUpperCase() === 'X');
+  if (!x) return null;
+  if (graphHasCycle(g) || !graphWeaklyConnected(g)) return null;
+  const intoX = g.edges.some((e) => e.to === x.id);
+  if (!intoX) return null;
+  const path = longestNodePath(g.nodes, g.edges);
+  return { path: path[path.length - 1] === x.id ? path : [x.id], sideId: null, custom: true };
+}
+
 /** null — форма совпала; иначе код отказа. */
 export function judgeGraphShape(graph, shape) {
   if (!shape) return null;
@@ -422,14 +491,15 @@ export function normalizeTruthGraph(raw) {
   return { nodes, edges };
 }
 
-/** Система: видим последний узел главной цепи; в linear_side иногда ещё E. */
+/** Система: видим последний узел главной цепи; в linear_side иногда ещё E; иначе X. */
 export function applySeedVisibility(graph, { shape, sideOpen = false } = {}) {
   if (!graph?.nodes) return graph;
   for (const n of graph.nodes) n.knowledge = 'hidden';
   for (const e of graph.edges) e.knowledge = 'hidden';
-  const info = inspectGraphShape(graph, shape);
+  const info = inspectGraphShape(graph, shape) || inspectCustomGraph(graph);
   const lastId = info?.path?.[info.path.length - 1];
-  const last = lastId ? graph.nodes.find((n) => n.id === lastId) : graph.nodes[graph.nodes.length - 1];
+  const xNode = graph.nodes.find((n) => String(n.id).toUpperCase() === 'X');
+  const last = lastId ? graph.nodes.find((n) => n.id === lastId) : xNode || graph.nodes[graph.nodes.length - 1];
   if (last) last.knowledge = 'observed';
   if (shape === 'linear_side' && sideOpen && info?.sideId) {
     const side = graph.nodes.find((n) => n.id === info.sideId);
@@ -438,9 +508,17 @@ export function applySeedVisibility(graph, { shape, sideOpen = false } = {}) {
   return graph;
 }
 
-export function judgeTruthGraph(graph, { minNodes = 4, maxNodes = 6, shape = null } = {}) {
+export function judgeTruthGraph(graph, { minNodes = 4, maxNodes = 6, shape = null, allowCustom = false } = {}) {
   const g = normalizeTruthGraph(graph);
   if (!g) return 'missing_graph';
+  if (allowCustom) {
+    const lo = Math.min(3, minNodes);
+    const hi = Math.max(8, maxNodes);
+    if (g.nodes.length < lo) return 'thin_graph';
+    if (g.nodes.length > hi) return 'fat_graph';
+    if (shape && inspectGraphShape(g, shape)) return null;
+    return inspectCustomGraph(g) ? null : 'wrong_shape';
+  }
   const want = shape ? graphNodeCount(shape) : null;
   const lo = want || minNodes;
   const hi = want || maxNodes;

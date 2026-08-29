@@ -68,7 +68,7 @@ test('старый модификатор без нити становится �
   assert.equal(domain.state.pendingOrderRequests[0].orderId, 'mod_old');
 });
 
-test('агент порядка по заявке создаёт пару модификатор+нить даже без runtime', async () => {
+test('агент порядка по заявке создаёт нить с orderText даже без runtime', async () => {
   const domain = normalizeDomain({
     id: 'd1',
     name: 'Саркум',
@@ -89,11 +89,10 @@ test('агент порядка по заявке создаёт пару мод
   });
   assert.equal(results.length, 1);
   assert.equal(domain.state.pendingOrderRequests.length, 0);
-  assert.equal(domain.state.modifiers.length, 1);
+  assert.equal(domain.state.modifiers.length, 0);
   assert.equal(domain.plotlines.length, 1);
   assert.equal(domain.plotlines[0].kind, 'order');
-  assert.equal(domain.plotlines[0].modifierId, domain.state.modifiers[0].id);
-  assert.equal(domain.state.modifiers[0].plotlineId, domain.plotlines[0].id);
+  assert.equal(domain.plotlines[0].orderText, 'Выбирать избранного раз в два месяца');
   assert.equal(countOpen(domain).orders, 1);
   assert.equal(countOpen(domain).stories, 0);
   assert.equal(liveStoryImportance(domain), 0);
@@ -321,8 +320,8 @@ test('срок указа: не задан — бессрочно; число �
     domain,
     world: { tickIndex: 4, gameDate: { label: 'Год 1, месяц 4' } },
   });
-  const forever = domain.state.modifiers.find((m) => m.text.includes('Комендантский'));
-  const timed = domain.state.modifiers.find((m) => m.text.includes('вина'));
+  const forever = domain.plotlines.find((p) => p.orderText.includes('Комендантский'));
+  const timed = domain.plotlines.find((p) => p.orderText.includes('вина'));
   assert.equal(forever.durationMonths, null);
   assert.equal(forever.expiresTick, null);
   assert.equal(timed.durationMonths, 3);
@@ -335,12 +334,12 @@ test('срок указа: не задан — бессрочно; число �
 
   const early = expireTimedOrders(domain, 6);
   assert.equal(early.length, 0);
-  assert.equal(domain.state.modifiers.length, 2);
+  assert.equal(domain.plotlines.filter((p) => p.kind === 'order').length, 2);
 
   const gone = expireTimedOrders(domain, 7);
   assert.equal(gone.length, 1);
-  assert.equal(domain.state.modifiers.length, 1);
-  assert.equal(domain.state.modifiers[0].text.includes('Комендантский'), true);
+  assert.equal(domain.plotlines.filter((p) => p.kind === 'order').length, 1);
+  assert.equal(domain.plotlines[0].orderText.includes('Комендантский'), true);
   assert.equal((domain.closedPlotlines || []).some((p) => p.reason === 'истёк срок порядка'), true);
 });
 
@@ -358,8 +357,8 @@ test('правка может снять срок и сделать указ б�
     domain,
     world: { tickIndex: 2, gameDate: { label: 'месяц' } },
   });
-  const id = domain.state.modifiers[0].id;
-  assert.equal(domain.state.modifiers[0].expiresTick, 4);
+  const id = domain.plotlines[0].id;
+  assert.equal(domain.plotlines[0].expiresTick, 4);
   queueOrderRequest(domain, { action: 'edit', text: 'Ночной дозор', orderId: id, tick: 3, durationMonths: 0 });
   await resolvePendingOrders({
     config: { tick: { plot: {} } },
@@ -367,7 +366,7 @@ test('правка может снять срок и сделать указ б�
     domain,
     world: { tickIndex: 3, gameDate: { label: 'месяц' } },
   });
-  assert.equal(domain.state.modifiers[0].durationMonths, null);
-  assert.equal(domain.state.modifiers[0].expiresTick, null);
+  assert.equal(domain.plotlines[0].durationMonths, null);
+  assert.equal(domain.plotlines[0].expiresTick, null);
   assert.equal(expireTimedOrders(domain, 10).length, 0);
 });

@@ -3,7 +3,6 @@
  * (каденс, расписание, синопсис, closeWhen). Не пишет хронику.
  */
 
-import { newId } from './ids.js';
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import {
@@ -15,11 +14,8 @@ import {
   PLOT_TITLE_MAX,
   plotConfig,
 } from './plotlines.js';
-import { closeOrderPair, normalizeOrders, stampOrderTerm } from './orders.js';
-
-function cityBrief(domain) {
-  return String(domain.description || '').trim() || '(описание пусто)';
-}
+import { closeOrderPair, findStandingOrder, normalizeOrders, stampOrderTerm } from './orders.js';
+import { formatCityForAgents } from './cityContext.js';
 
 function titleFromText(text) {
   const words = String(text || '')
@@ -51,7 +47,7 @@ function clampChance(n, fallback) {
   return Math.max(0, Math.min(1, v));
 }
 
-function applyCardToPlot(plot, card, { tick, cfg, modifierId }) {
+function applyCardToPlot(plot, card, { tick, cfg }) {
   plot.title = clipPlotText(card.title || plot.title, PLOT_TITLE_MAX);
   plot.synopsis = clipPlotText(card.synopsis || plot.synopsis, PLOT_SUMMARY_MAX);
   plot.closeWhen = clipPlotText(card.closeWhen || plot.closeWhen, PLOT_HOOK_MAX);
@@ -72,35 +68,9 @@ function applyCardToPlot(plot, card, { tick, cfg, modifierId }) {
       plot.nextDueTick = Number(tick) + plot.scheduleEveryMonths;
     }
   }
-  plot.modifierId = modifierId || plot.modifierId || null;
   if (Array.isArray(card.relatedStats) && card.relatedStats.length) {
     plot.relatedStats = card.relatedStats.map(String);
   }
-}
-
-function upsertModifier(domain, { id = null, text, plotId, by, initiative, tick }) {
-  if (!domain.state.modifiers) domain.state.modifiers = [];
-  let mod = id ? domain.state.modifiers.find((m) => m.id === id) : null;
-  if (!mod) {
-    mod = {
-      id: newId('mod'),
-      text,
-      kind: 'order',
-      since: new Date().toISOString(),
-      declaredTick: tick,
-      updatedAt: new Date().toISOString(),
-      by,
-      initiative,
-      plotlineId: plotId,
-    };
-    domain.state.modifiers.push(mod);
-    return mod;
-  }
-  mod.text = text;
-  mod.kind = 'order';
-  mod.updatedAt = new Date().toISOString();
-  mod.plotlineId = plotId || mod.plotlineId;
-  return mod;
 }
 
 async function askOrderCard({ runtime, domain, world, req, log, cfg, statIds }) {
@@ -178,7 +148,7 @@ async function askOrderCard({ runtime, domain, world, req, log, cfg, statIds }) 
     log,
     scene: 'order_smith',
     domainId: domain.id,
-    extraSystem: `Город «${domain.name}».\n${cityBrief(domain)}`,
+    extraSystem: `Город «${domain.name}».\n${formatCityForAgents(domain)}`,
     userMessages: [
       {
         role: 'user',
@@ -220,6 +190,7 @@ function applyCreate(domain, req, card, { tick, cfg, config }) {
     synopsis: card.synopsis,
     closeWhen: card.closeWhen,
     kind: 'order',
+    orderText: text,
     relatedStats: card.relatedStats,
     fireChance: card.fireChance,
     scheduleEveryMonths: card.scheduleEveryMonths,
@@ -228,41 +199,29 @@ function applyCreate(domain, req, card, { tick, cfg, config }) {
     tick,
     config,
   });
-  applyCardToPlot(plot, card, { tick, cfg, modifierId: null });
+  applyCardToPlot(plot, card, { tick, cfg });
+  plot.orderText = text;
   domain.plotlines = domain.plotlines || [];
   domain.plotlines.push(plot);
-  const mod = upsertModifier(domain, {
-    id: req.orderId,
-    text,
-    plotId: plot.id,
-    by: req.by,
-    initiative: req.initiative || 'patron',
-    tick,
-  });
-  plot.modifierId = mod.id;
-  mod.plotlineId = plot.id;
-  if (req.durationSet) stampOrderTerm(plot, mod, { months: req.durationMonths, tick });
-  else stampOrderTerm(plot, mod, { months: null, tick });
-  return { plot, modifier: mod };
+  if (req.durationSet) stampOrderTerm(plot, null, { months: req.durationMonths, tick });
+  else stampOrderTerm(plot, null, { months: null, tick });
+  return { plot };
 }
 
 function applyEdit(domain, req, card, { tick, cfg, config }) {
-  const mod = (domain.state.modifiers || []).find((m) => m.id === req.orderId);
-  if (!mod) return applyCreate(domain, { ...req, action: 'create' }, card, { tick, cfg, config });
-  const text = String(card.modifierText || req.text || mod.text).trim();
-  mod.text = text;
-  mod.updatedAt = new Date().toISOString();
-  let plot = mod.plotlineId ? findPlotline(domain, mod.plotlineId) : null;
+  const found = findStandingOrder(domain, req.orderId);
+  let plot = found ? findPlotline(domain, found.id) : findPlotline(domain, req.orderId);
   if (!plot) {
-    plot = (domain.plotlines || []).find((p) => p.kind === 'order' && p.modifierId === mod.id);
+    plot = (domain.plotlines || []).find(
+      (p) => p.kind === 'order' && (p.id === req.orderId || p.modifierId === req.orderId),
+    );
   }
-  if (!plot) {
-    return applyCreate(domain, { ...req, action: 'create', orderId: mod.id }, card, { tick, cfg, config });
-  }
-  applyCardToPlot(plot, card, { tick, cfg, modifierId: mod.id });
-  mod.plotlineId = plot.id;
-  if (req.durationSet) stampOrderTerm(plot, mod, { months: req.durationMonths, tick });
-  return { plot, modifier: mod };
+  if (!plot) return applyCreate(domain, { ...req, action: 'create' }, card, { tick, cfg, config });
+  const text = String(card.modifierText || req.text || plot.orderText || '').trim();
+  plot.orderText = text;
+  applyCardToPlot(plot, card, { tick, cfg });
+  if (req.durationSet) stampOrderTerm(plot, null, { months: req.durationMonths, tick });
+  return { plot };
 }
 
 /**
@@ -307,7 +266,6 @@ export async function resolvePendingOrders({ config, runtime, domain, world, log
         log.info('order.card', {
           action: req.action,
           plotId: applied.plot?.id,
-          modifierId: applied.modifier?.id,
           fireChance: applied.plot?.fireChance,
           scheduleEveryMonths: applied.plot?.scheduleEveryMonths,
           fireOn: applied.plot?.fireOn || null,

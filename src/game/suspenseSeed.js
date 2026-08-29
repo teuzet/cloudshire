@@ -5,6 +5,7 @@
 
 import { liveStoryImportance, pickSeedTags } from './plotlines.js';
 import { castRecords } from './models.js';
+import { annotationTagsFromCard, formatAnnotationCardForPrompt } from './annotationPool.js';
 
 const DEPTH_UP_TONES = new Set(['exploration', 'uncanny', 'mystical', 'adventure', 'wonder', 'horror']);
 const DEPTH_DOWN_TONES = new Set(['social', 'economic', 'political']);
@@ -146,6 +147,65 @@ export function rollSuspenseSeed({
     situation: situation?.tagId || null,
     dynamic: dynamic?.tagId || null,
   };
+}
+
+/** Gravity/depth с болванки: оси live-посева не бросаем. */
+export function engineSuspenseFromCard(
+  card,
+  { domain, cfg, opening = false, fromClosed = null, rng = Math.random } = {},
+) {
+  const seeded = Number(card?.axes?.gravity);
+  const gravity = Number.isFinite(seeded)
+    ? Math.max(0, Math.min(100, Math.round(seeded)))
+    : sampleSuspenseGravity(domain, { opening, fromClosed, rng, cfg });
+  const depth = sampleSuspenseDepth(gravity, {
+    toneId: card?.axes?.tone || '',
+    sourceId: '',
+    opening,
+    rng,
+    cfg,
+  });
+  return {
+    gravity,
+    depth,
+    tags: annotationTagsFromCard(card),
+    tonePrimary: card?.axes?.tone || null,
+    toneSecondary: null,
+    source: null,
+    situation: null,
+    dynamic: null,
+    annotation: card,
+  };
+}
+
+export function formatSuspenseCardSeedForPrompt(seed, { opening = false, fromClosed = null } = {}) {
+  if (!seed) return '';
+  const card = seed.annotation;
+  const lines = [
+    '==================================================',
+    'РЕЖИССУРА СЕВА (движок: gravity/depth; premise — болванка)',
+    '==================================================',
+    `gravity: ${seed.gravity} (${gravityBand(seed.gravity)})`,
+    'Gravity уже задана болванкой. Не подменяй масштаб.',
+    `depth: ${seed.depth}` +
+      (seed.depth <= 1
+        ? ' — короткая живая история; одно сильное вмешательство может закрыть.'
+        : seed.depth === 2
+          ? ' — полноценная дуга, минимум один содержательный поворот.'
+          : ' — глубокая история: несколько разных состояний. Не закрывай одним успехом.'),
+    seed.tonePrimary ? `tone: ${seed.tonePrimary}` : null,
+    '',
+    'Воплоти болванку в этом городе. Не пиши другую историю. Depth и лестница — твои, в брифе их нет.',
+    'Сначала событие болванки, потом якоря города. Социальная реакция — слой поверх premise, не замена.',
+    card ? formatAnnotationCardForPrompt(card, 0) : null,
+    opening
+      ? 'СТАРТ города: не катастрофа и не конец острова. Игрок сразу видит, куда вмешаться.'
+      : null,
+    fromClosed
+      ? `Сиквел: gravity не ниже ${fromClosed.gravity}. Расти из остатка закрытой истории, не повторяй её.`
+      : null,
+  ];
+  return lines.filter((x) => x != null).join('\n');
 }
 
 export function formatSuspenseSeedForPrompt(seed, { opening = false, fromClosed = null } = {}) {

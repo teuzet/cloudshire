@@ -198,6 +198,7 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
     const resolved = await resolveDomainMonth({
       config,
       runtime,
+      storage,
       domain: live,
       world,
       partner,

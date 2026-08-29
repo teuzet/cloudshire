@@ -18,6 +18,7 @@ function domainWithOrder(extra = {}) {
   const order = createPlotline({
     title: 'Делегация учёных',
     synopsis: 'На каждую встречу шлют учёных.',
+    orderText: 'При каждом сопряжении слать учёных',
     kind: 'order',
     fireOn: 'conflux_dock',
     relatedStats: ['knowledge'],
@@ -29,7 +30,7 @@ function domainWithOrder(extra = {}) {
     characters: [{ id: 'ch_1', name: 'Сатра' }],
     plotlines: [order],
     state: {
-      modifiers: [{ id: order.modifierId || 'mod_1', text: 'При каждом сопряжении слать учёных', plotlineId: order.id }],
+      modifiers: [],
       pendingActions: extra.processes || [],
     },
     stats: { knowledge: 60 },
@@ -112,7 +113,6 @@ test('стык заводит дело мимо лимита слотов и с�
 test('fireConfluxDockOrder пишет хронику, дело и отмечает стык', async () => {
   const domain = domainWithOrder();
   const order = domain.plotlines[0];
-  order.modifierId = domain.state.modifiers[0].id;
   const conflux = confluxWithMain();
   const partner = { id: 'city_b', name: 'Ксарет' };
   const runtime = {

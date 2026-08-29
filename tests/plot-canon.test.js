@@ -282,8 +282,11 @@ test('стартер тайны может пометить, что истори
   assert.equal(domain.plotlines[0].asksSequel, true);
   closePlotline(domain, seeded.id, { tick: 4, reason: 'Разгадали.', sequelHook: 'Яд шёл из соседней мастерской.' });
   assert.equal(findClosedPlotline(domain, seeded.id).asksSequel, true);
-  assert.equal(allowSequelAfter({ storyType: 'mystery', asksSequel: true, kind: 'story' }), true);
-  assert.equal(allowSequelAfter({ storyType: 'mystery', asksSequel: false, kind: 'story' }), false);
+  assert.equal(allowSequelAfter({ storyType: 'mystery', asksSequel: true, ending: 'ok', kind: 'story' }), true);
+  assert.equal(allowSequelAfter({ storyType: 'mystery', asksSequel: true, ending: 'crit', kind: 'story' }), true);
+  assert.equal(allowSequelAfter({ storyType: 'mystery', asksSequel: true, ending: 'fail', kind: 'story' }), false);
+  assert.equal(allowSequelAfter({ storyType: 'mystery', asksSequel: true, kind: 'story' }), false);
+  assert.equal(allowSequelAfter({ storyType: 'mystery', asksSequel: false, ending: 'ok', kind: 'story' }), false);
   assert.equal(allowSequelAfter({ storyType: 'suspense', kind: 'story' }), true);
   assert.equal(allowSequelAfter({ kind: 'errand' }), false);
 });

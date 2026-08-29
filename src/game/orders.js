@@ -38,17 +38,17 @@ export function orderMonthsLeft(expiresTick, tick) {
   return Math.max(0, exp - t);
 }
 
-export function stampOrderTerm(plot, mod, { months = null, tick = null } = {}) {
+export function stampOrderTerm(plot, _mod, { months = null, tick = null } = {}) {
   const durationMonths = parseOrderDuration(months);
   const expiresTick = orderExpiresAt(tick, durationMonths);
   if (plot) {
     plot.durationMonths = durationMonths;
     plot.expiresTick = expiresTick;
   }
-  if (mod) {
-    mod.durationMonths = durationMonths;
-    mod.expiresTick = expiresTick;
-  }
+}
+
+export function orderRuleText(plot) {
+  return String(plot?.orderText || plot?.synopsis || plot?.title || '').trim();
 }
 
 function durationPatch(durationMonths) {
@@ -74,23 +74,23 @@ export function normalizeOrders(domain) {
   if (!Array.isArray(domain.state.pendingOrderRequests)) domain.state.pendingOrderRequests = [];
 
   for (const plot of domain.plotlines || []) {
-    if (plot?.kind !== 'order' || !plot.modifierId) continue;
-    const mod = domain.state.modifiers.find((m) => m && m.id === plot.modifierId);
-    if (mod && !mod.plotlineId) mod.plotlineId = plot.id;
-    if (mod && mod.durationMonths == null && plot.durationMonths) {
-      mod.durationMonths = plot.durationMonths;
-      mod.expiresTick = plot.expiresTick ?? null;
+    if (plot?.kind !== 'order') continue;
+    if (!plot.orderText) {
+      const mod = plot.modifierId
+        ? domain.state.modifiers.find((m) => m && m.id === plot.modifierId)
+        : null;
+      plot.orderText = String(mod?.text || plot.synopsis || plot.title || '').trim();
     }
   }
 
   for (const mod of domain.state.modifiers) {
-    if (!mod?.id) continue;
+    if (!mod?.id || mod.kind !== 'order') continue;
     if (mod.plotlineId && findPlotline(domain, mod.plotlineId)) continue;
     const linked = (domain.plotlines || []).find(
-      (p) => p.kind === 'order' && p.modifierId === mod.id,
+      (p) => p.kind === 'order' && (p.modifierId === mod.id || p.orderText === mod.text),
     );
     if (linked) {
-      mod.plotlineId = linked.id;
+      if (!linked.orderText) linked.orderText = String(mod.text || '').trim();
       continue;
     }
     const already = domain.state.pendingOrderRequests.some(
@@ -108,45 +108,52 @@ export function normalizeOrders(domain) {
       reason: '',
     });
   }
+
+  domain.state.modifiers = (domain.state.modifiers || []).filter((m) => m && m.kind !== 'order');
   return domain;
 }
 
 export function findStandingOrder(domain, key) {
-  const list = domain?.state?.modifiers || [];
   const k = String(key || '').trim().toLowerCase();
   if (!k) return null;
-  return (
-    list.find((m) => String(m.id).toLowerCase() === k) ||
-    list.find((m) => String(m.text || '').toLowerCase().includes(k.slice(0, 40))) ||
-    null
-  );
+  const plots = (domain?.plotlines || []).filter((p) => p?.kind === 'order');
+  const plot =
+    plots.find((p) => String(p.id).toLowerCase() === k) ||
+    plots.find((p) => String(p.modifierId || '').toLowerCase() === k) ||
+    plots.find((p) => String(p.orderText || '').toLowerCase().includes(k.slice(0, 40))) ||
+    null;
+  if (!plot) return null;
+  return {
+    id: plot.id,
+    text: plot.orderText || plot.synopsis || plot.title,
+    plotlineId: plot.id,
+    kind: 'order',
+  };
 }
 
 export function listStandingOrders(domain, { tick = null } = {}) {
   const pending = domain?.state?.pendingOrderRequests || [];
   const revokeIds = new Set(pending.filter((r) => r.action === 'revoke').map((r) => r.orderId));
   const editIds = new Set(pending.filter((r) => r.action === 'edit').map((r) => r.orderId));
-  const mods = (domain?.state?.modifiers || []).map((m) => {
-    const plot = m.plotlineId ? findPlotline(domain, m.plotlineId) : null;
-    const src = plot || m;
-    return {
-      id: m.id,
-      text: m.text,
-      pending: revokeIds.has(m.id) ? 'revoke' : editIds.has(m.id) ? 'edit' : false,
-      plotlineId: m.plotlineId || null,
-      kind: m.kind || 'order',
-      since: m.since || null,
-      declaredTick: Number.isInteger(Number(m.declaredTick)) ? Number(m.declaredTick) : null,
-      initiative: m.initiative || 'patron',
-      ...orderTermView(src, tick),
-    };
-  });
+  const live = (domain?.plotlines || [])
+    .filter((p) => p?.kind === 'order')
+    .map((plot) => ({
+      id: plot.id,
+      text: plot.orderText || plot.synopsis || plot.title,
+      pending: revokeIds.has(plot.id) || revokeIds.has(plot.modifierId) ? 'revoke' : editIds.has(plot.id) || editIds.has(plot.modifierId) ? 'edit' : false,
+      plotlineId: plot.id,
+      kind: 'order',
+      since: null,
+      declaredTick: Number.isInteger(Number(plot.createdTick)) ? Number(plot.createdTick) : null,
+      initiative: 'patron',
+      ...orderTermView(plot, tick),
+    }));
   const creating = pending
-    .filter((r) => r.action === 'create')
+    .filter((r) => r.action === 'create' || r.action === 'adopt')
     .map((r) => ({
       id: r.id,
       text: r.text,
-      pending: 'create',
+      pending: r.action === 'adopt' ? 'create' : 'create',
       action: 'create',
       kind: 'order',
       since: null,
@@ -154,7 +161,7 @@ export function listStandingOrders(domain, { tick = null } = {}) {
       initiative: r.initiative || 'patron',
       ...orderTermView(r, tick),
     }));
-  return [...mods, ...creating];
+  return [...live, ...creating];
 }
 
 function replacePendingForOrder(pending, orderId, next) {
@@ -184,14 +191,16 @@ export function queueOrderRequest(
 
   if (kind === 'create') {
     if (body.length < 3) return { error: 'too_short', message: 'Слишком короткое правило.' };
-    const existingMod =
+    const existing =
       findStandingOrder(domain, orderId) ||
-      (domain.state.modifiers || []).find((m) => textsLookSame(m.text, body));
-    if (existingMod) {
+      (domain.plotlines || []).find(
+        (p) => p.kind === 'order' && textsLookSame(p.orderText || p.synopsis, body),
+      );
+    if (existing) {
       return queueOrderRequest(domain, {
         action: 'edit',
         text: body,
-        orderId: existingMod.id,
+        orderId: existing.id || existing.plotlineId,
         by,
         initiative,
         tick,
@@ -384,23 +393,21 @@ export function markOrderFired(plot, tick, { confluxId = null } = {}) {
   }
 }
 
-export function unlinkOrderModifier(domain, plot) {
-  const id = plot?.modifierId;
-  if (!id || !domain?.state?.modifiers) return;
-  domain.state.modifiers = domain.state.modifiers.filter((m) => m.id !== id);
+export function unlinkOrderModifier(_domain, plot) {
+  if (plot) plot.modifierId = null;
 }
 
 export function expireTimedOrders(domain, tick) {
   normalizeOrders(domain);
   const expired = [];
-  const mods = [...(domain.state?.modifiers || [])];
-  for (const mod of mods) {
-    if (mod.expiresTick == null || mod.expiresTick === '') continue;
-    const exp = Number(mod.expiresTick);
+  for (const plot of [...(domain.plotlines || [])]) {
+    if (plot?.kind !== 'order') continue;
+    if (plot.expiresTick == null || plot.expiresTick === '') continue;
+    const exp = Number(plot.expiresTick);
     if (!Number.isInteger(exp) || Number(tick) < exp) continue;
     expired.push(
       closeOrderPair(domain, {
-        modifierId: mod.id,
+        plotlineId: plot.id,
         tick,
         reason: 'истёк срок порядка',
       }),
@@ -410,20 +417,14 @@ export function expireTimedOrders(domain, tick) {
 }
 
 export function closeOrderPair(domain, { modifierId = null, plotlineId = null, tick = null, reason = '' } = {}) {
-  const mod =
-    (modifierId && (domain.state?.modifiers || []).find((m) => m.id === modifierId)) ||
-    (plotlineId && (domain.state?.modifiers || []).find((m) => m.plotlineId === plotlineId)) ||
-    null;
   const plot =
     (plotlineId && findPlotline(domain, plotlineId)) ||
-    (mod?.plotlineId && findPlotline(domain, mod.plotlineId)) ||
-    (mod && (domain.plotlines || []).find((p) => p.kind === 'order' && p.modifierId === mod.id)) ||
+    (domain.plotlines || []).find(
+      (p) => p.kind === 'order' && (p.id === modifierId || p.modifierId === modifierId),
+    ) ||
     null;
   if (plot) closePlotline(domain, plot.id, { tick, reason: reason || 'порядок отменён' });
-  if (mod && domain.state?.modifiers) {
-    domain.state.modifiers = domain.state.modifiers.filter((m) => m.id !== mod.id);
-  }
-  return { modifier: mod, plot };
+  return { modifier: null, plot };
 }
 
 export function eventCap(config) {

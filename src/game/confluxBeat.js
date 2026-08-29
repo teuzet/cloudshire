@@ -7,16 +7,13 @@ import { mixedChronicleForPrompt, knownPartnerLore, pushInternalChronicle, chron
 import { priorPlotChronicle } from './storyteller.js';
 import { TINT_LABELS, formatFinishForPrompt } from './rolls.js';
 import { formatContactForPrompt } from './conflux.js';
+import { formatCityForAgents } from './cityContext.js';
 import { formatTruthGraphForPrompt } from './mysteryGraph.js';
 import { formatLadderForPrompt, formatHiddenPremisesForPrompt } from './suspenseGraph.js';
 import { offerNames, formatOfferedNamesForPrompt, bindCharacterNames } from './names.js';
 
 function chronicleMaxChars(config) {
   return Math.max(80, Number(config?.tick?.chronicleEntryMaxChars) || 260);
-}
-
-function cityBrief(domain) {
-  return String(domain?.description || '').trim() || '(описание пусто)';
 }
 
 function rulerName(domain) {
@@ -85,7 +82,7 @@ function registerCharacters(domain, list, { world, plotId = null, author = 'stor
 function packCity(domain) {
   const ruler = rulerName(domain);
   return [
-    `Город «${domain.name}». ${cityBrief(domain)}`,
+    `Город «${domain.name}». ${formatCityForAgents(domain)}`,
     ruler ? `Правитель — ${ruler}. Этого человека в newCharacters не заводи.` : null,
     `Известные люди:\n${formatCastForPrompt(domain.lore, { limit: 10 })}`,
   ]

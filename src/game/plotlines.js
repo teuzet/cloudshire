@@ -108,6 +108,11 @@ function storyActState(p = {}) {
       resolutionFacts: [],
       ending: null,
       asksSequel: false,
+      annotationId: null,
+      ifSolved: '',
+      ifUnsolved: '',
+      ifPrevented: '',
+      ifNotPrevented: '',
       depth: null,
       hiddenPremises: [],
       discoveryLadder: null,
@@ -146,6 +151,12 @@ function storyActState(p = {}) {
       type === 'mystery' ? normalizeFactList(p.resolutionFacts, { maxLen: RESOLUTION_FACT_MAX }).facts : [],
     ending: ['crit', 'ok', 'fail'].includes(p.ending) ? p.ending : null,
     asksSequel: Boolean(p.asksSequel),
+    annotationId:
+      (type === 'mystery' || type === 'suspense') && p.annotationId ? String(p.annotationId) : null,
+    ifSolved: type === 'mystery' ? clipText(String(p.ifSolved || ''), 900) : '',
+    ifUnsolved: type === 'mystery' ? clipText(String(p.ifUnsolved || ''), 900) : '',
+    ifPrevented: type === 'suspense' ? clipText(String(p.ifPrevented || ''), 900) : '',
+    ifNotPrevented: type === 'suspense' ? clipText(String(p.ifNotPrevented || ''), 900) : '',
     depth,
     hiddenPremises: type === 'suspense' ? normalizeHiddenPremises(p.hiddenPremises, depth) : [],
     discoveryLadder: ladder,
@@ -214,6 +225,7 @@ function orderCadence(p, config = null) {
   const lastFired = p?.lastFiredConfluxId ? String(p.lastFiredConfluxId) : null;
   return {
     modifierId: p?.modifierId ? String(p.modifierId) : null,
+    orderText: String(p?.orderText || '').trim(),
     fireOn,
     lastFiredConfluxId: fireOn ? lastFired : null,
     // Регулярность, вероятность и сопряжение взаимоисключающи.
@@ -333,6 +345,42 @@ export function plotConfig(config) {
             ? a.incompatible
             : {},
         tagGroups: Array.isArray(a.tagGroups) ? a.tagGroups : [],
+        poolMin: Math.max(10, Math.round(Number(a.poolMin ?? 60))),
+        refillBatch: Math.max(1, Math.min(6, Math.round(Number(a.refillBatch ?? 3)))),
+        shortlistSize: Math.max(4, Math.min(20, Math.round(Number(a.shortlistSize ?? 10)))),
+        modifierGravityMin: Math.max(0, Math.min(100, Math.round(Number(a.modifierGravityMin ?? 40)))),
+      };
+    })(),
+    suspenseAnnotation: (() => {
+      const a = p.suspense?.annotation || {};
+      const m = p.mystery?.annotation || {};
+      const gmin = Math.round(Number(a.gravityMin ?? m.gravityMin ?? 0));
+      const gmax = Math.round(Number(a.gravityMax ?? m.gravityMax ?? 100));
+      return {
+        gravityMin: Math.max(0, Math.min(100, Number.isFinite(gmin) ? gmin : 0)),
+        gravityMax: Math.max(0, Math.min(100, Number.isFinite(gmax) ? gmax : 100)),
+        secondaryToneChance: Math.max(0, Math.min(1, Number(a.secondaryToneChance ?? 0))),
+        judgeAttempts: Math.max(1, Math.min(2, Math.round(Number(a.judgeAttempts ?? 2)))),
+        recentWindow: Math.max(1, Math.min(8, Math.round(Number(a.recentWindow ?? 5)))),
+        cooldown: {
+          previousMultiplier: Math.max(0.01, Number(a.cooldown?.previousMultiplier ?? m.cooldown?.previousMultiplier ?? 0.2)),
+          frequentWindow: Math.max(1, Math.min(12, Math.round(Number(a.cooldown?.frequentWindow ?? m.cooldown?.frequentWindow ?? 4)))),
+          frequentMinCount: Math.max(2, Math.round(Number(a.cooldown?.frequentMinCount ?? m.cooldown?.frequentMinCount ?? 2))),
+          frequentMultiplier: Math.max(0.01, Number(a.cooldown?.frequentMultiplier ?? m.cooldown?.frequentMultiplier ?? 0.4)),
+          absentWindow: Math.max(1, Math.min(12, Math.round(Number(a.cooldown?.absentWindow ?? m.cooldown?.absentWindow ?? 5)))),
+          absentMultiplier: Math.max(1, Number(a.cooldown?.absentMultiplier ?? m.cooldown?.absentMultiplier ?? 1.3)),
+        },
+        incompatible:
+          a.incompatible && typeof a.incompatible === 'object' && !Array.isArray(a.incompatible)
+            ? a.incompatible
+            : m.incompatible && typeof m.incompatible === 'object' && !Array.isArray(m.incompatible)
+              ? m.incompatible
+              : {},
+        tagGroups: Array.isArray(a.tagGroups) && a.tagGroups.length ? a.tagGroups : Array.isArray(m.tagGroups) ? m.tagGroups : [],
+        poolMin: Math.max(10, Math.round(Number(a.poolMin ?? 60))),
+        refillBatch: Math.max(1, Math.min(6, Math.round(Number(a.refillBatch ?? 3)))),
+        shortlistSize: Math.max(4, Math.min(20, Math.round(Number(a.shortlistSize ?? 10)))),
+        modifierGravityMin: Math.max(0, Math.min(100, Math.round(Number(a.modifierGravityMin ?? m.modifierGravityMin ?? 40)))),
       };
     })(),
     mysteryGraph: {
@@ -478,6 +526,7 @@ export function createPlotline({
   shared = false,
   isMainConflux = false,
   modifierId = null,
+  orderText = '',
   fireChance = null,
   scheduleEveryMonths = null,
   nextDueTick = null,
@@ -499,6 +548,11 @@ export function createPlotline({
   resolutionFacts = [],
   ending = null,
   asksSequel = false,
+  annotationId = null,
+  ifSolved = '',
+  ifUnsolved = '',
+  ifPrevented = '',
+  ifNotPrevented = '',
   depth = null,
   hiddenPremises = [],
   discoveryLadder = null,
@@ -548,7 +602,7 @@ export function createPlotline({
     beatCount: 0,
     ...(resolvedKind === 'order'
       ? orderCadence(
-          { modifierId, fireChance, scheduleEveryMonths, nextDueTick, fireOn, lastFiredConfluxId, durationMonths, expiresTick },
+          { modifierId, orderText, fireChance, scheduleEveryMonths, nextDueTick, fireOn, lastFiredConfluxId, durationMonths, expiresTick },
           config,
         )
       : {}),
@@ -567,6 +621,11 @@ export function createPlotline({
       resolutionFacts,
       ending,
       asksSequel,
+      annotationId,
+      ifSolved,
+      ifUnsolved,
+      ifPrevented,
+      ifNotPrevented,
       depth,
       hiddenPremises,
       discoveryLadder,
@@ -734,6 +793,7 @@ function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } =
           lastFiredConfluxId: plot.lastFiredConfluxId || null,
           durationMonths: plot.durationMonths ?? null,
           expiresTick: plot.expiresTick ?? null,
+          orderText: plot.orderText || '',
         }
       : {}),
     status: 'closed',
@@ -1074,9 +1134,11 @@ export function annotationSeedCompatible(tags, incompatible) {
 
 export function annotationRecentArenaId(entry) {
   if (!entry) return null;
-  if (entry.truthArena) return String(entry.truthArena);
-  const t = (entry.seed?.tags || entry.tags || []).find((x) => x.groupId === 'truthArena');
-  return t?.tagId || null;
+  const tagged = (entry.seed?.tags || entry.tags || []).find(
+    (x) => x.groupId === 'truthArena' || x.groupId === 'threatArena' || x.groupId === 'arena',
+  );
+  const raw = entry.arena || entry.truthArena || entry.threatArena || tagged?.tagName || tagged?.tagId;
+  return raw ? String(raw).trim().toLowerCase() : null;
 }
 
 export function annotationArenaWeights(cfg, recent = []) {
@@ -1176,6 +1238,14 @@ export function pickMysteryAnnotationSeed(
   const hi = Math.max(gmin, gmax);
   const gravity = Math.max(0, Math.min(100, Math.round(lo + rng() * (hi - lo))));
   return { tags, gravity, omitTruthNature: Boolean(omitTruthNature) };
+}
+
+export function pickSuspenseAnnotationSeed(cfg, rng = Math.random, { recent = [] } = {}) {
+  return pickMysteryAnnotationSeed(
+    { mysteryAnnotation: cfg?.suspenseAnnotation || cfg?.mysteryAnnotation },
+    rng,
+    { recent, omitTruthNature: true },
+  );
 }
 
 const HUMAN_WRONGDOING_TYPES = new Set([
@@ -1386,6 +1456,75 @@ export function formatMysteryAnnotationAxesForPrompt(seed = {}, { recent = [], r
   return lines.filter(Boolean).join('\n');
 }
 
+export function formatSuspenseAnnotationAxesForPrompt(seed = {}, { recent = [], recentWindow = 5 } = {}) {
+  const tags = seed.tags || [];
+  const lines = [];
+  const history = formatMysteryAnnotationRecentForPrompt(recent, recentWindow).replace(/MYSTERY/g, 'SUSPENSE');
+  if (history) lines.push(history, '');
+  if (Number.isFinite(Number(seed.gravity))) {
+    lines.push(
+      `GRAVITY: ${seed.gravity} (${annotationGravityBand(seed.gravity)}). Читай первым. Исторический вес развилки для города, не число жертв. Якоря: 0 эпизод; 50 веха; 100 «до/после».`,
+    );
+    lines.push(
+      'Порядок: gravity → масштаб последствий → угроза, способная их породить → затем нынешняя ситуация. Не приклеивай раздутые исходы к мелкому давлению.',
+    );
+  }
+  lines.push(
+    'ЖЁСТКИЕ ОСИ: threatArena, worldRelation, manifestation. Arena — causal substrate центральной угрозы, не место действия, не транспорт и не происхождение.',
+  );
+  lines.push('МЯГКИЕ: тон. Не ломай историю ради него.');
+  lines.push(
+    'Это suspense, не mystery: главный вопрос — что случится и удастся ли изменить исход. Если убрать расследование причины, напряжение должно остаться.',
+  );
+  lines.push(
+    'Исходы обязательны: конкретное хорошее «если предотвратить» и плохое «если не предотвратить», масштаб по gravity. Не generic «опасность устранена / стало хуже».',
+  );
+  const used = new Set();
+  const promptTags = tags.map((t) =>
+    t.groupId === 'truthArena' ? { ...t, groupId: 'threatArena', groupName: t.groupName || 'Арена угрозы' } : t,
+  );
+  for (const id of ['threatArena', 'worldRelation', 'manifestation', 'tonePrimary']) {
+    const t = promptTags.find((x) => x.groupId === id);
+    if (!t) continue;
+    used.add(id);
+    const about = t.about ? ` — ${t.about}` : '';
+    lines.push(`${(t.groupName || t.groupId || '').toUpperCase()} (жёсткая): ${t.tagName}${about}`);
+  }
+  for (const t of promptTags) {
+    if (used.has(t.groupId) || ANNOTATION_SKIP_GROUPS.has(t.groupId)) continue;
+    if (t.groupId === 'association' || t.groupId === 'scale' || t.groupId === 'toneSecondary' || t.groupId === 'situation' || t.groupId === 'truthNature') continue;
+    const about = t.about ? ` — ${t.about}` : '';
+    lines.push(`${(t.groupName || t.groupId || '').toUpperCase()}: ${t.tagName}${about}`);
+  }
+  const arena = tags.find((t) => t.groupId === 'truthArena' || t.groupId === 'threatArena' || t.groupId === 'arena');
+  const arenaId = String(arena?.tagId || arena?.tagName || '').toLowerCase();
+  if (arenaId === 'human') {
+    lines.push('THREAT_ARENA HUMAN: давление из человеческого поведения, не из вещества и не из конструкции как таковой.');
+  } else if (arenaId === 'creature') {
+    lines.push('THREAT_ARENA CREATURE: двигатель — конкретное существо. Популяция/гриб/экосдвиг — ECOLOGY.');
+  } else if (arenaId === 'ecology') {
+    lines.push('THREAT_ARENA ECOLOGY: двигатель — процесс видов или среды, не одно животное.');
+  } else if (arenaId === 'material') {
+    lines.push('THREAT_ARENA MATERIAL: двигатель в веществе. Живое в носителе — не эта арена.');
+  } else if (arenaId === 'built') {
+    lines.push('THREAT_ARENA BUILT: двигатель в устройстве человеческой системы. Если живое ломает постройку — CREATURE/ECOLOGY.');
+  } else if (arenaId === 'earth') {
+    lines.push('THREAT_ARENA EARTH: двигатель в ландшафте или геологии. Колодец и сток — BUILT.');
+  } else if (arenaId === 'sky') {
+    lines.push('THREAT_ARENA SKY: двигатель в атмосфере, погоде или небе. Существо в полёте — CREATURE.');
+  }
+  const rel = tags.find((t) => t.groupId === 'worldRelation');
+  if (rel?.tagId === 'native') {
+    lines.push('WORLD_RELATION NATIVE: угроза выросла из уже существующей обычной жизни острова.');
+  } else if (rel?.tagId === 'contact') {
+    lines.push('WORLD_RELATION CONTACT: в привычную жизнь вошло новое явление, которого здесь раньше не было.');
+  } else if (rel?.tagId === 'legacy') {
+    lines.push('WORLD_RELATION LEGACY: нынешнее давление — следствие прошлого, старого объекта или забытой структуры.');
+  }
+  lines.push('Не классифицируй suspense и не строй граф. Не ставь depth и лестницу раскрытия. Просто придумай хорошую угрозу.');
+  return lines.filter(Boolean).join('\n');
+}
+
 /** Тип обязателен; ассоциация должна читаться в графе, не как табличка. */
 export function formatMysteryAxesForPrompt(tags, { opening = false } = {}) {
   const type = mysteryTypeTag(tags);
@@ -1546,10 +1685,12 @@ export function pickSequelSeed(domain, offers, cfg, rng = Math.random) {
   return viable[viable.length - 1];
 }
 
-/** Тайна даёт сиквел только если стартер пометил, что разгадка вскрывает новую проблему. */
+/** Тайна даёт сиквел только если её целиком разгадали и стартер пометил новую проблему. */
 export function allowSequelAfter(plot) {
   if (!plot || plot.kind === 'errand') return false;
-  if (plot.storyType === 'mystery') return Boolean(plot.asksSequel);
+  if (plot.storyType === 'mystery') {
+    return Boolean(plot.asksSequel) && (plot.ending === 'ok' || plot.ending === 'crit');
+  }
   return true;
 }
 

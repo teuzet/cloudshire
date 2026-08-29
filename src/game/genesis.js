@@ -18,6 +18,7 @@ import {
 import { formatPlayerBrief } from './onboarding.js';
 import { seedOpeningPlots } from './storyteller.js';
 import { ensureCityEntities } from './cityEntities.js';
+import { clipCityText, CITY_BRIEF_MAX } from './cityContext.js';
 import { takeName } from './names.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
@@ -491,6 +492,60 @@ async function generateAspectBatch({
   return draft.texts;
 }
 
+async function generateCityBrief({ runtime, domain, log }) {
+  const draft = { text: '' };
+  const tools = [
+    {
+      name: 'submit_city_brief',
+      description: 'Компактный фактический бриф города для агентов тика. Не литература.',
+      parameters: {
+        type: 'object',
+        required: ['brief'],
+        properties: {
+          brief: {
+            type: 'string',
+            description: `Сухие постоянные факты города, до ${CITY_BRIEF_MAX} символов: места, институты, ресурсы, уклады, напряжения. Без сиюминутного и без сюжета.`,
+          },
+        },
+      },
+      handler: async (args) => {
+        const brief = clipCityText(args.brief, CITY_BRIEF_MAX);
+        if (brief.length < 80) return toolFail('thin', 'Слишком коротко: нужны конкретные факты города.');
+        draft.text = brief;
+        return { ok: true };
+      },
+    },
+  ];
+
+  try {
+    await runtime.run({
+      agentId: 'cityBrief',
+      tools,
+      maxTurns: 3,
+      toolChoice: { type: 'function', function: { name: 'submit_city_brief' } },
+      log,
+      scene: 'city_brief',
+      domainId: domain.id,
+      extraSystem: `Город «${domain.name}».\n${String(domain.description || '').trim()}`,
+      userMessages: [
+        {
+          role: 'user',
+          content: [
+            'Собери КОМПАКТНЫЙ фактический бриф этого города для других агентов.',
+            'Не пересказывай генезис литературно. Не пиши хронику месяца и не выдумывай тайну.',
+            'Оставь: рельеф и хозяйство, институты, ключевые места, устойчивые напряжения, необычные постоянные черты.',
+            'Бриф потом не переписывают: к нему только дописывают постоянные изменения.',
+            'Вызови submit_city_brief.',
+          ].join('\n'),
+        },
+      ],
+    });
+  } catch (err) {
+    log.warn('genesis.city_brief_failed', { error: err.message });
+  }
+  return draft.text;
+}
+
 export async function generateDomain({
   config,
   runtime,
@@ -621,6 +676,9 @@ export async function generateDomain({
     applyPatronName(domain, forcedPatronName, { world, allowReplace: true });
   }
 
+  await onProgress?.('бриф города');
+  domain.cityBrief = await generateCityBrief({ runtime, domain, log });
+
   await storage.saveDomain(domain);
   const prev = await storage.getUserBinding(String(ownerUserId));
   await storage.saveUserBinding({
@@ -643,7 +701,7 @@ export async function generateDomain({
   await ensureCityEntities({ domain, config, runtime, log });
   await storage.saveDomain(domain);
   await onProgress?.('первые истории');
-  await seedOpeningPlots({ config, runtime, domain, world, log });
+  await seedOpeningPlots({ config, runtime, domain, world, storage, log });
   await storage.saveDomain(domain);
   log.info('genesis.saved', {
     domainId: domain.id,

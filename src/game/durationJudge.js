@@ -8,10 +8,7 @@ import { guessProcessDuration } from './processes.js';
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { deadlineRemainingMs } from '../agents/runtime.js';
-
-function cityBrief(domain) {
-  return String(domain.description || '').trim() || '(описание пусто)';
-}
+import { formatCityForAgents } from './cityContext.js';
 
 /**
  * @returns {Promise<{ months: number, note: string|null, source: 'agent'|'fallback' }>}
@@ -89,7 +86,7 @@ export async function estimateProcessDuration({
             `Дело: ${summary}`,
             detail ? `Поручение: ${detail}` : null,
             '',
-            `Город: ${cityBrief(domain)}`,
+            `Город: ${formatCityForAgents(domain)}`,
             `Людей: ${qualitativePopulation(domain?.population || 0)}`,
             'Стороны жизни:',
             qualitativeStatsBrief(domain?.stats || {}, config),

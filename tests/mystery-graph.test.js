@@ -21,6 +21,7 @@ import {
   NODE_TEXT_MAX,
   EDGE_REASON_MAX,
   GRAPH_SHAPE_DEFAULTS,
+  inspectCustomGraph,
 } from '../src/game/mysteryGraph.js';
 
 function knowledgeOf(graph) {
@@ -309,4 +310,26 @@ test('observedFacts только из X, resolutionFacts из узлов, под
     }),
     'mask_leak',
   );
+});
+
+test('своя форма 3–8 узлов с X принимается, если allowCustom', () => {
+  const diamond = {
+    nodes: [
+      { id: 'A', text: 'Красильня сбросила купорос.' },
+      { id: 'B', text: 'Купорос попал в верхнюю цистерну.' },
+      { id: 'C', text: 'Ночной дозор переставил заслонку.' },
+      { id: 'X', text: 'Нижний ярус пьёт синюю воду.' },
+    ],
+    edges: [
+      { from: 'A', to: 'B', reason: 'сток ведёт в цистерну' },
+      { from: 'C', to: 'X', reason: 'заслонка пустила воду вниз' },
+      { from: 'B', to: 'X', reason: 'окрашенная вода дошла до яруса' },
+    ],
+  };
+  assert.equal(judgeTruthGraph(diamond, { shape: 'linear_4' }), 'wrong_shape');
+  assert.equal(judgeTruthGraph(diamond, { shape: 'linear_4', allowCustom: true }), null);
+  assert.ok(inspectCustomGraph(diamond));
+  const g = applySeedVisibility(normalizeTruthGraph(diamond), { shape: 'linear_4' });
+  assert.equal(g.nodes.find((n) => n.id === 'X').knowledge, 'observed');
+  assert.equal(g.nodes.find((n) => n.id === 'A').knowledge, 'hidden');
 });

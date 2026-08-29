@@ -33,9 +33,7 @@ import {
   plotHasActiveProcess,
   attachChronicleToPlotlines,
   plotConfig,
-  formatPlotTagsForPrompt,
   clipPlotText,
-  pickSeedTags,
   mysteryTypeTag,
   formatMysteryAxesForPrompt,
   openingPlotCount,
@@ -48,7 +46,12 @@ import {
   PLOT_SUMMARY_MAX,
   PLOT_HOOK_MAX,
 } from './plotlines.js';
-import { rollSuspenseSeed, formatSuspenseSeedForPrompt, characterPlotOccupancy, formatOccupancyForPrompt } from './suspenseSeed.js';
+import {
+  engineSuspenseFromCard,
+  formatSuspenseCardSeedForPrompt,
+  characterPlotOccupancy,
+  formatOccupancyForPrompt,
+} from './suspenseSeed.js';
 import { normalizeDiscoveryLadder, normalizeHiddenPremises, hiddenPremisesBudget } from './suspenseGraph.js';
 import { sharedPlots } from './confluxBoard.js';
 import { pickOrderOutcome, markOrderFired } from './orders.js';
@@ -82,6 +85,20 @@ import {
 import { formatMysteryJudgeCase, judgeMysteryCascade, summarizeJudgeAttempt, judgeMysteryPresentation, formatMysteryPresentationJudgeCase, formatJudgeRevisionForPrompt, literaryJudgeAccepts } from './mysteryJudge.js';
 import { formatSuspenseJudgeCase, judgeSuspenseSeed } from './suspenseJudge.js';
 import { ensureCityEntities, pickMysteryAnchors, formatMysteryAnchorsForPrompt } from './cityEntities.js';
+import { formatCityForAgents } from './cityContext.js';
+import {
+  annotationTagsFromCard,
+  climateOf,
+  formatAnnotationCardForPrompt,
+  poolKeyOf,
+  recordSeedClimate,
+  sampleAnnotationShortlist,
+  sortShortlistByNovelty,
+  unusedAnnotationPool,
+} from './annotationPool.js';
+import { refillMysteryAnnotationPool, refillSuspenseAnnotationPool } from './annotationCatalog.js';
+import { selectAnnotations } from './annotationSelector.js';
+import { maybeAppendStoryCityModifier } from './cityModifier.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 
@@ -91,7 +108,7 @@ function chronicleMaxChars(config) {
 }
 
 function cityBrief(domain) {
-  return String(domain.description || '').trim() || '(описание пусто)';
+  return formatCityForAgents(domain);
 }
 
 /** Контекст города для завязки: генезис, свежая хроника, дела, люди. */
@@ -292,6 +309,7 @@ export async function seedPlot({
   runtime,
   domain,
   world,
+  storage = null,
   tags = null,
   fromClosed = null,
   opening = false,
@@ -312,6 +330,7 @@ export async function seedPlot({
       runtime,
       domain,
       world,
+      storage,
       tags,
       fromClosed,
       opening,
@@ -322,164 +341,237 @@ export async function seedPlot({
     });
   }
 
-  const seed = rollSuspenseSeed({ domain, cfg, opening, fromClosed });
-  if (tags?.length) {
-    seed.tags = tags;
-    seed.tonePrimary = tags.find((t) => t.groupId === 'tone' && !t.secondary)?.tagId || seed.tonePrimary;
-    seed.toneSecondary = tags.find((t) => t.groupId === 'tone' && t.secondary)?.tagId || seed.toneSecondary;
-    seed.source = tags.find((t) => t.groupId === 'source')?.tagId || seed.source;
-    seed.situation = tags.find((t) => t.groupId === 'situation')?.tagId || seed.situation;
-    seed.dynamic = tags.find((t) => t.groupId === 'dynamic')?.tagId || seed.dynamic;
-  }
-  const roll = seed.tags;
-  const occupancy = characterPlotOccupancy(domain);
-  const maxRevise = cfg.suspense?.judgeAttempts ?? 3;
-  let revision = null;
-  let lastAsked = null;
-  let lastJudge = null;
+  return seedSuspensePlot({
+    config,
+    runtime,
+    domain,
+    world,
+    storage,
+    fromClosed,
+    opening,
+    log,
+    cfg,
+    maxChars,
+    statIds,
+  });
+}
 
-  for (let attempt = 0; attempt < maxRevise; attempt += 1) {
-    const draft = { data: null };
-    const asked = await askPlotSeed({
+async function pickAnnotationShortlist({ runtime, domain, world, cfg, log, kind = 'mystery' }) {
+  const mystery = kind === 'mystery';
+  const n = mystery
+    ? cfg.mysteryAnnotation?.shortlistSize || 10
+    : cfg.suspenseAnnotation?.shortlistSize || 10;
+  const nowTick = world?.tickIndex ?? 0;
+  const climate = climateOf(domain, kind);
+  const pool = unusedAnnotationPool(world?.[poolKeyOf(kind)] || [], climate);
+  if (!pool.length) return [];
+
+  const tryOnce = async () => {
+    const shortlist = sampleAnnotationShortlist(pool, { n, storyType: kind });
+    const approvedIds = await selectAnnotations({
       runtime,
       domain,
       world,
-      tags: roll,
+      cards: shortlist,
+      kind,
       log,
-      maxChars,
-      statIds,
-      draft,
-      fromClosed,
-      opening,
-      storyType,
-      seedPeople: [],
-      seedNames: [],
-      nodeCount: 0,
-      anchors: [],
-      graphShape: null,
-      sideOpen: false,
-      suspenseSeed: seed,
-      occupancy,
-      revision,
     });
-    if (!asked) {
-      log.warn('storyteller.seed_failed', { attempt });
-      continue;
-    }
-    lastAsked = asked;
+    const approved = shortlist.filter((c) => approvedIds.includes(c.id));
+    return sortShortlistByNovelty(approved, climate, { nowTick, storyType: kind });
+  };
 
-    const reason = judgePlotSeed(domain, asked, { storyType, depth: seed.depth });
-    if (reason) {
-      log.info('storyteller.seed_rejected', {
-        reason,
-        attempt,
-        title: asked.title,
-        tags: roll.map((t) => t.tagId),
-        depth: seed.depth,
-      });
-      revision = { mechanical: reason, judge: null, previous: asked };
-      continue;
-    }
+  let ranked = await tryOnce();
+  if (!ranked.length) ranked = await tryOnce();
+  return ranked;
+}
 
-    const caseText = formatSuspenseJudgeCase({ draft: asked, seed, tags: roll });
-    lastJudge = await judgeSuspenseSeed({
-      runtime,
-      caseText,
-      log,
-      domainId: domain.id,
-    });
-    log.info('suspense.seed.judge', {
-      attempt: attempt + 1,
-      title: asked.title,
-      verdict: lastJudge.verdict,
-      issues: lastJudge.issues,
-      summary: lastJudge.summary,
-    });
-    if (!literaryJudgeAccepts(lastJudge.verdict)) {
-      revision = { mechanical: null, judge: lastJudge, previous: asked };
-      continue;
-    }
-
-    if (opening) {
-      asked.maxAgeMonths = Math.min(5, Math.max(2, Number(asked.maxAgeMonths) || 4));
-    }
-
-    const ladder = normalizeDiscoveryLadder(asked.discoveryLadder, seed.depth);
-    const hidden = normalizeHiddenPremises(asked.hiddenPremises, seed.depth);
-
-    const plot = createPlotline({
-      title: asked.title,
-      synopsis: asked.synopsis,
-      closeWhen: asked.closeWhen,
-      mootWhen: asked.mootWhen,
-      relatedStats: asked.relatedStats,
-      maxAgeMonths: asked.maxAgeMonths,
-      temperature: cfg.temperature.initial,
-      tags: roll,
-      tick: world.tickIndex,
-      relatedPlotlineIds: fromClosed?.id ? [fromClosed.id] : [],
-      storyType,
-      act: 1,
-      gravity: seed.gravity,
-      gravity0: seed.gravity,
-      depth: seed.depth,
-      hiddenPremises: hidden,
-      discoveryLadder: ladder,
-      closureGate: asked.closureGate,
-      closureUnlocked: seed.depth <= 1,
-      tonePrimary: seed.tonePrimary,
-      toneSecondary: seed.toneSecondary,
-      source: seed.source,
-      situation: seed.situation,
-      dynamic: seed.dynamic,
-      legacyAxes: Array.isArray(asked.legacyAxes) ? asked.legacyAxes : [],
-      config,
-    });
-    domain.plotlines.push(plot);
-    await assignPlotStakes({ runtime, domain, plot, world, log });
-
-    const fact = pushChronicle(domain, {
-      text: asked.entry,
-      importance: plotScale(plot) >= 70 ? 'major' : 'minor',
-      world,
-      plotIds: [plot.id],
-      author: 'storyteller:seed',
-    });
-    const cast = registerCharacters(domain, asked.newCharacters, {
-      world,
-      plotId: plot.id,
-      author: 'storyteller:seed',
-    });
-
-    log.info('storyteller.seed', {
-      plotId: plot.id,
-      title: plot.title,
-      attempt,
-      sequelOf: fromClosed?.id || null,
-      importance: plot.importance,
-      storyType: plot.storyType,
-      urgency: plot.urgency,
-      gravity: plot.gravity,
-      depth: plot.depth,
-      source: plot.source,
-      tone: plot.tonePrimary,
-      dynamic: plot.dynamic,
-      maxAgeMonths: plot.maxAgeMonths,
-      relatedStats: plot.relatedStats,
-      cast: cast.map((c) => c.name),
-      ladder: ladder.map((r) => r.id),
-      literaryJudge: lastJudge?.verdict,
-    });
-    return { plot, fact, cast, seed, judge: lastJudge };
+async function seedSuspensePlot({
+  config,
+  runtime,
+  domain,
+  world,
+  storage = null,
+  fromClosed = null,
+  opening = false,
+  log,
+  cfg,
+  maxChars,
+  statIds,
+}) {
+  await refillSuspenseAnnotationPool({ world, storage, runtime, config, log });
+  const cards = await pickAnnotationShortlist({
+    runtime,
+    domain,
+    world,
+    cfg,
+    log,
+    kind: 'suspense',
+  });
+  if (!cards.length) {
+    log.info('storyteller.seed_skipped', { reason: 'seed_skipped', storyType: 'suspense' });
+    return { plot: null, attempts: [], skipped: 'seed_skipped' };
   }
 
-  log.info('storyteller.seed_skipped', {
-    reason: 'no_clean_seed',
-    attempts: maxRevise,
-    lastTitle: lastAsked?.title || null,
-    literary: lastJudge?.verdict || null,
-  });
-  return null;
+  const occupancy = characterPlotOccupancy(domain);
+  const maxRevise = cfg.suspense?.judgeAttempts ?? 3;
+
+  for (const card of cards) {
+    const seed = engineSuspenseFromCard(card, { domain, cfg, opening, fromClosed });
+    const roll = seed.tags;
+    let revision = null;
+    let lastAsked = null;
+    let lastJudge = null;
+
+    for (let attempt = 0; attempt < maxRevise; attempt += 1) {
+      const draft = { data: null };
+      const asked = await askPlotSeed({
+        runtime,
+        domain,
+        world,
+        tags: roll,
+        log,
+        maxChars,
+        statIds,
+        draft,
+        fromClosed,
+        opening,
+        storyType: 'suspense',
+        seedPeople: [],
+        seedNames: [],
+        nodeCount: 0,
+        anchors: [],
+        graphShape: null,
+        sideOpen: false,
+        suspenseSeed: seed,
+        occupancy,
+        revision,
+        annotation: card,
+      });
+      if (!asked) {
+        log.warn('storyteller.seed_failed', { attempt, annotationId: card.id });
+        continue;
+      }
+      lastAsked = asked;
+
+      const reason = judgePlotSeed(domain, asked, { storyType: 'suspense', depth: seed.depth });
+      if (reason) {
+        log.info('storyteller.seed_rejected', {
+          reason,
+          attempt,
+          title: asked.title,
+          annotationId: card.id,
+          depth: seed.depth,
+        });
+        revision = { mechanical: reason, judge: null, previous: asked };
+        continue;
+      }
+
+      const caseText = formatSuspenseJudgeCase({ draft: asked, seed, tags: roll });
+      lastJudge = await judgeSuspenseSeed({
+        runtime,
+        caseText,
+        log,
+        domainId: domain.id,
+      });
+      log.info('suspense.seed.judge', {
+        attempt: attempt + 1,
+        title: asked.title,
+        annotationId: card.id,
+        verdict: lastJudge.verdict,
+        issues: lastJudge.issues,
+        summary: lastJudge.summary,
+      });
+      if (!literaryJudgeAccepts(lastJudge.verdict)) {
+        revision = { mechanical: null, judge: lastJudge, previous: asked };
+        continue;
+      }
+
+      if (opening) {
+        asked.maxAgeMonths = Math.min(5, Math.max(2, Number(asked.maxAgeMonths) || 4));
+      }
+
+      const ladder = normalizeDiscoveryLadder(asked.discoveryLadder, seed.depth);
+      const hidden = normalizeHiddenPremises(asked.hiddenPremises, seed.depth);
+
+      const plot = createPlotline({
+        title: asked.title,
+        synopsis: asked.synopsis,
+        closeWhen: asked.closeWhen,
+        mootWhen: asked.mootWhen,
+        relatedStats: asked.relatedStats,
+        maxAgeMonths: asked.maxAgeMonths,
+        temperature: cfg.temperature.initial,
+        tags: roll,
+        tick: world.tickIndex,
+        relatedPlotlineIds: fromClosed?.id ? [fromClosed.id] : [],
+        storyType: 'suspense',
+        act: 1,
+        gravity: seed.gravity,
+        gravity0: seed.gravity,
+        depth: seed.depth,
+        hiddenPremises: hidden,
+        discoveryLadder: ladder,
+        closureGate: asked.closureGate,
+        closureUnlocked: seed.depth <= 1,
+        tonePrimary: seed.tonePrimary,
+        annotationId: card.id,
+        ifPrevented: card.ifPrevented || '',
+        ifNotPrevented: card.ifNotPrevented || '',
+        config,
+      });
+      domain.plotlines.push(plot);
+      recordSeedClimate(domain, {
+        tick: world.tickIndex,
+        storyType: 'suspense',
+        axes: card.axes,
+        annotationId: card.id,
+      });
+      await assignPlotStakes({ runtime, domain, plot, world, log });
+
+      const fact = pushChronicle(domain, {
+        text: asked.entry,
+        importance: plotScale(plot) >= 70 ? 'major' : 'minor',
+        world,
+        plotIds: [plot.id],
+        author: 'storyteller:seed',
+      });
+      const cast = registerCharacters(domain, asked.newCharacters, {
+        world,
+        plotId: plot.id,
+        author: 'storyteller:seed',
+      });
+
+      log.info('storyteller.seed', {
+        plotId: plot.id,
+        title: plot.title,
+        attempt,
+        sequelOf: fromClosed?.id || null,
+        importance: plot.importance,
+        storyType: 'suspense',
+        urgency: plot.urgency,
+        gravity: plot.gravity,
+        depth: plot.depth,
+        annotationId: card.id,
+        tone: plot.tonePrimary,
+        maxAgeMonths: plot.maxAgeMonths,
+        relatedStats: plot.relatedStats,
+        cast: cast.map((c) => c.name),
+        ladder: ladder.map((r) => r.id),
+        literaryJudge: lastJudge?.verdict,
+      });
+      return { plot, fact, cast, seed, judge: lastJudge };
+    }
+
+    log.info('storyteller.seed_card_failed', {
+      storyType: 'suspense',
+      annotationId: card.id,
+      lastTitle: lastAsked?.title || null,
+      literary: lastJudge?.verdict || null,
+    });
+  }
+
+  log.info('storyteller.seed_skipped', { reason: 'seed_skipped', storyType: 'suspense' });
+  return { plot: null, attempts: [], skipped: 'seed_skipped' };
 }
 
 async function seedMysteryPlot({
@@ -487,6 +579,7 @@ async function seedMysteryPlot({
   runtime,
   domain,
   world,
+  storage = null,
   tags = null,
   fromClosed = null,
   opening = false,
@@ -495,15 +588,29 @@ async function seedMysteryPlot({
   maxChars,
   statIds,
 }) {
+  await refillMysteryAnnotationPool({ world, storage, runtime, config, log });
+  const cards = await pickAnnotationShortlist({
+    runtime,
+    domain,
+    world,
+    cfg,
+    log,
+    kind: 'mystery',
+  });
+  if (!cards.length) {
+    log.info('storyteller.seed_skipped', { reason: 'seed_skipped', storyType: 'mystery' });
+    return { plot: null, attempts: [], skipped: 'seed_skipped' };
+  }
   const maxJudged = cfg.mysteryGraph?.judgeAttempts ?? 3;
   const maxGen = cfg.mysteryGraph?.generateTries ?? 6;
   const maxPres = cfg.mysteryGraph?.presentationTries ?? 3;
-  let judged = 0;
   const attempts = [];
 
+  for (const card of cards) {
+  const roll = annotationTagsFromCard(card);
+  let judged = 0;
+
   for (let genTry = 0; genTry < maxGen && judged < maxJudged; genTry += 1) {
-    const roll =
-      genTry === 0 && tags?.length ? tags : pickSeedTags(cfg, { storyType: 'mystery', opening });
     const seedNames = offerMysterySeedNames({ world, domain, config });
     const mysteryKind = mysteryTypeTag(roll);
     const graphShape = pickMysteryGraphShape(cfg);
@@ -519,6 +626,7 @@ async function seedMysteryPlot({
       domain,
       world,
       tags: roll,
+      annotation: card,
       log,
       draft: coreDraft,
       fromClosed,
@@ -736,9 +844,20 @@ async function seedMysteryPlot({
       observedFacts: asked.observedFacts,
       resolutionFacts: asked.resolutionFacts,
       asksSequel: asked.asksSequel === true || asked.asksSequel === 'true',
+      annotationId: card.id,
+      ifSolved: card.ifSolved || '',
+      ifUnsolved: card.ifUnsolved || '',
+      gravity: Number.isFinite(Number(card.axes?.gravity)) ? Number(card.axes.gravity) : null,
+      gravity0: Number.isFinite(Number(card.axes?.gravity)) ? Number(card.axes.gravity) : null,
       config,
     });
     domain.plotlines.push(plot);
+    recordSeedClimate(domain, {
+      tick: world.tickIndex,
+      storyType: 'mystery',
+      axes: card.axes,
+      annotationId: card.id,
+    });
     await assignPlotStakes({ runtime, domain, plot, world, log });
 
     const fact = pushChronicle(domain, {
@@ -770,6 +889,7 @@ async function seedMysteryPlot({
       graphShape,
       sideOpen,
       mysteryKind: mysteryKind?.tagId,
+      annotationId: card.id,
       asksSequel: asked.asksSequel === true || asked.asksSequel === 'true',
       anchors: anchors.map((a) => (a.invent ? `invent:${a.kind}` : a.name)),
       lunaJudge: rec.lunaJudge?.verdict,
@@ -778,9 +898,11 @@ async function seedMysteryPlot({
     });
     return { plot, fact, cast, anchors, graphShape, mysteryKind, sideOpen, judge: rec, attempts };
   }
+  }
 
   log.info('storyteller.seed_skipped', {
     reason: 'generation_failed',
+    storyType: 'mystery',
     judged,
     attempts: attempts.map((a) => ({
       attempt: a.attempt,
@@ -799,7 +921,7 @@ async function seedMysteryPlot({
 }
 
 /** 1–2 коротких истории сразу после генезиса. Ошибка посева город не ломает. */
-export async function seedOpeningPlots({ config, runtime, domain, world, log: parentLog, rng = Math.random }) {
+export async function seedOpeningPlots({ config, runtime, domain, world, storage = null, log: parentLog, rng = Math.random }) {
   const log = (parentLog || getLogger()).child({ scope: 'storyteller.opening', domainId: domain.id });
   const want = openingPlotCount(config, rng);
   if (want <= 0) return [];
@@ -811,6 +933,7 @@ export async function seedOpeningPlots({ config, runtime, domain, world, log: pa
         runtime,
         domain,
         world,
+        storage,
         opening: true,
         log,
       });
@@ -832,6 +955,7 @@ async function askMysteryCore({
   domain,
   world,
   tags,
+  annotation = null,
   log,
   draft,
   fromClosed = null,
@@ -853,7 +977,7 @@ async function askMysteryCore({
           title: { type: 'string', description: 'Название, 1–4 слова' },
           nodes: {
             type: 'array',
-            description: `Ровно ${nodeCount} узлов истины. Последний главной цепи — X. Текст узла до ${NODE_TEXT_MAX} символов, не обрывай.`,
+            description: `3–8 узлов истины (предпочтительно ${nodeCount}). Последний главной цепи — X. Текст узла до ${NODE_TEXT_MAX} символов, не обрывай.`,
             items: {
               type: 'object',
               required: ['id', 'text'],
@@ -920,11 +1044,12 @@ async function askMysteryCore({
         }
         const graph = normalizeTruthGraph(args);
         const shapeReason = judgeTruthGraph(graph, {
-          minNodes: nodeCount,
-          maxNodes: nodeCount,
+          minNodes: 3,
+          maxNodes: 8,
           shape: graphShape,
+          allowCustom: true,
         });
-        if (shapeReason) return toolFail(shapeReason, mysteryGraphShapeHint(graphShape));
+        if (shapeReason) return toolFail(shapeReason, mysteryGraphShapeHint(graphShape, { allowCustom: true }));
         applySeedVisibility(graph, { shape: graphShape, sideOpen });
         const observed = normalizeFactList(args.observedFacts, { maxLen: OBSERVED_FACT_MAX });
         const resolution = normalizeFactList(args.resolutionFacts, { maxLen: RESOLUTION_FACT_MAX });
@@ -964,15 +1089,16 @@ async function askMysteryCore({
       {
         role: 'user',
         content: [
-          `Построй CORE новой тайны города (${world.gameDate.label}). Тип уже выбран движком.`,
-          formatMysteryGraphShapeForPrompt(graphShape),
+          `Построй CORE новой тайны города (${world.gameDate.label}). Аннотация обязательна: воплоти её в этом городе, не пиши другую тайну.`,
+          formatMysteryGraphShapeForPrompt(graphShape, { soft: true }),
           formatMysteryMaskForPrompt(graphShape, { sideOpen, forCore: true }),
           'Не пиши synopsis, entry и closeWhen. Только истину, observedFacts из X и resolutionFacts из графа.',
           '`asksSequel` — true, только если разгадка вскрывает новую неизвестную проблему.',
           opening
             ? 'Масштаб — квартал или большая группа, ставки ощутимы. Не канцелярия и не конец острова.'
             : 'Масштаб — весь город или несущая жизнь острова.',
-          'Тип тайны ниже обязателен. Ассоциативное поле — слабый импульс.',
+          'Оси аннотации — направление, не второй сюжет. Ассоциативное поле — слабый импульс.',
+          annotation ? formatAnnotationCardForPrompt(annotation, 0) : null,
           anchors.length
             ? 'Якоря ниже обязательны: причинная модель висит на них, а не на самом громком риске из описания города.'
             : null,
@@ -1135,6 +1261,7 @@ async function askPlotSeed({
   suspenseSeed = null,
   occupancy = null,
   revision = null,
+  annotation = null,
 }) {
   const mystery = storyType === 'mystery';
   const depth = Math.max(1, Math.min(4, Math.round(Number(suspenseSeed?.depth) || 1)));
@@ -1290,12 +1417,13 @@ async function askPlotSeed({
         if (mystery) {
           const graph = normalizeTruthGraph(args);
           const reason = judgeTruthGraph(graph, {
-            minNodes: nodeCount,
-            maxNodes: nodeCount,
+            minNodes: 3,
+            maxNodes: 8,
             shape: graphShape,
+            allowCustom: true,
           });
           if (reason) {
-            return toolFail(reason, mysteryGraphShapeHint(graphShape));
+            return toolFail(reason, mysteryGraphShapeHint(graphShape, { allowCustom: true }));
           }
           applySeedVisibility(graph, { shape: graphShape, sideOpen });
           args.truthGraph = graph;
@@ -1390,11 +1518,7 @@ async function askPlotSeed({
           '',
           mystery
             ? formatMysteryAxesForPrompt(tags, { opening })
-            : [
-                formatSuspenseSeedForPrompt(suspenseSeed, { opening, fromClosed }),
-                '',
-                `Направление: ${formatPlotTagsForPrompt(tags)}`,
-              ].join('\n'),
+            : formatSuspenseCardSeedForPrompt(suspenseSeed, { opening, fromClosed }),
           '',
           mystery && anchors.length ? formatMysteryAnchorsForPrompt(anchors) : null,
           mystery && anchors.length ? '' : null,
@@ -1586,9 +1710,9 @@ export async function beatPlot({
   const closeHint = threeAct
     ? engineEnding
       ? mystery
-        ? plot.asksSequel
-          ? 'Движок уже закрывает историю. closes не выбирай. Стартер пометил: разгадка вскрывает новую проблему. Если она в этом месяце вышла наружу — sequelHook одной фразой. Если развязка сама гармонично всё закрыла — поле пустое.'
-          : 'Движок уже закрывает историю. closes не выбирай. Развязка должна закрыть тайну гармонично. sequelHook не ставь.'
+        ? plot.asksSequel && (engineEnding === 'ok' || engineEnding === 'crit')
+          ? 'Движок уже закрывает историю. closes не выбирай. Тайну разгадали, и стартер пометил новую проблему. Если она в этом месяце вышла наружу — sequelHook одной фразой. Если развязка сама гармонично всё закрыла — поле пустое.'
+          : 'Движок уже закрывает историю. closes не выбирай. Сиквел этой тайны не будет. sequelHook не ставь.'
         : 'Движок уже закрывает историю. closes не выбирай. Если развязка оставила новый нерешённый узел — sequelHook одной фразой, иначе пусто. Сиквел или след в каноне решает движок.'
       : 'Историю этим месяцем не закрывай. closes не выбирай.'
     : finale
@@ -1706,6 +1830,7 @@ export async function beatPlot({
 
   const wantClose = threeAct ? Boolean(engineEnding) : Boolean(d.closes || beat.finale);
   const closed = wantClose && !plotHasActiveProcess(domain, plot);
+  if (engineEnding && !plot.ending) plot.ending = engineEnding;
   const closeReason = threeAct
     ? engineEnding === 'crit'
       ? 'критический успех'
@@ -1721,6 +1846,7 @@ export async function beatPlot({
       reason: closeReason,
       sequelHook,
     });
+    await maybeAppendStoryCityModifier({ runtime, domain, world, plot, config, log });
   } else if (wantClose) {
     log.info('storyteller.beat_close_held', { plotId: plot.id, reason: 'active_process' });
   }
@@ -1854,8 +1980,7 @@ export async function tickOrder({
           },
         ];
 
-  const modifier = (domain.state?.modifiers || []).find((m) => m.id === plot.modifierId);
-  const rule = modifier?.text || plot.title;
+  const rule = plot.orderText || plot.title;
 
   await runtime.run({
     agentId: 'orderBeat',

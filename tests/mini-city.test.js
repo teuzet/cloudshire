@@ -71,7 +71,18 @@ test('мини-аппка: свои истории и участие в сопр
     id: 'd1',
     name: 'Саркум',
     stats: { faith: 62, might: 40 },
-    plotlines: [{ id: 'local', kind: 'story', title: 'Гул колодца', synopsis: 'Вода поёт.' }],
+    plotlines: [
+      { id: 'local', kind: 'story', title: 'Гул колодца', synopsis: 'Вода поёт.' },
+      {
+        id: 'ord_1',
+        kind: 'order',
+        title: 'Ночной дозор',
+        orderText: 'Ночной дозор у края',
+        createdTick: 3,
+        durationMonths: 4,
+        expiresTick: 7,
+      },
+    ],
     state: {
       pendingActions: [
         {
@@ -83,15 +94,7 @@ test('мини-аппка: свои истории и участие в сопр
           linkedStats: ['faith'],
         },
       ],
-      modifiers: [
-        {
-          id: 'mod_1',
-          text: 'Ночной дозор у края',
-          declaredTick: 3,
-          durationMonths: 4,
-          expiresTick: 7,
-        },
-      ],
+      modifiers: [],
     },
   };
   const conflux = {
