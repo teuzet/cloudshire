@@ -11,7 +11,7 @@ import {
   blessProcess,
   processOwnedBy,
 } from '../src/game/processes.js';
-import { rollProcessFinish, formatFinishForPrompt, FINISH_SHORT } from '../src/game/rolls.js';
+import { rollProcessFinish, finishFailChance, formatFinishForPrompt, FINISH_SHORT } from '../src/game/rolls.js';
 
 function action(extra = {}) {
   return normalizeProcess({
@@ -78,6 +78,21 @@ test('спешка уменьшает шанс успеха, обстоятел�
   assert.ok(haste.weights.fail > base.weights.fail);
   assert.ok(haste.weights.ok + haste.weights.crit < base.weights.ok + base.weights.crit);
   assert.ok(care.weights.fail < base.weights.fail);
+});
+
+test('исход дела: 40 ≈ 45% провала, 60–70 ≈ 10–15%, 90+ без провала', () => {
+  assert.equal(Math.round(finishFailChance(40) * 100), 45);
+  assert.equal(Math.round(finishFailChance(60) * 100), 15);
+  assert.equal(Math.round(finishFailChance(65) * 100), 13);
+  assert.equal(Math.round(finishFailChance(70) * 100), 10);
+  assert.equal(finishFailChance(90), 0);
+  assert.equal(finishFailChance(100), 0);
+  assert.equal(rollProcessFinish(40, 1, () => 0).weights.fail, 45);
+  assert.equal(rollProcessFinish(60, 1, () => 0).weights.fail, 15);
+  assert.equal(rollProcessFinish(70, 1, () => 0).weights.fail, 10);
+  assert.equal(rollProcessFinish(90, 1, () => 0).weights.fail, 0);
+  assert.equal(rollProcessFinish(90, 1 / 3, () => 0).weights.fail, 0);
+  assert.equal(rollProcessFinish(90, 1, () => 0).finish, 'ok');
 });
 
 test('завершение дела кидает исход и не срывает поручение из-за провала', () => {

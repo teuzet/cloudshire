@@ -585,8 +585,10 @@ function resolveAll(graph) {
 }
 
 /**
- * Движок сказал, что открыть. fail / none — маска не двигается.
- * full — всё resolved. partial — указанные фронтирные узлы, иначе один фронтир.
+ * Движок сказал, что открыть.
+ * none — маска не двигается.
+ * full при не-fail — всё resolved. full при fail не сбрасывает маску.
+ * partial — указанные фронтирные узлы, иначе один фронтир; при fail не resolveAll.
  */
 export function applyEngineReveal(
   graph,
@@ -594,8 +596,9 @@ export function applyEngineReveal(
 ) {
   if (!graph?.nodes) return graph;
   delete graph.hypothesis;
-  if (ending === 'fail' || reveal === 'none') return graph;
+  if (reveal === 'none') return graph;
   if (reveal === 'full') {
+    if (ending === 'fail') return graph;
     resolveAll(graph);
     return graph;
   }
@@ -620,6 +623,6 @@ export function applyEngineReveal(
       openEdge(graph, e.from, e.to);
     }
   }
-  if (!remainingHiddenNodeIds(graph).length) resolveAll(graph);
+  if (ending !== 'fail' && !remainingHiddenNodeIds(graph).length) resolveAll(graph);
   return graph;
 }

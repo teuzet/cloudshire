@@ -141,7 +141,15 @@ export function formatFactsForPrompt(lore = [], { limit = 40 } = {}) {
  */
 export function dialogHistoryForPrompt(dialogHistory = [], config = null) {
   const { dialogPromptMessages, compressTickNewsOlderThan } = memoryConfig(config);
-  const slice = (dialogHistory || []).slice(-dialogPromptMessages);
+  const kept = [];
+  const raw = dialogHistory || [];
+  for (let i = 0; i < raw.length; i += 1) {
+    const m = raw[i];
+    if (m?.kind === 'system' || m?.kind === 'ruler_hold') continue;
+    if (m?.role === 'user' && raw[i + 1]?.kind === 'system') continue;
+    kept.push(m);
+  }
+  const slice = kept.slice(-dialogPromptMessages);
   return slice.map((m, idx) => {
     const ageFromEnd = slice.length - 1 - idx;
     const role = m.role === 'assistant' ? 'assistant' : 'user';

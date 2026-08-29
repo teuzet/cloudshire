@@ -13,6 +13,7 @@ import {
   createLoreFact,
   assembleDescription,
   applyPatronName,
+  inferRulerGender,
 } from './models.js';
 import { formatPlayerBrief } from './onboarding.js';
 import { seedOpeningPlots } from './storyteller.js';
@@ -51,14 +52,14 @@ function fallbackName() {
 
 function bindRulerName(world, core, config) {
   if (!core) return core;
-  const gender =
-    /жриц|правительниц|хозяйк|матушк|госпож/i.test(String(core.rulerTitle || '')) ||
-    /[ая]$/i.test(String(core.rulerName || '').trim())
-      ? 'female'
-      : 'male';
+  const gender = inferRulerGender({
+    title: core.rulerTitle,
+    name: core.rulerName,
+  });
   const old = String(core.rulerName || '').trim();
   const next = takeName(world, gender, config);
   core.rulerName = next;
+  core.rulerGender = gender;
   if (old && old !== next) {
     const swap = (s) => String(s || '').split(old).join(next);
     core.rulerDescription = swap(core.rulerDescription);
@@ -570,6 +571,7 @@ export async function generateDomain({
     title: core.rulerTitle || 'Правитель',
     description: core.rulerDescription,
     role: 'ruler',
+    gender: core.rulerGender,
     ageYears: core.rulerAge,
     world,
   });

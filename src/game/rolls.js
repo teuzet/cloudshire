@@ -14,11 +14,61 @@ function clampStat(n) {
 
 /**
  * Сжатая шкала: стат 0 не означает верный провал, стат 100 — не гарантия.
- * По умолчанию удача идёт от 25% до 75%.
+ * По умолчанию удача идёт от 25% до 75%. Для окраски битов, не для исхода дела.
  */
 export function compressedChance(statValue, { minChance = 0.25, maxChance = 0.75 } = {}) {
   const v = clampStat(statValue) / 100;
   return minChance + (maxChance - minChance) * v;
+}
+
+/** Якоря стат → доля провала дела при обычном темпе. */
+export const DEFAULT_FINISH_FAIL_CURVE = [
+  { stat: 0, fail: 0.85 },
+  { stat: 40, fail: 0.45 },
+  { stat: 60, fail: 0.15 },
+  { stat: 70, fail: 0.1 },
+  { stat: 90, fail: 0 },
+];
+
+function asFailP(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return null;
+  if (v > 1) return Math.max(0, Math.min(1, v / 100));
+  return Math.max(0, Math.min(1, v));
+}
+
+export function parseFinishFailCurve(raw) {
+  const src = Array.isArray(raw) && raw.length ? raw : DEFAULT_FINISH_FAIL_CURVE;
+  const pts = [];
+  for (const item of src) {
+    const stat = clampStat(item?.stat ?? item?.[0]);
+    const fail = asFailP(item?.fail ?? item?.[1]);
+    if (fail == null) continue;
+    pts.push({ stat, fail });
+  }
+  pts.sort((a, b) => a.stat - b.stat);
+  return pts.length ? pts : DEFAULT_FINISH_FAIL_CURVE.map((p) => ({ ...p }));
+}
+
+/**
+ * Доля провала завершения дела по среднему связанных статов.
+ * 40 ≈ 45%, 60–70 ≈ 10–15%, 90+ = 0.
+ */
+export function finishFailChance(statValue, cfg = {}) {
+  const pts = parseFinishFailCurve(cfg.finishFailCurve);
+  const v = clampStat(statValue);
+  if (v <= pts[0].stat) return pts[0].fail;
+  const last = pts[pts.length - 1];
+  if (v >= last.stat) return last.fail;
+  for (let i = 1; i < pts.length; i += 1) {
+    if (v <= pts[i].stat) {
+      const a = pts[i - 1];
+      const b = pts[i];
+      const span = b.stat - a.stat || 1;
+      return a.fail + ((v - a.stat) / span) * (b.fail - a.fail);
+    }
+  }
+  return last.fail;
 }
 
 /**
@@ -82,19 +132,20 @@ export function rollTint(statValue, rng = Math.random, cfg = {}) {
 /**
  * Исход завершения дела: провал / нейтральный успех / критический успех.
  * paceRatio = назначенный срок / объективная оценка: <1 спешка, >1 обстоятельность.
+ * При стате 90+ провала нет даже в спешке.
  */
 export function rollProcessFinish(avgStat, paceRatio = 1, rng = Math.random, cfg = {}) {
-  const chance = compressedChance(avgStat, cfg);
   const critShare = Math.max(0.05, Math.min(0.45, Number(cfg.finishCritShare ?? 0.25)));
-  let pCrit = chance * critShare;
-  let pOk = chance * (1 - critShare);
-  let pFail = 1 - chance;
+  const baseFail = finishFailChance(avgStat, cfg);
+  let pFail = baseFail;
+  let pCrit = (1 - pFail) * critShare;
+  let pOk = (1 - pFail) * (1 - critShare);
   const ratio = Number(paceRatio);
-  if (Number.isFinite(ratio) && ratio > 0 && ratio < 1) {
+  if (baseFail > 0 && Number.isFinite(ratio) && ratio > 0 && ratio < 1) {
     pCrit *= ratio;
     pOk *= ratio;
     pFail = 1 - pCrit - pOk;
-  } else if (Number.isFinite(ratio) && ratio > 1) {
+  } else if (baseFail > 0 && Number.isFinite(ratio) && ratio > 1) {
     pFail *= 1 / ratio;
     const leftover = 1 - pFail;
     const success = pCrit + pOk;

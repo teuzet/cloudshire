@@ -321,7 +321,7 @@ export function applyEngineProgress(domain, rolls, { tick = null, config = null,
         process.finishWeights = { fail: 0, ok: 0, crit: 100 };
       } else {
         const avg = processStatAverage(domain, process, config);
-        const rolled = rollProcessFinish(avg, processPaceRatio(process), rng);
+        const rolled = rollProcessFinish(avg, processPaceRatio(process), rng, config?.tick?.plot?.roll || {});
         finish = rolled.finish;
         finishLabel = FINISH_LABELS[finish];
         process.finishKind = finish;

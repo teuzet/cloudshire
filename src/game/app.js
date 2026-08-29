@@ -9,6 +9,7 @@ import {
   applyPatronName,
   firstMentionHintForSpeech,
   peopleNamedInTexts,
+  inferRulerGender,
 } from './models.js';
 import {
   qualitativePopulation,
@@ -153,6 +154,19 @@ function looksLikeToolDump(text) {
   }
   if (/"summary"\s*:/.test(t) && (/"durationMonths"\s*:/.test(t) || /"expectedMonths"\s*:/.test(t))) return true;
   return false;
+}
+
+const DEFAULT_RULER_FAIL =
+  'Жрец не ответил вовремя. Этот ход система не сохранила — повтори волю, когда будешь готов.';
+
+export function rulerHoldLine(config, character) {
+  const gender = inferRulerGender(character);
+  const pack = config?.agents?.ruler?.holdMessage || {};
+  return String(pack[gender] || pack.male || pack.female || '').trim();
+}
+
+export function rulerFailLine(config) {
+  return String(config?.agents?.ruler?.failMessage || '').trim() || DEFAULT_RULER_FAIL;
 }
 
 function processPaceFeel(process) {
@@ -307,7 +321,7 @@ function submitReplyTool(turn, character) {
   return {
     name: 'submit_reply',
     description:
-      'ЕДИНСТВЕННЫЙ способ ответить покровителю. Вызывай последним, когда все нужные действия уже сделаны. ' +
+      'ЕДИНСТВЕННЫЙ способ ответить покровителю. Когда воля ясна, вызывай в том же ответе модели, что и действие, последним. ' +
       'text — сама речь; requestKind — чего просил покровитель; commitment — что ты реально сделал этим ходом. ' +
       'Если приказ ещё нельзя облечь в дело или порядок — спроси и поставь commitment=clarify.',
     parameters: {
@@ -1488,7 +1502,12 @@ export class GameApp {
         return await this.runOnboarding(uid, text, { channel, bootstrap, log });
       }
 
-      return await this.runRuler(domain, text, { channel, log, world });
+      try {
+        return await this.runRuler(domain, text, { channel, log, world });
+      } catch (err) {
+        log.error('ruler.turn_failed', { error: err.message, stack: err.stack });
+        return await this.persistRulerSystemFail(domain, text, { channel, log });
+      }
     } finally {
       this.busyUsers.delete(uid);
     }
@@ -2526,104 +2545,123 @@ export class GameApp {
       submitReplyTool(turn, character),
     ];
 
-    const deadlineAt = Date.now() + (Number(this.config.agents?.ruler?.turnBudgetMs) || 70_000);
-    const result = await this.runtime.run({
-      agentId: 'ruler',
-      userMessages: [...history, { role: 'user', content: text }],
-      tools,
-      extraSystem,
-      maxTurns: 10,
-      log,
-      scene: 'ruler',
-      domainId: domain.id,
-      deadlineAt,
-    });
-
-    if (!turn.reply && Date.now() < deadlineAt - 5000) {
-      log.warn('ruler.no_submit_reply', { preview: truncate(result.text, 200) });
-      await this.runtime.run({
-        agentId: 'ruler',
-        userMessages: [
-          ...history,
-          { role: 'user', content: text },
-          {
-            role: 'user',
-            content:
-              'Ответ не принят: речь передаётся только через submit_reply. Вызови его сейчас. ' +
-              'Если дела ты не заводил — commitment=none (или refused, если отговариваешь; ' +
-              'clarify — если приказ есть, но нужно уточнить волю), ' +
-              'и в речи не обещай долгих работ.',
-          },
-        ],
-        tools,
-        maxTurns: 4,
-        toolChoice: { type: 'function', function: { name: 'submit_reply' } },
-        extraSystem,
-        log,
-        scene: 'ruler_submit_retry',
+    const holdMs = Number(this.config.agents?.ruler?.holdAfterMs);
+    const holdDelay = Number.isFinite(holdMs) && holdMs > 0 ? holdMs : 10_000;
+    const holdTimer = setTimeout(() => {
+      const line = rulerHoldLine(this.config, character);
+      if (!line) return;
+      void this.emitOutbound(domain.ownerUserId, line, {
+        channel,
+        kind: 'ruler_hold',
         domainId: domain.id,
-        deadlineAt,
-      });
-    } else if (!turn.reply) {
-      log.warn('ruler.no_submit_reply', { preview: truncate(result.text, 200) });
-    }
+      }).catch((err) => log.warn('ruler.hold_failed', { error: err.message }));
+    }, holdDelay);
 
-    let reply = turn.reply || result.text || '';
-    if (!String(reply).trim() || looksLikeToolDump(reply)) {
-      log.warn('ruler.reply_unusable', { preview: truncate(reply, 200) });
-      reply =
-        `${patronName || 'Покровитель'}, прости — мысль сбилась. ` +
-        'Повтори волю коротко, и я исполню без путаницы.';
-    }
-    reply = stripSpeakerPrefix(reply, character.name);
+    try {
+      const deadlineAt = Date.now() + (Number(this.config.agents?.ruler?.turnBudgetMs) || 120_000);
+      let result = { text: '', toolTrace: [] };
+      try {
+        result = await this.runtime.run({
+          agentId: 'ruler',
+          userMessages: [...history, { role: 'user', content: text }],
+          tools,
+          extraSystem,
+          maxTurns: 10,
+          log,
+          scene: 'ruler',
+          domainId: domain.id,
+          deadlineAt,
+        });
 
-    const fresh = await this.storage.getDomain(domain.id);
-    const plotCfg = plotConfig(this.config);
-    const warmed = warmPlotlines(fresh, turn.meta?.touchedPlotIds || [], plotCfg);
-    let warmedConflux = [];
-    const liveConflux = conflux
-      ? (await this.storage.getConflux(conflux.id)) || conflux
-      : null;
-    if (liveConflux) {
-      warmedConflux = warmPlotlines(liveConflux, turn.meta?.touchedPlotIds || [], plotCfg);
-      if (warmedConflux.length) await this.storage.saveConflux(liveConflux);
-    }
-    if (turn.meta?.dayNote) {
-      fresh.state.monthLog = Array.isArray(fresh.state.monthLog) ? fresh.state.monthLog : [];
-      fresh.state.monthLog.push({
-        tick: world?.tickIndex ?? null,
-        at: new Date().toISOString(),
-        text: turn.meta.dayNote,
-        plotIds: turn.meta.touchedPlotIds || [],
-      });
-      if (fresh.state.monthLog.length > 12) {
-        fresh.state.monthLog = fresh.state.monthLog.slice(-12);
+        if (!turn.reply && Date.now() < deadlineAt - 5000) {
+          log.warn('ruler.no_submit_reply', { preview: truncate(result.text, 200) });
+          await this.runtime.run({
+            agentId: 'ruler',
+            userMessages: [
+              ...history,
+              { role: 'user', content: text },
+              {
+                role: 'user',
+                content:
+                  'Ответ не принят: речь передаётся только через submit_reply. Вызови его сейчас. ' +
+                  'Если дела ты не заводил — commitment=none (или refused, если отговариваешь; ' +
+                  'clarify — если приказ есть, но нужно уточнить волю), ' +
+                  'и в речи не обещай долгих работ.',
+              },
+            ],
+            tools,
+            maxTurns: 4,
+            toolChoice: { type: 'function', function: { name: 'submit_reply' } },
+            extraSystem,
+            log,
+            scene: 'ruler_submit_retry',
+            domainId: domain.id,
+            deadlineAt,
+          });
+        } else if (!turn.reply) {
+          log.warn('ruler.no_submit_reply', { preview: truncate(result.text, 200) });
+        }
+      } catch (err) {
+        log.error('ruler.llm_failed', { error: err.message });
       }
+
+      let reply = turn.reply || result.text || '';
+      if (!String(reply).trim() || looksLikeToolDump(reply)) {
+        log.warn('ruler.reply_unusable', { preview: truncate(reply, 200) });
+        return await this.persistRulerSystemFail(domain, text, { channel, log });
+      }
+      reply = stripSpeakerPrefix(reply, character.name);
+
+      const fresh = await this.storage.getDomain(domain.id);
+      const plotCfg = plotConfig(this.config);
+      const warmed = warmPlotlines(fresh, turn.meta?.touchedPlotIds || [], plotCfg);
+      let warmedConflux = [];
+      const liveConflux = conflux
+        ? (await this.storage.getConflux(conflux.id)) || conflux
+        : null;
+      if (liveConflux) {
+        warmedConflux = warmPlotlines(liveConflux, turn.meta?.touchedPlotIds || [], plotCfg);
+        if (warmedConflux.length) await this.storage.saveConflux(liveConflux);
+      }
+      if (turn.meta?.dayNote) {
+        fresh.state.monthLog = Array.isArray(fresh.state.monthLog) ? fresh.state.monthLog : [];
+        fresh.state.monthLog.push({
+          tick: world?.tickIndex ?? null,
+          at: new Date().toISOString(),
+          text: turn.meta.dayNote,
+          plotIds: turn.meta.touchedPlotIds || [],
+        });
+        if (fresh.state.monthLog.length > 12) {
+          fresh.state.monthLog = fresh.state.monthLog.slice(-12);
+        }
+      }
+      if (askNow) markRulerAsked(fresh, world);
+      await this.persistDialog(fresh, 'user', text);
+      await this.persistDialog(fresh, 'assistant', reply, { meta: turn.meta });
+
+      log.info('ruler.reply', {
+        replyPreview: truncate(reply, 400),
+        touchedPlots: [...warmed, ...warmedConflux].map((w) => `${w.id}:${w.from}→${w.to}`),
+        dayNote: turn.meta?.dayNote || null,
+        requestKind: turn.meta?.requestKind || null,
+        commitment: turn.meta?.commitment || null,
+        tools: (result.toolTrace || []).map((t) => ({
+          name: t.name,
+          ok: t.result?.ok !== false,
+        })),
+      });
+
+      return {
+        reply,
+        domainId: fresh.id,
+        agent: 'ruler',
+        turnMeta: turn.meta,
+        toolTrace: result.toolTrace,
+        channel,
+      };
+    } finally {
+      clearTimeout(holdTimer);
     }
-    if (askNow) markRulerAsked(fresh, world);
-    await this.persistDialog(fresh, 'user', text);
-    await this.persistDialog(fresh, 'assistant', reply, { meta: turn.meta });
-
-    log.info('ruler.reply', {
-      replyPreview: truncate(reply, 400),
-      touchedPlots: [...warmed, ...warmedConflux].map((w) => `${w.id}:${w.from}→${w.to}`),
-      dayNote: turn.meta?.dayNote || null,
-      requestKind: turn.meta?.requestKind || null,
-      commitment: turn.meta?.commitment || null,
-      tools: (result.toolTrace || []).map((t) => ({
-        name: t.name,
-        ok: t.result?.ok !== false,
-      })),
-    });
-
-    return {
-      reply,
-      domainId: fresh.id,
-      agent: 'ruler',
-      turnMeta: turn.meta,
-      toolTrace: result.toolTrace,
-      channel,
-    };
   }
 
   async narrateTickNews(domain, chronicleAdds, gameDate, opts = {}) {
@@ -2980,6 +3018,21 @@ export class GameApp {
       });
       return fallback;
     }
+  }
+
+  async persistRulerSystemFail(domain, text, { channel, log } = {}) {
+    const reply = rulerFailLine(this.config);
+    const fresh = (await this.storage.getDomain(domain.id)) || domain;
+    await this.persistDialog(fresh, 'user', text);
+    await this.persistDialog(fresh, 'assistant', reply, { kind: 'system' });
+    log?.warn?.('ruler.system_fail', { domainId: domain.id, preview: truncate(reply, 200) });
+    return {
+      reply,
+      agent: 'system',
+      failed: true,
+      domainId: domain.id,
+      channel,
+    };
   }
 
   async persistDialog(domain, role, content, { kind = null, meta = null } = {}) {

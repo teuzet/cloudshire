@@ -107,11 +107,19 @@ test('маску можно только повышать, движок откр
   assert.ok(g.edges.every((e) => e.knowledge === 'resolved'));
 });
 
-test('провал не раскрывает граф', () => {
+test('провал не раскрывает граф целиком', () => {
   const g = applySeedVisibility(normalizeTruthGraph(linear4()), { shape: 'linear_4' });
   applyEngineReveal(g, { reveal: 'full', ending: 'fail' });
   assert.equal(g.nodes[0].knowledge, 'hidden');
   assert.equal(g.nodes[3].knowledge, 'observed');
+});
+
+test('partial при провале открывает фронтир, но не resolveAll', () => {
+  const g = applySeedVisibility(normalizeTruthGraph(linear4()), { shape: 'linear_4' });
+  applyEngineReveal(g, { reveal: 'partial', ending: 'fail', openedNodes: ['C'] });
+  assert.equal(g.nodes.find((n) => n.id === 'C').knowledge, 'observed');
+  assert.equal(g.nodes.find((n) => n.id === 'A').knowledge, 'hidden');
+  assert.ok(!g.nodes.every((n) => n.knowledge === 'resolved'));
 });
 
 test('жребий формы: linear_4 и linear_side по 50%, linear_5 выключен', () => {

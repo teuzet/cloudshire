@@ -11,7 +11,7 @@ import { applyStoryActMove } from '../src/game/storyActs.js';
 import { plotConfig, createPlotline, judgePlotSeed, stripPlotSecrets } from '../src/game/plotlines.js';
 import { addCityEntity } from '../src/game/cityEntities.js';
 
-const ACTS = { acts: { maxEscalations: 3, worsenMin: 1, worsenMax: 1.5, dampMin: 0.8, dampMax: 1 } };
+const ACTS = { acts: { maxEscalations: 3, worsenMin: 1.1, worsenMax: 1.1, dampMin: 0.9, dampMax: 0.9 } };
 
 test('gravity посева: пустая доска 20–100, полная доска уже, сиквел не ниже оригинала', () => {
   const empty = sampleSuspenseGravity({ plotlines: [] }, { rng: () => 0 });

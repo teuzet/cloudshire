@@ -30,4 +30,14 @@ test('mysteryStart, presentation и литературные судьи без r
   assert.equal(config.agents.mysteryPresentation.reasoningEffort, undefined);
   assert.equal(config.agents.mysteryPresentationJudge.reasoningEffort, undefined);
   assert.equal(config.agents.suspenseJudge.reasoningEffort, undefined);
+  assert.equal(config.agents.mysteryArchitect.reasoningEffort, undefined);
+  assert.equal(config.agents.mysteryArchitectJudge.reasoningEffort, undefined);
+  assert.equal(config.agents.mysteryArchitect.model, 'gpt-5.6-terra');
+  assert.equal(config.agents.mysteryArchitectJudge.model, 'gpt-5.6-luna');
+  assert.equal(config.agents.mysteryAnnotation.reasoningEffort, undefined);
+  assert.equal(config.agents.mysteryAnnotation.model, 'claude-sonnet-4-6');
+  assert.equal(config.agents.mysteryAnnotation.provider, 'anthropic');
+  assert.equal(config.agents.mysteryAnnotationJudge.reasoningEffort, undefined);
+  assert.equal(config.agents.mysteryAnnotationJudge.model, 'gpt-5.6-luna');
+  assert.equal(config.agents.mysteryAnnotationJudge.provider, 'openai');
 });

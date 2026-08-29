@@ -72,6 +72,10 @@ function renderHistory(history, tutorial = null) {
       box.appendChild(bubble('news', m.content, 'календарь'));
     } else if (m.kind === 'onboarding') {
       box.appendChild(bubble('ruler', m.content, 'проводник'));
+    } else if (m.kind === 'system') {
+      box.appendChild(bubble('news', m.content, 'система'));
+    } else if (m.kind === 'ruler_hold') {
+      box.appendChild(bubble('ruler', m.content, 'ещё думает'));
     } else {
       box.appendChild(bubble('ruler', m.content));
     }
@@ -225,11 +229,25 @@ $('form').addEventListener('submit', async (e) => {
   busy = true;
   $('send').disabled = true;
   $('messages').appendChild(bubble('user', text));
-  const pending = bubble('ruler', '…', 'печатает');
+  let pending = bubble('ruler', '…', 'печатает');
   pending.classList.add('pending');
   $('messages').appendChild(pending);
   $('messages').scrollTop = $('messages').scrollHeight;
   $('text').value = '';
+  const holdPoll = setInterval(async () => {
+    try {
+      const state = await api(`/api/play/state?userId=${encodeURIComponent(userId)}`);
+      const hold = [...(state.pushes || [])].reverse().find((p) => p.kind === 'ruler_hold');
+      if (hold?.content && document.body.contains(pending)) {
+        const next = bubble('ruler', hold.content, 'ещё думает');
+        pending.replaceWith(next);
+        pending = next;
+        $('messages').scrollTop = $('messages').scrollHeight;
+      }
+    } catch {
+      /* ход ещё идёт */
+    }
+  }, 2000);
   try {
     const result = await api('/api/play/chat', {
       method: 'POST',
@@ -240,12 +258,13 @@ $('form').addEventListener('submit', async (e) => {
     if (result.reply) {
       pending.remove();
       const label = { onboarding: 'проводник', system: 'система' }[result.agent] || null;
-      $('messages').appendChild(bubble('ruler', result.reply, label));
+      $('messages').appendChild(bubble(result.agent === 'system' ? 'news' : 'ruler', result.reply, label));
       $('messages').scrollTop = $('messages').scrollHeight;
     }
   } catch (err) {
     setBanner(err.message);
   } finally {
+    clearInterval(holdPoll);
     pending.remove();
     busy = false;
     $('send').disabled = false;

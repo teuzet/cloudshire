@@ -30,6 +30,7 @@ export function normalizeUsage(raw) {
   const cached =
     raw.prompt_tokens_details?.cached_tokens ??
     raw.input_tokens_details?.cached_tokens ??
+    raw.cache_read_input_tokens ??
     raw.cached_tokens;
   if (cached != null && Number.isFinite(Number(cached))) {
     out.cached_tokens = Number(cached);

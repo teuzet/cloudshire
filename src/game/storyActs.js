@@ -6,8 +6,11 @@
  * Такт 2 — кульминация после DIRECT-успеха.
  * Такт 3 в данных — ending; третья эскалация закрывает сюжет провалом.
  *
- * Саспенс: gravity не растёт; depth решает, закрывает ли крит всю историю;
+ * Gravity при эскалации не меняется — только urgency, примерно на 10%.
+ * Саспенс: depth решает, закрывает ли крит всю историю;
  * discovery ladder продвигается ровно на одну ступень за beat.
+ * Тайна: DIRECT-провал открывает фронтирный узел и поднимает urgency.
+ * Если это последний скрытый узел — загадка закрывается как успех дорогой ценой.
  */
 
 import { isThreeActPlot } from './plotlines.js';
@@ -37,10 +40,10 @@ export function actsConfig(cfg) {
   const a = cfg?.acts || {};
   return {
     maxEscalations: Math.max(1, Math.round(Number(a.maxEscalations ?? 3))),
-    worsenMin: Number(a.worsenMin ?? 1),
-    worsenMax: Number(a.worsenMax ?? 1.5),
-    dampMin: Number(a.dampMin ?? 0.8),
-    dampMax: Number(a.dampMax ?? 1),
+    worsenMin: Number(a.worsenMin ?? 1.1),
+    worsenMax: Number(a.worsenMax ?? 1.1),
+    dampMin: Number(a.dampMin ?? 0.9),
+    dampMax: Number(a.dampMax ?? 0.9),
   };
 }
 
@@ -56,17 +59,10 @@ function scale(value, lo, hi, rng) {
   return clampStakes(value * f);
 }
 
-function freezeGravity(plot) {
-  return plot?.storyType === 'suspense';
-}
-
 export function worsenStakes(plot, rng, cfg) {
   const acts = actsConfig(cfg);
   const before = { urgency: plot.urgency, gravity: plot.gravity };
   plot.urgency = scale(plot.urgency, acts.worsenMin, acts.worsenMax, rng);
-  if (!freezeGravity(plot)) {
-    plot.gravity = scale(plot.gravity, acts.worsenMin, acts.worsenMax, rng);
-  }
   return { kind: 'worsen', before, after: { urgency: plot.urgency, gravity: plot.gravity } };
 }
 
@@ -74,9 +70,6 @@ export function dampStakes(plot, rng, cfg) {
   const acts = actsConfig(cfg);
   const before = { urgency: plot.urgency, gravity: plot.gravity };
   plot.urgency = scale(plot.urgency, acts.dampMin, acts.dampMax, rng);
-  if (!freezeGravity(plot)) {
-    plot.gravity = scale(plot.gravity, acts.dampMin, acts.dampMax, rng);
-  }
   return { kind: 'damp', before, after: { urgency: plot.urgency, gravity: plot.gravity } };
 }
 
@@ -114,7 +107,7 @@ function suspenseDepth(plot) {
   return 1;
 }
 
-/** Текущий decideSkeleton тайны — без изменений. */
+/** Тайна: DIRECT-провал открывает фронтир; последний узел — разгадка дорогой ценой. */
 function decideMysterySkeleton({ act, auto, relation, fin }) {
   if (auto) {
     return { nextAct: act, pressure: 'ESCALATE', reveal: 'none', ending: null };
@@ -140,7 +133,7 @@ function decideMysterySkeleton({ act, auto, relation, fin }) {
     }
     return { nextAct: act, pressure: 'NONE', reveal: 'full', ending: 'ok' };
   }
-  return { nextAct: act, pressure: 'ESCALATE', reveal: 'none', ending: null };
+  return { nextAct: act, pressure: 'ESCALATE', reveal: 'partial', ending: null };
 }
 
 function decideSuspenseSkeleton({ act, auto, relation, fin, depth, unlocked, dynamic, unattendedBeats }) {
@@ -272,6 +265,7 @@ export function applyStoryActMove(
   let openedEdges = [];
   let openedLadder = [];
   let allowedHiddenIndex = null;
+  let costlySolve = false;
 
   if (type === 'mystery' && reveal === 'partial' && plot.truthGraph) {
     const picked = pickFrontierReveal(plot.truthGraph, rng);
@@ -279,11 +273,13 @@ export function applyStoryActMove(
       openedNodes = [picked.nodeId];
       const edgeLabel = formatEdge(picked.edge);
       if (edgeLabel) openedEdges = [edgeLabel];
-      if (!remainingHiddenNodeIds(plot.truthGraph, openedNodes).length) {
+      const lastClue = !remainingHiddenNodeIds(plot.truthGraph, openedNodes).length;
+      if (lastClue) {
         reveal = 'full';
         ending = fin === 'crit' ? 'crit' : 'ok';
         nextAct = act;
         pressure = 'NONE';
+        costlySolve = fin === 'fail';
       }
     }
   }
@@ -300,23 +296,18 @@ export function applyStoryActMove(
     }
   }
 
-  if (ending === 'fail') {
-    reveal = 'none';
-    openedNodes = [];
-    openedEdges = [];
-    openedLadder = [];
-    allowedHiddenIndex = null;
-  }
-
   const levelBefore = Math.max(0, Number(plot.escalationLevel) || 0);
   const maxEsc = actsConfig(config).maxEscalations;
   let stakesKind = 'none';
   if (pressure === 'ESCALATE') {
     if (escalationWouldFail(plot, config)) {
       ending = 'fail';
-      reveal = type === 'mystery' ? 'none' : reveal;
-      openedNodes = [];
-      openedEdges = [];
+      const keepMysteryClue = type === 'mystery' && openedNodes.length;
+      if (!keepMysteryClue) {
+        reveal = type === 'mystery' ? 'none' : reveal;
+        openedNodes = [];
+        openedEdges = [];
+      }
       openedLadder = [];
       allowedHiddenIndex = null;
       nextAct = act;
@@ -358,6 +349,7 @@ export function applyStoryActMove(
     openedEdges,
     openedLadder,
     allowedHiddenIndex,
+    costlySolve,
     progress,
     depth,
     closureUnlockedBefore: unlockedBefore,
@@ -368,22 +360,17 @@ export function applyStoryActMove(
   };
 }
 
-function pressureInstructions(plot, move) {
+function pressureInstructions(_plot, move) {
   const change = move.pressure;
-  const suspense = plot.storyType === 'suspense';
   if (change === 'ESCALATE') {
     const du = (move.stakes?.after?.urgency ?? 0) - (move.stakes?.before?.urgency ?? 0);
-    const dg = (move.stakes?.after?.gravity ?? 0) - (move.stakes?.before?.gravity ?? 0);
     const lines = [
-      'Если pressure.change = ESCALATE: покажи НОВОЕ конкретное изменение ситуации, из-за которого история стала срочнее и/или тяжелее.',
+      'Если pressure.change = ESCALATE: покажи НОВОЕ конкретное изменение ситуации, из-за которого история стала срочнее.',
       'Не пиши абстрактно: «напряжение выросло», «ставки повысились», «ситуация ухудшилась». Покажи, ЧТО именно произошло.',
+      'Gravity этой истории не меняй и не объявляй более судьбоносной. Давление — в urgency и конкретном событии.',
     ];
-    if (suspense) {
-      lines.push('Gravity этой истории не меняй и не объявляй более судьбоносной. Давление — в urgency и конкретном событии.');
-    } else if (du > dg) {
-      lines.push('Urgency выросла сильнее gravity: в первую очередь объясни, почему стало меньше времени или проблема стала быстрее развиваться.');
-    } else if (dg > du) {
-      lines.push('Gravity выросла сильнее urgency: в первую очередь объясни, почему возможные последствия стали тяжелее или затронули больше важного.');
+    if (du > 0) {
+      lines.push('Urgency выросла: в первую очередь объясни, почему стало меньше времени или проблема стала быстрее развиваться.');
     }
     return lines;
   }
@@ -508,9 +495,20 @@ export function formatActMoveForPrompt(plot, move) {
     } else if (move.ending === 'crit') {
       lines.push('Тайна разгадана целиком, успели вовремя. Только хорошее для города.');
     } else if (move.ending === 'ok') {
-      lines.push('Тайна разгадана целиком, но поздно или дорогой ценой. Негативная побочка есть, плюсы перевешивают.');
+      if (move.costlySolve || move.finish === 'fail') {
+        lines.push(
+          'Тайна разгадана целиком, но связанное дело провалилось: разгадка досталась дорогой ценой.',
+          'Обязательны конкретные потери этого месяца, не абстрактное «пострадало». Нужны жертвы среди населения, репутационный удар по городу или правителю и экономический урон (запасы, торговля, работы, повинности).',
+          'Знание правды есть. Лёгкой победы нет. Не сглаживай и не уравновешивай потери тёплым плюсом.',
+        );
+      } else {
+        lines.push('Тайна разгадана целиком, но поздно или дорогой ценой. Негативная побочка есть, плюсы перевешивают.');
+      }
     } else {
-      lines.push('Тайна не разгадана до конца — и это уже ударило по городу. Саму разгадку не выдавай.');
+      lines.push('Тайна не разгадана до конца — и это уже ударило по городу. Саму разгадку целиком не выдавай.');
+      if (move.reveal === 'partial' && (move.openedNodes || []).length) {
+        lines.push('Узлы, которые движок открыл в этом месяце, в хронику можно. Соседние скрытые — нет.');
+      }
     }
   } else {
     lines.push('Историю этим месяцем не закрывай.');

@@ -27,7 +27,7 @@ export function deadlineRemainingMs() {
 function llmTimeoutMs() {
   const left = deadlineRemainingMs();
   if (left == null) return undefined;
-  return Math.max(2500, Math.min(180_000, left - 200));
+  return Math.max(2500, Math.min(120_000, left - 200));
 }
 
 export function toOpenAiTools(toolDefs = []) {
@@ -282,7 +282,13 @@ export class AgentRuntime {
           };
         }
 
-        for (const call of toolCalls) {
+        const orderedCalls = [...toolCalls].sort((a, b) => {
+          const aReply = a.function?.name === 'submit_reply' ? 1 : 0;
+          const bReply = b.function?.name === 'submit_reply' ? 1 : 0;
+          return aReply - bReply;
+        });
+
+        for (const call of orderedCalls) {
           const name = call.function?.name;
           const handler = handlers[name];
           let args = {};
@@ -344,6 +350,49 @@ export class AgentRuntime {
             content: JSON.stringify(result ?? { ok: true }),
           });
           if (result && result.ok === false) lastToolFailed = true;
+        }
+
+        const replyOk = toolTrace.some(
+          (t) => t.name === 'submit_reply' && t.result?.ok !== false,
+        );
+        const forcedOk =
+          Boolean(forcedTool) &&
+          toolTrace.some((t) => t.name === forcedTool && t.result?.ok !== false);
+        if (replyOk || forcedOk) {
+          const record = this.#finishUsage({
+            slog,
+            agentId,
+            model,
+            scene,
+            domainId,
+            runId,
+            turns: turn + 1,
+            usageTotal,
+            footprint,
+            toolTrace,
+            truncated: false,
+            ms: Date.now() - runStarted,
+            callUsages,
+          });
+          slog.info('agent.run.done', {
+            turns: turn + 1,
+            truncated: false,
+            toolsUsed: toolTrace.map((t) => t.name),
+            replyPreview: truncate(message.content || '', 300),
+            usage: record.usage,
+            costUsd: record.costUsd,
+          });
+          return {
+            text: message.content || '',
+            messages,
+            toolTrace,
+            model,
+            agentId,
+            scene,
+            usage: record.usage,
+            costUsd: record.costUsd,
+            callUsages,
+          };
         }
 
         if (!lastToolFailed) choice = undefined;

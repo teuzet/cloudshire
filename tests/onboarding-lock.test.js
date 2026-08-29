@@ -32,6 +32,9 @@ function memoryStorage() {
     async listDomains() {
       return [];
     },
+    async listUserBindings() {
+      return [...users.values()];
+    },
     async listConfluxes() {
       return [];
     },

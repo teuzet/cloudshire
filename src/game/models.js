@@ -62,6 +62,9 @@ export function normalizeDomain(domain) {
       else ch.loyalty = Math.max(0, Math.min(100, Math.round(Number(ch.loyalty))));
       if (!Number.isFinite(Number(ch.terror))) ch.terror = 50;
       else ch.terror = Math.max(0, Math.min(100, Math.round(Number(ch.terror))));
+      if (!['male', 'female'].includes(ch.gender)) {
+        ch.gender = inferRulerGender(ch);
+      }
     }
   }
   normalizeOrders(domain);
@@ -198,12 +201,23 @@ export function createDomainRecord({
   };
 }
 
+/** Пол правителя: не булево, а male | female. Старые карточки без поля — по титулу и имени. */
+export function inferRulerGender(character = {}) {
+  if (character.gender === 'female' || character.gender === 'male') return character.gender;
+  const title = String(character.title || '');
+  const name = String(character.name || '').trim();
+  if (/жриц|правительниц|хозяйк|матушк|госпож/i.test(title)) return 'female';
+  if (/[ая]$/i.test(name)) return 'female';
+  return 'male';
+}
+
 export function createCharacter({
   id,
   name,
   description,
   role = 'ruler',
   title = 'Правитель',
+  gender = null,
   ageYears = null,
   world = null,
 }) {
@@ -213,6 +227,7 @@ export function createCharacter({
     title,
     description,
     role,
+    gender: inferRulerGender({ gender, title, name }),
     portrait: null,
     dialogHistory: [],
     /** Преданность покровителю 0–100 */

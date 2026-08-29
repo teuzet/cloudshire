@@ -43,13 +43,6 @@ export function resolveReasoningEffort({ model, tools, reasoningEffort } = {}) {
   return undefined;
 }
 
-export function createLlmProvider(config, providerName = 'openai') {
-  if (providerName === 'openai') {
-    return new OpenAiProvider(config);
-  }
-  throw new Error(`Unknown LLM provider: ${providerName}`);
-}
-
 export class OpenAiProvider {
   constructor(config) {
     this.name = 'openai';
@@ -60,7 +53,7 @@ export class OpenAiProvider {
       this.client = null;
       this.missingKey = keyEnv;
     } else {
-      this.client = new OpenAI({ apiKey, timeout: 180_000, maxRetries: 1 });
+      this.client = new OpenAI({ apiKey, timeout: 120_000, maxRetries: 0 });
       this.missingKey = null;
     }
     this.defaultModel = config.llm.openai.defaultModel || 'gpt-4o-mini';

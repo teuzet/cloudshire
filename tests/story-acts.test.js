@@ -46,7 +46,7 @@ function seededMystery() {
   return applySeedVisibility(normalizeTruthGraph(mysteryGraph()), { shape: 'linear_4' });
 }
 
-const ACTS = { acts: { maxEscalations: 3, worsenMin: 1, worsenMax: 1.5, dampMin: 0.8, dampMax: 1 } };
+const ACTS = { acts: { maxEscalations: 3, worsenMin: 1.1, worsenMax: 1.1, dampMin: 0.9, dampMax: 0.9 } };
 const maxRng = () => 1;
 const minRng = () => 0;
 
@@ -117,7 +117,8 @@ test('саспенс такт 1: холостой тик остаётся в э�
   assert.ok(!plot.ending);
   assert.equal(move.stakes.kind, 'worsen');
   assert.equal(plot.escalationLevel, 1);
-  assert.equal(plot.urgency, 40);
+  assert.equal(plot.urgency, 44);
+  assert.equal(plot.gravity, 40);
 });
 
 test('саспенс такт 1: DIRECT крит сразу закрывает', () => {
@@ -185,17 +186,17 @@ test('саспенс: UNRELATED крит гасит urgency и ступень, g
   assert.equal(plot.act, 2);
   assert.equal(move.stakes.kind, 'damp');
   assert.equal(plot.escalationLevel, 1);
-  assert.equal(plot.urgency, 32);
+  assert.equal(plot.urgency, 36);
   assert.equal(plot.gravity, 40);
 });
 
-test('третья эскалация закрывает провалом; у саспенса gravity не растёт', () => {
+test('третья эскалация закрывает провалом; gravity не растёт', () => {
   const plot = three({ act: 1, urgency: 80, gravity: 80, escalationLevel: 2 });
   assert.equal(escalationWouldFail(plot, ACTS), true);
   applyStoryActMove(plot, { trigger: 'auto', rng: maxRng, config: ACTS });
   assert.equal(plot.ending, 'fail');
   assert.equal(plot.escalationLevel, 3);
-  assert.equal(plot.urgency, 100);
+  assert.equal(plot.urgency, 88);
   assert.equal(plot.gravity, 80);
   assert.equal(plot.act, 1);
 });
@@ -257,7 +258,7 @@ test('саспенс depth 1: RELEVANT успех в такте 2 закрыва
   assert.equal(plot.ending, 'ok');
 });
 
-test('тайна: эскалация по-прежнему может поднять gravity', () => {
+test('эскалация тайны и саспенса не трогает gravity, urgency +10%', () => {
   const plot = three({
     storyType: 'mystery',
     truthGraph: seededMystery(),
@@ -266,8 +267,10 @@ test('тайна: эскалация по-прежнему может подня
   });
   applyStoryActMove(plot, { trigger: 'auto', rng: minRng, config: ACTS });
   assert.equal(plot.gravity, 40);
+  assert.equal(plot.urgency, 44);
   applyStoryActMove(plot, { trigger: 'auto', rng: maxRng, config: ACTS });
-  assert.equal(plot.gravity, 60);
+  assert.equal(plot.gravity, 40);
+  assert.equal(plot.urgency, 48);
 });
 
 test('тайна такт 1: DIRECT успех открывает ближайший к концу узел и идёт во второй такт', () => {
@@ -288,6 +291,80 @@ test('тайна такт 1: DIRECT успех открывает ближайш
   assert.ok(!plot.ending);
   assert.equal(plot.escalationLevel, 0);
   assert.equal(plot.truthGraph.nodes.find((n) => n.id === 'C').knowledge, 'hidden');
+});
+
+test('тайна: DIRECT провал открывает фронтир и поднимает urgency, gravity та же', () => {
+  const plot = three({
+    storyType: 'mystery',
+    truthGraph: seededMystery(),
+  });
+  const move = applyStoryActMove(plot, {
+    trigger: 'process_finished',
+    relation: 'DIRECT',
+    finish: 'fail',
+    rng: minRng,
+    config: ACTS,
+  });
+  assert.equal(move.reveal, 'partial');
+  assert.deepEqual(move.openedNodes, ['C']);
+  assert.equal(move.pressure, 'ESCALATE');
+  assert.ok(!plot.ending);
+  assert.equal(plot.escalationLevel, 1);
+  assert.equal(plot.urgency, 44);
+  assert.equal(plot.gravity, 40);
+  assert.equal(plot.act, 1);
+});
+
+test('тайна: DIRECT провал на последнем узле разгадывает дорогой ценой', () => {
+  const graph = seededMystery();
+  graph.nodes.find((n) => n.id === 'C').knowledge = 'observed';
+  graph.nodes.find((n) => n.id === 'B').knowledge = 'observed';
+  const plot = three({
+    storyType: 'mystery',
+    act: 2,
+    truthGraph: graph,
+    escalationLevel: 2,
+    urgency: 80,
+    gravity: 70,
+  });
+  const move = applyStoryActMove(plot, {
+    trigger: 'process_finished',
+    relation: 'DIRECT',
+    finish: 'fail',
+    rng: minRng,
+    config: ACTS,
+  });
+  assert.equal(move.reveal, 'full');
+  assert.equal(move.ending, 'ok');
+  assert.equal(plot.ending, 'ok');
+  assert.equal(move.costlySolve, true);
+  assert.equal(move.pressure, 'NONE');
+  assert.deepEqual(move.openedNodes, ['A']);
+  assert.equal(plot.escalationLevel, 2);
+  assert.equal(plot.gravity, 70);
+  assert.equal(plot.urgency, 80);
+});
+
+test('тайна: DIRECT провал на последней эскалации закрывает, но узел остаётся открытым', () => {
+  const plot = three({
+    storyType: 'mystery',
+    truthGraph: seededMystery(),
+    escalationLevel: 2,
+    urgency: 80,
+    gravity: 70,
+  });
+  const move = applyStoryActMove(plot, {
+    trigger: 'process_finished',
+    relation: 'DIRECT',
+    finish: 'fail',
+    rng: minRng,
+    config: ACTS,
+  });
+  assert.equal(plot.ending, 'fail');
+  assert.equal(move.reveal, 'partial');
+  assert.deepEqual(move.openedNodes, ['C']);
+  assert.equal(plot.gravity, 70);
+  assert.equal(plot.urgency, 88);
 });
 
 test('тайна: RELEVANT успех открывает фронтир, остаётся в акте 1 и эскалирует', () => {
@@ -474,6 +551,28 @@ test('тактовка для бита говорит закрывать тол�
   assert.match(text, /КОНЦОВКА УЖЕ РЕШЕНА/);
   assert.match(text, /\[УСПЕХ\]/);
   assert.match(text, /фаза: 2 → 3/);
+});
+
+test('тактовка: DIRECT-провал на разгадке требует жертв, репутации и экономического урона', () => {
+  const plot = three({ storyType: 'mystery', act: 2, ending: 'ok' });
+  const text = formatActMoveForPrompt(plot, {
+    actFrom: 2,
+    actTo: 3,
+    ending: 'ok',
+    reveal: 'full',
+    pressure: 'NONE',
+    relation: 'DIRECT',
+    finish: 'fail',
+    costlySolve: true,
+    trigger: 'process_finished',
+    openedNodes: ['A'],
+    openedEdges: [],
+    stakes: { kind: 'none', before: { urgency: 80, gravity: 70 }, after: { urgency: 80, gravity: 70 } },
+  });
+  assert.match(text, /дорогой ценой/);
+  assert.match(text, /жертвы среди населения/);
+  assert.match(text, /репутационн/);
+  assert.match(text, /экономическ/);
 });
 
 test('plotAlign: старый boolean и безопасный default', () => {

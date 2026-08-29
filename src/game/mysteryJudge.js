@@ -198,6 +198,7 @@ function verdictTool({
   codes = MYSTERY_JUDGE_CODES,
   name = 'submit_mystery_verdict',
   description = 'Вердикт по уже написанной тайне. Историю не чини и не переписывай.',
+  locationDescription = 'Узел, ребро или поле: C, A → B, X, entry…',
 } = {}) {
   return {
     name,
@@ -219,7 +220,7 @@ function verdictTool({
             required: ['code', 'reason'],
             properties: {
               code: { type: 'string', description: `Один из: ${codes.join(', ')}` },
-              location: { type: 'string', description: 'Узел, ребро или поле: C, A → B, X, entry…' },
+              location: { type: 'string', description: locationDescription },
               reason: { type: 'string', description: 'Почему это ошибка. Без предложения исправления.' },
             },
           },
@@ -242,10 +243,16 @@ export async function runVerdictJudge({
   scope = 'mystery.judge',
   toolName = 'submit_mystery_verdict',
   toolDescription = 'Вердикт. Историю не чини и не переписывай.',
+  locationDescription,
 } = {}) {
   const log = (parentLog || getLogger()).child({ scope, agentId });
   const draft = { data: null };
-  const tool = verdictTool({ codes, name: toolName, description: toolDescription });
+  const tool = verdictTool({
+    codes,
+    name: toolName,
+    description: toolDescription,
+    ...(locationDescription ? { locationDescription } : {}),
+  });
   tool.handler = async (args) => {
     draft.data = parseJudgeVerdict(args, codes);
     return { ok: true };

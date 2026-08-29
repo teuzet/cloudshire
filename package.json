@@ -12,6 +12,8 @@
     "tokens": "node scripts/token-report.js",
     "report": "node scripts/world-report.js",
     "seed-sample": "node scripts/sample-plot-seeds.mjs",
+    "seed-skeletons": "node scripts/sample-mystery-skeletons.mjs",
+    "seed-annotations": "node scripts/sample-mystery-annotations.mjs",
     "test": "node --test tests/*.js"
   },
   "engines": {

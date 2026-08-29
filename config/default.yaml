@@ -117,12 +117,13 @@ tick:
       # Шанс тика указа, если агент порядка не задал свой.
       defaultChance: 0.2
     acts:
-      # Третья эскалация закрывает историю провалом. urgency/gravity клампятся 0–100.
+      # Третья эскалация закрывает историю провалом. Gravity не трогаем.
+      # Urgency сдвигается примерно на 10%.
       maxEscalations: 3
-      worsenMin: 1
-      worsenMax: 1.5
-      dampMin: 0.8
-      dampMax: 1
+      worsenMin: 1.1
+      worsenMax: 1.1
+      dampMin: 0.9
+      dampMax: 0.9
     temperature:
       initial: 30
       decayPerTick: 8
@@ -132,13 +133,22 @@ tick:
       # Просроченная нить без дел гаснет, только если интерес остыл ниже этого.
       fadeBelow: 18
     roll:
-      # Сжатая шкала: слабость чувствуется, но не приговаривает.
+      # Сжатая шкала окраски бита: слабость чувствуется, но не приговаривает.
       minChance: 0.25
       maxChance: 0.75
       # Перевес главного стата нити при выборе, по чему кидать.
       primaryWeight: 2
       # Полоса «двойственного» исхода вокруг порога.
       dualBand: 0.2
+      # Исход дела: якоря стат → доля провала при обычном темпе.
+      # 40 ≈ 45%, 60–70 ≈ 10–15%, 90+ провала нет.
+      finishCritShare: 0.25
+      finishFailCurve:
+        - { stat: 0, fail: 0.85 }
+        - { stat: 40, fail: 0.45 }
+        - { stat: 60, fail: 0.15 }
+        - { stat: 70, fail: 0.10 }
+        - { stat: 90, fail: 0 }
     stats:
       # Раздельные месячные бюджеты: решения игрока и события мира.
       playerBudget: 6
@@ -246,6 +256,280 @@ tick:
         pickMax: 2
         twoChance: 0.12
         inventChance: 0.15
+      # Phase 1: абстрактный skeleton без города. Оси можно потом отключать по одной.
+      architect:
+        judgeAttempts: 3
+        gravityMin: 15
+        gravityMax: 90
+        # Веса source после броска типа. 0 исключает ось. Нет ключа — равный вес.
+        sourceByType:
+          crime: { social: 8, political: 5, economic: 5, religious: 3, technological: 3, unknown: 3, external: 3, archaeological: 2, environment: 1, creature: 1 }
+          conspiracy: { social: 8, political: 8, economic: 4, religious: 4, external: 4, unknown: 3, technological: 3, archaeological: 2, environment: 1, creature: 1 }
+          betrayal: { social: 8, political: 5, economic: 4, religious: 3, unknown: 3, external: 2, technological: 2, archaeological: 2, environment: 1, creature: 1 }
+          sabotage: { social: 8, political: 4, economic: 5, technological: 5, religious: 2, unknown: 3, external: 3, archaeological: 2, environment: 1, creature: 1 }
+          kidnapping: { social: 8, political: 5, economic: 4, unknown: 4, external: 3, religious: 2, technological: 2, archaeological: 1, environment: 1, creature: 1 }
+          blackmail: { social: 8, political: 6, economic: 6, unknown: 3, religious: 3, external: 2, technological: 2, archaeological: 1, environment: 1, creature: 1 }
+          impostor: { social: 8, political: 6, religious: 3, economic: 3, unknown: 3, external: 2, technological: 2, archaeological: 2, environment: 1, creature: 1 }
+          poisoning: { social: 8, environment: 5, creature: 5, technological: 5, unknown: 4, archaeological: 4, economic: 3, external: 3, religious: 2, political: 2 }
+          loss: { social: 8, economic: 7, environment: 4, creature: 4, external: 4, unknown: 4, technological: 3, archaeological: 3, political: 3, religious: 2 }
+          disappearance: { social: 7, unknown: 6, creature: 5, political: 4, environment: 4, external: 4, religious: 3, archaeological: 3, economic: 3, technological: 2 }
+          cult: { religious: 8, social: 6, political: 5, unknown: 4, archaeological: 3, external: 3, economic: 2, technological: 2, environment: 1, creature: 1 }
+          forbidden: { religious: 6, political: 6, archaeological: 6, unknown: 5, social: 4, external: 3, technological: 3, economic: 2, environment: 1, creature: 1 }
+          artifact: { archaeological: 8, technological: 6, unknown: 5, religious: 4, social: 3, external: 3, environment: 3, economic: 2, political: 2, creature: 2 }
+          locus: { archaeological: 7, unknown: 6, environment: 5, religious: 4, external: 3, technological: 3, social: 3, creature: 3, political: 2, economic: 2 }
+          false_miracle: { religious: 8, social: 6, technological: 5, unknown: 5, political: 3, external: 3, archaeological: 3, economic: 2, environment: 2, creature: 1 }
+        tagGroups:
+          - id: scale
+            name: Масштаб
+            tags:
+              - { id: local, name: LOCAL, about: "человек, дом, мастерская, небольшое место", weight: 4 }
+              - { id: civic, name: CIVIC, about: "значимая часть города, институт, отрасль", weight: 3 }
+              - { id: islandwide, name: ISLANDWIDE, about: "весь остров или большая система", weight: 2 }
+              - { id: mythic, name: MYTHIC, about: "фундаментальная аномалия, древняя сила, экзистенциальное явление", weight: 1 }
+          - id: source
+            name: Источник
+            tags:
+              - { id: social, name: SOCIAL, about: действия людей или групп }
+              - { id: political, name: POLITICAL, about: власть, статус, контроль, борьба влияний }
+              - { id: economic, name: ECONOMIC, about: выгода, ресурс, снабжение, долги }
+              - { id: environment, name: ENVIRONMENT, about: погода, геология, климат, природный процесс }
+              - { id: creature, name: CREATURE, about: животное, неизвестный вид, миграция }
+              - { id: religious, name: RELIGIOUS, about: культ, вера, ритуал, сакральный объект }
+              - { id: technological, name: TECHNOLOGICAL, about: механизм, ремесленный процесс, эксперимент }
+              - { id: archaeological, name: ARCHAEOLOGICAL, about: древний объект, старая конструкция, забытое место }
+              - { id: unknown, name: UNKNOWN, about: источник на старте трудно классифицировать }
+              - { id: external, name: EXTERNAL, about: причина пришла извне города или острова }
+          - id: entry
+            name: Вход
+            tags:
+              - { id: people, name: PEOPLE, about: странное поведение, исчезновение, свидетельства }
+              - { id: city, name: CITY, about: проявление внутри повседневной городской среды }
+              - { id: outskirts, name: OUTSKIRTS, about: поля, дороги, внешние постройки }
+              - { id: depths, name: DEPTHS, about: пещеры, шахты, глубокие полости }
+              - { id: edge, name: EDGE, about: край острова, обрыв, нестабильная кромка }
+              - { id: sky, name: SKY, about: погода, свет, осадки, летающие существа }
+              - { id: wilds, name: WILDS, about: лес, дикая территория }
+              - { id: past, name: PAST, about: старый предмет, руины, запись, наследие }
+              - { id: body, name: BODY, about: болезнь, симптом, изменение организма }
+              - { id: material, name: MATERIAL, about: необычное вещество, предмет, образец }
+          - id: tone
+            name: Тон
+            tags:
+              - { id: social, name: social }
+              - { id: political, name: political }
+              - { id: investigative, name: investigative }
+              - { id: exploration, name: exploration }
+              - { id: adventure, name: adventure }
+              - { id: mystical, name: mystical }
+              - { id: uncanny, name: uncanny }
+              - { id: horror, name: horror }
+              - { id: religious, name: religious }
+              - { id: wonder, name: wonder }
+              - { id: disaster, name: disaster }
+              - { id: tragic, name: tragic }
+              - { id: conspiracy, name: conspiracy }
+          - id: situation
+            name: Ситуация
+            tags:
+              - { id: harm, name: HARM, about: уже произошёл ущерб, причина неизвестна }
+              - { id: anomaly, name: ANOMALY, about: наблюдается необычный повторяющийся эффект }
+              - { id: discovery, name: DISCOVERY, about: найден объект, место, след или структура }
+              - { id: disappearance, name: DISAPPEARANCE, about: исчез человек, предмет, ресурс или ожидаемый результат }
+              - { id: contradiction, name: CONTRADICTION, about: несколько наблюдений не складываются }
+              - { id: threat, name: THREAT, about: признаки продолжающейся скрытой причины }
+              - { id: opportunity, name: OPPORTUNITY, about: найдено нечто ценное с неизвестной природой }
+          - id: dynamic
+            name: Динамика
+            tags:
+              - { id: static, name: STATIC, about: следы есть, но причина сама почти не нарастает }
+              - { id: accumulation, name: ACCUMULATION, about: скрытая причина копит эффект }
+              - { id: spread, name: SPREAD, about: затрагивает всё больше мест или людей }
+              - { id: repetition, name: REPETITION, about: одно и то же проявляется снова }
+              - { id: depletion, name: DEPLETION, about: что-то необходимое убывает }
+              - { id: escalation, name: ESCALATION, about: каждый новый след тяжелее прежнего }
+              - { id: drift, name: DRIFT, about: причина медленно смещает норму }
+              - { id: cascade, name: CASCADE, about: одно следствие запускает следующее }
+              - { id: deadline, name: DEADLINE, about: есть ощутимый срок, после которого будет поздно }
+          - id: canonRelation
+            name: Отношение к канону
+            tags:
+              - { id: native, name: NATIVE, about: легко воплощается через существующие городские системы }
+              - { id: contact, name: CONTACT, about: в город входит новое явление, не часть status quo }
+              - { id: legacy, name: LEGACY, about: скрытая причина связана с прошлым, старым объектом или давним событием }
+      # V5.1 brief: causal arena + gravity-scaled outcomes.
+      # Один посев: генерация, при FAIL судьи — одна доработка того же brief, без нового жребия.
+      # situation / scale / association / второй тон не бросаем.
+      # OLD_EVENT и EXTERNAL_INTRUSION убраны: это LEGACY и CONTACT.
+      # Классификация (вопрос/маска/домен) — после. cooldown — для доски города, не для лабораторного семпла.
+      annotation:
+        gravityMin: 0
+        gravityMax: 100
+        secondaryToneChance: 0
+        judgeAttempts: 2
+        recentWindow: 5
+        cooldown:
+          previousMultiplier: 0.2
+          frequentWindow: 4
+          frequentMinCount: 2
+          frequentMultiplier: 0.4
+          absentWindow: 5
+          absentMultiplier: 1.3
+        incompatible:
+          truthArena:
+            human:
+              truthNature: [natural_process, creature_behavior, hidden_structure, anomalous_phenomenon]
+            creature:
+              truthNature: [human_action, collective_human_process, intentional_deception, hidden_structure, accident_chain]
+            ecology:
+              truthNature: [human_action, collective_human_process, intentional_deception, hidden_structure, accident_chain, creature_behavior]
+            material:
+              truthNature: [creature_behavior, collective_human_process, intentional_deception, hidden_structure, human_action]
+            built:
+              truthNature: [creature_behavior, intentional_deception, collective_human_process, human_action]
+            earth:
+              truthNature: [human_action, collective_human_process, intentional_deception, accident_chain, creature_behavior]
+            sky:
+              truthNature: [hidden_structure, human_action, collective_human_process, intentional_deception, accident_chain, creature_behavior]
+        tagGroups:
+          # Жёсткий посев генератора. Арена — causal substrate Y, не место X и не provenance.
+          - id: truthArena
+            name: Арена истины
+            tags:
+              - { id: human, name: HUMAN, about: "причина в действиях, решениях, ошибках, знаниях, скрытом или коллективном поведении людей", weight: 10 }
+              - { id: creature, name: CREATURE, about: "причина — конкретное животное или существо: свойства, поведение, жизненный цикл, охота, перемещение", weight: 10 }
+              - { id: ecology, name: ECOLOGY, about: "причина — экологический или популяционный процесс: растения, грибы, паразиты, распространение вида, смена экосистемы", weight: 10 }
+              - { id: material, name: MATERIAL, about: "причина в веществе или свойствах материала: реакция, коррозия, примесь, минерал, загрязнение", weight: 10 }
+              - { id: built, name: BUILT, about: "причина в устройстве созданной людьми физической системы: здание, механизм, водоотвод, дорога, резервуар, кладка", weight: 10 }
+              - { id: earth, name: EARTH, about: "причина — естественный процесс острова как ландшафта: скала, грунт, эрозия, оползень, подземная вода, геологический пласт; не колодец и не сток", weight: 10 }
+              - { id: sky, name: SKY, about: "причина — процесс воздуха, погоды или открытого неба: ветер, облака, температура, атмосферный перенос, оптический эффект", weight: 10 }
+          - id: truthNature
+            name: Природа истины
+            tags:
+              - { id: human_action, name: HUMAN_ACTION, about: "действие одного или нескольких людей, не обязательно преступление" }
+              - { id: collective_human_process, name: COLLECTIVE_HUMAN_PROCESS, about: "норма, привычка, решение группы; нет обязательного единственного виновника" }
+              - { id: natural_process, name: NATURAL_PROCESS, about: "физический, биологический, климатический или геологический процесс" }
+              - { id: creature_behavior, name: CREATURE_BEHAVIOR, about: "поведение животного, неизвестного существа или вида" }
+              - { id: accident_chain, name: ACCIDENT_CHAIN, about: "связанные ошибки и случайности дали необычный итог" }
+              - { id: hidden_structure, name: HIDDEN_STRUCTURE, about: "устройство скрытого места, объекта или системы" }
+              - { id: misidentification, name: MISIDENTIFICATION, about: "на старте принимают не за то, чем оно является" }
+              - { id: intentional_deception, name: INTENTIONAL_DECEPTION, about: "кто-то сознательно создаёт ложную картину" }
+              - { id: anomalous_phenomenon, name: ANOMALOUS_PHENOMENON, about: "редкое явление со стабильным конкретным правилом" }
+          - id: truthDomain
+            name: Домен истины
+            # Классификация после генерации, не жребий.
+            tags:
+              - { id: people, name: PEOPLE, about: "истина в людях, решении, привычке или скрытом человеческом действии", weight: 4 }
+              - { id: ecology, name: ECOLOGY, about: "истина в живой среде: растения, почва, вода, пищевая цепь", weight: 3 }
+              - { id: creatures, name: CREATURES, about: "истина в поведении животного, существа или вида", weight: 3 }
+              - { id: surface, name: SURFACE, about: "истина на поверхности острова: край, рельеф, поля, дороги, открытый камень", weight: 4 }
+              - { id: sky, name: SKY, about: "истина в небе, ветре, свете или явлении над островом", weight: 2 }
+              - { id: body, name: BODY, about: "истина в теле, симптоме, болезни или ране", weight: 3 }
+              - { id: material, name: MATERIAL, about: "истина в веществе, осадке, предмете или следе материала", weight: 3 }
+              - { id: built_environment, name: BUILT_ENVIRONMENT, about: "истина в постройке, пути, очаге, колодце или обычной конструкции", weight: 4 }
+              - { id: underisland, name: UNDERISLAND, about: "истина в пустоте, шахте или устройстве под островом", weight: 1 }
+              - { id: external, name: EXTERNAL, about: "истина пришла извне обычной жизни этого острова", weight: 3 }
+              - { id: past, name: PAST, about: "истина в конкретном прошлом событии, старом решении или забытом следе", weight: 3 }
+          - id: manifestation
+            name: Проявление
+            tags:
+              - { id: body, name: BODY, about: "симптомы, раны, болезнь" }
+              - { id: behavior, name: BEHAVIOR, about: "необычное поведение людей или существ" }
+              - { id: absence, name: ABSENCE, about: "пропажа людей, вещей, ресурса или ожидаемого" }
+              - { id: creatures, name: CREATURES, about: "животные, миграции, гибель или появление вида" }
+              - { id: material, name: MATERIAL, about: "вещество, осадок, след, остаток" }
+              - { id: object, name: OBJECT, about: "странный предмет или находка" }
+              - { id: place, name: PLACE, about: "необычное место или изменение знакомого" }
+              - { id: structure, name: STRUCTURE, about: "повреждение или странное устройство конструкции" }
+              - { id: landscape, name: LANDSCAPE, about: "рельеф, край, почва, лес, скалы" }
+              - { id: sky, name: SKY, about: "небо, свет, явление над островом" }
+              - { id: weather, name: WEATHER, about: "дождь, ветер, холод, туман" }
+              - { id: light_or_sound, name: LIGHT_OR_SOUND, about: "огни, тени, шумы, эхо, голоса" }
+              - { id: resource, name: RESOURCE, about: "изменение важного ресурса" }
+              - { id: social_pattern, name: SOCIAL_PATTERN, about: "одинаковое решение независимых людей" }
+              - { id: memory_or_knowledge, name: MEMORY_OR_KNOWLEDGE, about: "противоречивые воспоминания или свидетельства" }
+          - id: situation
+            name: Ситуация
+            # Каталог классификации, не жребий V5.1.
+            tags:
+              - { id: harm, name: HARM, about: "уже произошёл вред" }
+              - { id: anomaly, name: ANOMALY, about: "странное и повторяемое" }
+              - { id: discovery, name: DISCOVERY, about: "найден предмет, место, след, существо или структура" }
+              - { id: disappearance, name: DISAPPEARANCE, about: "кто-то или что-то исчезло" }
+              - { id: contradiction, name: CONTRADICTION, about: "наблюдения не складываются" }
+              - { id: threat, name: THREAT, about: "признаки продолжающейся скрытой опасности" }
+              - { id: opportunity, name: OPPORTUNITY, about: "неизвестное может оказаться ценным" }
+          - id: epistemicMask
+            name: Эпистемическая маска
+            # Классификация после генерации, не жребий.
+            tags:
+              - { id: delay, name: DELAY, about: "причина и эффект разделены временем" }
+              - { id: distance, name: DISTANCE, about: "причина и X в разных местах" }
+              - { id: hidden_stage, name: HIDDEN_STAGE, about: "критический промежуточный этап невидим" }
+              - { id: common_mediator, name: COMMON_MEDIATOR, about: "обычный ресурс, процедура или среда скрывают источник" }
+              - { id: rare_condition, name: RARE_CONDITION, about: "механизм только при редком условии" }
+              - { id: lookalike, name: LOOKALIKE, about: "истинная причина выглядит как более обычная" }
+              - { id: false_correlation, name: FALSE_CORRELATION, about: "X совпадает с более правдоподобной кажущейся причиной" }
+              - { id: old_assumption, name: OLD_ASSUMPTION, about: "верное знание здесь вводит в заблуждение" }
+              - { id: partial_visibility, name: PARTIAL_VISIBILITY, about: "видна только часть происходящего" }
+              - { id: indirect_effect, name: INDIRECT_EFFECT, about: "X вторичен, первичная причина в другом месте или форме" }
+              - { id: scale_mismatch, name: SCALE_MISMATCH, about: "маленькая причина — большой эффект или наоборот" }
+          - id: worldRelation
+            name: Отношение к миру
+            tags:
+              - { id: native, name: NATIVE, about: "причина выросла из уже существующей обычной жизни", weight: 35 }
+              - { id: contact, name: CONTACT, about: "в привычную жизнь вошло новое явление", weight: 40 }
+              - { id: legacy, name: LEGACY, about: "X — следствие прошлого, старого объекта или забытой структуры", weight: 25 }
+          - id: scale
+            name: Масштаб
+            # Каталог классификации, не жребий V5.
+            tags:
+              - { id: local, name: LOCAL, about: "один человек, группа, место или небольшой участок", weight: 4 }
+              - { id: civic, name: CIVIC, about: "значимая часть города или городской жизни", weight: 3 }
+              - { id: islandwide, name: ISLANDWIDE, about: "большая часть острова или островная система", weight: 2 }
+              - { id: mythic, name: MYTHIC, about: "фундаментальное устройство мира или крупный сверхъестественный факт; не обязательно магия", weight: 1 }
+          - id: tone
+            name: Тон
+            tags:
+              - { id: investigative, name: investigative }
+              - { id: uncanny, name: uncanny }
+              - { id: wonder, name: wonder }
+              - { id: horror, name: horror }
+              - { id: tragic, name: tragic }
+              - { id: adventure, name: adventure }
+              - { id: social, name: social }
+              - { id: political, name: political }
+              - { id: religious, name: religious }
+              - { id: mystical, name: mystical }
+          - id: association
+            name: Ассоциация
+            # Каталог, не жребий V5.
+            tags:
+              - { id: echo, name: эхо }
+              - { id: threshold, name: порог }
+              - { id: wear, name: износ }
+              - { id: exchange, name: обмен }
+              - { id: residue, name: остаток }
+              - { id: reflection, name: отражение }
+              - { id: layer, name: слой }
+              - { id: shift, name: сдвиг }
+              - { id: boundary, name: граница }
+              - { id: trace, name: след }
+              - { id: cycle, name: цикл }
+              - { id: void, name: пустота }
+          # Классификация после генерации, не жребий.
+          - id: mysteryQuestion
+            name: Вопрос тайны
+            tags:
+              - { id: cause, name: CAUSE, about: "почему наблюдается X" }
+              - { id: agent, name: AGENT, about: "кто вызвал X или скрытое действие" }
+              - { id: motive, name: MOTIVE, about: "зачем совершено уже видное или подозреваемое действие" }
+              - { id: provenance, name: PROVENANCE, about: "откуда объект, вещество, след, явление или группа" }
+              - { id: identity, name: IDENTITY, about: "кто или что на самом деле наблюдаемое" }
+              - { id: location, name: LOCATION, about: "куда исчезли или где находятся сейчас" }
+              - { id: mechanism, name: MECHANISM, about: "как наблюдаемый эффект вообще возможен" }
+              - { id: history, name: HISTORY, about: "что раньше породило нынешние следы" }
+              - { id: relation, name: RELATION, about: "как связаны два или несколько наблюдений" }
+              - { id: nature, name: NATURE, about: "чем является наблюдаемый объект, процесс или явление" }
       tagGroups:
         - id: association
           name: Ассоциативное поле
@@ -391,6 +675,9 @@ llm:
   openai:
     apiKeyEnv: OPENAI_API_KEY
     defaultModel: gpt-4o-mini
+  anthropic:
+    apiKeyEnv: ANTHROPIC_API_KEY
+    defaultModel: claude-sonnet-5
   # Учёт токенов → logs/worlds/<worldId>/usage.jsonl; после wipe — data/archives/<worldId>/logs/
   usage:
     enabled: true
@@ -414,10 +701,18 @@ llm:
         input: 4.00
         output: 24.00
         cachedInput: 0.40
-      gpt-4o-mini:
-        input: 0.15
-        output: 0.60
-        cachedInput: 0.075
+      claude-sonnet-5:
+        input: 2.00
+        output: 10.00
+        cachedInput: 0.20
+      claude-sonnet-4-6:
+        input: 3.00
+        output: 15.00
+        cachedInput: 0.30
+      claude-haiku-4-5:
+        input: 1.00
+        output: 5.00
+        cachedInput: 0.10
 
 world:
   # Ключ сезона/шаблона (не уникален). Уникальный id экземпляра мира
@@ -1290,8 +1585,14 @@ agents:
     provider: openai
     model: gpt-5.6-luna
     safety: true
-    # Сколько миллисекунд жрец может крутить инструменты до ответа. Дальше — «мысль сбилась».
-    turnBudgetMs: 70000
+    # Сколько миллисекунд жрец может крутить инструменты до ответа. Дальше — системный отказ, без ретрая.
+    turnBudgetMs: 120000
+    # Если за это время речи ещё нет — статичная реплика жреца (не ответ; диалог не пишется).
+    holdAfterMs: 10000
+    holdMessage:
+      female: Покровитель, не теряйте меня — я услышала вашу волю и ещё облекаю её в дело у алтаря. Сейчас вернусь.
+      male: Покровитель, не теряйте меня — я услышал вашу волю и ещё облекаю её в дело у алтаря. Сейчас вернусь.
+    failMessage: Жрец не ответил вовремя. Этот ход система не сохранила — повтори волю, когда будешь готов.
     canon: [world, patron, ruler, time, foreign]
     styles: [names, priestVoice]
     instructions: |
@@ -1313,7 +1614,9 @@ agents:
       3. Нужно что-то СДЕЛАТЬ — вызови соответствующий инструмент.
       Если воля ещё неясна, чтобы облечь её в дело или постоянный порядок, — сначала спроси,
       не заводи tool и не додумывай недостающее.
-      4. Последним вызовом всегда submit_reply. Только его текст увидит игрок.
+      4. Когда воля ясна, действие и submit_reply можно вызвать в одном ответе модели:
+      сначала tool дела или указа, сразу за ним submit_reply. Только текст submit_reply увидит игрок.
+      Если сначала нужен бриф или лормастер — получи результат, затем в следующем ходе действие и речь.
       В submit_reply честно укажи requestKind и commitment.
       Если дело реально не создано — не обещай, что оно создано.
 
@@ -1667,6 +1970,964 @@ agents:
       - asksSequel только если разгадка уже содержит новую проблему.
 
       При FAIL: узел/ребро/поле и кратко почему. Без исправления.
+
+  mysteryArchitect:
+    provider: openai
+    model: gpt-5.6-terra
+    canon: []
+    styles: []
+    instructions: |
+      Ты — MYSTERY ARCHITECT.
+      Создай абстрактный skeleton mystery-истории ДО привязки к конкретному городу.
+
+      Мир: изолированные летающие острова; на каждом город-государство и один бог-покровитель.
+      Игрок — этот бог, действует через верховного жреца. Технология прединдустриальная.
+      Бытовой магии почти нет; редкие аномалии возможны. Обычная причинность конкретна и понятна.
+
+      Ты НЕ знаешь конкретный город. Не фиксируй конкретный район, профессию, гильдию, архив,
+      цистерну, склад, имя, локальный обычай. Это выберет Phase 2.
+      Пиши ROLES AND MECHANISMS: person who creates the dangerous condition;
+      shared resource; affected population; public authority; unknown material;
+      hidden physical mechanism; remote location; expert observer; resident; worker.
+      Можно говорить city / settlement / public authority — нельзя выбирать городской инстанс.
+
+      Класс носителя (mediumClass) обязателен и один на всю историю:
+      SHARED_CONSUMABLE — еда/вода/топливо/ткань/лекарство (конкретный ресурс — Phase 2);
+      BODY — организм; ATMOSPHERE — воздух/свет/осадки; SIGNAL — мера/запись/ритм;
+      POPULATION — живая группа; STRUCTURE — несущая конструкция или путь.
+      Фиксируй causal function и класс носителя, не local implementation.
+      Перед узлом: «Phase 2 сможет воплотить это тремя разными материалами в разных городах?»
+      Если нет — слишком конкретно.
+      Prefer shared resource over water supply; legacy structure over weather barrier;
+      exposure channel over city water distribution; physical trace over seal/ledger.
+      Не используй по умолчанию водосбор, зерновой список, печать, архив, амбар, цистерну.
+
+      ПРИОРИТЕТ ТЕГОВ: тип > источник > ситуация > gravity/scale > canonRelation > dynamic > тон > association.
+      Не искажай mysteryType ради нижнего тега. Тон и association — мягкие.
+
+      Граф: A → B → C → X. A первичная скрытая причина, B необходимый шаг,
+      C непосредственный механизм наблюдаемой mystery, X главный наблюдаемый эффект.
+      Всё до X уже произошло и фиксировано. Будущие действия игрока не фиксируй.
+      Side nodes не используй.
+
+      Каждый узел — одно событие или устойчивый факт, с ясным mechanism.
+      Ребро: mechanism (как parent вызывает child) и counterfactual
+      (если убрать parent, child всё ещё произойдёт почти так же? если да — переделай).
+      Особенно C → X: C причиняет X, а не скрывает уже возникший X.
+
+      Человеческое действие: сделал бы человек это, если забыть, что автору нужен следующий узел?
+      Страх, ошибка, жадность, незнание, привычка, приказ, норма, сокрытие ошибки, личная цель — да.
+      Нелепый шаг только ради цепи — нет.
+      Если вред продолжает самозванец, культ или «толкователь» — из неспособности делать чужую работу
+      (не умеет дать отбой, не знает знак, боится раннего разоблачения), не из «продлю ритуал, чтобы удержаться».
+
+      Жители не идиоты. Дешёвый бытовой опыт они уже умеют: открыть ставни, если в закрытом месте
+      трудно дышать; не есть явно испорченное; не стоять у края в ветер.
+      Не строй X на том, что все это забыли. Если простая проверка доступна и не запрещена,
+      они ею воспользуются. Ошибочная народная причина допустима только если симптомы совпадают
+      с уже страшным внешним событием или дешёвая проверка табуирована.
+
+      Базовый набор любого острова (не выдумывай ради сюжета редкую службу):
+      край и ветер; очаг и лампа; общий расходник; власть и жители; тот, кто говорит, когда непогода кончилась;
+      старый предмет или путь; лес, тело, ремесло.
+      Не требуй «службу небесной тревоги», штатного толкователя знамений или иной должности,
+      без которой история не работает. Спроси: если в городе нет этого института — Phase 2 всё ещё
+      может надеть скелет на базовый набор? Если нет — переделай.
+
+      Наблюдаемая mystery (X и mysteryQuestion) должна быть формой ТИПА, не побочным вредом,
+      к которому тип только открыл доступ. Самозванец: игрок расследует ложную роль.
+      Нельзя: самозванец в A, а X — повторные приступы от примеси в общем ресурсе (это отравление).
+
+      Механизм либо обычный и правдоподобный (ORDINARY), либо редкая аномалия с простым явным правилом
+      (ANOMALOUS). Не маскируй произвольную магию под молекулярную физику.
+      Не изобретай экзотическое свойство, которое срабатывает ровно в нужный сюжетный момент
+      и воспроизводит X. Если аномалия нужна — скажи правило просто и стабильно.
+      POISONING: простой вред носителя; не выдумывай токсикологию.
+
+      Важный новый объект, вещество, доступ, знание, инструмент — с происхождением.
+      Старый объект, природная черта, обычная практика, обычный институт могут быть даны в корне
+      (LEGACY), если загадка не в том, откуда они взялись.
+
+      X: наблюдаемый, конкретный, интригующий, полностью объясняемый графом, не раскрывает hidden truth.
+      Каждое утверждение X имеет source node. Нет источника — удали утверждение, не дописывай truth.
+
+      resolutionFacts — 2–4 неизвестных уже из узлов: что игрок должен установить.
+      Не новые объекты. Не разгадка целиком. Вопросительный знак не обязателен.
+
+      NATIVE: skeleton легко воплощается через базовый набор острова, без новой гражданской службы.
+      CONTACT: в основе новое явление, вошедшее в жизнь извне status quo.
+      LEGACY: скрытая причина связана с прошлым, старым объектом или давним событием.
+
+      Цель — 3 ясных шага, 1 сильная наблюдаемая аномалия, 1 центральная истина.
+      Не добавляй второй twist, тайное общество, древнюю цивилизацию, артефакт без нужды.
+
+      bindingSlots — заказ Phase 2: найди в городе кого-то/что-то с этой функцией.
+      Это не персонажи истины и не узлы графа. Лишние наблюдатели — optional.
+
+      Верни только submit_mystery_skeleton.
+
+  mysteryArchitectJudge:
+    provider: openai
+    model: gpt-5.6-luna
+    canon: []
+    styles: []
+    instructions: |
+      Ты — судья абстрактного skeleton тайны. Не писатель. Не чини историю.
+      Города в пакете нет. Цель — сохранить свободу Phase 2, не запретить слово «город».
+
+      PASS — цепь A→B→C→X целая, X объясняется, тип соблюдён, нет преждевременной городской конкретики,
+      resolutionFacts — неизвестные уже из узлов.
+      FAIL — доказуемый дефект. UNCERTAIN если не уверен; пайплайн UNCERTAIN не принимает.
+
+      FAIL если:
+      - CITY_SPECIFIC_INSTANTIATION: skeleton без нужды фиксирует профессию, именной институт,
+        район, гильдию, архив, цистерну, амбар, водосбор, локальный ритуал, proper noun
+        или готовый городской конфликт. Не FAIL за city, settlement, public authority,
+        shared resource, common practice, distribution channel, affected population,
+        generic institution, worker, resident, leader, тег входа CITY;
+      - EXOTIC_BINDING: история не садится без редкой должности, службы или обряда
+        (небесная тревога, штатный толкователь знамений, уникальный ритуал запирания),
+        которых нет в базовом наборе острова (край/ветер, очаг, расходник, власть, отбой непогоды,
+        старый предмет или путь). Особенно строго при NATIVE;
+      - нет обязательного узла / не A→B→C→X;
+      - ребро слабое: child произошёл бы почти так же без parent; особенно C→X не причиняет X;
+      - временной цикл или причина после следствия;
+      - факт X без источника;
+      - ключевой НОВЫЙ предмет/знание/доступ/аномальное свойство из ниоткуда;
+      - поступок нелеп без авторской нужды в следующем узле (IMPLAUSIBLE_ACTION);
+        самозванец «продлевает ритуал чтобы удержаться» без неумения исполнить чужую работу — FAIL;
+      - жители игнорируют дешёвый бытовой опыт (открыть, понюхать, отойти от края) без табу и без смешения
+        с внешним событием, которое маскирует ту же связь (IMPLAUSIBLE_ACTION);
+      - физика без механизма, либо экзотическое свойство, которое существует только чтобы дать X
+        в нужный момент; если это аномалия — должно быть простое явное правило, иначе FAIL;
+      - тип тайны (type.about) не соблюдён, тип растянут метафорой, либо тип только открыл доступ,
+        а X — другая mystery (самозванец в A, отравление в X) — WRONG_MYSTERY_TYPE;
+      - resolutionFacts вводят новый объект (RESOLUTION_INVENTION). Не FAIL за отсутствие «?»;
+      - теги явно не сформировали историю (декоративная наклейка вместо причины).
+
+      bindingSlots НЕ сущности истины. Не ставь UNEXPLAINED_ENTITY / UNEXPLAINED_KNOWLEDGE /
+      provenance на слоты. Смотри только: полезная функция, generic, required правда обязателен.
+
+      Не требуй происхождение у корневого данного: старый объект (LEGACY), природная черта,
+      обычная практика, обычный институт, обычный инструмент — если они не сами являются ответом тайны.
+
+      При FAIL: code, location, reason. Без исправления.
+
+  mysteryAnnotation:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    canon: []
+    styles: []
+    instructions: |
+      Ты проектируешь mystery-сюжеты для текстовой god-sim в low-magic fantasy.
+
+      Игрок — бог-покровитель города-государства на изолированном летающем острове. На этой стадии конкретный город ещё НЕ выбран.
+
+      Твоя задача — спроектировать одну mystery и записать её как короткий `mystery brief`.
+
+      `Mystery brief` — это НЕ художественный текст и НЕ текст для игрока.
+
+      Пиши предметно, сухо и конкретно.
+
+      Не стремись к:
+
+      * красивому слогу;
+      * атмосфере ради атмосферы;
+      * драматической подаче;
+      * метафорам;
+      * литературным образам;
+      * эффектному твисту ради самого твиста.
+
+      Brief должен быть удобен для следующего этапа, где другой агент:
+
+      * адаптирует mystery под конкретный город;
+      * конкретизирует сущности;
+      * построит truth graph;
+      * проверит причинность;
+      * создаст игровую подачу.
+
+      ---
+
+      # Мир
+
+      Считай установленным только следующее:
+
+      * действие происходит на изолированном летающем острове;
+      * на острове существует человеческое поселение;
+      * у города есть бог-покровитель;
+      * технология доиндустриальная;
+      * бытовая магия не является нормой;
+      * редкие аномальные или сверхъестественные явления возможны.
+
+      Не предполагай заранее конкретные:
+
+      * институты;
+      * гильдии;
+      * профессии;
+      * культы;
+      * архивы;
+      * государственные службы;
+      * уникальные инфраструктурные системы;
+      * сложные местные традиции.
+
+      Можно вводить простые общие элементы мира, если они нужны mystery:
+
+      * животное;
+      * растение;
+      * материал;
+      * природное место;
+      * дорогу;
+      * постройку;
+      * старый объект;
+      * группу жителей;
+      * путешественников;
+      * внешний груз;
+      * бытовую практику.
+
+      Не используй конкретные имена города, районов, семей, организаций или персонажей.
+
+      ---
+
+      # Жребий
+
+      Создай mystery, соответствующую следующим параметрам:
+
+      ```yaml
+      gravity: {{gravity}}
+      truthArena: {{truthArena}}
+      truthNature: {{truthNature}}
+      manifestation: {{manifestation}}
+      worldRelation: {{worldRelation}}
+      tone: {{primaryTone}}
+      ```
+
+      ---
+
+      # 1. `truthArena`
+
+      `truthArena` отвечает только на вопрос:
+
+      > Из какого causal substrate состоит центральная скрытая причина Y?
+
+      Это не место действия, не clue, не транспорт причины, не время, не происхождение и не первая ошибочная гипотеза.
+
+      География, прошлое и внешний контакт могут свободно возникать внутри premise.
+      Прошлое выражай через `worldRelation: LEGACY`.
+      Внешнее происхождение — через `CONTACT`.
+
+      ### HUMAN
+
+      Причина состоит в действиях людей, решениях, ошибках, знаниях, скрытом или коллективном поведении, социальных практиках.
+
+      ### CREATURE
+
+      Причина — конкретное животное или иное существо: свойства, поведение, жизненный цикл, охота, перемещение.
+
+      ```text
+      один неизвестный хищник атакует людей → CREATURE
+      ```
+
+      ### ECOLOGY
+
+      Причина — экологический или популяционный процесс: растения, грибы, паразиты, распространение вида, взаимодействие видов, изменение экосистемы.
+
+      ```text
+      новый гриб распространяется по деревянным зданиям → ECOLOGY
+      исчезновение насекомых меняет опыление → ECOLOGY
+      ```
+
+      ### MATERIAL
+
+      Причина в веществе или свойствах материала: реакция, коррозия, растворение, осаждение, загрязнение, примесь, необычный минерал.
+
+      ```text
+      цистерна содержит необычное вещество → MATERIAL
+      ```
+
+      ### BUILT
+
+      Причина — устройство созданной людьми физической системы: здание, кладка, механизм, водоотвод, дорога, резервуар, мост, инфраструктура.
+
+      Колодец, цистерна, сток, погреб — BUILT, если действует конструкция, а не содержимое и не живое.
+
+      ```text
+      особая конструкция цистерны вызывает эффект → BUILT
+      ```
+
+      ### EARTH
+
+      Причина — естественный процесс острова как физического ландшафта: скала, грунт, эрозия, оползень, подземная вода, геологический пласт, естественная полость, движение породы.
+
+      Не путай с BUILT: человеческая подземная инфраструктура — не EARTH.
+
+      Не ищи полость, шахту или нижнюю сторону острова по умолчанию.
+
+      ### SKY
+
+      Причина — процесс воздуха, погоды или открытого неба: ветер, облака, температура, воздушный слой, атмосферный перенос, оптический эффект.
+
+      Птица или иное существо в полёте — CREATURE, не SKY.
+
+      ---
+
+      ## Truth Arena Fidelity
+
+      Центральный answer должен действительно принадлежать выбранной `truthArena`.
+
+      Мысленно проверь:
+
+      > Если убрать место действия, транспортный носитель и декорацию, останется ли причина того же класса?
+
+      Если нет — идея не соответствует жребию.
+
+      Пример плохого соответствия:
+
+      ```text
+      truthArena = MATERIAL
+
+      светящиеся жуки приехали в шерсти
+      ```
+
+      Шерсть — только транспорт. Это `CREATURE`.
+
+      ```text
+      truthArena = BUILT
+
+      постройку ломают жуки или корни
+      ```
+
+      Живое — ядро. Это `CREATURE` или `ECOLOGY`, не BUILT.
+
+      ---
+
+      # 2. `truthNature`
+
+      `truthNature` определяет ХАРАКТЕР центральной скрытой истины.
+
+      Возможные значения могут включать:
+
+      * `HUMAN_ACTION`
+      * `COLLECTIVE_HUMAN_PROCESS`
+      * `NATURAL_PROCESS`
+      * `CREATURE_BEHAVIOR`
+      * `ACCIDENT_CHAIN`
+      * `HIDDEN_STRUCTURE`
+      * `MISIDENTIFICATION`
+      * `INTENTIONAL_DECEPTION`
+      * `ANOMALOUS_PHENOMENON`
+
+      `truthNature` должна описывать сам центральный causal answer.
+
+      Она не может описывать только:
+
+      * clue;
+      * фон;
+      * происхождение причины;
+      * способ доставки;
+      * способ маскировки;
+      * первую ошибочную гипотезу жителей.
+
+      Мысленно проверь:
+
+      > Если убрать выбранный `truthNature`, останется ли та же самая центральная mystery?
+
+      Если да — `truthNature` реализована плохо.
+
+      ---
+
+      ## MISIDENTIFICATION
+
+      Если выбрана `MISIDENTIFICATION`, ошибочная идентификация должна быть частью самой разгадки.
+
+      Недостаточно написать:
+
+      > жители сначала приняли белую пыль за пепел.
+
+      Если центральная mystery на самом деле полностью объясняется разрушившейся конструкцией, misidentification здесь только второстепенный clue.
+
+      ---
+
+      ## ACCIDENT_CHAIN
+
+      Если выбрана `ACCIDENT_CHAIN`, наблюдаемое должно возникнуть из цепочки нескольких обычных ошибок или обстоятельств.
+
+      Эти шаги должны образовывать одну цепь.
+
+      Не используй несколько независимых причин, которые просто совпали одновременно.
+
+      ---
+
+      # 3. `manifestation`
+
+      `manifestation` определяет, В КАКОМ ВИДЕ mystery становится наблюдаемой.
+
+      Центральное наблюдаемое X должно соответствовать этому параметру напрямую.
+
+      Не добавляй более яркое проявление другого типа только ради драматичности.
+
+      ---
+
+      # 4. `worldRelation`
+
+      ### NATIVE
+
+      Причина является частью обычного мира острова.
+
+      ### CONTACT
+
+      Ключевой элемент mystery появился благодаря новому внешнему контакту.
+
+      Если причина пришла извне, это уже CONTACT. Не нужен отдельный тег вторжения.
+
+      ### LEGACY
+
+      Mystery существенно связана с наследием прошлого.
+
+      Прошлое должно быть частью самой разгадки, а не только provenance нынешней причины.
+
+      ---
+
+      # 5. Gravity
+
+      Сначала прочитай `gravity`. Только потом проектируй Y и X.
+
+      `gravity` — насколько сильно развилка «разгадана / не разгадана» важна для дальнейшей истории города.
+
+      Это НЕ размер непосредственного происшествия, НЕ число жертв, НЕ опасность X и НЕ физический масштаб причины.
+
+      Последствия НЕ обязаны быть долговременными сами по себе. Их масштаб определяется исключительно gravity.
+
+      Не придумывай маленькую тайну, а потом искусственно раздувай исходы под высокое число.
+
+      Порядок:
+
+      1. Прочитать gravity.
+      2. Определить примерный масштаб изменения города.
+      3. Придумать Y, которая естественно способна породить последствия такого масштаба.
+      4. Только затем выбрать конкретное наблюдаемое X.
+
+      Особенно для gravity 70–100: высокий вес должен быть встроен в leverage самой истины.
+
+      Три якоря. Между ними — плавная интерполяция, без отдельных обязательных категорий для 30 или 75.
+
+      * 0 — небольшой эпизод. Почти нет долговременного следа. Последствия локальны, обратимы, быстро забываются.
+      * 50 — важная веха. Через десятилетия уместно упомянуть в истории города. Город становится заметно другим хотя бы в одной области.
+      * 100 — судьбоносное. Долгосрочная траектория меняется. Есть осмысленное историческое «до / после».
+
+      `gravity 68` должен быть заметно тяжелее 50 и заметно легче 100. Не превращай его в отдельную формальную категорию.
+
+      Высокий gravity НЕ означает новый закон мира, древнюю цивилизацию или обязательный глобальный lore reveal.
+
+      ---
+
+      # 6. Tone
+
+      Один основной тон задаёт эмоциональный режим.
+
+      Он не должен заставлять нарушать причинность.
+
+      Не добавляй необъяснимые сверхъестественные детали только потому, что задан `mystical`, `horror` или `uncanny`.
+
+      ---
+
+      # Центральная структура mystery
+
+      Mystery должна иметь:
+
+      ```text
+      наблюдаемое X
+      ↓
+      одна скрытая причина Y
+      ```
+
+      Brief должен позволять сформулировать:
+
+      > X происходит потому, что Y.
+
+      Если это невозможно сделать одним коротким предложением, причина, вероятно, перегружена.
+
+      ---
+
+      # ONE CENTRAL REVEAL
+
+      У mystery должна быть одна центральная разгадка.
+
+      Не строй:
+
+      ```text
+      X
+      → причина
+      → второй секрет
+      → скрытое место
+      → ещё один старый заговор
+      → новый закон мира
+      ```
+
+      После Y допустимы последствия, но они должны быть прямым следствием Y.
+
+      Не добавляй вторую mystery для повышения значимости первой.
+
+      ---
+
+      # Исходы
+
+      Brief обязан содержать две ветки последствий. Масштаб веток задаёт только `gravity`.
+
+      ### Если разгадана
+
+      Какое конкретное хорошее последствие получает город благодаря пониманию истины?
+
+      ### Если не разгадана
+
+      Какое конкретное плохое последствие получает город, если продолжает ошибаться?
+
+      Последствия не обязаны быть долговременными. При низком gravity это может быть короткий обратимый эпизод. При высоком — изменение траектории города.
+
+      Одна и та же базовая тайна может иметь разные последствия. Пример: инвазивный гриб.
+
+      * gravity 8 — уничтожили очаг / вспышка задела одно пастбище и затухла.
+      * gravity 55 — освоили карантин фуража и сохранили систему пастбищ / гриб навсегда меняет скотоводство.
+      * gravity 90 — контроль инвазивных видов становится системной политикой внешней торговли / кормовая база рушится, город меняет хозяйство и расселение.
+
+      Не раздувай gravity 8 до новой городской системы. Не сужай gravity 90 до одного колодца.
+
+      Ветки не обязаны быть одинаково тяжёлыми. Суди развилку целиком.
+
+      Обе ветки — прямое развитие Y, не generic morale.
+
+      Не делай исход «если разгадана» по умолчанию новым правилом, протоколом, инспекцией или учреждением.
+
+      В зависимости от gravity и самой истины разгаданная mystery может вместо этого дать, например:
+
+      * доступ к территории;
+      * новый ресурс;
+      * потерю или сохранение земли;
+      * миграцию или сдвиг расселения;
+      * новую торговую связь;
+      * изменение обычая;
+      * техническую возможность;
+      * экологическое изменение;
+      * сдвиг статуса или власти;
+      * новый путь;
+      * новое понимание острова;
+      * примирение или конфликт групп.
+
+      Институциональное правило — только когда оно естественное следствие именно этой истины.
+
+      Плохо:
+
+      ```text
+      Если разгадана: опасность устранена, жители благодарны.
+      Если не разгадана: проблема становится хуже и люди страдают.
+      ```
+
+      Нужен конкретный факт, соответствующий gravity.
+
+      Для чисто вредоносной причины не придумывай серебряную подкладку, которая не следует из Y.
+
+      ---
+
+      # EXPLAIN EVERY SALIENT OBSERVATION
+
+      Все странные наблюдения, введённые в brief, должны объясняться центральной причиной.
+
+      Перед ответом мысленно перечисли каждую необычную деталь в разделе `Наблюдаемое`.
+
+      Каждая должна следовать из `Истина`.
+
+      Не добавляй декоративные аномалии.
+
+      Плохо:
+
+      ```text
+      люди исчезают;
+      их отражения запаздывают;
+      на земле появляется серебряная пыль;
+
+      разгадка объясняет только исчезновение людей
+      ```
+
+      Если деталь не нужна mystery — убери её.
+
+      ---
+
+      # NO PLOT-SHAPED MECHANISMS
+
+      Не придумывай биологический, медицинский, химический или физический эффект, который слишком точно выполняет нужную сюжетную функцию.
+
+      Особенно избегай причин, которые без отдельного убедительного механизма заставляют людей или животных:
+
+      * идти в конкретное место;
+      * выполнять одно и то же сложное действие;
+      * слышать осмысленные голоса;
+      * слышать конкретные команды;
+      * вспоминать чужие события;
+      * получать одинаковые сложные воспоминания;
+      * забывать именно нужную сюжету информацию;
+      * совершать одинаковые сложные решения;
+      * совершать самоубийственные действия;
+      * действовать так, будто организм понимает скрытый сюжет.
+
+      Предпочитай общие эффекты:
+
+      * боль;
+      * слабость;
+      * раздражение;
+      * сонливость;
+      * спутанность;
+      * ухудшение зрения;
+      * нарушение координации;
+      * обычный страх;
+      * обычная дезориентация;
+      * избегание раздражителя;
+      * поиск еды;
+      * поиск воды;
+      * поиск света;
+      * поиск тепла;
+      * поиск укрытия;
+      * простое стадное поведение;
+      * территориальное поведение;
+      * обычное выученное поведение.
+
+      Сложное действие должно возникать из понятной цепочки простых причин, а не из специального свойства организма.
+
+      ---
+
+      # MECHANISM BUDGET
+
+      Причина должна иметь достаточный физический масштаб для своего эффекта.
+
+      Мысленно проверь:
+
+      * достаточно ли вещества;
+      * достаточно ли энергии;
+      * достаточно ли времени;
+      * достаточно ли контакта;
+      * существует ли путь распространения;
+      * соответствует ли площадь воздействия масштабу X;
+      * способен ли звук дать заявленный механический эффект;
+      * способен ли ветер перенести заявленное количество материала;
+      * может ли небольшая колония животных вызвать эффект заявленного масштаба;
+      * может ли концентрация вещества реально возникнуть в описанных условиях.
+
+      Не используй:
+
+      ```text
+      small cause
+      → enormous consequence
+      ```
+
+      без понятного механизма усиления.
+
+      Это про физику механизма, не про gravity. Маленькая причина может иметь большой исторический вес, если усиление понятно.
+
+      ---
+
+      # PHYSICS, BIOLOGY, MEDICINE
+
+      Используй обычные механизмы, если их достаточно.
+
+      Не изобретай псевдонаучные свойства ради оригинальности.
+
+      Плохие решения:
+
+      * специальная пыль с идеально подходящими симптомами;
+      * газ, вызывающий сложное целенаправленное поведение;
+      * растение, выделяющее вещество ровно с нужным сюжетным эффектом;
+      * паразит, управляющий жертвой по сложному сценарию;
+      * звук, разрушающий массивную конструкцию без достаточной энергии;
+      * химический процесс, который одновременно объясняет несколько несвязанных эффектов.
+
+      Оригинальность ищи в сочетании обычных механизмов и обстоятельств.
+
+      ---
+
+      # ANOMALOUS PHENOMENA
+
+      Аномальное явление допустимо.
+
+      Но его правило должно быть:
+
+      * простым;
+      * стабильным;
+      * ограниченным;
+      * неразумным;
+      * не семантическим;
+      * легко описываемым одной фразой.
+
+      Хорошо:
+
+      > При сильном ночном охлаждении материал несколько минут отталкивает воду.
+
+      Плохо:
+
+      > Материал заставляет человека вспомнить забытое преступление своей семьи и идти к месту, где оно произошло.
+
+      Аномалия не является разрешением на произвольную причинность.
+
+      ---
+
+      # HUMAN BEHAVIOR
+
+      Люди должны действовать разумно исходя из доступной им информации.
+
+      Не строй mystery на:
+
+      * массовой глупости;
+      * очевидной проверке, которую никто не проводит;
+      * необъяснимом нежелании разговаривать;
+      * одинаковом сложном решении множества независимых людей;
+      * удобной для автора иррациональности.
+
+      Если люди ошибаются, ошибка должна иметь обычную причину:
+
+      * ложная корреляция;
+      * задержка;
+      * расстояние;
+      * скрытый промежуточный этап;
+      * социальное предположение;
+      * табу;
+      * физически трудный доступ;
+      * несколько правдоподобных объяснений;
+      * неполная информация.
+
+      ---
+
+      # CREDIBLE HIDDENNESS
+
+      Mystery должна быть неочевидной, но расследуемой.
+
+      Нужно объяснить:
+
+      > Почему разумные люди не связывают X с Y сразу?
+
+      Не нужно делать истину принципиально недоступной.
+
+      Причина скрытости должна вытекать из механизма.
+
+      Допустимые основания:
+
+      * задержка между причиной и эффектом;
+      * причина находится далеко от проявления;
+      * промежуточный переносчик;
+      * эффект возникает только при редком условии;
+      * причина выглядит безобидно;
+      * наблюдаемое имеет более очевидное ложное объяснение;
+      * ключевой этап физически скрыт;
+      * разные люди видят разные части процесса.
+
+      Не используй просто:
+
+      * туман;
+      * темноту;
+      * ночь;
+      * расстояние;
+
+      как универсальную маскировку, если существует простая очевидная проверка.
+
+      ---
+
+      # PREFER THE SIMPLEST WORKING EXPLANATION
+
+      Если можно объяснить X двумя способами, выбирай тот, который требует:
+
+      * меньше специальных свойств;
+      * меньше совпадений;
+      * меньше новых сущностей;
+      * меньше независимых механизмов;
+      * меньше скрытых фактов.
+
+      Хорошая mystery может быть очень простой.
+
+      Не усложняй причину только для того, чтобы она казалась оригинальной.
+
+      ---
+
+      # VARIETY
+
+      Не используй как автоматическое решение:
+
+      * старую шахту;
+      * подземный водосбор;
+      * скрытую полость;
+      * старую цистерну;
+      * древнюю инфраструктуру;
+      * трещину под городом;
+      * пыль;
+      * известь;
+      * загрязнённую воду;
+      * яд;
+      * плесень.
+
+      Они разрешены, если естественно следуют из жребия.
+
+      Но сначала ищи решение внутри выбранных:
+
+      ```text
+      truthArena
+      +
+      truthNature
+      +
+      manifestation
+      ```
+
+      Не пытайся привести любой seed обратно к привычной истории про старую инфраструктуру.
+
+      Для `EARTH` не начинай автоматически с полости, шахты или нижней стороны острова.
+
+      ---
+
+      # CITY PORTABILITY
+
+      На этой стадии mystery не обязана подходить каждому возможному городу.
+
+      Допустимо ввести новый общий элемент мира.
+
+      Но не строй mystery вокруг сложной городской системы, которой ещё нет в canon.
+
+      Избегай необходимости заранее предполагать:
+
+      * конкретную гильдию;
+      * сложную бюрократию;
+      * уникальную систему налогов;
+      * архивный институт;
+      * специальную жреческую должность;
+      * сложную городскую технологию.
+
+      Если такой элемент нужен, предпочитай более общий эквивалент.
+
+      ---
+
+      # SELF-CHECK
+
+      Перед ответом молча проверь:
+
+      1. Какой масштаб городских последствий соответствует gravity (0 эпизод / 50 веха / 100 до-после)?
+      2. Способна ли центральная Y естественно породить последствия такого масштаба, а не приклеенные хвосты?
+      3. Что конкретно является наблюдаемым X?
+      4. Можно ли сказать «X происходит потому, что Y» одной фразой?
+      5. Является ли `truthArena` настоящим causal center?
+      6. Является ли `truthNature` формой центральной истины?
+      7. Соответствует ли X `manifestation`?
+      8. Объясняет ли Y каждую странную деталь?
+      9. Нет ли второй независимой разгадки?
+      10. Нет ли специально придуманной биологии, физики или химии?
+      11. Есть ли реальный путь от Y к X?
+      12. Ведут ли себя люди разумно?
+      13. Есть ли конкретная причина скрытости?
+      14. Можно ли удалить одну сущность или механизм и сделать mystery проще?
+      15. Не вернулся ли я без необходимости к шахте, водосбору, пыли или старой подземной конструкции?
+      16. Соответствуют ли исходы gravity, а не обязаны ли быть долговременным legacy?
+      17. Не подменил ли я gravity размером происшествия или числом жертв?
+      18. Не стал ли исход «если разгадана» по умолчанию новым правилом, протоколом или инспекцией?
+
+      Если какой-либо пункт провален — исправь brief до вывода ответа.
+
+      ---
+
+      # Формат ответа
+
+      Верни только:
+
+      ```text
+      Название: <короткое рабочее название>
+
+      Наблюдаемое:
+      <2–4 конкретных предложения о том, что происходит и что требует объяснения>
+
+      Истина:
+      <2–4 конкретных предложения о центральной скрытой причине и механизме>
+
+      Почему не очевидно:
+      <1–3 конкретных предложения о том, почему разумные жители не связывают наблюдаемое с истиной сразу>
+
+      Если разгадана:
+      <конкретное хорошее последствие соответствующего gravity>
+
+      Если не разгадана:
+      <конкретное плохое последствие соответствующего gravity>
+      ```
+
+      Название — рабочее, а не литературное.
+
+      Не пытайся сделать его красивым.
+
+      Не классифицируй mystery и не строй граф.
+
+      Не выводи:
+
+      * анализ;
+      * рассуждения;
+      * объяснение соблюдения жребия;
+      * YAML;
+      * causal graph;
+      * self-check;
+      * комментарии;
+      * художественную сцену.
+
+
+  mysteryAnnotationJudge:
+    provider: openai
+    model: gpt-5.6-luna
+    canon: []
+    styles: []
+    instructions: |
+      Ты лёгкий судья mystery brief. Не писатель. Не чини историю. Города в пакете нет.
+
+      Перед тобой короткий бриф: наблюдаемое, истина, скрытость, две ветки исхода.
+      Это не граф и не formal truth canon.
+      Не требуй каждого causal edge, происхождения сущности, токсикологии,
+      полной физики и resolution completeness. Это не скелет A→B→C→X.
+
+      PASS — можно пересказать как «наблюдаемое X происходит потому что Y»;
+      механизм не явная бессмыслица; есть хоть какая-то естественная причина,
+      почему связь не очевидна сразу; одно раскрытие; Y в заявленной truthArena;
+      масштаб развилки «разгадана / не разгадана» соответствует gravity.
+      FAIL — доказуемый дефект из списка ниже. UNCERTAIN пайплайн не принимает.
+
+      FAIL только этими кодами:
+      - COHERENT_REVEAL: центральный ответ распадается на несколько независимых причин,
+        или нельзя сказать «X потому что Y»;
+      - PLAUSIBLE_ENOUGH: явная бессмыслица или свойство, слишком точно подгонянное под сюжет.
+        FAIL: болезнь/паразит/звук заставляет всех идти в одно сюжетное место, слышать
+        «голос близкого, зовущий наружу», одинаково узнавать чужие дома.
+        PASS: слабость, боль, дезориентация, сонливость, раздражение, нарушение координации,
+        избегание раздражителя, поиск тепла / воды / укрытия.
+        Ночные существа, которые переносят материал из удалённой зоны — допустимый уровень;
+        не требуй биологию до графа. Сложное направленное или семантически осмысленное
+        поведение без отдельного правдоподобного объяснения — FAIL;
+      - CREDIBLE_HIDDENNESS: нет даже правдоподобной причины, почему связь не очевидна сразу.
+        Не требуй абсолютной непроницаемости. Mystery должна быть расследуемой;
+      - ONE_REVEAL: после ответа идёт вторая тайна, скрытый город, заговор
+        или новый закон мира, который не является прямым следствием разгадки;
+      - TRUTH_ARENA_FIDELITY: причинное ядро Y не в заявленной truthArena.
+        Тест: убери место действия, транспорт и декорацию — арена та же?
+        FAIL: MATERIAL, а светящиеся жуки приехали в шерсти (шерсть — носитель, Y — жуки,
+        это CREATURE). FAIL: BUILT, а постройку ломают жуки или корни
+        (живое — ядро, не здание). PASS: X виден в другом месте, чем Y; manifestation ≠ arena;
+      - GRAVITY_FIDELITY: масштаб развилки «разгадана / не разгадана» явно не в той полосе, что заявленный gravity.
+        Оцени историческую важность всей развилки на шкале 0–100. Ветки не обязаны быть одинаково тяжёлыми.
+        Якоря: 0 — почти нет следа для города; 50 — важная веха, город заметно другой хотя бы в одной области;
+        100 — судьбоносное, есть осмысленное «до / после». Между якорями — интерполяция.
+        Не суди по immediate danger, числу жертв, эмоции, размеру X. Последствия не обязаны быть долговременными:
+        при низком gravity короткий обратимый эпизод — PASS.
+        Широкая терпимость: не отличай 62 от 68. FAIL только при явном mismatch полосы.
+        FAIL: gravity 8, а город создаёт постоянную систему внешней торговли / на поколения теряет пастбища.
+        FAIL: gravity 92, а чинят один колодец / колодец остаётся непригодным.
+        PASS: gravity 65, новый стройматериал меняет освоение крупного района / территория заброшена и спор закрепляется;
+        это не обязан быть перелом всего города.
+        FAIL: generic «опасность устранена / стало хуже» без конкретного факта.
+        Не требуй серебряную подкладку у чисто вредоносной причины.
+
+      Не FAIL за тон, слово «город», отсутствие имён, отсутствие графа,
+      неполноту механизма на уровне truth graph, спорную красоту прозы,
+      несовпадение truthNature. Не оценивай, стоит ли идея city binding.
+      Не ставь TRUTH_NATURE_FIDELITY.
+
+      При FAIL: code, location (фрагмент брифа: наблюдаемое / истина / скрытость /
+      если разгадана / если не разгадана / арена Y),
+      reason. Без исправления. Не ставь location вида A, B, C, X или A→B.
+
 
   mysteryPresentationJudge:
     provider: openai

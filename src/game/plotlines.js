@@ -268,11 +268,13 @@ export function plotConfig(config) {
       fadeBelow: clamp100(p.temperature?.fadeBelow ?? 18, 18),
     },
     roll: {
-      // Сжатая шкала: слабость чувствуется, но не приговаривает.
+      // Сжатая шкала окраски бита: слабость чувствуется, но не приговаривает.
       minChance: Number(roll.minChance ?? 0.25),
       maxChance: Number(roll.maxChance ?? 0.75),
       primaryWeight: Number(roll.primaryWeight ?? 2),
       dualBand: Number(roll.dualBand ?? 0.2),
+      finishCritShare: Number(roll.finishCritShare ?? 0.25),
+      finishFailCurve: Array.isArray(roll.finishFailCurve) ? roll.finishFailCurve : [],
     },
     stats: {
       playerBudget: Math.max(1, Number(stats.playerBudget ?? 6)),
@@ -293,6 +295,46 @@ export function plotConfig(config) {
     },
     tagGroups: Array.isArray(p.tagGroups) ? p.tagGroups : [],
     mysteryTagGroups: Array.isArray(p.mystery?.tagGroups) ? p.mystery.tagGroups : [],
+    mysteryArchitect: (() => {
+      const a = p.mystery?.architect || {};
+      const gmin = Math.round(Number(a.gravityMin ?? 15));
+      const gmax = Math.round(Number(a.gravityMax ?? 90));
+      return {
+        judgeAttempts: Math.max(1, Math.min(8, Math.round(Number(a.judgeAttempts ?? 3)))),
+        gravityMin: Math.max(0, Math.min(100, Number.isFinite(gmin) ? gmin : 15)),
+        gravityMax: Math.max(0, Math.min(100, Number.isFinite(gmax) ? gmax : 90)),
+        tagGroups: Array.isArray(a.tagGroups) ? a.tagGroups : [],
+        sourceByType:
+          a.sourceByType && typeof a.sourceByType === 'object' && !Array.isArray(a.sourceByType)
+            ? a.sourceByType
+            : {},
+      };
+    })(),
+    mysteryAnnotation: (() => {
+      const a = p.mystery?.annotation || {};
+      const gmin = Math.round(Number(a.gravityMin ?? 0));
+      const gmax = Math.round(Number(a.gravityMax ?? 100));
+      return {
+        gravityMin: Math.max(0, Math.min(100, Number.isFinite(gmin) ? gmin : 0)),
+        gravityMax: Math.max(0, Math.min(100, Number.isFinite(gmax) ? gmax : 100)),
+        secondaryToneChance: Math.max(0, Math.min(1, Number(a.secondaryToneChance ?? 0))),
+        judgeAttempts: Math.max(1, Math.min(2, Math.round(Number(a.judgeAttempts ?? 2)))),
+        recentWindow: Math.max(1, Math.min(8, Math.round(Number(a.recentWindow ?? 5)))),
+        cooldown: {
+          previousMultiplier: Math.max(0.01, Number(a.cooldown?.previousMultiplier ?? 0.2)),
+          frequentWindow: Math.max(1, Math.min(12, Math.round(Number(a.cooldown?.frequentWindow ?? 4)))),
+          frequentMinCount: Math.max(2, Math.round(Number(a.cooldown?.frequentMinCount ?? 2))),
+          frequentMultiplier: Math.max(0.01, Number(a.cooldown?.frequentMultiplier ?? 0.4)),
+          absentWindow: Math.max(1, Math.min(12, Math.round(Number(a.cooldown?.absentWindow ?? 5)))),
+          absentMultiplier: Math.max(1, Number(a.cooldown?.absentMultiplier ?? 1.3)),
+        },
+        incompatible:
+          a.incompatible && typeof a.incompatible === 'object' && !Array.isArray(a.incompatible)
+            ? a.incompatible
+            : {},
+        tagGroups: Array.isArray(a.tagGroups) ? a.tagGroups : [],
+      };
+    })(),
     mysteryGraph: {
       minNodes: Math.max(3, Math.round(Number(p.mystery?.graph?.minNodes ?? 4))),
       maxNodes: Math.max(
@@ -330,10 +372,10 @@ export function plotConfig(config) {
     },
     acts: {
       maxEscalations: Math.max(1, Math.round(Number(p.acts?.maxEscalations ?? 3))),
-      worsenMin: Number(p.acts?.worsenMin ?? 1),
-      worsenMax: Number(p.acts?.worsenMax ?? 1.5),
-      dampMin: Number(p.acts?.dampMin ?? 0.8),
-      dampMax: Number(p.acts?.dampMax ?? 1),
+      worsenMin: Number(p.acts?.worsenMin ?? 1.1),
+      worsenMax: Number(p.acts?.worsenMax ?? 1.1),
+      dampMin: Number(p.acts?.dampMin ?? 0.9),
+      dampMax: Number(p.acts?.dampMax ?? 0.9),
     },
     suspense: {
       gravityFloor: Math.max(5, Math.min(40, Math.round(Number(p.suspense?.gravityFloor ?? 20)))),
@@ -841,10 +883,23 @@ function pickWeightedTag(tags, rng) {
   return tags[tags.length - 1];
 }
 
-/**
- * Жребий завязки: по одному тегу из каждой группы, все обязательны.
- * Группы саспенса: тон, источник (причинная сила), ситуация, динамика.
- */
+/** Веса source по типу тайны: 0 исключает тег, иначе подменяет weight. */
+export function weightedArchitectSourceGroup(group, typeId, sourceByType = {}) {
+  if (!group?.tags?.length) return group;
+  const weights = sourceByType?.[typeId];
+  if (!weights || typeof weights !== 'object') return group;
+  const tags = (group.tags || [])
+    .map((t) => {
+      const raw = weights[t.id] ?? weights[t.name];
+      if (raw == null) return t;
+      const w = Number(raw);
+      if (!Number.isFinite(w) || w <= 0) return null;
+      return { ...t, weight: w };
+    })
+    .filter(Boolean);
+  return tags.length ? { ...group, tags } : group;
+}
+
 function tagFromGroup(group, rng) {
   if (!group?.tags?.length) return null;
   const tag = pickWeightedTag(group.tags, rng);
@@ -863,6 +918,7 @@ function tagFromGroup(group, rng) {
   };
 }
 
+/** Жребий завязки: по одному тегу из каждой группы. */
 export function pickPlotTags(cfg, rng = Math.random) {
   const groups = cfg?.tagGroups || [];
   return groups.map((g) => tagFromGroup(g, rng)).filter(Boolean);
@@ -883,6 +939,451 @@ export function mysteryTypeTag(tags = []) {
 
 export function mysteryAssociationTag(tags = []) {
   return (tags || []).find((t) => t.groupId === 'association') || null;
+}
+
+function pickTwoTones(group, rng) {
+  const first = tagFromGroup(group, rng);
+  if (!first) return [];
+  const rest = (group.tags || []).filter((t) => t.id !== first.tagId);
+  const secondSrc = rest.length ? { ...group, tags: rest } : group;
+  const second = tagFromGroup(secondSrc, rng);
+  return [
+    { ...first, groupId: 'tonePrimary', groupName: 'Тон (основной)' },
+    second ? { ...second, groupId: 'toneSecondary', groupName: 'Тон (второй)' } : null,
+  ].filter(Boolean);
+}
+
+export function gravityBand(gravity) {
+  const n = Number(gravity);
+  if (!Number.isFinite(n)) return 'локальные';
+  if (n <= 25) return 'локальные';
+  if (n <= 50) return 'заметные городские';
+  if (n <= 75) return 'крупные системные';
+  return 'судьбоносные';
+}
+
+/** Исторический вес mystery-брифа. Три якоря: 0 / 50 / 100, между ними интерполяция. */
+export function annotationGravityBand(gravity) {
+  const n = Number(gravity);
+  if (!Number.isFinite(n)) return 'эпизод';
+  if (n <= 20) return 'эпизод';
+  if (n < 45) return 'между эпизодом и вехой';
+  if (n <= 55) return 'городская веха';
+  if (n < 90) return 'между вехой и судьбоносным';
+  return 'судьбоносное';
+}
+
+/**
+ * Жребий Phase 1: тип+ассоциация тайны, все оси architect, gravity числом.
+ */
+export function pickMysteryArchitectSeed(cfg, rng = Math.random) {
+  const tags = [...pickMysteryPlotTags(cfg, rng)];
+  const typeId = mysteryTypeTag(tags)?.tagId;
+  const groups = cfg?.mysteryArchitect?.tagGroups || [];
+  const toneGroup = groups.find((g) => g.id === 'tone');
+  const sourceGroup = groups.find((g) => g.id === 'source');
+  if (sourceGroup) {
+    const weighted = weightedArchitectSourceGroup(
+      sourceGroup,
+      typeId,
+      cfg?.mysteryArchitect?.sourceByType,
+    );
+    const tag = tagFromGroup(weighted, rng);
+    if (tag) tags.push(tag);
+  }
+  for (const group of groups) {
+    if (group.id === 'tone' || group.id === 'source') continue;
+    const tag = tagFromGroup(group, rng);
+    if (tag) tags.push(tag);
+  }
+  if (toneGroup) tags.push(...pickTwoTones(toneGroup, rng));
+  const gmin = Number(cfg?.mysteryArchitect?.gravityMin ?? 15);
+  const gmax = Number(cfg?.mysteryArchitect?.gravityMax ?? 90);
+  const lo = Math.min(gmin, gmax);
+  const hi = Math.max(gmin, gmax);
+  const gravity = Math.max(0, Math.min(100, Math.round(lo + rng() * (hi - lo))));
+  return { tags, gravity };
+}
+
+const ANNOTATION_AXIS_ORDER = [
+  'truthArena',
+  'truthNature',
+  'worldRelation',
+  'manifestation',
+];
+
+const ANNOTATION_HARD_AXES = new Set([
+  'truthArena',
+  'truthNature',
+  'worldRelation',
+  'manifestation',
+]);
+
+const ANNOTATION_SKIP_GROUPS = new Set(['mysteryQuestion', 'truthDomain', 'epistemicMask', 'situation']);
+const ANNOTATION_FILTER_SKIP = new Set(['tone', 'tonePrimary', 'toneSecondary', 'association']);
+
+function annotationAxisId(groupId) {
+  if (groupId === 'tonePrimary' || groupId === 'toneSecondary') return 'tone';
+  return groupId;
+}
+
+function annotationBanList(incompatible, axis, tagId, otherAxis) {
+  const raw = incompatible?.[axis]?.[tagId]?.[otherAxis];
+  return Array.isArray(raw) ? raw.map(String) : [];
+}
+
+export function annotationPairCompatible(incompatible, axisA, tagA, axisB, tagB) {
+  if (!axisA || !axisB || !tagA || !tagB || axisA === axisB) return true;
+  if (annotationBanList(incompatible, axisA, tagA, axisB).includes(String(tagB))) return false;
+  if (annotationBanList(incompatible, axisB, tagB, axisA).includes(String(tagA))) return false;
+  return true;
+}
+
+export function annotationTagCompatibleWithChosen(incompatible, chosen, groupId, tagId) {
+  for (const c of chosen || []) {
+    const axis = annotationAxisId(c.groupId);
+    if (!axis || ANNOTATION_FILTER_SKIP.has(c.groupId) || ANNOTATION_SKIP_GROUPS.has(axis)) continue;
+    if (!annotationPairCompatible(incompatible, axis, c.tagId, groupId, tagId)) return false;
+  }
+  return true;
+}
+
+export function annotationSeedCompatible(tags, incompatible) {
+  const list = (tags || []).filter(
+    (t) => t?.tagId && !ANNOTATION_FILTER_SKIP.has(t.groupId) && !ANNOTATION_SKIP_GROUPS.has(t.groupId),
+  );
+  for (let i = 0; i < list.length; i += 1) {
+    for (let j = i + 1; j < list.length; j += 1) {
+      const a = list[i];
+      const b = list[j];
+      if (
+        !annotationPairCompatible(
+          incompatible,
+          annotationAxisId(a.groupId),
+          a.tagId,
+          annotationAxisId(b.groupId),
+          b.tagId,
+        )
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+export function annotationRecentArenaId(entry) {
+  if (!entry) return null;
+  if (entry.truthArena) return String(entry.truthArena);
+  const t = (entry.seed?.tags || entry.tags || []).find((x) => x.groupId === 'truthArena');
+  return t?.tagId || null;
+}
+
+export function annotationArenaWeights(cfg, recent = []) {
+  const ann = cfg?.mysteryAnnotation || cfg || {};
+  const group = (ann.tagGroups || []).find((g) => g.id === 'truthArena');
+  const cooldown = ann.cooldown || {};
+  const ids = (recent || []).map(annotationRecentArenaId).filter(Boolean);
+  const prev = ids[ids.length - 1];
+  const freqWin = ids.slice(-(cooldown.frequentWindow || 4));
+  const absWin = ids.slice(-(cooldown.absentWindow || 5));
+  const frequentMin = cooldown.frequentMinCount || 2;
+  const out = {};
+  for (const t of group?.tags || []) {
+    let w = Number(t.weight);
+    if (!Number.isFinite(w) || w <= 0) w = 1;
+    if (ids.length) {
+      if (t.id === prev) w *= cooldown.previousMultiplier ?? 0.2;
+      else if (freqWin.filter((id) => id === t.id).length >= frequentMin) {
+        w *= cooldown.frequentMultiplier ?? 0.4;
+      }
+      if (!absWin.includes(t.id)) w *= cooldown.absentMultiplier ?? 1.3;
+    }
+    out[t.id] = w;
+  }
+  return out;
+}
+
+function applyArenaCooldown(group, cfg, recent) {
+  if (!group?.tags?.length) return group;
+  const map = annotationArenaWeights(cfg, recent);
+  return {
+    ...group,
+    tags: group.tags.map((t) => ({ ...t, weight: map[t.id] ?? t.weight })),
+  };
+}
+
+function tagFromCompatibleGroup(group, rng, chosen, incompatible) {
+  if (!group?.tags?.length) return null;
+  const ok = group.tags.filter((t) =>
+    annotationTagCompatibleWithChosen(incompatible, chosen, group.id, t.id),
+  );
+  if (!ok.length) return null;
+  return tagFromGroup({ ...group, tags: ok }, rng);
+}
+
+/**
+ * Жребий V5.1: causal arena + gravity-scaled outcomes.
+ * situation, scale, association и второй тон не бросаем.
+ * OLD_EVENT / EXTERNAL_INTRUSION нет в посеве (это LEGACY / CONTACT).
+ * omitTruthNature — ветка B эксперимента V5.2: форму причины модель выбирает сама.
+ * recent/cooldown — доска города, не лабораторный семпл.
+ */
+export function pickMysteryAnnotationSeed(
+  cfg,
+  rng = Math.random,
+  { recent = [], omitTruthNature = false } = {},
+) {
+  const ann = cfg?.mysteryAnnotation || {};
+  const groups = ann.tagGroups || [];
+  const byId = (id) => groups.find((g) => g.id === id);
+  const incompatible = ann.incompatible || {};
+  const tags = [];
+
+  const arenaGroup = byId('truthArena');
+  if (arenaGroup) {
+    const weighted = applyArenaCooldown(arenaGroup, ann, recent);
+    const arena = tagFromGroup(weighted, rng);
+    if (arena) tags.push(arena);
+  }
+
+  for (const id of ANNOTATION_AXIS_ORDER) {
+    if (id === 'truthArena') continue;
+    if (omitTruthNature && id === 'truthNature') continue;
+    const tag = tagFromCompatibleGroup(byId(id), rng, tags, incompatible);
+    if (tag) tags.push(tag);
+  }
+
+  const toneGroup = byId('tone');
+  if (toneGroup) {
+    const first = tagFromGroup(toneGroup, rng);
+    if (first) {
+      tags.push({ ...first, groupId: 'tonePrimary', groupName: 'Тон' });
+      const chance = Number(ann.secondaryToneChance ?? 0);
+      if (chance > 0 && rng() < chance) {
+        const rest = (toneGroup.tags || []).filter((t) => t.id !== first.tagId);
+        const second = tagFromGroup(rest.length ? { ...toneGroup, tags: rest } : toneGroup, rng);
+        if (second) {
+          tags.push({ ...second, groupId: 'toneSecondary', groupName: 'Тон (второй)' });
+        }
+      }
+    }
+  }
+
+  const gmin = Number(ann.gravityMin ?? 0);
+  const gmax = Number(ann.gravityMax ?? 100);
+  const lo = Math.min(gmin, gmax);
+  const hi = Math.max(gmin, gmax);
+  const gravity = Math.max(0, Math.min(100, Math.round(lo + rng() * (hi - lo))));
+  return { tags, gravity, omitTruthNature: Boolean(omitTruthNature) };
+}
+
+const HUMAN_WRONGDOING_TYPES = new Set([
+  'crime',
+  'conspiracy',
+  'betrayal',
+  'sabotage',
+  'kidnapping',
+  'blackmail',
+  'impostor',
+]);
+
+export function formatMysteryArchitectAxesForPrompt(seed = {}) {
+  const tags = seed.tags || [];
+  const type = mysteryTypeTag(tags);
+  const assoc = mysteryAssociationTag(tags);
+  const lines = [];
+  if (type) {
+    const about = type.about ? ` — ${type.about}` : '';
+    lines.push(`ТИП ТАЙНЫ (обязателен): ${type.tagName}${about}`);
+    lines.push('Это форма произошедшего. Следуй type.about, не растягивай тип метафорой.');
+  }
+  lines.push(
+    'ПРИОРИТЕТ ТЕГОВ: тип > источник > ситуация > gravity/scale > canonRelation > dynamic > тон > association.',
+  );
+  lines.push('Нижний тег ослабь, если он ломает тип или причинность. Тон и association — мягкие.');
+  if (type?.tagId === 'poisoning') {
+    lines.push(
+      'POISONING: вред носителя простой и правдоподобный. Оригинальность — provenance, путь, кто задет, зачем скрыли; не токсикология.',
+    );
+  }
+  if (type?.tagId && HUMAN_WRONGDOING_TYPES.has(type.tagId)) {
+    lines.push(
+      'Тип требует сознательного запрещённого или скрытого человеческого действия. Не подменяй его чистой природной аномалией.',
+    );
+  }
+  if (type?.tagId === 'impostor') {
+    lines.push(
+      'САМОЗВАНЕЦ: X и mysteryQuestion про ложную роль. Нельзя: самозванец только открыл доступ, а наблюдаемое — вред носителя. Вред из неумения делать чужую работу, не из «продлю ритуал чтобы удержаться».',
+    );
+  }
+  lines.push(
+    'БАЗОВЫЙ НАБОР ОСТРОВА: край и ветер, очаг/лампа, общий расходник, власть, жители, отбой непогоды, старый предмет или путь. Не строй сюжет вокруг редкой службы или обряда, без которых Phase 2 не наденет скелет.',
+  );
+  lines.push(
+    'Жители пользуются дешёвым бытовым опытом. Не делай X из того, что они забыли открыть, понюхать или отойти от края. Ошибочная народная причина — только если простая проверка смешана с внешней угрозой или табуирована.',
+  );
+  if (Number.isFinite(Number(seed.gravity))) {
+    lines.push(`GRAVITY: ${seed.gravity} (${gravityBand(seed.gravity)} последствия). Не сложность mystery.`);
+  }
+  for (const t of tags) {
+    if (t.groupId === 'type' || t.groupId === 'association') continue;
+    const about = t.about ? ` — ${t.about}` : '';
+    lines.push(`${(t.groupName || t.groupId || '').toUpperCase()}: ${t.tagName}${about}`);
+  }
+  if (assoc) {
+    lines.push(`ASSOCIATION (слабое вдохновение): «${assoc.tagName}».`);
+    lines.push('Максимум 1–2 элемента как образ или ритм. Не ломай причинность ради буквального воплощения.');
+  }
+  const rel = tags.find((t) => t.groupId === 'canonRelation');
+  if (rel?.tagId === 'native') {
+    lines.push(
+      'CANON_RELATION NATIVE: воплощай через базовый набор острова, не через новую гражданскую службу или уникальный обряд тревоги.',
+    );
+  } else if (rel?.tagId === 'contact') {
+    lines.push('CANON_RELATION CONTACT: в основе новое явление, вошедшее в жизнь извне status quo города.');
+  } else if (rel?.tagId === 'legacy') {
+    lines.push('CANON_RELATION LEGACY: скрытая причина связана с прошлым, старым объектом или давним событием.');
+  }
+  lines.push('Теги должны сформировать историю, не приклеиваться декоративно.');
+  return lines.filter(Boolean).join('\n');
+}
+
+const ANNOTATION_PROMPT_ORDER = [
+  'truthArena',
+  'truthNature',
+  'worldRelation',
+  'manifestation',
+  'tonePrimary',
+];
+
+const ANNOTATION_RECENT_CLIP = 500;
+
+function clipAnnotationRecent(s, max = ANNOTATION_RECENT_CLIP) {
+  const t = String(s || '').trim().replace(/\s+/g, ' ');
+  if (t.length <= max) return t;
+  return `${t.slice(0, max).replace(/[\s,;:—-]+$/, '')}…`;
+}
+
+export function annotationOmitsTruthNature(seed = {}) {
+  if (seed?.omitTruthNature) return true;
+  const tags = seed?.tags || [];
+  if (!tags.length) return false;
+  return !tags.some((t) => t.groupId === 'truthNature');
+}
+
+export const ANNOTATION_NATURE_OFF_SYSTEM = [
+  'В этом посеве оси truthNature нет.',
+  'Игнорируй раздел «# 2. truthNature» целиком и пункт self-check про truthNature.',
+  'В примере жребия в инструкциях поле truthNature не действует — его нет в текущем seed.',
+  'Не выбирай, не называй и не обслуживай тег формы причины.',
+  'Сам выбери конкретную причинную форму внутри выбранной truthArena.',
+  'Не классифицируй brief тегами HUMAN_ACTION, NATURAL_PROCESS, MISIDENTIFICATION и т.п.',
+].join('\n');
+
+export function formatMysteryAnnotationRecentForPrompt(recent = [], window = 5) {
+  const items = (recent || [])
+    .filter((r) => String(r?.annotation || r?.text || '').trim())
+    .slice(-Math.max(1, window));
+  if (!items.length) return '';
+  const lines = [
+    'НЕДАВНИЕ MYSTERY (не копируй субстрат, место Y и тип следа, если текущий seed прямо этого не требует):',
+  ];
+  items.forEach((r, i) => {
+    const title = String(r.title || r.workingTitle || 'без названия').trim();
+    const text = clipAnnotationRecent(r.annotation || r.text);
+    lines.push(`${i + 1}. «${title}»`);
+    lines.push(text);
+  });
+  lines.push(
+    'Новая mystery должна существенно отличаться не только названием. Не повторяй тот же тип инфраструктуры, тот же материал, то же hidden location, ту же causal premise и тот же природный процесс.',
+  );
+  return lines.join('\n');
+}
+
+export function formatMysteryAnnotationAxesForPrompt(seed = {}, { recent = [], recentWindow = 5 } = {}) {
+  const tags = seed.tags || [];
+  const lines = [];
+  const history = formatMysteryAnnotationRecentForPrompt(recent, recentWindow);
+  if (history) lines.push(history, '');
+  if (Number.isFinite(Number(seed.gravity))) {
+    lines.push(
+      `GRAVITY: ${seed.gravity} (${annotationGravityBand(seed.gravity)}). Читай первым. Исторический вес развилки для города, не число жертв и не размер X. Якоря: 0 эпизод; 50 веха; 100 «до/после». Между ними интерполяция, без отдельных категорий 30 и 75.`,
+    );
+    lines.push(
+      'Порядок: gravity → масштаб последствий → Y, способная их породить → затем X. Не приклеивай раздутые исходы к маленькой тайне. Последствия не обязаны быть долговременными.',
+    );
+  }
+  lines.push(
+    annotationOmitsTruthNature(seed)
+      ? 'ЖЁСТКИЕ ОСИ: truthArena, worldRelation, manifestation. Arena — causal substrate Y, не место X, не транспорт, не время и не происхождение. X может быть в другом месте. truthNature не задана: форму причины выбери сам внутри арены.'
+      : 'ЖЁСТКИЕ ОСИ: truthArena, truthNature, worldRelation, manifestation. Arena — causal substrate Y, не место X, не транспорт, не время и не происхождение. X может быть в другом месте.',
+  );
+  lines.push(
+    'МЯГКИЕ: тон. Не ломай историю ради него.',
+  );
+  lines.push(
+    'ONE CENTRAL REVEAL: одна скрытая причина. Не дописывай вторую тайну, скрытый город, заговор или новый закон мира, если это не прямое следствие самой разгадки.',
+  );
+  lines.push(
+    'Разгадка должна быть неочевидной разумным людям по конкретной естественной причине. Укажи эту причину в брифе. Не обслуживай тег маски.',
+  );
+  lines.push(
+    'Mystery не должна работать только потому, что наблюдатели игнорируют очевидное. Дешёвый бытовой опыт (открыть, понюхать, отойти от края) они уже умеют, если проверка не табуирована и не смешана с внешней угрозой.',
+  );
+  lines.push(
+    'Исходы обязательны: конкретное хорошее последствие «если разгадана» и плохое «если не разгадана», масштаб по gravity. Обе ветки из Y, не generic morale, не обязаны быть одинаково тяжёлыми и не обязаны быть legacy.',
+    'Не делай «если разгадана» по умолчанию новым правилом, протоколом, инспекцией или учреждением. Сначала смотри: территория, ресурс, земля, расселение, торговля, обычай, техника, экология, статус, путь, понимание острова, конфликт или примирение. Правило — только если оно естественно следует из этой истины.',
+  );
+  const used = new Set();
+  for (const id of ANNOTATION_PROMPT_ORDER) {
+    const t = tags.find((x) => x.groupId === id);
+    if (!t) continue;
+    used.add(id);
+    const about = t.about ? ` — ${t.about}` : '';
+    const hard = ANNOTATION_HARD_AXES.has(id) ? ' (жёсткая)' : '';
+    lines.push(`${(t.groupName || t.groupId || '').toUpperCase()}${hard}: ${t.tagName}${about}`);
+  }
+  for (const t of tags) {
+    if (used.has(t.groupId) || ANNOTATION_SKIP_GROUPS.has(t.groupId)) continue;
+    if (t.groupId === 'association' || t.groupId === 'scale' || t.groupId === 'toneSecondary' || t.groupId === 'situation') continue;
+    const about = t.about ? ` — ${t.about}` : '';
+    lines.push(`${(t.groupName || t.groupId || '').toUpperCase()}: ${t.tagName}${about}`);
+  }
+  const arena = tags.find((t) => t.groupId === 'truthArena');
+  if (arena?.tagId === 'human') {
+    lines.push('TRUTH_ARENA HUMAN: Y в человеческом поведении, не в веществе и не в конструкции как таковой.');
+  } else if (arena?.tagId === 'creature') {
+    lines.push(
+      'TRUTH_ARENA CREATURE: Y — конкретное существо. Жуки в шерсти: шерсть транспорт, арена CREATURE. Популяция, гриб, экосдвиг — ECOLOGY.',
+    );
+  } else if (arena?.tagId === 'ecology') {
+    lines.push('TRUTH_ARENA ECOLOGY: Y — процесс видов или среды, не одно животное и не вещество само по себе.');
+  } else if (arena?.tagId === 'material') {
+    lines.push(
+      'TRUTH_ARENA MATERIAL: Y в веществе или свойствах материала. Живое в тюке — не эта арена. Цистерна как конструкция — BUILT.',
+    );
+  } else if (arena?.tagId === 'built') {
+    lines.push(
+      'TRUTH_ARENA BUILT: Y в устройстве человеческой системы, включая колодец, цистерну, сток. Если живое ломает постройку — CREATURE или ECOLOGY. Если действует содержимое — MATERIAL.',
+    );
+  } else if (arena?.tagId === 'earth') {
+    lines.push(
+      'TRUTH_ARENA EARTH: Y в ландшафте или геологии острова. Колодец и сток — BUILT. Не начинай с полости или нижней стороны по умолчанию.',
+    );
+  } else if (arena?.tagId === 'sky') {
+    lines.push('TRUTH_ARENA SKY: Y в атмосфере, погоде или небе. Птица или существо в полёте — CREATURE.');
+  }
+  const rel = tags.find((t) => t.groupId === 'worldRelation');
+  if (rel?.tagId === 'native') {
+    lines.push('WORLD_RELATION NATIVE: причина выросла из уже существующей обычной жизни острова.');
+  } else if (rel?.tagId === 'contact') {
+    lines.push('WORLD_RELATION CONTACT: в привычную жизнь вошло новое явление, которого здесь раньше не было.');
+  } else if (rel?.tagId === 'legacy') {
+    lines.push('WORLD_RELATION LEGACY: нынешний X — следствие прошлого, старого объекта или забытой структуры.');
+  }
+  lines.push('Не классифицируй mystery и не строй граф. Просто придумай хорошую тайну.');
+  return lines.filter(Boolean).join('\n');
 }
 
 /** Тип обязателен; ассоциация должна читаться в графе, не как табличка. */
