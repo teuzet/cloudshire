@@ -17,6 +17,7 @@ import { stripPlotSecrets } from '../../game/plotlines.js';
 import { FINISH_SHORT } from '../../game/rolls.js';
 import { resolveIslandImage } from '../../game/islandImage.js';
 import { resolveOfficerPortrait } from '../../game/officerImage.js';
+import { domainHasIslandImage, officerHasPortrait } from '../../storage/r2.js';
 import { knownPartnerLore } from '../../game/confluxBoard.js';
 import { genesisTutorialText } from '../../game/progressBar.js';
 import { orderMonthsLeft } from '../../game/orders.js';
@@ -347,7 +348,8 @@ export function createWebServer({ config, app, runtime, storage }) {
       const world = await storage.getWorld();
       const domain = await storage.getDomainForUser(who.userId, world.id);
       const officer = (domain?.officers || []).find((o) => o.id === req.params.officerId);
-      if (!officer) return res.status(404).end();
+      if (!officer || !officerHasPortrait(officer)) return res.status(404).end();
+      if (officer.portraitUrl) return res.redirect(officer.portraitUrl);
       const picture = await resolveOfficerPortrait({ domain, officer, config });
       if (!picture?.abs) return res.status(404).end();
       res.type('png').sendFile(picture.abs);
@@ -364,7 +366,8 @@ export function createWebServer({ config, app, runtime, storage }) {
       if (!who.ok) return res.status(who.status).end();
       const world = await storage.getWorld();
       const domain = await storage.getDomainForUser(who.userId, world.id);
-      if (!domain?.imagePath && !domain?.imageBase64) return res.status(404).end();
+      if (!domainHasIslandImage(domain)) return res.status(404).end();
+      if (domain.imageUrl) return res.redirect(domain.imageUrl);
       const picture = await resolveIslandImage({ domain, config });
       if (!picture?.abs) return res.status(404).end();
       res.type('png').sendFile(picture.abs);
@@ -419,9 +422,10 @@ export function createWebServer({ config, app, runtime, storage }) {
                   ? { name: character.name, title: character.title }
                   : null,
                 stats: statsWithEpithets(domain.stats, config),
-                imageUrl: domain.imagePath || domain.imageBase64
-                  ? `/api/play/island-image?userId=${encodeURIComponent(userId)}`
-                  : null,
+                imageUrl: domain.imageUrl
+                  || (domain.imagePath || domain.imageBase64
+                    ? `/api/play/island-image?userId=${encodeURIComponent(userId)}`
+                    : null),
               }
             : null,
           history,
@@ -438,7 +442,8 @@ export function createWebServer({ config, app, runtime, storage }) {
         const userId = String(req.query.userId || 'local-user');
         const world = await storage.getWorld();
         const domain = await storage.getDomainForUser(userId, world.id);
-        if (!domain?.imagePath && !domain?.imageBase64) return res.status(404).end();
+        if (!domainHasIslandImage(domain)) return res.status(404).end();
+        if (domain.imageUrl) return res.redirect(domain.imageUrl);
         const picture = await resolveIslandImage({ domain, config });
         if (!picture?.abs) return res.status(404).end();
         res.type('png').sendFile(picture.abs);

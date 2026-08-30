@@ -2,8 +2,6 @@ import { emptyPlayerDirectives, normalizePlayerDirectives, hasUnresolvedConflict
 import {
   emptyAxesState,
   normalizeAxesState,
-  normalizeQuestionnaire,
-  emptyQuestionnaire,
   emptyAxisInterview,
   normalizeAxisInterview,
   missingAxisIds,
@@ -103,7 +101,6 @@ export function emptyOnboardingDraft() {
     axes: emptyAxesState(),
     playerDirectives: emptyPlayerDirectives(),
     concept: null,
-    questionnaire: emptyQuestionnaire(),
     axisInterview: emptyAxisInterview(),
   };
 }
@@ -121,7 +118,7 @@ export function normalizeOnboardingDraft(draft) {
   if (!Array.isArray(d.messages)) d.messages = [];
   d.axes = normalizeAxesState(d.axes);
   d.playerDirectives = normalizePlayerDirectives(d.playerDirectives);
-  d.questionnaire = normalizeQuestionnaire(d.questionnaire);
+  if ('questionnaire' in d) delete d.questionnaire;
   d.axisInterview = normalizeAxisInterview(d.axisInterview);
   if (d.mode === 'dossier') d.mode = 'brief';
   if (d.concept && typeof d.concept !== 'object') d.concept = null;

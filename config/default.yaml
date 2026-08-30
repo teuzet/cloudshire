@@ -46,15 +46,10 @@ tick:
   # Границы по часам сервера: 00:00 дня старта/wipe = год 1 месяц 1, 02:00 = год 1 месяц 2.
   intervalHours: 2
   enabled: true
-  chronicleEvents:
-    min: 2
-    max: 4
-  # Запись хроники — сухой факт в 1–2 фразы. Ориентир для промпта резолверов.
+  # Запись хроники — сухой факт в 1–2 фразы.
   chronicleEntryMaxChars: 260
-  # После процессов — ориентир побочных событий месяца (не раздувать хронику).
-  sideEventsMax: 2
   officerStatPerMonth: 1
-  # Слот дела = свободный столп; это поле больше не лимит игрока.
+  # Fallback, если у домена нет столпов. Иначе слот дела = свободный столп.
   maxActiveProcesses: 4
   # Conflux: матчмейкинг и геометрия сопряжения — только код (не LLM).
   # Approaching считается соло для доли времени; docked — конфлюкс.
@@ -63,7 +58,6 @@ tick:
     targetDockedFraction: 0.5
     minDomainAgeMonths: 6
     preferNeverMet: true
-    rematchChronicle: true
     maxNewPairsPerTick: 2
     etaMonths:
       min: 6
@@ -82,7 +76,7 @@ tick:
       wagon_pass: 10
       causeway: 60
       landmass: 20
-  # Сюжетные нити — ядро мира (docs/PIVOT_PLOTLINES.md).
+  # Сюжетные нити — ядро мира (docs/PLOTS.md).
   # События вне нитей не бывает: дело, указ, находка — всё это биты.
   plot:
     enabled: true
@@ -253,106 +247,6 @@ tick:
         pickMax: 2
         twoChance: 0.12
         inventChance: 0.15
-      # Phase 1: абстрактный skeleton без города. Оси можно потом отключать по одной.
-      architect:
-        judgeAttempts: 3
-        gravityMin: 15
-        gravityMax: 90
-        # Веса source после броска типа. 0 исключает ось. Нет ключа — равный вес.
-        sourceByType:
-          crime: { social: 8, political: 5, economic: 5, religious: 3, technological: 3, unknown: 3, external: 3, archaeological: 2, environment: 1, creature: 1 }
-          conspiracy: { social: 8, political: 8, economic: 4, religious: 4, external: 4, unknown: 3, technological: 3, archaeological: 2, environment: 1, creature: 1 }
-          betrayal: { social: 8, political: 5, economic: 4, religious: 3, unknown: 3, external: 2, technological: 2, archaeological: 2, environment: 1, creature: 1 }
-          sabotage: { social: 8, political: 4, economic: 5, technological: 5, religious: 2, unknown: 3, external: 3, archaeological: 2, environment: 1, creature: 1 }
-          kidnapping: { social: 8, political: 5, economic: 4, unknown: 4, external: 3, religious: 2, technological: 2, archaeological: 1, environment: 1, creature: 1 }
-          blackmail: { social: 8, political: 6, economic: 6, unknown: 3, religious: 3, external: 2, technological: 2, archaeological: 1, environment: 1, creature: 1 }
-          impostor: { social: 8, political: 6, religious: 3, economic: 3, unknown: 3, external: 2, technological: 2, archaeological: 2, environment: 1, creature: 1 }
-          poisoning: { social: 8, environment: 5, creature: 5, technological: 5, unknown: 4, archaeological: 4, economic: 3, external: 3, religious: 2, political: 2 }
-          loss: { social: 8, economic: 7, environment: 4, creature: 4, external: 4, unknown: 4, technological: 3, archaeological: 3, political: 3, religious: 2 }
-          disappearance: { social: 7, unknown: 6, creature: 5, political: 4, environment: 4, external: 4, religious: 3, archaeological: 3, economic: 3, technological: 2 }
-          cult: { religious: 8, social: 6, political: 5, unknown: 4, archaeological: 3, external: 3, economic: 2, technological: 2, environment: 1, creature: 1 }
-          forbidden: { religious: 6, political: 6, archaeological: 6, unknown: 5, social: 4, external: 3, technological: 3, economic: 2, environment: 1, creature: 1 }
-          artifact: { archaeological: 8, technological: 6, unknown: 5, religious: 4, social: 3, external: 3, environment: 3, economic: 2, political: 2, creature: 2 }
-          locus: { archaeological: 7, unknown: 6, environment: 5, religious: 4, external: 3, technological: 3, social: 3, creature: 3, political: 2, economic: 2 }
-          false_miracle: { religious: 8, social: 6, technological: 5, unknown: 5, political: 3, external: 3, archaeological: 3, economic: 2, environment: 2, creature: 1 }
-        tagGroups:
-          - id: scale
-            name: Масштаб
-            tags:
-              - { id: local, name: LOCAL, about: "человек, дом, мастерская, небольшое место", weight: 4 }
-              - { id: civic, name: CIVIC, about: "значимая часть города, институт, отрасль", weight: 3 }
-              - { id: islandwide, name: ISLANDWIDE, about: "весь остров или большая система", weight: 2 }
-              - { id: mythic, name: MYTHIC, about: "фундаментальная аномалия, древняя сила, экзистенциальное явление", weight: 1 }
-          - id: source
-            name: Источник
-            tags:
-              - { id: social, name: SOCIAL, about: действия людей или групп }
-              - { id: political, name: POLITICAL, about: власть, статус, контроль, борьба влияний }
-              - { id: economic, name: ECONOMIC, about: выгода, ресурс, снабжение, долги }
-              - { id: environment, name: ENVIRONMENT, about: погода, геология, климат, природный процесс }
-              - { id: creature, name: CREATURE, about: животное, неизвестный вид, миграция }
-              - { id: religious, name: RELIGIOUS, about: культ, вера, ритуал, сакральный объект }
-              - { id: technological, name: TECHNOLOGICAL, about: механизм, ремесленный процесс, эксперимент }
-              - { id: archaeological, name: ARCHAEOLOGICAL, about: древний объект, старая конструкция, забытое место }
-              - { id: unknown, name: UNKNOWN, about: источник на старте трудно классифицировать }
-              - { id: external, name: EXTERNAL, about: причина пришла извне города или острова }
-          - id: entry
-            name: Вход
-            tags:
-              - { id: people, name: PEOPLE, about: странное поведение, исчезновение, свидетельства }
-              - { id: city, name: CITY, about: проявление внутри повседневной городской среды }
-              - { id: outskirts, name: OUTSKIRTS, about: поля, дороги, внешние постройки }
-              - { id: depths, name: DEPTHS, about: пещеры, шахты, глубокие полости }
-              - { id: edge, name: EDGE, about: край острова, обрыв, нестабильная кромка }
-              - { id: sky, name: SKY, about: погода, свет, осадки, летающие существа }
-              - { id: wilds, name: WILDS, about: лес, дикая территория }
-              - { id: past, name: PAST, about: старый предмет, руины, запись, наследие }
-              - { id: body, name: BODY, about: болезнь, симптом, изменение организма }
-              - { id: material, name: MATERIAL, about: необычное вещество, предмет, образец }
-          - id: tone
-            name: Тон
-            tags:
-              - { id: social, name: social }
-              - { id: political, name: political }
-              - { id: investigative, name: investigative }
-              - { id: exploration, name: exploration }
-              - { id: adventure, name: adventure }
-              - { id: mystical, name: mystical }
-              - { id: uncanny, name: uncanny }
-              - { id: horror, name: horror }
-              - { id: religious, name: religious }
-              - { id: wonder, name: wonder }
-              - { id: disaster, name: disaster }
-              - { id: tragic, name: tragic }
-              - { id: conspiracy, name: conspiracy }
-          - id: situation
-            name: Ситуация
-            tags:
-              - { id: harm, name: HARM, about: уже произошёл ущерб, причина неизвестна }
-              - { id: anomaly, name: ANOMALY, about: наблюдается необычный повторяющийся эффект }
-              - { id: discovery, name: DISCOVERY, about: найден объект, место, след или структура }
-              - { id: disappearance, name: DISAPPEARANCE, about: исчез человек, предмет, ресурс или ожидаемый результат }
-              - { id: contradiction, name: CONTRADICTION, about: несколько наблюдений не складываются }
-              - { id: threat, name: THREAT, about: признаки продолжающейся скрытой причины }
-              - { id: opportunity, name: OPPORTUNITY, about: найдено нечто ценное с неизвестной природой }
-          - id: dynamic
-            name: Динамика
-            tags:
-              - { id: static, name: STATIC, about: следы есть, но причина сама почти не нарастает }
-              - { id: accumulation, name: ACCUMULATION, about: скрытая причина копит эффект }
-              - { id: spread, name: SPREAD, about: затрагивает всё больше мест или людей }
-              - { id: repetition, name: REPETITION, about: одно и то же проявляется снова }
-              - { id: depletion, name: DEPLETION, about: что-то необходимое убывает }
-              - { id: escalation, name: ESCALATION, about: каждый новый след тяжелее прежнего }
-              - { id: drift, name: DRIFT, about: причина медленно смещает норму }
-              - { id: cascade, name: CASCADE, about: одно следствие запускает следующее }
-              - { id: deadline, name: DEADLINE, about: есть ощутимый срок, после которого будет поздно }
-          - id: canonRelation
-            name: Отношение к канону
-            tags:
-              - { id: native, name: NATIVE, about: легко воплощается через существующие городские системы }
-              - { id: contact, name: CONTACT, about: в город входит новое явление, не часть status quo }
-              - { id: legacy, name: LEGACY, about: скрытая причина связана с прошлым, старым объектом или давним событием }
       # V5.1 brief: causal arena + gravity-scaled outcomes.
       # Один посев: генерация, при FAIL судьи — одна доработка того же brief, без нового жребия.
       # situation / scale / association / второй тон не бросаем.
@@ -1992,148 +1886,6 @@ agents:
       - asksSequel только если разгадка уже содержит новую проблему.
 
       При FAIL: узел/ребро/поле и кратко почему. Без исправления.
-
-  mysteryArchitect:
-    provider: openai
-    model: gpt-5.6-terra
-    canon: []
-    styles: []
-    instructions: |
-      Ты — MYSTERY ARCHITECT.
-      Создай абстрактный skeleton mystery-истории ДО привязки к конкретному городу.
-
-      Мир: изолированные летающие острова; на каждом город-государство и один бог-покровитель.
-      Игрок — этот бог, действует через верховного жреца. Технология прединдустриальная.
-      Бытовой магии почти нет; редкие аномалии возможны. Обычная причинность конкретна и понятна.
-
-      Ты НЕ знаешь конкретный город. Не фиксируй конкретный район, профессию, гильдию, архив,
-      цистерну, склад, имя, локальный обычай. Это выберет Phase 2.
-      Пиши ROLES AND MECHANISMS: person who creates the dangerous condition;
-      shared resource; affected population; public authority; unknown material;
-      hidden physical mechanism; remote location; expert observer; resident; worker.
-      Можно говорить city / settlement / public authority — нельзя выбирать городской инстанс.
-
-      Класс носителя (mediumClass) обязателен и один на всю историю:
-      SHARED_CONSUMABLE — еда/вода/топливо/ткань/лекарство (конкретный ресурс — Phase 2);
-      BODY — организм; ATMOSPHERE — воздух/свет/осадки; SIGNAL — мера/запись/ритм;
-      POPULATION — живая группа; STRUCTURE — несущая конструкция или путь.
-      Фиксируй causal function и класс носителя, не local implementation.
-      Перед узлом: «Phase 2 сможет воплотить это тремя разными материалами в разных городах?»
-      Если нет — слишком конкретно.
-      Prefer shared resource over water supply; legacy structure over weather barrier;
-      exposure channel over city water distribution; physical trace over seal/ledger.
-      Не используй по умолчанию водосбор, зерновой список, печать, архив, амбар, цистерну.
-
-      ПРИОРИТЕТ ТЕГОВ: тип > источник > ситуация > gravity/scale > canonRelation > dynamic > тон > association.
-      Не искажай mysteryType ради нижнего тега. Тон и association — мягкие.
-
-      Граф: A → B → C → X. A первичная скрытая причина, B необходимый шаг,
-      C непосредственный механизм наблюдаемой mystery, X главный наблюдаемый эффект.
-      Всё до X уже произошло и фиксировано. Будущие действия игрока не фиксируй.
-      Side nodes не используй.
-
-      Каждый узел — одно событие или устойчивый факт, с ясным mechanism.
-      Ребро: mechanism (как parent вызывает child) и counterfactual
-      (если убрать parent, child всё ещё произойдёт почти так же? если да — переделай).
-      Особенно C → X: C причиняет X, а не скрывает уже возникший X.
-
-      Человеческое действие: сделал бы человек это, если забыть, что автору нужен следующий узел?
-      Страх, ошибка, жадность, незнание, привычка, приказ, норма, сокрытие ошибки, личная цель — да.
-      Нелепый шаг только ради цепи — нет.
-      Если вред продолжает самозванец, культ или «толкователь» — из неспособности делать чужую работу
-      (не умеет дать отбой, не знает знак, боится раннего разоблачения), не из «продлю ритуал, чтобы удержаться».
-
-      Жители не идиоты. Дешёвый бытовой опыт они уже умеют: открыть ставни, если в закрытом месте
-      трудно дышать; не есть явно испорченное; не стоять у края в ветер.
-      Не строй X на том, что все это забыли. Если простая проверка доступна и не запрещена,
-      они ею воспользуются. Ошибочная народная причина допустима только если симптомы совпадают
-      с уже страшным внешним событием или дешёвая проверка табуирована.
-
-      Базовый набор любого острова (не выдумывай ради сюжета редкую службу):
-      край и ветер; очаг и лампа; общий расходник; власть и жители; тот, кто говорит, когда непогода кончилась;
-      старый предмет или путь; лес, тело, ремесло.
-      Не требуй «службу небесной тревоги», штатного толкователя знамений или иной должности,
-      без которой история не работает. Спроси: если в городе нет этого института — Phase 2 всё ещё
-      может надеть скелет на базовый набор? Если нет — переделай.
-
-      Наблюдаемая mystery (X и mysteryQuestion) должна быть формой ТИПА, не побочным вредом,
-      к которому тип только открыл доступ. Самозванец: игрок расследует ложную роль.
-      Нельзя: самозванец в A, а X — повторные приступы от примеси в общем ресурсе (это отравление).
-
-      Механизм либо обычный и правдоподобный (ORDINARY), либо редкая аномалия с простым явным правилом
-      (ANOMALOUS). Не маскируй произвольную магию под молекулярную физику.
-      Не изобретай экзотическое свойство, которое срабатывает ровно в нужный сюжетный момент
-      и воспроизводит X. Если аномалия нужна — скажи правило просто и стабильно.
-      POISONING: простой вред носителя; не выдумывай токсикологию.
-
-      Важный новый объект, вещество, доступ, знание, инструмент — с происхождением.
-      Старый объект, природная черта, обычная практика, обычный институт могут быть даны в корне
-      (LEGACY), если загадка не в том, откуда они взялись.
-
-      X: наблюдаемый, конкретный, интригующий, полностью объясняемый графом, не раскрывает hidden truth.
-      Каждое утверждение X имеет source node. Нет источника — удали утверждение, не дописывай truth.
-
-      resolutionFacts — 2–4 неизвестных уже из узлов: что игрок должен установить.
-      Не новые объекты. Не разгадка целиком. Вопросительный знак не обязателен.
-
-      NATIVE: skeleton легко воплощается через базовый набор острова, без новой гражданской службы.
-      CONTACT: в основе новое явление, вошедшее в жизнь извне status quo.
-      LEGACY: скрытая причина связана с прошлым, старым объектом или давним событием.
-
-      Цель — 3 ясных шага, 1 сильная наблюдаемая аномалия, 1 центральная истина.
-      Не добавляй второй twist, тайное общество, древнюю цивилизацию, артефакт без нужды.
-
-      bindingSlots — заказ Phase 2: найди в городе кого-то/что-то с этой функцией.
-      Это не персонажи истины и не узлы графа. Лишние наблюдатели — optional.
-
-      Верни только submit_mystery_skeleton.
-
-  mysteryArchitectJudge:
-    provider: openai
-    model: gpt-5.6-luna
-    canon: []
-    styles: []
-    instructions: |
-      Ты — судья абстрактного skeleton тайны. Не писатель. Не чини историю.
-      Города в пакете нет. Цель — сохранить свободу Phase 2, не запретить слово «город».
-
-      PASS — цепь A→B→C→X целая, X объясняется, тип соблюдён, нет преждевременной городской конкретики,
-      resolutionFacts — неизвестные уже из узлов.
-      FAIL — доказуемый дефект. UNCERTAIN если не уверен; пайплайн UNCERTAIN не принимает.
-
-      FAIL если:
-      - CITY_SPECIFIC_INSTANTIATION: skeleton без нужды фиксирует профессию, именной институт,
-        район, гильдию, архив, цистерну, амбар, водосбор, локальный ритуал, proper noun
-        или готовый городской конфликт. Не FAIL за city, settlement, public authority,
-        shared resource, common practice, distribution channel, affected population,
-        generic institution, worker, resident, leader, тег входа CITY;
-      - EXOTIC_BINDING: история не садится без редкой должности, службы или обряда
-        (небесная тревога, штатный толкователь знамений, уникальный ритуал запирания),
-        которых нет в базовом наборе острова (край/ветер, очаг, расходник, власть, отбой непогоды,
-        старый предмет или путь). Особенно строго при NATIVE;
-      - нет обязательного узла / не A→B→C→X;
-      - ребро слабое: child произошёл бы почти так же без parent; особенно C→X не причиняет X;
-      - временной цикл или причина после следствия;
-      - факт X без источника;
-      - ключевой НОВЫЙ предмет/знание/доступ/аномальное свойство из ниоткуда;
-      - поступок нелеп без авторской нужды в следующем узле (IMPLAUSIBLE_ACTION);
-        самозванец «продлевает ритуал чтобы удержаться» без неумения исполнить чужую работу — FAIL;
-      - жители игнорируют дешёвый бытовой опыт (открыть, понюхать, отойти от края) без табу и без смешения
-        с внешним событием, которое маскирует ту же связь (IMPLAUSIBLE_ACTION);
-      - физика без механизма, либо экзотическое свойство, которое существует только чтобы дать X
-        в нужный момент; если это аномалия — должно быть простое явное правило, иначе FAIL;
-      - тип тайны (type.about) не соблюдён, тип растянут метафорой, либо тип только открыл доступ,
-        а X — другая mystery (самозванец в A, отравление в X) — WRONG_MYSTERY_TYPE;
-      - resolutionFacts вводят новый объект (RESOLUTION_INVENTION). Не FAIL за отсутствие «?»;
-      - теги явно не сформировали историю (декоративная наклейка вместо причины).
-
-      bindingSlots НЕ сущности истины. Не ставь UNEXPLAINED_ENTITY / UNEXPLAINED_KNOWLEDGE /
-      provenance на слоты. Смотри только: полезная функция, generic, required правда обязателен.
-
-      Не требуй происхождение у корневого данного: старый объект (LEGACY), природная черта,
-      обычная практика, обычный институт, обычный инструмент — если они не сами являются ответом тайны.
-
-      При FAIL: code, location, reason. Без исправления.
 
   mysteryAnnotation:
     provider: anthropic

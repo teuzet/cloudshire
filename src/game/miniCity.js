@@ -3,6 +3,7 @@ import { plotConcerns } from './confluxBoard.js';
 import { activeProcesses, pausedProcesses, processOwnedBy } from './processes.js';
 import { listStandingOrders } from './orders.js';
 import { gameDateFromTickIndex, worldDateLabel } from './tickClock.js';
+import { domainHasIslandImage, officerHasPortrait } from '../storage/r2.js';
 
 function clip(text, max = 800) {
   const t = String(text || '').trim();
@@ -115,7 +116,8 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
             title: officer.title,
             name: officer.name,
             nature: clip(officer.nature || '', 280),
-            hasPortrait: Boolean(officer.portraitPath || officer.portraitBase64),
+            hasPortrait: officerHasPortrait(officer),
+            portraitUrl: officer.portraitUrl || null,
             busy: Boolean(officer.processId),
             process: proc ? slimProcess(proc, config) : null,
           }
@@ -139,7 +141,8 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
   return {
     city: {
       name: domain.name || 'Город',
-      hasImage: Boolean(domain.imagePath || domain.imageBase64),
+      hasImage: domainHasIslandImage(domain),
+      imageUrl: domain.imageUrl || null,
     },
     generating: Boolean(generating),
     gameDate: worldDateLabel(world),
@@ -167,7 +170,8 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
         name: o.name,
         office: o.office,
         officerId: o.id,
-        hasPortrait: Boolean(o.portraitPath || o.portraitBase64),
+        hasPortrait: officerHasPortrait(o),
+        portraitUrl: o.portraitUrl || null,
         process: proc ? slimProcess(proc, config) : null,
       };
     }),

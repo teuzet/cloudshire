@@ -251,7 +251,7 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
   if (longRunning.length) {
     flags.push([WARN, `процессы тянутся 8+ мес: ${longRunning.map(procName).join('; ')}`]);
   }
-  const maxProc = config.tick?.maxActiveProcesses ?? 4;
+  const maxProc = domain.officers?.length || config.tick?.maxActiveProcesses || 4;
   if (processes.length === 0 && ageMonths >= 3) {
     flags.push([WARN, 'нет активных процессов — правитель ничего не делает вдолгую']);
   }
@@ -266,8 +266,8 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
   if (boardOverflow) {
     flags.push([BAD, `нитей ${plots.length} > доски ${plotCfg.board?.maxOpen}`]);
   }
-  if (errands.length > (plotCfg.board?.maxErrands ?? 2)) {
-    flags.push([WARN, `проходных нитей ${errands.length} — доска забита делами`]);
+  if (errands.length > 6) {
+    flags.push([WARN, `проходных нитей ${errands.length} — много отдельных поручений`]);
   }
   if (stalePlots.length) {
     flags.push([

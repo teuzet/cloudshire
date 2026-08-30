@@ -100,6 +100,7 @@ async function emitApproachPhotos({ app, storage, config, notes }) {
         agent: 'ruler',
         domainId: domain.id,
         kind: 'conflux_approach',
+        photoUrl: partner.imageUrl || null,
         photoPath: picture?.abs || null,
         photoBuffer: picture?.buffer || null,
       });

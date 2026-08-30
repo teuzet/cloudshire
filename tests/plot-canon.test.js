@@ -8,7 +8,6 @@ import {
   plotHasActiveProcess,
   pickPlotTags,
   pickMysteryPlotTags,
-  pickMysteryArchitectSeed,
   pickSeedTags,
   formatPlotTagsForPrompt,
   formatMysteryAxesForPrompt,
@@ -35,7 +34,7 @@ function plot(id, extra = {}) {
     closeWhen: 'Найдут или похоронят.',
     kind: 'story',
     tags: [],
-    relatedStats: ['stability'],
+    relatedStats: ['security'],
     chronicleIds: ['lore_found'],
     relatedProcessIds: ['act_search'],
     relatedPlotlineIds: [],
@@ -349,10 +348,6 @@ test('каталог тайны: поле и тип', async () => {
     tags.map((t) => t.groupId).sort(),
     ['association', 'type'],
   );
-  const architect = pickMysteryArchitectSeed(cfg, () => 0.1);
-  assert.equal(architect.tags.filter((t) => t.groupId === 'type').length, 1);
-  assert.ok(cfg.mysteryArchitect.tagGroups.find((g) => g.id === 'canonRelation'));
-  assert.equal(cfg.mysteryArchitect.judgeAttempts, 3);
   assert.ok(mysteryTypeTag(tags)?.tagName);
   const opening = pickSeedTags(cfg, { storyType: 'mystery', opening: true, rng: () => 0.01 });
   assert.equal(opening.some((t) => t.groupId === 'scale'), false);

@@ -174,6 +174,9 @@ test('мини-аппка: свои истории и участие в сопр
   assert.match(view.orders[0].since, /Год 1, месяц 4/);
   assert.equal(view.gameDate, 'Год 1, месяц 6');
   assert.equal('loyalty' in (view.city || {}), false);
+  assert.equal(view.city.hasImage, false);
+  assert.equal(view.city.imageUrl, null);
+  assert.equal(knowledge.officer.portraitUrl, null);
 });
 
 test('GET /mini и /mini/ отдают страницу без редиректа', async () => {

@@ -3,6 +3,7 @@ import { createWorldFromConfig, normalizeDomain, normalizeWorld } from '../game/
 import { writeWorldArchive } from './worldArchive.js';
 import { getLogger } from '../log.js';
 import { attachStoryPoolsFromCatalog } from '../game/annotationCatalog.js';
+import { stripOfficerPortraitPayload } from '../game/officers.js';
 
 /**
  * Mongo implementation of the same storage surface as YamlStorage.
@@ -64,6 +65,7 @@ export class MongoStorage {
 
   async saveDomain(domain) {
     normalizeDomain(domain);
+    stripOfficerPortraitPayload(domain);
     domain.updatedAt = new Date().toISOString();
     const { id, ...rest } = domain;
     await this.col('domains').replaceOne({ _id: id }, { _id: id, ...rest }, { upsert: true });

@@ -267,6 +267,8 @@ export function ensureOfficersFromLore(domain, config = null) {
       axes: { will: 3, wits: 3, mercy: 3 },
       look: Number.isFinite(Number(rec?.ageYears)) ? { ageYears: Number(rec.ageYears) } : {},
       portraitPath: domain.id ? `data/images/officers/${domain.id}_${def.office}.png` : null,
+      portraitUrl: null,
+      portraitKey: null,
       portraitBase64: null,
       processId: null,
     });
@@ -278,8 +280,9 @@ export function ensureOfficersFromLore(domain, config = null) {
 }
 
 export function stripOfficerPortraitPayload(domain) {
+  if (domain?.imageUrl || domain?.imagePath) domain.imageBase64 = null;
   for (const o of domain?.officers || []) {
-    if (o.portraitPath) o.portraitBase64 = null;
+    if (o.portraitPath || o.portraitUrl) o.portraitBase64 = null;
   }
   return domain;
 }
@@ -459,6 +462,8 @@ export async function generateOfficers({ domain, world, config, runtime, log: pa
       axes,
       look,
       portraitPath: null,
+      portraitUrl: null,
+      portraitKey: null,
       portraitBase64: null,
       processId: null,
     };

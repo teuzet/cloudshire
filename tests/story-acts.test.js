@@ -66,7 +66,7 @@ function three(extra = {}) {
     escalationLevel: 0,
     maxEscalations: 3,
     relatedProcessIds: [],
-    relatedStats: ['stability'],
+    relatedStats: ['security'],
     tags: [],
     chronicleIds: [],
     relatedPlotlineIds: [],

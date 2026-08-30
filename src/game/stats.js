@@ -11,71 +11,12 @@ function clamp(n, min, max) {
   return Math.max(min, Math.min(max, Math.round(n)));
 }
 
-/**
- * Independent normal rolls biased to center (no fixed sum).
- * @deprecated Genesis 2 allocates after prose; kept for leftover callers.
- */
-export function rollDomainStats(config, rng = Math.random) {
-  return allocateStats({}, config);
-}
-
 export function rollPopulation(config, rng = Math.random) {
   const { min, max } = config.genesis.population;
   const mean = (min + max) / 2;
   const std = (max - min) / 6;
   const value = clamp(mean + gaussian(rng) * std, min, max);
   return Math.round(value / 100) * 100;
-}
-
-export function pickTags(config, rng = Math.random, forcedChoices = {}) {
-  return (config.genesis.tagGroups || []).map((group) => {
-    const forced = forcedChoices[group.id];
-    if (forced != null && String(forced).trim()) {
-      const raw = String(forced).trim();
-      const fromCatalog = group.tags.find((t) => t.id === raw || t.name === raw);
-      if (fromCatalog) {
-        return {
-          groupId: group.id,
-          groupName: group.name,
-          tagId: fromCatalog.id,
-          tagName: fromCatalog.name,
-          source: 'catalog',
-        };
-      }
-      // Свободные слова игрока — не обязаны совпадать с каталогом
-      const slug = raw
-        .toLowerCase()
-        .replace(/[^\p{L}\p{N}]+/gu, '_')
-        .replace(/^_|_$/g, '')
-        .slice(0, 40);
-      return {
-        groupId: group.id,
-        groupName: group.name,
-        tagId: `free:${slug || 'custom'}`,
-        tagName: raw,
-        source: 'freeform',
-      };
-    }
-    const tag = group.tags[Math.floor(rng() * group.tags.length)];
-    return {
-      groupId: group.id,
-      groupName: group.name,
-      tagId: tag.id,
-      tagName: tag.name,
-      source: 'random',
-    };
-  });
-}
-
-function nearestScaleKey(value, scale) {
-  const keys = Object.keys(scale)
-    .map(Number)
-    .sort((a, b) => a - b);
-  let best = keys[0];
-  for (const k of keys) {
-    if (Math.abs(k - value) < Math.abs(best - value)) best = k;
-  }
-  return best;
 }
 
 /** Ближайшая нижняя (или равная) ступень шкалы. */
@@ -233,26 +174,6 @@ export function applyStatDeltasToDomain(domain, deltas) {
 }
 
 /**
- * Статы для агентов со стейтом: число + эпитет + about + ориентир шкалы.
- */
-export function formatStatsForPrompt(stats, config) {
-  return (config.stats || [])
-    .map((def) => {
-      const value = Number(stats?.[def.id]);
-      const v = Number.isFinite(value) ? value : 50;
-      const scale = def.scale || {};
-      const key = nearestScaleKey(v, scale);
-      const hint = scale[key] || scale[String(key)] || '';
-      const about = def.about ? ` ${def.about}` : '';
-      const covers = def.covers ? ` Сферы: ${def.covers}` : '';
-      const when = def.changeWhen ? ` Менять, когда: ${def.changeWhen}` : '';
-      const orient = hint ? ` Ориентир: ${hint}` : '';
-      return `${def.name} (${def.id}): ${formatStatValue(v, config)}.${about}${covers}${when}${orient}`;
-    })
-    .join('\n');
-}
-
-/**
  * Качественная картина для правителя: без чисел, эпитет + about + ориентир.
  */
 /** Короткая форма для доски нитей: «Вера (скудно), Знание (заметно)». */
@@ -288,16 +209,6 @@ export function qualitativeStatsBrief(stats, config, { only = null } = {}) {
       const covers = def.covers ? ` Сферы: ${def.covers}` : '';
       const when = def.changeWhen ? ` Менять, когда: ${def.changeWhen}` : '';
       return `- ${def.name} (${epithet}).${about}${covers}${when} Ориентир: ${hint}`;
-    })
-    .join('\n');
-}
-
-export function formatTagsForPrompt(tags) {
-  return tags
-    .map((t) => {
-      const src =
-        t.source === 'freeform' ? ' (слова игрока)' : t.source === 'random' ? ' (random)' : '';
-      return `${t.groupName}: ${t.tagName}${src}`;
     })
     .join('\n');
 }

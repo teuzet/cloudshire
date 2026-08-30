@@ -49,6 +49,14 @@ export function normalizeDomain(domain) {
     if (!Number.isFinite(Number(domain.state.faith))) domain.state.faith = null;
   }
   if (!Array.isArray(domain.officers)) domain.officers = [];
+  for (const o of domain.officers) {
+    if (!o || typeof o !== 'object') continue;
+    if (typeof o.portraitUrl !== 'string') o.portraitUrl = o.portraitUrl || null;
+    if (typeof o.portraitKey !== 'string') o.portraitKey = o.portraitKey || null;
+    if (typeof o.portraitPath !== 'string') o.portraitPath = o.portraitPath || null;
+    if (typeof o.portraitBase64 !== 'string') o.portraitBase64 = o.portraitBase64 || null;
+    if (o.portraitUrl) o.portraitBase64 = null;
+  }
   if (!Array.isArray(domain.tags)) domain.tags = [];
   if (!Array.isArray(domain.plotlines)) domain.plotlines = [];
   if (typeof domain.chronicleDigest !== 'string') domain.chronicleDigest = domain.chronicleDigest || '';
@@ -60,7 +68,10 @@ export function normalizeDomain(domain) {
     domain.confluxPartners = {};
   }
   if (typeof domain.imagePath !== 'string') domain.imagePath = domain.imagePath || null;
+  if (typeof domain.imageUrl !== 'string') domain.imageUrl = domain.imageUrl || null;
+  if (typeof domain.imageKey !== 'string') domain.imageKey = domain.imageKey || null;
   if (typeof domain.imageBase64 !== 'string') domain.imageBase64 = domain.imageBase64 || null;
+  if (domain.imageUrl) domain.imageBase64 = null;
   if (typeof domain.cityBrief !== 'string') domain.cityBrief = domain.cityBrief || '';
   if (!Array.isArray(domain.seedClimate)) domain.seedClimate = [];
   if (!Array.isArray(domain.mysteryClimate)) domain.mysteryClimate = [];
@@ -221,6 +232,8 @@ export function createDomainRecord({
     createdAt: now,
     updatedAt: now,
     imagePath: null,
+    imageUrl: null,
+    imageKey: null,
     imageBase64: null,
     cityBrief: '',
     modifiers: [],

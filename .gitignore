@@ -6,3 +6,6 @@ artifacts/
 logs/
 *.log
 .DS_Store
+data-prepivot/
+data-prod-snapshot-*/
+*.deb

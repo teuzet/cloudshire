@@ -3,7 +3,7 @@
  *
  * Движок считает ход дел, часы нитей, отбор битов и окраску; рассказчик
  * пишет хронику; оценщик статов читает записи месяца и ставит след.
- * См. docs/PIVOT_PLOTLINES.md и docs/STANDING_ORDERS.md.
+ * См. docs/PLOTS.md и docs/STANDING_ORDERS.md.
  */
 
 import { newId } from './ids.js';

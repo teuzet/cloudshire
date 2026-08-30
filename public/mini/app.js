@@ -48,8 +48,16 @@ function empty(text) {
   return `<p class="empty muted">${esc(text)}</p>`;
 }
 
-function portraitUrl(officerId) {
-  return `/api/mini/officer-portrait/${encodeURIComponent(officerId)}${queryAuth()}`;
+function portraitSrc(officer) {
+  if (officer?.portraitUrl) return officer.portraitUrl;
+  const id = officer?.id || officer?.officerId;
+  if (id) return `/api/mini/officer-portrait/${encodeURIComponent(id)}${queryAuth()}`;
+  return '';
+}
+
+function islandBgUrl(city) {
+  if (city?.imageUrl) return city.imageUrl;
+  return `/api/mini/island-image${queryAuth()}`;
 }
 
 function renderStats(stats, faith) {
@@ -68,8 +76,8 @@ function renderStats(stats, faith) {
   const cards = stats
     .map((s) => {
       const o = s.officer;
-      const portrait = o?.hasPortrait && o.id
-        ? `<img class="portrait" src="${esc(portraitUrl(o.id))}" alt="">`
+      const portrait = o?.hasPortrait
+        ? `<img class="portrait" src="${esc(portraitSrc(o))}" alt="">`
         : '';
       const person = o
         ? `<p class="meta">${esc(o.title)} ${esc(o.name)}${o.busy ? ' · при деле' : ' · свободен'}</p>
@@ -96,8 +104,8 @@ function renderProcesses(list) {
   return list
     .map((slot) => {
       const p = slot.process;
-      const portrait = slot.hasPortrait && slot.officerId
-        ? `<img class="portrait" src="${esc(portraitUrl(slot.officerId))}" alt="">`
+      const portrait = slot.hasPortrait
+        ? `<img class="portrait" src="${esc(portraitSrc(slot))}" alt="">`
         : '';
       if (!p) {
         return `
@@ -179,7 +187,7 @@ function render() {
   cityName.textContent = state.city.name;
   gameDate.textContent = state.gameDate || '';
   if (state.city.hasImage) {
-    bg.style.backgroundImage = `url("/api/mini/island-image${queryAuth()}")`;
+    bg.style.backgroundImage = `url("${islandBgUrl(state.city)}")`;
     bg.hidden = false;
   } else {
     bg.hidden = true;

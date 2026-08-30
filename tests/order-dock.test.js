@@ -6,7 +6,7 @@ import { canStartProcess } from '../src/game/processes.js';
 import { startDockOrderProcess, fireConfluxDockOrder, mainConfluxPlot } from '../src/game/orderDock.js';
 
 const config = {
-  stats: [{ id: 'knowledge' }, { id: 'order' }, { id: 'might' }],
+  stats: [{ id: 'knowledge' }, { id: 'influence' }, { id: 'security' }],
   tick: { maxActiveProcesses: 2, plot: {} },
 };
 
@@ -89,12 +89,19 @@ test('стык заводит дело на главной нити и не ду
 });
 
 test('стык заводит дело мимо лимита слотов и слот игрока не занимает', () => {
-  const domain = domainWithOrder({
-    processes: [
-      { id: 'act_1', summary: 'Стена', status: 'active' },
-      { id: 'act_2', summary: 'Канал', status: 'active' },
-    ],
-  });
+  const processes = [
+    { id: 'act_1', summary: 'Стена', status: 'active' },
+    { id: 'act_2', summary: 'Канал', status: 'active' },
+    { id: 'act_3', summary: 'Склад', status: 'active' },
+    { id: 'act_4', summary: 'Дозор', status: 'active' },
+  ];
+  const officers = ['treasurer', 'marshal', 'keeper', 'chancellor'].map((office, i) => ({
+    id: `off_${i + 1}`,
+    office,
+    name: office,
+    processId: processes[i].id,
+  }));
+  const domain = domainWithOrder({ processes, officers });
   const order = domain.plotlines[0];
   const conflux = confluxWithMain();
   const result = startDockOrderProcess(domain, order, {
@@ -105,9 +112,9 @@ test('стык заводит дело мимо лимита слотов и с�
   });
   assert.equal(result.ok, true);
   assert.equal(result.process.slotless, true);
-  assert.equal(domain.state.pendingActions.length, 3);
+  assert.equal(domain.state.pendingActions.length, 5);
   assert.equal(canStartProcess(domain, config).ok, false);
-  assert.equal(canStartProcess(domain, config).active, 2);
+  assert.equal(canStartProcess(domain, config).active, 4);
 });
 
 test('fireConfluxDockOrder пишет хронику, дело и отмечает стык', async () => {

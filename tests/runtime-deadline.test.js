@@ -109,7 +109,7 @@ test('успешный forced tool без submit_reply сразу заверша
   const runtime = new AgentRuntime({
     llm: { defaultProvider: 'openai', openai: { apiKeyEnv: 'OPENAI_API_KEY' } },
     agents: {
-      mysteryArchitect: { provider: 'openai', model: 'gpt-4o-mini', instructions: 'тест' },
+      mysteryStart: { provider: 'openai', model: 'gpt-4o-mini', instructions: 'тест' },
     },
   });
   runtime.getProvider = () => ({
@@ -131,7 +131,7 @@ test('успешный forced tool без submit_reply сразу заверша
     },
   });
   const result = await runtime.run({
-    agentId: 'mysteryArchitect',
+    agentId: 'mysteryStart',
     userMessages: [{ role: 'user', content: 'skeleton' }],
     maxTurns: 3,
     toolChoice: { type: 'function', function: { name: 'submit_mystery_skeleton' } },

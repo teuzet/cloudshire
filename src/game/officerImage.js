@@ -8,6 +8,7 @@ import path from 'node:path';
 import { projectRoot } from '../config.js';
 import { createLlmProvider } from '../llm/index.js';
 import { getLogger, truncate } from '../log.js';
+import { persistPngToR2, officerObjectKey } from '../storage/r2.js';
 import { formatAxesForSpeech, formatLookForSpeech, officerGender, ensureOfficerLook } from './officers.js';
 
 function clip(text, max) {
@@ -90,15 +91,29 @@ export async function generateOfficerPortrait({ config, domain, officer, log }) 
     await fs.mkdir(path.dirname(abs), { recursive: true });
     await fs.writeFile(abs, buffer);
     const rel = path.relative(projectRoot(), abs);
+    const uploaded = await persistPngToR2(config, {
+      key: officerObjectKey(domain.id, officer.office),
+      buffer,
+      log,
+    });
     officer.portraitPath = rel;
-    officer.portraitBase64 = buffer.toString('base64');
+    officer.portraitUrl = uploaded?.url || null;
+    officer.portraitKey = uploaded?.key || null;
+    officer.portraitBase64 = uploaded ? null : buffer.toString('base64');
     log?.info('officer_image.saved', {
       domainId: domain.id,
       office: officer.office,
       path: rel,
       bytes: buffer.length,
+      url: officer.portraitUrl,
     });
-    return { path: rel, abs, base64: officer.portraitBase64 };
+    return {
+      path: rel,
+      abs,
+      url: officer.portraitUrl,
+      key: officer.portraitKey,
+      base64: officer.portraitBase64,
+    };
   } catch (err) {
     log?.warn('officer_image.failed', {
       domainId: domain?.id,
@@ -136,4 +151,18 @@ export async function resolveOfficerPortrait({ domain, officer, config }) {
     return { abs, buffer, path: path.relative(projectRoot(), abs) };
   }
   return null;
+}
+
+export async function removeOfficerPortraits(config, domain) {
+  const root = path.resolve(officerImageDir(config));
+  for (const officer of domain?.officers || []) {
+    const file = officer?.portraitPath
+      ? path.resolve(projectRoot(), officer.portraitPath)
+      : domain?.id && officer?.office
+        ? officerImageFile(config, domain.id, officer.office)
+        : null;
+    if (!file) continue;
+    if (!file.startsWith(root + path.sep) && file !== root) continue;
+    await fs.unlink(file).catch(() => {});
+  }
 }

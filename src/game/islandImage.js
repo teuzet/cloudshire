@@ -4,6 +4,7 @@ import { projectRoot } from '../config.js';
 import { createLlmProvider } from '../llm/index.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
+import { persistPngToR2, islandObjectKey } from '../storage/r2.js';
 
 const CONTENT_MAX = 900;
 const WISH_MAX = 500;
@@ -196,8 +197,25 @@ export async function generateIslandImage({ config, domain, runtime, playerBrief
     await fs.mkdir(path.dirname(abs), { recursive: true });
     await fs.writeFile(abs, buffer);
     const rel = path.relative(projectRoot(), abs);
-    log?.info('island_image.saved', { domainId: domain.id, path: rel, bytes: buffer.length });
-    return { path: rel, abs, base64: buffer.toString('base64'), buffer };
+    const uploaded = await persistPngToR2(config, {
+      key: islandObjectKey(domain.id),
+      buffer,
+      log,
+    });
+    log?.info('island_image.saved', {
+      domainId: domain.id,
+      path: rel,
+      bytes: buffer.length,
+      url: uploaded?.url || null,
+    });
+    return {
+      path: rel,
+      abs,
+      buffer,
+      url: uploaded?.url || null,
+      key: uploaded?.key || null,
+      base64: uploaded ? null : buffer.toString('base64'),
+    };
   } catch (err) {
     log?.warn('island_image.failed', { domainId: domain.id, error: err.message });
     return null;
