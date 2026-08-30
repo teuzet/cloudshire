@@ -12,14 +12,12 @@ import {
   formatSuspenseAnnotationAxesForPrompt,
   annotationGravityBand,
 } from './plotlines.js';
-import {
-  ANNOTATION_TITLE_MAX,
-  BRIEF_SECTION_MIN,
-  BRIEF_SECTION_MAX,
-  BRIEF_SECTION_SENTENCE_MAX,
-  BRIEF_TEXT_MAX,
-  countAnnotationSentences,
-} from './mysteryAnnotation.js';
+import { ANNOTATION_TITLE_MAX, BRIEF_SECTION_MIN, countAnnotationSentences } from './mysteryAnnotation.js';
+
+/** Mystery остаётся на 4 предложениях; саспенсу нужен запас на эскалацию и точку невозврата. */
+export const SUSPENSE_BRIEF_SECTION_MAX = 1400;
+export const SUSPENSE_BRIEF_SECTION_SENTENCE_MAX = 6;
+export const SUSPENSE_BRIEF_TEXT_MAX = 6000;
 
 export const SUSPENSE_BRIEF_SECTIONS = [
   { key: 'situation', label: 'Сейчас' },
@@ -41,6 +39,7 @@ export const SUSPENSE_ANNOTATION_JUDGE_CODES = [
   'PLAUSIBLE_ENOUGH',
   'ARENA_FIDELITY',
   'GRAVITY_FIDELITY',
+  'WORLD_FIDELITY',
   'OTHER',
 ];
 
@@ -135,19 +134,19 @@ export function normalizeSuspenseAnnotation(raw) {
   if (!parts) return { annotation: null, reason: 'thin_brief' };
   const cleaned = {};
   for (const { key } of SUSPENSE_BRIEF_SECTIONS) {
-    const text = clip(parts[key], BRIEF_SECTION_MAX);
+    const text = clip(parts[key], SUSPENSE_BRIEF_SECTION_MAX);
     if (!text || text.length < BRIEF_SECTION_MIN) {
       return { annotation: null, reason: `thin_section:${key}` };
     }
     const sentences = countAnnotationSentences(text);
     if (sentences < 1) return { annotation: null, reason: `thin_sentences:${key}` };
-    if (sentences > BRIEF_SECTION_SENTENCE_MAX) {
+    if (sentences > SUSPENSE_BRIEF_SECTION_SENTENCE_MAX) {
       return { annotation: null, reason: `long_sentences:${key}` };
     }
     cleaned[key] = text;
   }
   const text = formatSuspenseBriefText(cleaned);
-  if (text.length > BRIEF_TEXT_MAX) return { annotation: null, reason: 'long_brief' };
+  if (text.length > SUSPENSE_BRIEF_TEXT_MAX) return { annotation: null, reason: 'long_brief' };
   return {
     annotation: {
       workingTitle: workingTitle || 'без названия',
@@ -183,7 +182,10 @@ export function formatSuspenseAnnotationJudgeCase({ seed = {}, annotation = null
     'ПАКЕТ НА ПРОВЕРКУ (suspense brief; города нет).',
     'Это бриф угрозы, не граф и не завязка города. Не ищи hiddenPremises и лестницу.',
     Number.isFinite(Number(seed.gravity))
-      ? `GRAVITY: ${seed.gravity} (${annotationGravityBand(seed.gravity)}) — вес развилки для города, не размер сцены`
+      ? `GRAVITY: ${seed.gravity} (${annotationGravityBand(seed.gravity)}) — вес развилки для города. Полосу несёт «если не предотвратить»; успех может быть civic-memory.`
+      : null,
+    Number(seed.gravity) >= 80
+      ? 'GRAVITY 80+: сама угроза экзистенциальна (разрушение города, массовая гибель, слом веры/порядка). Нормирование на год — не эта полоса. Успех не обязан тянуть полосу.'
       : null,
     `АРЕНА УГРОЗЫ: ${tagLine(tags, 'threatArena')}`,
     `ПРОЯВЛЕНИЕ: ${tagLine(tags, 'manifestation')}`,
@@ -206,7 +208,7 @@ export async function judgeSuspenseAnnotation({ runtime, caseText, log: parentLo
     agentId: 'suspenseAnnotationJudge',
     caseText,
     extraUser:
-      'Лёгкая проверка suspense brief, не завязки города. PASS если ясно «если ничего не сделать, будет Y», давление следует из ситуации, нет дешёвого выхода, бездействие ухудшает, это не mystery, у города есть агентность, нет plot-shaped свойства, угроза в заявленной threatArena, масштаб исходов соответствует gravity. Иначе FAIL одним из CLEAR_THREAT / CREDIBLE_PRESSURE / NO_EASY_EXIT / ESCALATION / SUSPENSE_NOT_MYSTERY / MEANINGFUL_AGENCY / PLAUSIBLE_ENOUGH / ARENA_FIDELITY / GRAVITY_FIDELITY. UNCERTAIN пайплайн не принимает.',
+      'Лёгкая проверка suspense brief, не завязки города. PASS если ясно «если ничего не сделать, будет Y», давление следует из ситуации, нет дешёвого выхода с конкретной ценой, бездействие ухудшает, это не mystery, у города есть агентность, нет plot-shaped и дыр в цепочке, угроза в заявленной threatArena, космология Cloudshire цела, «если не предотвратить» соответствует gravity. При 80+ сама угроза экзистенциальна; успех может быть праздником/монументом после отведённой беды. Если механизм не тянет масштаб — PLAUSIBLE_ENOUGH, не «урежь концовку». Суда, порты, регулярный импорт — WORLD_FIDELITY; CONTACT через ветер/споры/существо/падение/сопряжение — можно. Иначе FAIL одним из CLEAR_THREAT / CREDIBLE_PRESSURE / NO_EASY_EXIT / ESCALATION / SUSPENSE_NOT_MYSTERY / MEANINGFUL_AGENCY / PLAUSIBLE_ENOUGH / ARENA_FIDELITY / GRAVITY_FIDELITY / WORLD_FIDELITY. UNCERTAIN пайплайн не принимает.',
     log,
     codes: SUSPENSE_ANNOTATION_JUDGE_CODES,
     scene: 'suspense_annotation_judge',
@@ -233,31 +235,35 @@ const BRIEF_TOOL_PROPERTIES = {
   },
   situation: {
     type: 'string',
-    description: 'Сейчас: 2–4 конкретных предложения о том, что уже происходит.',
+    description: 'Сейчас: 2–6 конкретных предложений о том, что уже происходит.',
   },
   threat: {
     type: 'string',
-    description: 'Угроза: 2–4 предложения о Y, к которому ситуация естественно придёт, если ничего не менять.',
+    description: 'Угроза: 2–6 предложений о Y, к которому ситуация естественно придёт, если ничего не менять.',
   },
   whyNotSolvedNow: {
     type: 'string',
-    description: 'Почему не закрыть сразу: конкретная цена, ограничение или препятствие, не «никто не догадался».',
+    description:
+      'Почему не закрыть сразу: 1–6 предложений. Конкретная цена или ограничение. «Люди будут недовольны» само по себе недостаточно.',
   },
   escalation: {
     type: 'string',
-    description: 'Эскалация: как бездействие меняет ситуацию в ближайшие недели или месяцы.',
+    description: 'Эскалация: 1–6 предложений. Как бездействие меняет ситуацию в ближайшие недели или месяцы.',
   },
   pointOfNoReturn: {
     type: 'string',
-    description: 'Точка невозврата: после какого факта предотвращать уже поздно или много дороже.',
+    description:
+      'Точка невозврата: 1–6 предложений. Исчез лучший вариант, цена скакнула, часть потерь неизбежна или кризис перешёл в новую фазу. Не обязана означать, что спасать уже бессмысленно.',
   },
   ifPrevented: {
     type: 'string',
-    description: 'Если предотвратить: конкретное хорошее последствие соответствующего gravity.',
+    description:
+      'Если предотвратить: конкретный хороший исход. Не обязан тянуть gravity. Дефолт — отвели беду: праздник, молитвы, монумент, общий подъём. Не новое ведомство, протокол или инспекция.',
   },
   ifNotPrevented: {
     type: 'string',
-    description: 'Если не предотвратить: конкретное плохое последствие соответствующего gravity.',
+    description:
+      'Если не предотвратить: конкретный плохой исход, он несёт полосу gravity. При 80+ — разрушение города, массовая гибель, слом веры или порядка.',
   },
 };
 
@@ -321,15 +327,16 @@ async function askSuspenseAnnotation({
             : 'Запиши одну suspense как короткий brief.',
           'Не перечисляй теги. Не строй граф. Не ставь depth и лестницу раскрытия.',
           'Нужны секции: Сейчас, Угроза, Почему не закрыть сразу, Эскалация, Точка невозврата, Если предотвратить, Если не предотвратить.',
+          'workingTitle называет то же проявление, что секция Сейчас, не обломок другого черновика.',
           'Главный вопрос — будущее. Если убрать расследование причины, напряжение должно остаться.',
           revision
-            ? 'Почини указанный дефект. Не пиши другую историю с нуля, если можно исправить эту. Не переноси угрозу в другую arena.'
+            ? 'Почини указанный дефект. Не пиши другую историю с нуля, если можно исправить эту. Не переноси угрозу в другую arena. PLAUSIBLE_ENOUGH не чини сменой arena.'
             : 'Сначала gravity: придумай угрозу, способную породить последствия такого масштаба, затем нынешнюю ситуацию.',
           revision ? null : 'Вызови submit_suspense_annotation.',
           '',
           formatSuspenseAnnotationAxesForPrompt(seed, { recent, recentWindow }),
           revision ? '' : null,
-          revision ? formatSuspenseAnnotationRevisionForPrompt(revision) : null,
+          revision ? formatSuspenseAnnotationRevisionForPrompt({ ...revision, gravity: seed?.gravity }) : null,
         ]
           .filter((line) => line != null)
           .join('\n'),
@@ -345,11 +352,25 @@ async function askSuspenseAnnotation({
   };
 }
 
-export function formatSuspenseAnnotationRevisionForPrompt({ annotation = null, judge = null } = {}) {
+export function formatSuspenseAnnotationRevisionForPrompt({ annotation = null, judge = null, gravity = null } = {}) {
+  const g = Number(gravity);
   const lines = [
     'ДОРАБОТКА. Предыдущий brief не принят. Исправь указанные ошибки.',
-    'Тот же жребий. Не меняй центральную угрозу и threatArena без нужды.',
+    'Это не новая генерация. Тот же жребий.',
+    'Неизменяемые: threatArena, worldRelation, manifestation, полоса gravity, тон, основная наблюдаемая ситуация.',
+    'Можно менять: точный механизм, конкретный Y, препятствие, эскалацию, точку невозврата, исходы.',
+    'Нельзя чинить PLAUSIBLE_ENOUGH переносом центральной причины в другую arena. Упрости механизм, не добавляй вторую угрозу.',
+    'Не вводи воздушные суда, регулярный импорт, постоянную внешнюю торговлю, новую физику полёта острова.',
   ];
+  if (Number.isFinite(g) && g >= 80) {
+    lines.push(
+      'GRAVITY 80+: не урезай конец до нормирования. Увеличь естественный leverage самой угрозы, не раздувай хвост словами «навсегда».',
+    );
+  } else if (Number.isFinite(g) && g < 50) {
+    lines.push('GRAVITY ниже 50: можно урезать последствия до полосы, не раздувай «на поколения».');
+  } else {
+    lines.push('GRAVITY_FIDELITY: не раздувай «навсегда» и «на поколения», если причинность этого не заработала.');
+  }
   if (judge?.summary) lines.push(`Судья: ${judge.summary}`);
   for (const issue of judge?.issues || []) {
     const loc = issue.location ? ` @ ${issue.location}` : '';
