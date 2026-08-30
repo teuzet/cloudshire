@@ -157,6 +157,8 @@ test('маска в промпте говорит, вокруг чего стр�
   assert.match(formatMysteryMaskForPrompt('linear_4'), /ТОЛЬКО ИЗВЕСТНАЯ ЧАСТЬ ТАЙНЫ/);
   assert.match(formatMysteryMaskForPrompt('linear_4', { forCore: true }), /observedFacts/);
   assert.match(formatMysteryMaskForPrompt('linear_4', { forCore: true }), /Не пиши synopsis/);
+  assert.match(formatMysteryMaskForPrompt('linear_4', { forCore: true }), /X читается без скрытых/);
+  assert.match(formatMysteryMaskForPrompt('linear_4'), /не голое «соседи»/);
   const contract = formatMysteryCausalContractForPrompt();
   assert.match(contract, /КОНТРАКТ УЗЛА/);
   assert.match(contract, /откуда знает/);

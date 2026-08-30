@@ -98,13 +98,34 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
   const stats = (config?.stats || []).map((def) => {
     const value = Number(domain.stats?.[def.id]);
     const v = Number.isFinite(value) ? Math.max(0, Math.min(100, Math.round(value))) : 50;
+    const officer = (domain.officers || []).find((o) => o.statId === def.id) || null;
+    const proc = officer?.processId
+      ? ownProcesses(domain, conflux).find((p) => p.id === officer.processId)
+      : null;
     return {
+      id: def.id,
       name: def.name,
       value: v,
       epithet: statEpithet(v, config),
-      about: clip(def.about || '', 240),
+      about: clip(def.about || '', 280),
+      officer: officer
+        ? {
+            id: officer.id,
+            office: officer.office,
+            title: officer.title,
+            name: officer.name,
+            nature: clip(officer.nature || '', 280),
+            hasPortrait: Boolean(officer.portraitPath || officer.portraitBase64),
+            busy: Boolean(officer.processId),
+            process: proc ? slimProcess(proc, config) : null,
+          }
+        : null,
     };
   });
+  const faithRaw = Number(domain.state?.faith);
+  const faith = Number.isFinite(faithRaw)
+    ? Math.max(0, Math.min(100, Math.round(faithRaw)))
+    : null;
 
   const orders = listStandingOrders(domain, { tick })
     .filter((o) => o.pending !== 'create')
@@ -122,9 +143,34 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
     },
     generating: Boolean(generating),
     gameDate: worldDateLabel(world),
+    faith:
+      faith == null
+        ? null
+        : {
+            name: config.faith?.name || 'Вера',
+            value: faith,
+            epithet: statEpithet(faith, config),
+            about: clip(
+              config.faith?.about ||
+                'Насколько город ещё верит, что ты — его бог.',
+              280,
+            ),
+          },
     stats,
     events: collectEvents(domain, conflux, config),
-    processes: ownProcesses(domain, conflux).map((p) => slimProcess(p, config)),
+    processes: (domain.officers || []).map((o) => {
+      const proc = o.processId
+        ? ownProcesses(domain, conflux).find((p) => p.id === o.processId)
+        : null;
+      return {
+        title: o.title,
+        name: o.name,
+        office: o.office,
+        officerId: o.id,
+        hasPortrait: Boolean(o.portraitPath || o.portraitBase64),
+        process: proc ? slimProcess(proc, config) : null,
+      };
+    }),
     orders,
   };
 }

@@ -4,6 +4,7 @@ import yaml from 'js-yaml';
 import { createWorldFromConfig, normalizeDomain, normalizeWorld } from '../game/models.js';
 import { writeWorldArchive } from './worldArchive.js';
 import { attachStoryPoolsFromCatalog } from '../game/annotationCatalog.js';
+import { ensureOfficersFromLore, stripOfficerPortraitPayload } from '../game/officers.js';
 
 async function ensureDir(dir) {
   await fs.mkdir(dir, { recursive: true });
@@ -102,11 +103,16 @@ export class YamlStorage {
 
   async getDomain(domainId) {
     const domain = await readYaml(this.domainPath(domainId), null);
-    return domain ? normalizeDomain(domain) : null;
+    if (!domain) return null;
+    normalizeDomain(domain);
+    ensureOfficersFromLore(domain, this.config);
+    return domain;
   }
 
   async saveDomain(domain) {
     normalizeDomain(domain);
+    ensureOfficersFromLore(domain, this.config);
+    stripOfficerPortraitPayload(domain);
     domain.updatedAt = new Date().toISOString();
     await writeYaml(this.domainPath(domain.id), domain);
     return domain;
@@ -123,7 +129,11 @@ export class YamlStorage {
     for (const file of files) {
       if (!file.endsWith('.yaml')) continue;
       const domain = await readYaml(path.join(dir, file), null);
-      if (domain) domains.push(normalizeDomain(domain));
+      if (domain) {
+        normalizeDomain(domain);
+        ensureOfficersFromLore(domain, this.config);
+        domains.push(domain);
+      }
     }
     return domains;
   }

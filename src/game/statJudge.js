@@ -3,9 +3,9 @@
  * записи месяца и ставит, какие стороны города задеты. Величину считает движок.
  */
 
-import { findPlotline, plotScale } from './plotlines.js';
-import { resolveStatDeltas, planQuietDrift } from './plotEngine.js';
-import { applyStatDeltas, statEpithet } from './stats.js';
+import { findPlotline, plotStatForce } from './plotlines.js';
+import { resolveStatDeltas } from './plotEngine.js';
+import { applyStatDeltasToDomain, statEpithet } from './stats.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 
@@ -28,23 +28,8 @@ function plotForFact(domain, fact) {
   return null;
 }
 
-function closedThisTick(domain, fact, tick) {
-  const closed = domain.closedPlotlines || [];
-  return (fact?.relatedPlotlineIds || []).some((id) =>
-    closed.some((p) => p.id === id && p.closedTick === tick),
-  );
-}
-
 export function factsForStatJudge(chronicleAdds = []) {
   return (chronicleAdds || []).filter((f) => f && f.author !== 'storyteller:quiet');
-}
-
-function importanceForFact(domain, fact) {
-  const plot = plotForFact(domain, fact);
-  if (plot) return plotScale(plot);
-  if (PLAYER_AUTHORS.has(fact?.author)) return 45;
-  if (fact?.importance === 'major' || fact?.importance === 'critical') return 70;
-  return 40;
 }
 
 /** Концовка дела/истории задаёт знак следа: crit без минусов, fail без плюсов. */
@@ -63,39 +48,30 @@ export function enforceFinishPolarity(deltas, finish) {
   return next;
 }
 
-/** Если оценщик пропустил запись, движок всё равно оставляет лёгкий след. */
-export function applyFallbackStatDrift({
-  domain,
-  config,
-  chronicleAdds = [],
-  budget = null,
-  rng = Math.random,
-  log = null,
-} = {}) {
-  const pending = (chronicleAdds || []).filter(
-    (f) => f && !(f.statChanges && Object.keys(f.statChanges).length),
-  );
-  if (!pending.length) return null;
-  let last = null;
-  for (const fact of pending) {
-    const drift = planQuietDrift(domain, config, rng, { force: true });
-    if (!drift) continue;
-    const deltas = enforceFinishPolarity(
-      resolveStatDeltas(domain, [drift], {
-        importance: importanceForFact(domain, fact),
-        source: sourceForFact(fact),
-        budget,
-        config,
-      }),
-      fact.processFinish,
-    );
-    const changes = applyStatDeltas(domain.stats, deltas);
-    if (!Object.keys(changes).length) continue;
-    fact.statChanges = changes;
-    log?.info?.('statJudge.fallback_drift', { factId: fact.id, deltas, changes });
-    last = { factId: fact.id, changes };
+/** Тихий месяц и пропуски оценщика больше не двигают статы. */
+export function applyFallbackStatDrift() {
+  return null;
+}
+
+function polarityOf(fact) {
+  const f = String(fact?.processFinish || '');
+  if (f === 'crit') return 'nonneg';
+  if (f === 'fail') return 'nonpos';
+  return 'any';
+}
+
+function absBudgetForFact(domain, fact, config) {
+  if (/order/i.test(String(fact?.author || ''))) return 0;
+  if (fact?.author === 'storyteller:quiet') return 0;
+  if (fact?.processFinish) {
+    const proc = (domain.state?.pendingActions || []).find((a) => a.id === fact.relatedPendingId);
+    const months = Math.max(1, Number(proc?.expectedMonths || proc?.durationMonths || 1));
+    return months * (Number(config?.tick?.officerStatPerMonth) || 1);
   }
-  return last;
+  const plot = plotForFact(domain, fact);
+  if (!plot || plot.kind === 'order' || plot.kind === 'errand') return 0;
+  const opening = /start/i.test(String(fact.author || ''));
+  return plotStatForce(plot, { opening, config });
 }
 
 function statsBrief(domain, config) {
@@ -256,14 +232,21 @@ export async function scoreMonthStats({
     seen.add(id);
 
     const note = String(mark.catastrophe || '').trim();
+    const absBudget = absBudgetForFact(domain, fact, config);
+    if (!absBudget) {
+      if (note) {
+        fact.importance = 'critical';
+        if (!catastrophe) catastrophe = { title: entryKind(fact, domain), text: fact.text, note };
+      }
+      continue;
+    }
     const deltas = enforceFinishPolarity(
       resolveStatDeltas(domain, mark.affects || [], {
-        importance: importanceForFact(domain, fact),
-        finale: closedThisTick(domain, fact, world.tickIndex),
         source: sourceForFact(fact),
-        budget,
         config,
         catastrophe: Boolean(note),
+        absBudget,
+        polarity: polarityOf(fact),
       }),
       fact.processFinish,
     );
@@ -275,7 +258,7 @@ export async function scoreMonthStats({
       continue;
     }
 
-    const changes = applyStatDeltas(domain.stats, deltas);
+    const changes = applyStatDeltasToDomain(domain, deltas);
     if (Object.keys(changes).length) {
       fact.statChanges = changes;
       scored += 1;

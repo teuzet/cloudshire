@@ -1,3 +1,15 @@
+import { emptyPlayerDirectives, normalizePlayerDirectives, hasUnresolvedConflicts } from './playerDirectives.js';
+import {
+  emptyAxesState,
+  normalizeAxesState,
+  normalizeQuestionnaire,
+  emptyQuestionnaire,
+  emptyAxisInterview,
+  normalizeAxisInterview,
+  missingAxisIds,
+  nextAxisOffer,
+} from './genesisAxes.js';
+
 const BANNED_EXACT = new Set(
   [
     'город',
@@ -75,25 +87,24 @@ export function emptyOnboardingDraft() {
     messages: [],
     cityName: null,
     cityNameApproved: false,
-    tagChoices: {}, // groupId -> tagId | freeform label
-    /** quick | brief | questions | dossier | null */
+    /** quick | brief | questions | null (dossier = brief) */
     mode: null,
     /** intro | collecting | pitched | named | generating */
     phase: 'intro',
-    /** Бриф пожеланий игрока для генезиса — не стенограмма чата, но может быть подробным. */
     playerBrief: {
       city: '',
       ruler: '',
       freeform: '',
     },
     pitched: false,
-    /** Последнее имя, которое агент или игрок уже назвал (ещё без set_city_name). */
     pitchedName: null,
-    /** Теги на момент этого питча — чтобы не потерять их, если агент рандомит снова. */
-    pitchedTagChoices: {},
-    /** Как к игроку-богу будут обращаться. Без этого генезис не стартует. */
     patronName: null,
     patronNameApproved: false,
+    axes: emptyAxesState(),
+    playerDirectives: emptyPlayerDirectives(),
+    concept: null,
+    questionnaire: emptyQuestionnaire(),
+    axisInterview: emptyAxisInterview(),
   };
 }
 
@@ -108,8 +119,12 @@ export function deriveOnboardingPhase(draft, { generating = false } = {}) {
 export function normalizeOnboardingDraft(draft) {
   const d = draft && typeof draft === 'object' ? draft : emptyOnboardingDraft();
   if (!Array.isArray(d.messages)) d.messages = [];
-  if (!d.tagChoices || typeof d.tagChoices !== 'object') d.tagChoices = {};
-  if (!d.pitchedTagChoices || typeof d.pitchedTagChoices !== 'object') d.pitchedTagChoices = {};
+  d.axes = normalizeAxesState(d.axes);
+  d.playerDirectives = normalizePlayerDirectives(d.playerDirectives);
+  d.questionnaire = normalizeQuestionnaire(d.questionnaire);
+  d.axisInterview = normalizeAxisInterview(d.axisInterview);
+  if (d.mode === 'dossier') d.mode = 'brief';
+  if (d.concept && typeof d.concept !== 'object') d.concept = null;
   if (!d.playerBrief || typeof d.playerBrief !== 'object') {
     d.playerBrief = { city: '', ruler: '', freeform: '' };
   } else {
@@ -153,26 +168,53 @@ export function hasPatronName(draft) {
   return Boolean(String(draft?.patronName || '').trim());
 }
 
+export function hasReadyConcept(draft) {
+  return draft?.concept?.status === 'READY' && Boolean(draft?.concept?.name);
+}
+
 export function canStartOnboarding(draft) {
-  return Boolean(draft?.cityNameApproved && draft?.cityName && hasPatronName(draft));
+  return Boolean(
+    draft?.cityNameApproved &&
+      draft?.cityName &&
+      hasPatronName(draft) &&
+      hasReadyConcept(draft) &&
+      !hasUnresolvedConflicts(draft?.playerDirectives),
+  );
 }
 
 export function formatOnboardingStatusCard(draft, config, { generating = false, occupiedByKey = null } = {}) {
   const d = draft || emptyOnboardingDraft();
   const phase = deriveOnboardingPhase(d, { generating });
-  const tagCount = Object.keys(d.tagChoices || {}).length;
-  const tagTotal = (config?.genesis?.tagGroups || []).length;
-  const pitched = hasPitchedCity(d);
+  const dirs = normalizePlayerDirectives(d.playerDirectives);
+  const axes = normalizeAxesState(d.axes);
+  const axisCount = Object.keys(axes).length;
+  const pitched = hasPitchedCity(d) || hasReadyConcept(d);
   const brief = d.playerBrief || {};
   const cityPreview = String(brief.city || '').trim().slice(0, BRIEF_PROMPT_CITY_MAX);
   const rulerPreview = String(brief.ruler || '').trim().slice(0, BRIEF_PROMPT_RULER_MAX);
   const freeformPreview = String(brief.freeform || '').trim().slice(0, 4000);
+  const conceptLine = hasReadyConcept(d)
+    ? `концепт=READY «${d.concept.name}»`
+    : d.concept?.status === 'NEEDS_PLAYER_REVISION'
+      ? 'концепт=нужна правка космологии'
+      : 'концепт=нет';
   const lines = [
     `фаза=${phase}; режим=${d.mode || 'не выбран'};`,
-    `питч=${d.pitchedName || '—'}; имя=${d.cityName || '—'} approved=${Boolean(d.cityNameApproved)};`,
+    `питч=${d.pitchedName || d.concept?.name || '—'}; имя=${d.cityName || '—'} approved=${Boolean(d.cityNameApproved)};`,
     `покровитель=${d.patronName || '—'} approved=${Boolean(d.patronNameApproved)};`,
-    `черты=${tagCount}/${tagTotal}${pitched ? '' : ' (это не питч)'}; ждатьСтарта=${pitched ? 'да, только после имени бога и явного согласия' : 'нет'}.`,
+    `${conceptLine}; оси=${axisCount}; required=${dirs.required.length}; конфликты=${dirs.unresolvedConflicts.length};`,
+    `ждатьСтарта=${canStartOnboarding(d) ? 'да, после явного согласия' : 'нет'}.`,
   ];
+  if (dirs.unresolvedConflicts.length) {
+    lines.push('Неразрешённые конфликты космологии (назови игроку, предложи адаптации, не чини молча):');
+    for (const c of dirs.unresolvedConflicts) {
+      lines.push(`- «${c.requested}»: ${c.reason}`);
+      for (const a of c.adaptations || []) lines.push(`    можно: ${a}`);
+    }
+  }
+  if (hasReadyConcept(d) && d.concept.preview) {
+    lines.push(`PREVIEW КОНЦЕПТА (это и есть питч, не выдумывай другой город):\n${d.concept.preview}`);
+  }
   if (cityPreview) lines.push(`бриф города для генезиса:\n${cityPreview}`);
   if (rulerPreview) lines.push(`правитель:\n${rulerPreview}`);
   if (freeformPreview) lines.push(`ещё к брифу:\n${freeformPreview}`);
@@ -180,26 +222,54 @@ export function formatOnboardingStatusCard(draft, config, { generating = false, 
     lines.push('Город ещё не предложен. Не пиши «город уже предложен» и не вызывай start_new_game.');
   } else {
     lines.push(
-      'Имя города уже названо. НЕ вызывай randomize_all_tags и не выдумывай новый город. ' +
-        (hasPatronName(d)
-          ? 'Согласие («да/начинаем/создавай/готов») → set_city_name + start_new_game.'
-          : 'Спроси, как к игроку-богу обращаться. Имя бога придумывает игрок, не ты. Без set_patron_name генезис не стартует.') +
+      'Концепт уже есть. НЕ вызывай sample_genesis_axes заново и не выдумывай новый город. ' +
+        (hasUnresolvedConflicts(d.playerDirectives)
+          ? 'Сначала разреши конфликты космологии.'
+          : hasPatronName(d)
+            ? 'Согласие («да/начинаем/создавай/готов») → set_city_name + start_new_game.'
+            : 'Спроси, как к игроку-богу обращаться. Имя бога придумывает игрок, не ты. Без set_patron_name генезис не стартует.') +
         ' Новый набор — только если игрок просит другой город.',
     );
   }
-  if (d.mode === 'quick' && !pitched) {
-    lines.push('Режим quick: один раз randomize_all_tags, опиши город с именем и спроси согласия.');
-  }
-  if (d.mode === 'dossier') {
+  if (d.mode === 'quick' && !hasReadyConcept(d)) {
     lines.push(
-      'Режим dossier: игрок несёт своё ТЗ. Перескажи, лови дыры, не финализируй. ' +
-        'Длинный текст → set_player_brief: подробный бриф для генезиса (формулировки игрока сохрани). ' +
-        'Сжимай только болтовню и повторы, не выкидывай канон в абзац. ' +
-        'Старт только после имени и явного «создавай/готов».',
+      'Режим quick: оси уже семплируются в set_onboarding_mode. Покажи preview, когда он вернётся. Не задавай анкету.',
     );
   }
-  if (d.mode === 'questions') {
-    lines.push('Режим questions: 1–2 живых вопроса за ход. Имя предложи сам, когда картина сложилась.');
+  if (d.mode === 'brief' && !hasReadyConcept(d)) {
+    const missing = missingAxisIds(config, d.axes);
+    const offer = nextAxisOffer(config, d.axes);
+    lines.push(
+      'Режим brief: описание любой длины. Сохрани текст в set_player_brief. Выведи из него set_axis, что можешь.',
+    );
+    if (missing.length && offer) {
+      lines.push(
+        `Не хватает осей (${missing.length}). Следующая: «${offer.prompt}».`,
+        `Варианты: ${offer.options.map((o) => `${o.id} «${o.label}»`).join('; ')}.`,
+        'Плюс random (система) или agent (ты выбираешь value из каталога). Один вопрос за ход — resolve_axis.',
+        'Не request_city_concept, пока все оси не закрыты.',
+      );
+    } else {
+      lines.push('Оси закрыты. request_city_concept. Не описывай город до preview.');
+    }
+  }
+  if (d.mode === 'questions' && !hasReadyConcept(d)) {
+    const interview = normalizeAxisInterview(d.axisInterview);
+    const offer = nextAxisOffer(config, d.axes);
+    if (offer) {
+      lines.push(
+        `АНКЕТА. Задай ОДИН вопрос: «${offer.prompt}».`,
+        `Варианты: ${offer.options.map((o) => `${o.id} «${o.label}»`).join('; ')}.`,
+        'Ещё: random — система; agent — ты сам выбираешь value. resolve_axis. Не выдумывай дерево.',
+        'Не sample_genesis_axes и не request_city_concept, пока оси не закрыты.',
+      );
+    } else if (!interview.uniqueFeatureAsked) {
+      lines.push(
+        'Оси закрыты. Спроси, хочет ли игрок добавить уникальную изюминку (set_unique_feature с text или skip=true). Потом request_city_concept.',
+      );
+    } else {
+      lines.push('Анкета собрана. request_city_concept. Не описывай город до preview.');
+    }
   }
   if (d.pitchedName && isCityNameOccupied(d.pitchedName, occupiedByKey)) {
     lines.push(`Питч «${d.pitchedName}» уже занят — не подтверждай его, предложи другое имя.`);
@@ -348,6 +418,20 @@ export function collectOccupiedCityNames({
   return byKey;
 }
 
+/** Имена из Map/массива занятых — для промпта концепта. */
+export function occupiedNameList(occupiedByKey, limit = 40) {
+  if (!occupiedByKey) return [];
+  let names = [];
+  if (Array.isArray(occupiedByKey)) names = occupiedByKey.map(String);
+  else if (occupiedByKey instanceof Map) names = [...occupiedByKey.values()];
+  else if (typeof occupiedByKey.values === 'function') names = [...occupiedByKey.values()];
+  else if (typeof occupiedByKey === 'object') names = Object.values(occupiedByKey).map(String);
+  return names
+    .map((n) => String(n || '').trim())
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
 export function validateCityNameAvailable(raw, occupiedByKey) {
   const v = validateCityName(raw);
   if (!v.ok) return v;
@@ -365,254 +449,6 @@ export function appendNameTakenNote(reply, name) {
   return `${text}\n\n${note}`;
 }
 
-/** Случайно заполнить все группы тегов из каталога (перезаписывает текущие). */
-export function randomizeAllTags(config, rng = Math.random) {
-  const chosen = {};
-  const applied = [];
-  for (const group of config.genesis?.tagGroups || []) {
-    const tag = group.tags[Math.floor(rng() * group.tags.length)];
-    chosen[group.id] = tag.id;
-    applied.push({ groupId: group.id, group: group.name, tagId: tag.id, tag: tag.name });
-  }
-  return { chosen, applied, forPlayer: formatTagChoicesForPlayer(config, chosen) };
-}
-
-/** Человекочитаемая сводка выбранных тегов для речи к игроку. */
-export function formatTagChoicesForPlayer(config, tagChoices = {}) {
-  const lines = [];
-  for (const group of config.genesis?.tagGroups || []) {
-    const raw = tagChoices[group.id];
-    if (raw == null || raw === '') continue;
-    const fromCatalog = group.tags.find((t) => t.id === raw);
-    const label = fromCatalog ? fromCatalog.name : String(raw);
-    lines.push(`${group.name}: ${label}`);
-  }
-  return lines.length ? lines.join('\n') : '(теги ещё не заданы)';
-}
-
-export function listTagCatalog(config) {
-  return (config.genesis.tagGroups || []).map((g) => ({
-    groupId: g.id,
-    groupName: g.name,
-    tags: g.tags.map((t) => ({ tagId: t.id, tagName: t.name })),
-  }));
-}
-
-/** Короткий текст каталога для system/extra — чтобы агент не выдумывал группы. */
-export function formatTagCatalogForPrompt(config) {
-  return listTagCatalog(config)
-    .map((g) => {
-      const tags = g.tags.map((t) => `${t.tagId}=${t.tagName}`).join('; ');
-      return `- ${g.groupId} «${g.groupName}»: ${tags}`;
-    })
-    .join('\n');
-}
-
-export function resolveTagChoice(config, tagChoices = {}) {
-  return (config.genesis.tagGroups || []).map((group) => {
-    const forcedId = tagChoices[group.id];
-    const tag =
-      (forcedId && group.tags.find((t) => t.id === forcedId)) ||
-      group.tags[Math.floor(Math.random() * group.tags.length)];
-    return {
-      groupId: group.id,
-      groupName: group.name,
-      tagId: tag.id,
-      tagName: tag.name,
-      forced: Boolean(forcedId && group.tags.some((t) => t.id === forcedId)),
-    };
-  });
-}
-
-/**
- * Эвристика: вытащить groupId→значение из свободного текста игрока.
- * Значения — свободные слова (не обязаны быть id из каталога).
- * Каталог используется только как подсказка смысла группы.
- */
-export function inferTagChoicesFromText(config, text, existing = {}) {
-  const raw = String(text || '').toLowerCase();
-  if (raw.length < 4) return { ...existing };
-
-  const rules = {
-    climate: [
-      { label: 'морозный, снежный', re: /снег|снежн|мороз|зим|холод|ледян|аркти/ },
-      { label: 'тропический, джунгли', re: /джунгл|тропик|влажн.*жар|экватор/ },
-      { label: 'сухой, пустынный', re: /пустын|засух|сухой\s+край|арид/ },
-      { label: 'бурный, ветреный', re: /бурный|ветрен|шторм|ураган/ },
-      { label: 'туманный', re: /туман/ },
-      { label: 'влажный', re: /влажн/ },
-      { label: 'дождливый', re: /дождл|ливн/ },
-      { label: 'сезон муссонов / ливней', re: /муссон/ },
-      { label: 'пепельный / вулканическая пыль', re: /пепельн|вулканическ.*пыл|пеплопад/ },
-      { label: 'разреженный воздух высот', re: /разрежен|высокогорн.*воздух/ },
-      { label: 'вечные сумерки под облаками', re: /сумерк|вечная\s+тень/ },
-      { label: 'ослепительно ясный', re: /ослепительн|ясн.*неб/ },
-      { label: 'солёные ветры', re: /солен.*ветр|солён.*ветр/ },
-      { label: 'мягкий, вечно-весенний', re: /вечно.?весен|мягк.*климат/ },
-    ],
-    terrain: [
-      { label: 'скалистые пики', re: /скал|пик|горн|ущель/ },
-      { label: 'пещеры', re: /пещер/ },
-      { label: 'террасы и уступы', re: /террас|уступ/ },
-      { label: 'кальдера / кратер', re: /кальдер|кратер|вулкан/ },
-      { label: 'рой малых островков', re: /рой\s+остров|осколк/ },
-      { label: 'плоскогорье', re: /плоскогор|плато/ },
-      { label: 'ущелья и трещины', re: /ущель|трещин.*скал/ },
-      { label: 'столовая гора / меса', re: /\bмеса\b|столов.*гор/ },
-      { label: 'болота и топи', re: /болот|топ[иь]/ },
-      { label: 'песчаные дюны', re: /дюн|песчан/ },
-      { label: 'кристаллические хребты', re: /кристалл/ },
-      { label: 'лесистые склоны', re: /лесист|лесн.*склон/ },
-      { label: 'висячие озёра', re: /висяч.*озёр|озёр.*обрыв/ },
-      { label: 'базальтовые ступени', re: /базальт/ },
-      { label: 'полый / пронизанный пустотами', re: /полый\s+остров|пустот.*недр/ },
-      { label: 'узкий хребет-лезвие', re: /хребет.?лезв|нож.?хребет/ },
-    ],
-    economy: [
-      { label: 'добыча руд и камня', re: /руд|шахт|добыч|каменолом|металл/ },
-      { label: 'торговля', re: /торгов|перевалк|рынок|караван/ },
-      { label: 'ремёсла и мануфактуры', re: /рем[её]сл|мануфакт|мастерск/ },
-      { label: 'земледелие и сады', re: /земледел|сад[ыа]|пашн|ферм/ },
-      { label: 'скотоводство', re: /скот|пастбищ/ },
-      { label: 'храмовые сборы на острове', re: /паломнич|храмов.*сбор/ },
-      { label: 'промысел у края / лов с обрыва', re: /охот.*облак|промысел.*неб|лов.*обрыв|промысел.*кра/ },
-      { label: 'вино / брага / дистиллят', re: /винодел|браг|дистиллят|винокур/ },
-      { label: 'ткани и красильни', re: /ткан|красильн|пряж/ },
-      { label: 'канаты, леса и подъёмники', re: /судостро|верф.*стро|канат|такелаж|лес.*подъём/ },
-      { label: 'лекарства и травы', re: /лекарств|травник|аптек/ },
-      { label: 'книги, чернила, перепись', re: /книгопечат|чернил|скриптор|перепис/ },
-      { label: 'огранка камней', re: /огранк|ювелир/ },
-      { label: 'сбор обломков с неба', re: /обломк.*неб|salvage|сбор.*облом/ },
-      { label: 'найм стражи / сопровождение', re: /найм.*страж|сопровожден/ },
-      { label: 'сборы с праздников и ярмарок', re: /ярмарочн|сбор.*праздник/ },
-      { label: 'продажа / развоз воды', re: /развоз.*вод|торгов.*вод/ },
-      { label: 'алхимия и реактивы', re: /алхим|реактив/ },
-    ],
-    paradigm: [
-      { label: 'технократия, смесь магии и механизмов', re: /технократ|маги.*техн|техн.*маг|смесь\s+магии|магия\s+и\s+техн/ },
-      { label: 'технологии и механизмы', re: /технолог|механизм|машин|паро|инженер/ },
-      { label: 'магия', re: /маги|колдов|чародей|волшеб/ },
-      { label: 'традиционный уклад', re: /традиц|древн.*уклад/ },
-      { label: 'устные предания сильнее книг', re: /устн.*предан|сказител/ },
-      { label: 'канцелярия и реестры', re: /канцеляр|реестр|бюрократ/ },
-      { label: 'цеховые тайны', re: /цехов.*тайн|гильд.*секрет/ },
-      { label: 'знания через знамения', re: /знамен.*знан|пророческ.*учен/ },
-      { label: 'опыты и риск', re: /эксперимент|опытн.*школ/ },
-      { label: 'запретные архивы', re: /запретн.*архив/ },
-      { label: 'мастера-наставники', re: /мастер.?настав|ученичеств/ },
-      { label: 'чтение ветров и звёзд', re: /навигац|зв[её]здн.*карт|чтени.*ветр/ },
-    ],
-    temper: [
-      { label: 'учёные', re: /учёны|научн|академи/ },
-      { label: 'воинственный', re: /воинств|ратный|боевой/ },
-      { label: 'набожный', re: /набожн|благочест|жрец/ },
-      { label: 'торговый, расчётливый', re: /торговый\s+нрав|расчётлив/ },
-      { label: 'гостеприимный', re: /гостеприим/ },
-      { label: 'беспокойный', re: /бескокойн|неспокойн/ },
-      { label: 'стойкий, немногословный', re: /стойк.*нрав|немногослов/ },
-      { label: 'праздничный, шумный', re: /праздничн.*нрав|шумный\s+город/ },
-      { label: 'подозрительный к чужакам', re: /подозрительн.*чуж|недоверчив/ },
-      { label: 'гордый честью', re: /горд.*чест|честь\s+рода/ },
-      { label: 'бережливый до скупости', re: /бережлив|скуп/ },
-      { label: 'любопытный', re: /любопытн/ },
-      { label: 'суеверно-фаталистичный', re: /фаталист|суеверн/ },
-      { label: 'равный, не любит титулов', re: /не\s+любит\s+титул|эгалитар/ },
-      { label: 'чтит ранги и дома', re: /чтит\s+ранг|иерархич/ },
-      { label: 'меланхоличный', re: /меланхол/ },
-    ],
-    architecture: [
-      { label: 'вросший в скалу', re: /вросш.*скал|в\s+скал|высечен/ },
-      { label: 'башни и шпили', re: /башн|шпил/ },
-      { label: 'крепостные кольца', re: /крепост|стены|кольц.*стен/ },
-      { label: 'сторожевые выступы у края', re: /верф|небесн.*суд|сторож.*выступ|караул.*кра/ },
-      { label: 'сады и висячие дворы', re: /висяч.*сад|сады\s+и/ },
-      { label: 'лабиринты рынков', re: /базар|лабиринт.*рынк/ },
-      { label: 'мосты и галереи над пропастью', re: /галере.*пропаст|мост.*обрыв/ },
-      { label: 'амфитеатры и площади', re: /амфитеатр/ },
-      { label: 'каналы и цистерны', re: /цистерн|канал.*вод/ },
-      { label: 'деревянные подъёмники', re: /подъ[её]мник/ },
-      { label: 'мозаики и росписи', re: /мозаик|роспис/ },
-      { label: 'низкие крыши от ветра', re: /низк.*крыш/ },
-      { label: 'лестницы по обрыву', re: /лестниц.*обрыв/ },
-      { label: 'стеклянные оранжереи', re: /оранжерей|стеклянн.*дом/ },
-      { label: 'кость и камень в фасадах', re: /кость.*камен|костяной\s+фасад/ },
-      { label: 'шатровые кварталы', re: /шатров|палаточн.*квартал/ },
-    ],
-    society: [
-      { label: 'власть гильдий', re: /власть\s+гильд|гильдии\s+правят/ },
-      { label: 'сильная роль храма', re: /храм.*власть|жрецы\s+сильн/ },
-      { label: 'дома знати', re: /дома\s+знати|аристократ/ },
-      { label: 'совет старейшин', re: /совет\s+старейшин/ },
-      { label: 'купеческие князья', re: /купеческ.*княз|олигарх/ },
-      { label: 'касты ремёсел', re: /касты?\s+рем[её]сл/ },
-      { label: 'гражданское ополчение', re: /гражданск.*ополчен/ },
-      { label: 'учёная элита', re: /учёная\s+элита/ },
-      { label: 'кланы и родство', re: /кланы|родов.*строй/ },
-      { label: 'свободные кварталы', re: /свободн.*квартал/ },
-      { label: 'долговая кабала', re: /долговая\s+кабал|кабала/ },
-      { label: 'патронаж сильных домов', re: /патронаж/ },
-    ],
-    faith_shape: [
-      { label: 'единый покровитель', re: /единый\s+покровител|монотеи/ },
-      { label: 'старый пантеон рядом с новым', re: /старый\s+пантеон|многобож/ },
-      { label: 'культ предков', re: /культ\s+предков/ },
-      { label: 'жизнь по знамениям', re: /жизнь\s+по\s+знамен/ },
-      { label: 'тихая повседневная набожность', re: /тихая\s+набожн/ },
-      { label: 'громкие публичные обряды', re: /громк.*обряд|публичн.*ритуал/ },
-      { label: 'тайные ордена', re: /тайные?\s+ордена?/ },
-      { label: 'тлеющие ереси', re: /тлеющ.*ерес|ерес.*тле/ },
-      { label: 'почитание реликвий', re: /реликви/ },
-      { label: 'почитание неба и ветра', re: /почитан.*неб|культ\s+ветра/ },
-      { label: 'вера как договор о милости', re: /договор.*милост|прагматичн.*вер/ },
-      { label: 'вера через ужас и благоговение', re: /ужас.*благоговен|страхопочитан/ },
-    ],
-    pressure: [
-      { label: 'нехватка воды', re: /нехватк.*вод|жажд/ },
-      { label: 'раскол культов', re: /раскол\s+культ/ },
-      { label: 'угроза небесных тварей', re: /небесн.*твар|звер.*неб/ },
-      { label: 'старое проклятие', re: /проклят|табу/ },
-      { label: 'наплыв беженцев', re: /бежен/ },
-      { label: 'тревога из-за силуэтов в небе', re: /тревог.*силуэт|сосед.*остров/ },
-      { label: 'тонкие запасы зерна', re: /тонк.*запас|нехватк.*зерн/ },
-      { label: 'осыпающийся край', re: /осыпа.*край|эрози.*обрыв/ },
-      { label: 'безумие от ветра', re: /безумие.*ветр|ветер.*сводит/ },
-      { label: 'память о чуме', re: /память.*чум|после\s+чумы/ },
-      { label: 'риск обвалов в недрах', re: /обвал.*шахт|обвал.*недр/ },
-      { label: 'вражда домов', re: /вражда\s+домов|междоусобиц/ },
-      { label: 'теневая контрабанда', re: /контрабанд/ },
-      { label: 'паника от знамений', re: /паника.*знамен/ },
-      { label: 'нехватка мастеров', re: /нехватк.*мастер/ },
-      { label: 'долговая спираль', re: /долговая\s+спирал/ },
-      { label: 'тихий ропот улиц', re: /тихий\s+ропот|ропот\s+улиц/ },
-    ],
-  };
-
-  const out = { ...existing };
-  for (const group of config.genesis.tagGroups || []) {
-    if (out[group.id]) continue;
-    const groupRules = rules[group.id] || [];
-    for (const rule of groupRules) {
-      if (!rule.re.test(raw)) continue;
-      out[group.id] = rule.label;
-      break;
-    }
-  }
-  return out;
-}
-
-/** Собрать текст brief + последних реплик игрока для эвристики тегов. */
-export function collectOnboardingPreferenceText(draft) {
-  const parts = [];
-  const brief = draft?.playerBrief || {};
-  for (const key of ['city', 'ruler', 'freeform']) {
-    if (brief[key]) parts.push(String(brief[key]));
-  }
-  const userMsgs = (draft?.messages || []).filter((m) => m.role === 'user' && m.content);
-  for (const m of userMsgs.slice(-4)) {
-    parts.push(String(m.content).slice(0, 2000));
-  }
-  return parts.join('\n');
-}
 
 function hasNegatedGenerationClaim(text) {
   return /(?:ещё|еще|пока|не)\s+(?:не\s+)?(?:начал[аи]?\s+)?созда|не\s+создаю|не\s+финализ|не\s+начинаю\s+(?:созда|финализ|остров)/i.test(
@@ -912,6 +748,30 @@ export function planOnboardingAutoStart({
         reason: 'consent_without_patron',
       };
     }
+    if (hasUnresolvedConflicts(draft?.playerDirectives)) {
+      return {
+        start: false,
+        name: v.name,
+        stripFalseStart: false,
+        appendNeedName: false,
+        appendNeedPatron: false,
+        appendNameTaken: false,
+        takenName: null,
+        reason: 'unresolved_cosmology',
+      };
+    }
+    if (!hasReadyConcept(draft)) {
+      return {
+        start: false,
+        name: v.name,
+        stripFalseStart: false,
+        appendNeedName: false,
+        appendNeedPatron: false,
+        appendNameTaken: false,
+        takenName: null,
+        reason: 'concept_not_ready',
+      };
+    }
     return {
       start: true,
       name: v.name,
@@ -938,14 +798,19 @@ export function planOnboardingAutoStart({
   };
 }
 
-export function maybeSwitchToDossier(draft, userText) {
+export function maybeSwitchToBrief(draft, userText) {
   const raw = String(userText || '').trim();
   if (!draft || raw.length < DOSSIER_SWITCH_MIN) return false;
   if (draft.mode === 'quick' || draft.cityNameApproved) return false;
-  if (draft.mode === 'dossier') return false;
-  draft.mode = 'dossier';
+  if (draft.mode === 'brief') return false;
+  draft.mode = 'brief';
   draft.phase = deriveOnboardingPhase(draft);
   return true;
+}
+
+/** @deprecated dossier свёрнут в brief */
+export function maybeSwitchToDossier(draft, userText) {
+  return maybeSwitchToBrief(draft, userText);
 }
 
 export function rememberLongUserBrief(draft, userText, { usedBriefTool = false } = {}) {

@@ -42,7 +42,7 @@ function memoryStorage() {
 }
 
 const miniConfig = {
-  genesis: { tagGroups: [] },
+  genesis: { axes: [] },
   tick: { intervalHours: 2 },
   telegram: { enabled: false },
 };

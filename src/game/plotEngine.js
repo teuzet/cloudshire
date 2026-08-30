@@ -19,6 +19,8 @@ import {
   clipPlotText,
   PLOT_SUMMARY_MAX,
   isThreeActPlot,
+  plotHasActiveProcess,
+  closePlotline,
 } from './plotlines.js';
 import {
   beatChance,
@@ -26,8 +28,16 @@ import {
   rollTint,
   tintFromProcessOutcome,
   TINT_LABELS,
+  rollProcessAdvance,
 } from './rolls.js';
 import { applyStoryActMove } from './storyActs.js';
+import { engagementOf, engagementAttends, applyEngagement } from './plotAlign.js';
+import {
+  applyEngineProgress,
+  processStatAverage,
+  normalizeProcess,
+} from './processes.js';
+import { releaseOfficerProcess } from './officers.js';
 
 /** Месячные часы доски: возраст растёт, интерес остывает. */
 export function advancePlotMonth(domain, cfg) {
@@ -91,6 +101,173 @@ export function linkProcessToPlotline(domain, processId, plotlineId) {
   return plot;
 }
 
+function unlinkProcessFromPlot(plot, processId) {
+  const id = String(processId);
+  plot.relatedProcessIds = (plot.relatedProcessIds || []).filter((x) => String(x) !== id);
+  return plot;
+}
+
+function processTime(process) {
+  const t = Date.parse(process?.createdAt || '');
+  return Number.isFinite(t) ? t : 0;
+}
+
+function findProcessById(domain, processId) {
+  return (domain?.state?.pendingActions || []).find((a) => String(a.id) === String(processId)) || null;
+}
+
+/** DIRECT/RELEVANT активные дела на нити, старше первым. */
+export function attendingQueueForPlot(domain, plot) {
+  const ids = new Set((plot?.relatedProcessIds || []).map(String));
+  return (domain?.state?.pendingActions || [])
+    .filter((a) => {
+      if (!ids.has(String(a.id))) return false;
+      if (a.status && a.status !== 'active') return false;
+      return engagementAttends(engagementOf(a));
+    })
+    .sort((a, b) => processTime(a) - processTime(b) || String(a.id).localeCompare(String(b.id)));
+}
+
+/**
+ * UNRELATED на трёхтактной нити — ошибка привязки: своя проходная карточка.
+ * Автотик и такты истории это дело больше не трогает.
+ */
+export function rehomeUnrelatedProcess(domain, process, { tick = null, config = null } = {}) {
+  if (!process || process.intel) return { plot: null, rehomed: false, originPlot: null };
+  const attached = plotsForProcess(domain, process.id);
+  if (engagementAttends(engagementOf(process))) {
+    return { plot: attached[0] || findPlotline(domain, process.plotlineId) || null, rehomed: false, originPlot: null };
+  }
+  const stories = attached.filter((p) => isThreeActPlot(p));
+  const errands = attached.filter((p) => p.kind === 'errand');
+  if (!stories.length) {
+    return { plot: errands[0] || findPlotline(domain, process.plotlineId) || null, rehomed: false, originPlot: null };
+  }
+  const originPlot = stories[0];
+  for (const plot of stories) unlinkProcessFromPlot(plot, process.id);
+  applyEngagement(process, 'UNRELATED');
+  if (errands.length) {
+    process.plotlineId = errands[0].id;
+    return { plot: errands[0], rehomed: true, originPlot };
+  }
+  process.plotlineId = null;
+  const created = createErrandPlotline(process, { tick, config });
+  domain.plotlines = domain.plotlines || [];
+  domain.plotlines.push(created);
+  process.plotlineId = created.id;
+  return { plot: created, rehomed: true, originPlot };
+}
+
+/** Снять с трёхтактных нитей все дела, которые судья счёл UNRELATED. */
+export function rehomeUnrelatedOnDomain(domain, { tick = null, config = null } = {}) {
+  const moved = [];
+  for (const process of domain?.state?.pendingActions || []) {
+    const result = rehomeUnrelatedProcess(domain, process, { tick, config });
+    if (result.rehomed) moved.push({ process, ...result });
+  }
+  return moved;
+}
+
+/** Остальные дела на нити не уходят в новую карточку: идущие сворачиваем, нужда отпала. */
+export function mootSiblingProcesses(domain, plot, exceptProcessId) {
+  if (!plot) return [];
+  const except = String(exceptProcessId || '');
+  const mooted = [];
+  for (const id of [...(plot.relatedProcessIds || [])]) {
+    if (String(id) === except) continue;
+    const process = findProcessById(domain, id);
+    if (!process) continue;
+    if (!process.status || process.status === 'active') {
+      process.status = 'revoked';
+      process.revokeReason = 'нужда отпала';
+      process.updatedAt = new Date().toISOString();
+      releaseOfficerProcess(domain, process);
+    }
+    mooted.push({ id: process.id, summary: process.summary || process.id });
+  }
+  return mooted;
+}
+
+/**
+ * Снять дело со всех нитей. Пустую карточку-поручение закрыть без новой истории.
+ */
+export function detachProcessFromPlots(domain, process, { tick = null } = {}) {
+  if (!process) return { closedErrands: [] };
+  const attached = plotsForProcess(domain, process.id);
+  for (const plot of attached) unlinkProcessFromPlot(plot, process.id);
+  process.plotlineId = null;
+  const closedErrands = [];
+  for (const plot of attached) {
+    if (plot.kind !== 'errand') continue;
+    if (plotHasActiveProcess(domain, plot)) continue;
+    closePlotline(domain, plot.id, { tick, reason: 'поручение свёрнуто' });
+    closedErrands.push(plot);
+  }
+  return { closedErrands };
+}
+
+export function plotSituationForSpeech(plot) {
+  return clipPlotText(String(plot?.synopsis || plot?.closeWhen || '').trim(), 160);
+}
+
+/**
+ * На трёхтактной нити в месяц тикает только старшее DIRECT/RELEVANT дело.
+ * UNRELATED и поручения идут своим ходом. Если голова очереди уже продвинулась
+ * и завершилась, следующая голова попадёт в следующий заход того же месяца.
+ */
+export function collectProcessAdvanceBatch(domain, alreadyAdvanced = new Set()) {
+  const skip = new Set([...alreadyAdvanced].map(String));
+  const active = (domain?.state?.pendingActions || []).filter(
+    (a) => (!a.status || a.status === 'active') && !skip.has(String(a.id)),
+  );
+  const due = [];
+  for (const process of active) {
+    const stories = plotsForProcess(domain, process.id).filter((p) => isThreeActPlot(p));
+    if (!stories.length || !engagementAttends(engagementOf(process))) {
+      due.push(process);
+      continue;
+    }
+    const blocked = stories.some((plot) => {
+      const head = attendingQueueForPlot(domain, plot)[0];
+      return head && String(head.id) !== String(process.id);
+    });
+    if (!blocked) due.push(process);
+  }
+  return due;
+}
+
+export function applyQueuedEngineProgress(
+  domain,
+  { tick = null, config = null, rng = Math.random, skipProcess = null, averageOf = null } = {},
+) {
+  const outcomes = [];
+  const advanced = new Set();
+  for (let i = 0; i < 24; i += 1) {
+    let batch = collectProcessAdvanceBatch(domain, advanced);
+    if (typeof skipProcess === 'function') batch = batch.filter((p) => !skipProcess(p));
+    if (!batch.length) break;
+    const rolls = batch.map((p) => {
+      normalizeProcess(p, config);
+      const avg = averageOf ? averageOf(p) : processStatAverage(domain, p, config);
+      const rolled = rollProcessAdvance(avg, rng);
+      return {
+        processId: p.id,
+        summary: p.summary,
+        monthsLeftBefore: p.monthsLeft,
+        linkedStats: [...(p.linkedStats || [])],
+        ownerDomainId: p.ownerDomainId || null,
+        ...rolled,
+      };
+    });
+    const part = applyEngineProgress(domain, rolls, { tick, config, rng });
+    for (const o of part) {
+      outcomes.push(o);
+      advanced.add(String(o.processId));
+    }
+  }
+  return outcomes;
+}
+
 function statValue(domain, statId) {
   const v = Number(domain?.stats?.[statId]);
   return Number.isFinite(v) ? v : 50;
@@ -116,7 +293,7 @@ export function planBeats({
   const beats = [];
   const taken = new Set();
 
-  const addBeat = (plot, { mandatory, reason, tint, finale = false, fade = false, outcome = null, actMove = null, skipTint = false }) => {
+  const addBeat = (plot, { mandatory, reason, tint, finale = false, fade = false, outcome = null, actMove = null, skipTint = false, mootedProcesses = null }) => {
     if (!plot) return false;
     const processKey = outcome?.processId ? `${plot.id}:${outcome.processId}` : null;
     if (processKey) {
@@ -150,16 +327,28 @@ export function planBeats({
       processOutcome: outcome,
       actMove: actMove || null,
       skipTint: Boolean(skipTint),
+      mootedProcesses: mootedProcesses?.length ? mootedProcesses : null,
     });
     return true;
   };
 
   // 1. Процессы — всегда, даже сверх потолка. Прыжок такта — только на финише. Intel не двигает сюжет.
-  for (const outcome of processOutcomes) {
+  // На одной нити — по очереди создания: сначала ход истории от первого дела, затем второе уже на новом состоянии.
+  const orderedOutcomes = [...processOutcomes].sort((a, b) => {
+    const pa = findProcessById(domain, a?.processId);
+    const pb = findProcessById(domain, b?.processId);
+    return processTime(pa) - processTime(pb) || String(a?.processId || '').localeCompare(String(b?.processId || ''));
+  });
+  for (const outcome of orderedOutcomes) {
     if (!outcome?.mustNarrate) continue;
     if (outcome.intel) continue;
     for (const plot of plotsForProcess(domain, outcome.processId)) {
+      if (isThreeActPlot(plot) && !engagementAttends(outcome.plotEngagement || engagementOf(findProcessById(domain, outcome.processId)))) {
+        continue;
+      }
+      if (isThreeActPlot(plot) && plot.ending) continue;
       let actMove = null;
+      let mootedProcesses = null;
       if (isThreeActPlot(plot) && outcome.finished) {
         actMove = applyStoryActMove(plot, {
           trigger: 'process_finished',
@@ -169,6 +358,9 @@ export function planBeats({
           rng,
           config: cfg,
         });
+        if (actMove?.ending) {
+          mootedProcesses = mootSiblingProcesses(domain, plot, outcome.processId);
+        }
       }
       addBeat(plot, {
         mandatory: true,
@@ -178,6 +370,7 @@ export function planBeats({
         outcome,
         actMove,
         skipTint: isThreeActPlot(plot),
+        mootedProcesses,
       });
     }
   }
@@ -264,27 +457,65 @@ export function createStatBudget(config) {
 const FORCE_BASE = { slight: 1, notable: 2, heavy: 4 };
 
 /**
+ * Раскладка целых дельт: сумма модулей === budget.
+ */
+export function scaleAffectsToBudget(affects, budget, { polarity = 'any', allowed = null } = {}) {
+  const B = Math.max(0, Math.round(Number(budget) || 0));
+  if (!B) return {};
+  let rows = (affects || [])
+    .map((a) => ({
+      stat: String(a?.stat || ''),
+      dir: a?.direction === 'down' ? -1 : 1,
+      weight: Math.max(1, FORCE_BASE[a?.force] ?? 2),
+    }))
+    .filter((a) => a.stat && (!allowed || allowed.has(a.stat)));
+  if (polarity === 'nonneg') rows = rows.filter((r) => r.dir > 0);
+  if (polarity === 'nonpos') rows = rows.filter((r) => r.dir < 0);
+  if (!rows.length) return {};
+  const sumW = rows.reduce((s, r) => s + r.weight, 0) || 1;
+  const mags = rows.map((r) => Math.max(0, Math.round((r.weight / sumW) * B)));
+  let cur = mags.reduce((a, b) => a + b, 0);
+  let i = 0;
+  while (cur !== B && i < 400) {
+    const idx = i % mags.length;
+    if (cur < B) {
+      mags[idx] += 1;
+      cur += 1;
+    } else if (mags[idx] > 0) {
+      mags[idx] -= 1;
+      cur -= 1;
+    }
+    i += 1;
+  }
+  const deltas = {};
+  rows.forEach((r, idx) => {
+    const v = r.dir * mags[idx];
+    if (v) deltas[r.stat] = (deltas[r.stat] || 0) + v;
+  });
+  return deltas;
+}
+
+/**
  * Направление даёт агент, величину — движок.
- * @param {{stat: string, direction: 'up'|'down', force?: string}[]} affects
+ * Если передан `absBudget`, сумма модулей равна ему (новый контракт).
+ * Иначе старый месячный котёл — не используем.
  */
 export function resolveStatDeltas(
   domain,
   affects = [],
-  { importance = 40, finale = false, source = 'world', budget = null, config = null, catastrophe = false } = {},
+  { source = 'world', budget = null, config = null, catastrophe = false, absBudget = null, polarity = 'any' } = {},
 ) {
-  const cfg = plotConfig(config || {});
   const allowed = new Set((config?.stats || []).map((s) => s.id));
-  const importanceFactor = 0.5 + Math.max(0, Math.min(100, Number(importance) || 0)) / 100;
-  const finaleFactor = finale ? cfg.stats.finaleFactor : 1;
+  if (absBudget != null) {
+    return scaleAffectsToBudget(affects, absBudget, { polarity, allowed });
+  }
   const deltas = {};
-
   for (const a of affects) {
     const stat = String(a?.stat || '');
     if (allowed.size && !allowed.has(stat)) continue;
     const dir = a?.direction === 'down' ? -1 : 1;
     const base = FORCE_BASE[a?.force] ?? FORCE_BASE.notable;
-    let size = Math.max(1, Math.round(base * importanceFactor * finaleFactor));
-
+    let size = Math.max(1, Math.round(base));
     if (budget && !catastrophe) {
       const key = source === 'player' ? 'spentPlayer' : 'spentWorld';
       const cap = source === 'player' ? budget.player : budget.world;
@@ -295,7 +526,6 @@ export function resolveStatDeltas(
     }
     deltas[stat] = (deltas[stat] || 0) + dir * size;
   }
-
   return deltas;
 }
 
@@ -310,29 +540,9 @@ function pickWeighted(items, weights, rng) {
   return items[items.length - 1] || null;
 }
 
-/**
- * След тихого месяца в статах: небольшой сдвиг с тягой к середине.
- * Просевшее чаще выправляется, раздутое чаще садится — спираль не разгоняется.
- * @returns {{stat: string, name: string, direction: 'up'|'down', force: string}|null}
- */
-export function planQuietDrift(domain, config, rng = Math.random, { force = false } = {}) {
-  const cfg = plotConfig(config || {}).quiet;
-  const stats = config?.stats || [];
-  if (!stats.length) return null;
-  if (!force && rng() >= cfg.driftChance) return null;
-
-  const weights = stats.map((s) => 1 + (Math.abs(50 - statValue(domain, s.id)) / 50) * cfg.extremeBias);
-  const stat = pickWeighted(stats, weights, rng);
-  if (!stat) return null;
-
-  const value = statValue(domain, stat.id);
-  const upChance = 0.5 + ((50 - value) / 50) * cfg.meanReversion * 0.5;
-  return {
-    stat: stat.id,
-    name: stat.name || stat.id,
-    direction: rng() < upChance ? 'up' : 'down',
-    force: rng() < cfg.notableChance ? 'notable' : 'slight',
-  };
+/** Тихий месяц не двигает статы. */
+export function planQuietDrift() {
+  return null;
 }
 
 /** Просевшие стороны города — для подсказки о шансе на восстановление. */

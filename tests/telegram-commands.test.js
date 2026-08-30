@@ -69,13 +69,13 @@ test('удаление острова требует имя и отказыва�
 test('сводка статов и нитей читается без механики движка', () => {
   const config = {
     stats: [
-      { id: 'faith', name: 'Вера' },
-      { id: 'might', name: 'Мощь' },
+      { id: 'knowledge', name: 'Знание' },
+      { id: 'security', name: 'Безопасность' },
     ],
   };
   const domain = {
     name: 'Талиндор',
-    stats: { faith: 62, might: 40 },
+    stats: { knowledge: 62, security: 40 },
     plotlines: [
       {
         title: 'Пустая келья',
@@ -90,7 +90,7 @@ test('сводка статов и нитей читается без механ
   };
   const stats = formatIslandStats(domain, config);
   assert.match(stats, /Талиндор/);
-  assert.match(stats, /Вера: 62/);
+  assert.match(stats, /Знание: 62/);
   const board = formatIslandPlotlines(domain);
   assert.match(board, /Пустая келья/);
   assert.match(board, /закроется, когда/);

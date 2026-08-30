@@ -96,6 +96,8 @@ export function backfillPlotChronicles(plot, domainId, conflux, domains = []) {
       importance: fact.importance || 'minor',
       sourcePlotId: plot.id,
       relatedPlotlineIds: [plot.id],
+      plotClosed: Boolean(fact.plotClosed),
+      plotCloseReason: fact.plotCloseReason || null,
     });
     copy.leakedFromId = fact.id;
     viewer.lore.push(copy);
@@ -249,6 +251,8 @@ export function copyChronicleToAwareCities({ plot, fact, conflux, domains, autho
       importance: fact.importance || 'minor',
       sourcePlotId: plot.id,
       relatedPlotlineIds: [plot.id],
+      plotClosed: Boolean(fact.plotClosed),
+      plotCloseReason: fact.plotCloseReason || null,
     });
     domain.lore.push(copy);
     markLoreKnown(conflux, domain.id, fact.id);
@@ -334,6 +338,8 @@ export function maybeLeakChronicle({ plot, fact, conflux, viewerId, viewerDomain
         author: 'conflux-leak',
         importance: 'minor',
         sourcePlotId: plot.id,
+        plotClosed: Boolean(fact.plotClosed),
+        plotCloseReason: fact.plotCloseReason || null,
       });
       copy.leakedFromId = fact.id;
       viewerDomain.lore.push(copy);

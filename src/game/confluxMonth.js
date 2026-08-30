@@ -1,23 +1,22 @@
 import { getLogger } from '../log.js';
+import { newId } from './ids.js';
 import {
   plotConfig,
   findPlotline,
   closePlotline,
   plotHasActiveProcess,
   isOrderPlot,
+  attachChronicleToPlotlines,
 } from './plotlines.js';
 import {
   advancePlotMonth,
   planBeats,
   openLogGate,
   createStatBudget,
+  applyQueuedEngineProgress,
+  rehomeUnrelatedOnDomain,
 } from './plotEngine.js';
-import { rollProcessAdvance } from './rolls.js';
-import {
-  normalizeProcess,
-  applyEngineProgress,
-  processStatAverage,
-} from './processes.js';
+import { processStatAverage } from './processes.js';
 import {
   normalizeConfluxBoard,
   processesForPlots,
@@ -26,6 +25,7 @@ import {
 } from './confluxBoard.js';
 import { beatSharedPlot } from './confluxBeat.js';
 import { fadeQuietPlot, keepSharedStories } from './storyteller.js';
+import { markChroniclePlotClosed, createLoreFact } from './models.js';
 import { scoreMonthStats, factsForStatJudge } from './statJudge.js';
 import { realignFinishedOutcomes } from './plotAlign.js';
 
@@ -50,22 +50,11 @@ function boardFromPlots(conflux, domains, plots) {
   };
 }
 
-function rollConfluxProcesses(conflux, domainsById, config, rng = Math.random) {
-  const list = (conflux.processes || []).filter((p) => !p.status || p.status === 'active');
-  return list.map((p) => {
-    normalizeProcess(p, config);
-    const owner = domainsById.get(p.ownerDomainId) || [...domainsById.values()][0];
-    const avg = processStatAverage(owner || { stats: {} }, p, config);
-    const rolled = rollProcessAdvance(avg, rng);
-    return {
-      processId: p.id,
-      summary: p.summary,
-      monthsLeftBefore: p.monthsLeft,
-      linkedStats: [...(p.linkedStats || [])],
-      ownerDomainId: p.ownerDomainId || null,
-      ...rolled,
-    };
-  });
+function bindLiveConfluxBoard(conflux, domains, plots) {
+  const board = boardFromPlots(conflux, domains, plots);
+  board.plotlines = conflux.plotlines || [];
+  board.state.pendingActions = conflux.processes || [];
+  return board;
 }
 
 function outcomesForPlots(outcomes, plots) {
@@ -96,13 +85,16 @@ export async function resolveConfluxSharedMonth({
   const addsByDomain = new Map((domains || []).map((d) => [d.id, []]));
   const domainsById = new Map((domains || []).map((d) => [d.id, d]));
   const allPlots = storyPlots(conflux);
-  const fullBoard = boardFromPlots(conflux, domains, allPlots);
-
-  const processOutcomes = applyEngineProgress(
-    fullBoard,
-    rollConfluxProcesses(conflux, domainsById, config),
-    { tick: world.tickIndex, config },
-  );
+  const fullBoard = bindLiveConfluxBoard(conflux, domains, allPlots);
+  rehomeUnrelatedOnDomain(fullBoard, { tick: world.tickIndex, config });
+  const processOutcomes = applyQueuedEngineProgress(fullBoard, {
+    tick: world.tickIndex,
+    config,
+    averageOf: (p) => {
+      const owner = domainsById.get(p.ownerDomainId) || [...domainsById.values()][0];
+      return processStatAverage(owner || { stats: {} }, p, config);
+    },
+  });
   const intelAdds = applyIntelFinishes({ conflux, domains, world, outcomes: processOutcomes });
   for (const row of intelAdds) {
     if (!addsByDomain.has(row.domainId)) addsByDomain.set(row.domainId, []);
@@ -119,9 +111,10 @@ export async function resolveConfluxSharedMonth({
     return { conflux, domains, chronicleAddsByDomain: addsByDomain, processOutcomes: storyOutcomes };
   }
 
-  const board = boardFromPlots(conflux, domains, plots);
+  const board = bindLiveConfluxBoard(conflux, domains, plots);
   const beatOutcomes = outcomesForPlots(storyOutcomes, plots);
   await realignFinishedOutcomes({ runtime, domain: board, outcomes: beatOutcomes, log });
+  rehomeUnrelatedOnDomain(board, { tick: world.tickIndex, config });
 
   const mainId = conflux.mainPlotId;
   beatOutcomes.sort((a, b) => {
@@ -136,6 +129,26 @@ export async function resolveConfluxSharedMonth({
     processOutcomes: beatOutcomes,
     piercePlotIds: mainId ? [mainId] : [],
   });
+
+  for (const beat of beats) {
+    for (const row of beat.mootedProcesses || []) {
+      const fact = createLoreFact({
+        id: newId('lore'),
+        text: `Поручение «${row.summary}» свернули: нужда отпала.`,
+        tags: ['chronicle'],
+        gameDateLabel: world.gameDate?.label,
+        tick: world.tickIndex,
+        author: 'engine:moot',
+        importance: 'minor',
+        relatedPendingId: row.id,
+        relatedPlotlineIds: [beat.plotId],
+        sourcePlotId: beat.plotId,
+      });
+      conflux.lore = conflux.lore || [];
+      conflux.lore.push(fact);
+      attachChronicleToPlotlines(board, fact.id, [beat.plotId]);
+    }
+  }
 
   log.info('conflux.month.plan', {
     contested: plots.length,
@@ -169,11 +182,16 @@ export async function resolveConfluxSharedMonth({
     const live = (conflux.plotlines || []).find((p) => p.id === plot.id);
     if (live) Object.assign(live, plot);
     if (result?.closed && !plotHasActiveProcess(board, plot)) {
+      const closeReason = result.closeReason || 'условие закрытия исполнилось';
       closePlotline(board, plot.id, {
         tick: world.tickIndex,
-        reason: result.closeReason || 'условие закрытия исполнилось',
+        reason: closeReason,
         sequelHook: result.sequelHook || '',
       });
+      markChroniclePlotClosed(result.fact, { reason: closeReason });
+      for (const row of result.cityFacts || []) {
+        markChroniclePlotClosed(row.fact, { reason: closeReason });
+      }
       conflux.plotlines = (conflux.plotlines || []).filter((p) => p.id !== plot.id);
       conflux.closedPlotlines = board.closedPlotlines;
     }

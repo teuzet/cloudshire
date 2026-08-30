@@ -1,9 +1,10 @@
-import { generateDomain, domainSummary } from './genesis.js';
+import { buildOnboardingTools } from './onboardingTools.js';
 import {
   chronicleEntries,
   newsChronicleEntries,
   filterChronicleForDomain,
   formatChronicleScope,
+  formatChroniclePriestMark,
   normalizeDomain,
   formatCastForPrompt,
   applyPatronName,
@@ -42,12 +43,7 @@ import {
   isCityNameOccupied,
   occupiedCityNameError,
   extractUserCityName,
-  listTagCatalog,
   formatPlayerBrief,
-  formatTagCatalogForPrompt,
-  inferTagChoicesFromText,
-  collectOnboardingPreferenceText,
-  randomizeAllTags,
   claimsOnboardingAlreadyCreated,
   extractPitchedCityName,
   lastPitchedCityName,
@@ -57,6 +53,7 @@ import {
   formatOnboardingStatusCard,
   deriveOnboardingPhase,
   hasPitchedCity,
+  hasReadyConcept,
   canStartOnboarding,
   applyUserNamedCity,
   applyUserNamedPatron,
@@ -101,12 +98,25 @@ import { formatBoardForSpeech, warmPlotlines, plotConfig, findPlotline, clipPlot
 import { queueOrderRequest, listStandingOrders } from './orders.js';
 import { islandDeleteCheck } from '../clients/telegram/access.js';
 import { generateIslandImage, removeIslandImage } from './islandImage.js';
+import { generateOfficerPortraits } from './officerImage.js';
+import { generateDomain } from './genesis.js';
+import {
+  formatOfficersForPrompt,
+  findOfficer,
+  pickRandomFreeOfficer,
+  bindOfficerProcess,
+  releaseOfficerProcess,
+  isOffPortfolio,
+  officerActiveProcess,
+  officerBusyAgentMessage,
+  ensureOfficersFromLore,
+} from './officers.js';
 import { formatIslandReveal } from './islandReveal.js';
 import { formatProgressBar, genesisTutorialText } from './progressBar.js';
 import { genesisDateMessage } from './tickClock.js';
 import { estimateProcessDuration } from './durationJudge.js';
-import { ensureErrandForProcess, linkProcessToPlotline } from './plotEngine.js';
-import { judgeProcessAlignment } from './plotAlign.js';
+import { ensureErrandForProcess, linkProcessToPlotline, rehomeUnrelatedProcess, plotSituationForSpeech, attendingQueueForPlot, detachProcessFromPlots } from './plotEngine.js';
+import { judgeProcessAlignment, engagementOf, engagementAttends } from './plotAlign.js';
 import { dialogHistoryForPrompt } from './memory.js';
 import {
   newsScheduleOf,
@@ -201,6 +211,37 @@ function syncErrandFromProcess(domain, action) {
   if (!plot || plot.kind !== 'errand') return;
   if (action.summary) plot.title = clipPlotText(action.summary, PLOT_TITLE_MAX);
   if (action.detail) plot.synopsis = clipPlotText(action.detail, PLOT_SUMMARY_MAX);
+}
+
+function unlinkProcessFromAllPlots(domain, processId) {
+  const id = String(processId);
+  for (const plot of domain.plotlines || []) {
+    plot.relatedProcessIds = (plot.relatedProcessIds || []).filter((x) => String(x) !== id);
+  }
+}
+
+function unrelatedAttachHint(originPlot) {
+  const situation = plotSituationForSpeech(originPlot);
+  return (
+    'Дело заведено, но к названной истории оно не относится — снято на отдельное поручение. ' +
+    'В речи: приказ отдан, однако ты сомневаешься, что это поможет с той бедой, о которой говорил покровитель' +
+    (situation ? ` (${situation})` : '') +
+    '. Не уверен, что правильно понял замысел. Спроси коротко: это отдельное дело или всё же про ту беду? ' +
+    'Не называй историю заголовком. commitment=process — работа уже началась. ' +
+    'Если подтвердит, что отдельно — ничего не перевешивай. ' +
+    'Если настаивает, что про ту беду — не перевешивай это поручение: revoke_process его (карточка поручения снимется), ' +
+    'затем declare_process с УТОЧНЁННОЙ целью, которая реально двигает ту историю, и plotId той нити. commitment=process.'
+  );
+}
+
+function queueAttachHint(domain, plot, action) {
+  if (!plot || !isThreeActPlot(plot) || !engagementAttends(engagementOf(action))) return '';
+  const head = attendingQueueForPlot(domain, plot)[0];
+  if (!head || String(head.id) === String(action.id)) return '';
+  return (
+    ` На этой беде уже идёт «${head.summary}». Новое дело в очереди: сдвинется, когда прежнее завершит месяц ` +
+    '(или сразу в тот месяц, когда прежнее закончится). В речи можно сказать, что сначала доведут прежнее.'
+  );
 }
 
 /** Убрать префикс «Имя:» / «Имя —» из речи правителя. */
@@ -429,6 +470,7 @@ function characterTools(domain, storage, character, ctx) {
         attitudes: formatRulerAttitudes(character, ctx.config),
         // Без каста правитель не знает своих же людей и додумывает за них.
         knownPeople: formatCastForPrompt(domain.lore, { limit: 20 }),
+        officers: formatOfficersForPrompt(domain, ctx.config),
         guidance:
           'Отвечай в духе conditionFeel: качественно, без чисел и без имён статов. ' +
           'О делах — по-человечески: что делается и сколько примерно ждать.',
@@ -493,6 +535,8 @@ function characterTools(domain, storage, character, ctx) {
           'blessed=true — покровитель уже благословил это дело; исход будет [КРИТИЧЕСКИЙ УСПЕХ], так и помни. ' +
           'pausedProcesses — на паузе: прогресс жив, слот свободен, тик не идёт. Снять паузу — resume_process, если есть слот. ' +
           'recentlyClosed[].outcome — итог [ПРОВАЛ] / [УСПЕХ] / [КРИТИЧЕСКИЙ УСПЕХ]; про них не говори «не знаю». ' +
+          'Недавно закрытое дело столпа не занимает: он свободен для нового поручения. ' +
+          'Если покровитель хочет столпа, у которого в officers/processes уже есть ИДУЩЕЕ дело — назови это дело и предложи pause_process или revoke_process, затем declare_process. ' +
           'Для update_process / revoke_process бери id из processes[].id. ' +
           'Если id не помнишь — передай краткий смысл дела в processId (например «университет»), система найдёт. ' +
           'Покровитель уточняет уже идущую ту же работу (новый вопрос к тому же дознанию, другой темп) — update_process, commitment=process. Не отказывай и не заводи второе. ' +
@@ -506,7 +550,10 @@ function characterTools(domain, storage, character, ctx) {
           'Если покровитель хочет «узнать, что это» — declare_process с intel=true и chronicleId (или plotId, если карточка уже известна). ' +
           'intel нельзя на указ и на уже раскрытую нить. Шпионы «на остров вообще» — обычное дело без intel и без plotId. ' +
           'Приказ по известной истории без дела — declare_process с plotId этой истории. ' +
-          'Не бери id соседней нити из-за общего места или общих людей.',
+          'plotId — нить, которую покровитель этим делом пытается решить, судя по разговору, а не соседняя из-за места или людей. ' +
+          'Закрытую не подставляй. Сомнение — commitment=clarify, не угадывай id. ' +
+          'Если declare_process вернул, что дело снято с истории — так и скажи покровителю: приказ отдан, но ты не уверен, что это поможет с той бедой. ' +
+          'Если он имел в виду ту историю — revoke_process поручение, затем declare_process с уточнённой целью и plotId. Не перевешивай старое поручение.',
       }),
     },
     !domain.state?.patronName && {
@@ -597,7 +644,7 @@ function characterTools(domain, storage, character, ctx) {
       name: 'consult_loremaster',
       description:
         'Справка о фактах мира: имена, места, устройство города, прошлое, уже установленный канон. ' +
-        'Если вопрос про идущую историю с доски — передай plotId этой нити: лормастер увидит её канон и сможет дописать детали, не ломая повествование. ' +
+        'Если вопрос про идущую историю — передай plotId этой нити: лормастер увидит её канон и сможет дописать детали, не ломая повествование. ' +
         'Закрытую или сыгранную нить не передавай — тогда он читает только хронику. ' +
         'Не расследование: то, что уже является тайной или предметом текущего выбора, он может оставить неизвестным.',
       parameters: {
@@ -612,7 +659,7 @@ function characterTools(domain, storage, character, ctx) {
           plotId: {
             type: 'string',
             description:
-              'id идущей истории с доски (или сопряжения). Только открытая нить: закрытую не передавай.',
+              'id идущей истории или сопряжения. Только открытая нить: закрытую не передавай.',
           },
         },
       },
@@ -639,7 +686,7 @@ function characterTools(domain, storage, character, ctx) {
           plotId: result.focusPlotId,
           focusNote:
             wanted && !focused
-              ? 'Эта нить сейчас не на доске. Лормастер ответил по хронике и общим фактам, без канона тайны.'
+              ? 'Эта нить сейчас закрыта. Лормастер ответил по хронике и общим фактам, без канона тайны.'
               : null,
           hint:
             'Перескажи суть своими словами и своим тоном, не цитируя карточки фактов. ' +
@@ -704,7 +751,8 @@ function characterTools(domain, storage, character, ctx) {
         'Длительное дело: стройка, суд, поход, снабжение. Не для мгновенных постоянных приказов — declare_standing_order. ' +
         'Если воля ещё неясна — не вызывай, спроси покровителя (commitment=clarify). ' +
         'Срок сам не оценивай: его посчитает отдельный оценщик. ' +
-        'Отказы: too_many_processes (лимит слотов) vs duplicate_process (та же нить) — разные отговорки в речи.',
+        'Отказы: too_many_processes (все столпы заняты), officer_busy (названный столп уже ведёт другое). ' +
+        'В речи — человеческая причина; предложи паузу или отмену текущего, не «доска» и не «слот».',
       parameters: {
         type: 'object',
         required: ['summary', 'detail', 'linkedStats'],
@@ -735,18 +783,34 @@ function characterTools(domain, storage, character, ctx) {
             type: 'array',
             items: { type: 'string' },
             minItems: 1,
-            description: `Статы, от которых зависит ход дела (1+ из: ${(ctx.config.stats || [])
+            description: `Ровно один стат характера ДЕЛА из: ${(ctx.config.stats || [])
               .map((s) => s.id)
-              .join(', ')})`,
+              .join(', ')}`,
+          },
+          office: {
+            type: 'string',
+            description:
+              'Должность столпа, если покровитель назвал конкретного (treasurer/marshal/keeper/chancellor). ' +
+              'Пусто + randomOfficer — движок выберет случайного свободного.',
+          },
+          randomOfficer: {
+            type: 'boolean',
+            description: 'true, если покровитель сказал «разберитесь сами» / не назвал столпа.',
+          },
+          insistOffPortfolio: {
+            type: 'boolean',
+            description:
+              'true только после спора: покровитель настаивает отправить не того столпа.',
           },
           onBehalfOf: { type: 'string', default: 'patron' },
           characterNote: { type: 'string' },
           plotId: {
             type: 'string',
             description:
-              'id истории с доски, О КОТОРОЙ говорит покровитель. ' +
-              'Если у этой истории ещё нет дела — укажи её id. ' +
-              'Не подставляй соседнюю нить из-за общего места или общих людей. ' +
+              'id живой истории, которую покровитель этим делом пытается сдвинуть. ' +
+              'Смотри на замысел из разговора, не на общее место и не на «единственную открытую» нить. ' +
+              'Закрытую историю не подставляй: продолжение закрытого — пустой plotId, своё поручение. ' +
+              'Если неясно, про какую беду речь или это вообще новое хозяйство — спроси (commitment=clarify), не гадай. ' +
               'Если приказ не про живую историю — оставь пустым, дело заведёт свою нить само.',
           },
           chronicleId: {
@@ -775,7 +839,18 @@ function characterTools(domain, storage, character, ctx) {
         chronicleId,
         intel = false,
         goal,
+        office = null,
+        randomOfficer = false,
+        insistOffPortfolio = false,
       }) => {
+        ensureOfficersFromLore(domain, ctx.config);
+        const named = office ? findOfficer(domain, { office: String(office) }) : null;
+        if (named) {
+          const current = officerActiveProcess(domain, named);
+          if (current) {
+            return toolFail('officer_busy', officerBusyAgentMessage(named, current));
+          }
+        }
         const slots = canStartProcess(domain, ctx.config);
         if (!slots.ok) {
           return {
@@ -786,12 +861,11 @@ function characterTools(domain, storage, character, ctx) {
             max: slots.max,
             busyWith: slots.busy,
             agentMessage:
-              'ОТКАЗ: лимит параллельных дел (' +
+              'ОТКАЗ: все столпы заняты (' +
               `${slots.active}/${slots.max}` +
               '). Это НЕ «похожее дело». ' +
-              'В речи: люди/мастера уже заняты перечисленными делами — назови их по смыслу; ' +
-              'предложи дождаться или свернуть одно через revoke_process. ' +
-              'Не говори «лимит», process, tool. Новое дело НЕ объявляй и НЕ путай с дублем.',
+              'В речи: назови, кто чем занят; предложи приостановить (pause_process) или свернуть (revoke_process) одно, ' +
+              'затем отправить освободившегося на новое. Не говори «лимит», process, tool. Новое дело НЕ объявляй, пока старое не снято.',
           };
         }
         const dup = findDuplicateProcess(domain, summary, detail);
@@ -819,8 +893,33 @@ function characterTools(domain, storage, character, ctx) {
         if (!linked.length) {
           return toolFail(
             'linked_stats_required',
-            `linkedStats обязательны — выбери 1+ id из: ${(ctx.config.stats || []).map((s) => s.id).join(', ')}. ` +
-              'Повтори declare_process с валидными linkedStats.',
+            `linkedStats обязательны — ровно один id из: ${(ctx.config.stats || []).map((s) => s.id).join(', ')}. ` +
+              'Это стат характера задачи, не должности столпа.',
+          );
+        }
+        const linkedStat = linked[0];
+        let officer = named;
+        if (!officer && (randomOfficer || !office)) {
+          officer = pickRandomFreeOfficer(domain);
+        }
+        if (!officer) {
+          return toolFail(
+            'officer_required',
+            named
+              ? officerBusyAgentMessage(named, officerActiveProcess(domain, named) || { summary: 'другое поручение' })
+              : 'Нет свободного столпа. Предложи паузу или отмену одного из идущих дел.',
+          );
+        }
+        const stillBusy = officerActiveProcess(domain, officer);
+        if (stillBusy) {
+          return toolFail('officer_busy', officerBusyAgentMessage(officer, stillBusy));
+        }
+        const mismatch = isOffPortfolio(officer, linkedStat);
+        if (mismatch && named && !insistOffPortfolio && !randomOfficer) {
+          return toolFail(
+            'off_portfolio_warn',
+            `Покровитель шлёт ${officer.title} ${officer.name} на чужое (дело про ${linkedStat}, должность — ${officer.statId}). ` +
+              'Сначала поспорь и предупреди, что справится плохо. Если настаивает — повтори declare_process с insistOffPortfolio=true.',
           );
         }
         const askedRemaining =
@@ -882,7 +981,10 @@ function characterTools(domain, storage, character, ctx) {
           durationMonths: 1,
           monthsLeft: 1,
           monthsDone: 0,
-          linkedStats: linked,
+          linkedStats: [linkedStat],
+          officerId: officer.id,
+          office: officer.office,
+          offPortfolio: mismatch,
           onBehalfOf,
           characterId: character.id,
           characterName: character.name,
@@ -895,6 +997,7 @@ function characterTools(domain, storage, character, ctx) {
           updatedAt: new Date().toISOString(),
         };
         domain.state.pendingActions.push(action);
+        bindOfficerProcess(domain, officer, action);
         const estimated = await estimateProcessDuration({
           config: ctx.config,
           runtime: ctx.runtime,
@@ -921,6 +1024,8 @@ function characterTools(domain, storage, character, ctx) {
           }).plot;
         }
         action.plotlineId = plot?.id || null;
+        let originPlot = null;
+        let rehomed = false;
         if (plot && isThreeActPlot(plot) && !wantIntel) {
           await judgeProcessAlignment({
             runtime: ctx.runtime,
@@ -929,8 +1034,18 @@ function characterTools(domain, storage, character, ctx) {
             plot,
             log: ctx.log,
           });
+          if (engagementOf(action) === 'UNRELATED') {
+            const moved = rehomeUnrelatedProcess(domain, action, {
+              tick: world?.tickIndex ?? null,
+              config: ctx.config,
+            });
+            plot = moved.plot;
+            originPlot = moved.originPlot;
+            rehomed = moved.rehomed;
+            action.plotlineId = plot?.id || null;
+          }
         }
-        if (ctx.conflux && plot && !isOrderPlot(plot)) {
+        if (ctx.conflux && plot && !isOrderPlot(plot) && !rehomed) {
           action.confluxId = ctx.conflux.id;
           action.ownerDomainId = domain.id;
           if (!wantIntel && !plotConcerns(plot, domain.id) && !plot.isMainConflux) {
@@ -942,13 +1057,17 @@ function characterTools(domain, storage, character, ctx) {
           }
         }
         await save();
+        const hint = rehomed
+          ? unrelatedAttachHint(originPlot)
+          : `В речи: принял повеление. ${paceHint(action)} ` +
+            'Не говори «уже строим» и не рапортуй механику; итог придёт с новостями месяца, ' +
+            'а не в этой переписке.' +
+            queueAttachHint(domain, plot, action);
         return {
           ok: true,
           process: action,
-          hint:
-            `В речи: принял повеление. ${paceHint(action)} ` +
-            'Не говори «уже строим» и не рапортуй механику; итог придёт с новостями месяца, ' +
-            'а не в этой переписке.',
+          rehomed,
+          hint,
         };
       },
     },
@@ -1110,6 +1229,12 @@ function characterTools(domain, storage, character, ctx) {
           },
           linkedStats: { type: 'array', items: { type: 'string' } },
           characterNote: { type: 'string' },
+          plotId: {
+            type: 'string',
+            description:
+              'Не для поручения, снятого с истории. Если покровитель имел в виду живую историю — ' +
+              'сначала revoke_process это поручение, затем declare_process с уточнённой целью и plotId.',
+          },
         },
       },
       handler: async ({
@@ -1121,6 +1246,7 @@ function characterTools(domain, storage, character, ctx) {
         linkedStats,
         characterNote,
         goal,
+        plotId,
       }) => {
         const { process: action, candidates } = resolveActiveProcess(domain, processId, ctx.config);
         if (!action) {
@@ -1150,11 +1276,28 @@ function characterTools(domain, storage, character, ctx) {
           applyObjectiveSchedule(action, estimated.months, remainingMonths);
         }
         syncErrandFromProcess(domain, action);
-        const plot = findPlotline(domain, action.plotlineId);
+        if (plotId) {
+          const current = findPlotline(domain, action.plotlineId);
+          const target = findPlotline(domain, String(plotId));
+          if (current?.kind === 'errand' && target && isThreeActPlot(target)) {
+            return toolFail(
+              'retarget_needs_new_process',
+              'Это поручение снято с истории. Не перевешивай его. revoke_process это дело, затем declare_process с уточнённой целью и plotId той нити.',
+            );
+          }
+          unlinkProcessFromAllPlots(domain, action.id);
+          const linked = linkProcessToPlotline(domain, action.id, String(plotId));
+          if (linked) {
+            action.plotlineId = linked.id;
+          }
+        }
+        let plot = findPlotline(domain, action.plotlineId);
+        let rehomed = false;
+        let originPlot = null;
         if (
           plot &&
           isThreeActPlot(plot) &&
-          (goal != null || revised.rewritten || summary || detail || addDetail)
+          (goal != null || revised.rewritten || summary || detail || addDetail || plotId)
         ) {
           await judgeProcessAlignment({
             runtime: ctx.runtime,
@@ -1163,15 +1306,28 @@ function characterTools(domain, storage, character, ctx) {
             plot,
             log: ctx.log,
           });
+          if (engagementOf(action) === 'UNRELATED') {
+            const moved = rehomeUnrelatedProcess(domain, action, {
+              tick: world?.tickIndex ?? null,
+              config: ctx.config,
+            });
+            plot = moved.plot;
+            originPlot = moved.originPlot;
+            rehomed = moved.rehomed;
+            action.plotlineId = plot?.id || action.plotlineId;
+          }
         }
         await save();
         const mode = revised.fresh ? 'дело ещё не сдвинулось, можно было переписать' : 'дело уже шло, текст только дополнен';
         return {
           ok: true,
           process: action,
-          hint:
-            `${mode}. ${paceHint(action)} ` +
-            'В речи не обещай, что уже сделано; итог придёт с новостями месяца.',
+          rehomed,
+          hint: rehomed
+            ? unrelatedAttachHint(originPlot)
+            : `${mode}. ${paceHint(action)} ` +
+              'В речи не обещай, что уже сделано; итог придёт с новостями месяца.' +
+              queueAttachHint(domain, plot, action),
         };
       },
     },
@@ -1207,12 +1363,17 @@ function characterTools(domain, storage, character, ctx) {
         action.status = 'revoked';
         action.revokeReason = reason || '';
         action.updatedAt = new Date().toISOString();
+        releaseOfficerProcess(domain, action);
+        const dropped = detachProcessFromPlots(domain, action, { tick: world?.tickIndex ?? null });
         await save();
         return {
           ok: true,
           revokedId: action.id,
           summary: action.summary,
-          hint: 'В речи: дело свёрнуто/отложено по воле покровителя. Без id/process.',
+          closedErrands: dropped.closedErrands.map((p) => p.id),
+          hint: dropped.closedErrands.length
+            ? 'В речи: поручение свёрнуто, карточку убрали. Без id/process.'
+            : 'В речи: дело свёрнуто/отложено по воле покровителя. Без id/process.',
         };
       },
     },
@@ -1236,7 +1397,7 @@ function characterTools(domain, storage, character, ctx) {
             activeProcesses: candidates.map((a) => ({ id: a.id, summary: a.summary })),
           };
         }
-        const result = pauseProcess(action);
+        const result = pauseProcess(action, domain);
         if (!result.ok) return { ok: false, error: result.error };
         await save();
         return {
@@ -1513,7 +1674,7 @@ export class GameApp {
     }
   }
 
-  startDomainGeneration(userId, { channel, forcedName, forcedPatronName, forcedTagChoices, playerBrief }) {
+  startDomainGeneration(userId, { channel, forcedName, forcedPatronName, frozenConcept, axes, playerDirectives, playerBrief }) {
     const uid = String(userId);
     if (this.generatingUsers.has(uid)) {
       getLogger().warn('genesis.already_running', { userId: uid });
@@ -1527,7 +1688,7 @@ export class GameApp {
         log.info('genesis.start', {
           forcedName: forcedName || null,
           forcedPatronName: forcedPatronName || null,
-          tagChoices: forcedTagChoices || {},
+          concept: frozenConcept?.name || null,
           playerBrief: truncate(playerBrief, 500),
         });
         const tutorial = genesisTutorialText(this.config);
@@ -1565,7 +1726,9 @@ export class GameApp {
           channel,
           forcedName: forcedName || null,
           forcedPatronName: forcedPatronName || null,
-          forcedTagChoices: forcedTagChoices || {},
+          frozenConcept,
+          axes,
+          playerDirectives,
           playerBrief: playerBrief || null,
           log,
           onProgress: async (msg) => {
@@ -1573,6 +1736,7 @@ export class GameApp {
             let step = 2;
             if (/ядро/i.test(label)) step = 1;
             else if (/описание|аспект/i.test(label)) step = 2;
+            else if (/сил|столп/i.test(label)) step = 3;
             else if (/истори/i.test(label)) step = 3;
             else if (/собран|готов/i.test(label)) step = 3;
             await pushProgress(step, label);
@@ -1584,6 +1748,17 @@ export class GameApp {
           : `${domain.characters[0].name}: ${domain._greeting}`;
 
         await pushProgress(4, 'рисую вид острова…');
+        generateOfficerPortraits({
+          config: this.config,
+          domain,
+          log,
+        })
+          .then(async () => {
+            await this.storage.saveDomain(domain);
+          })
+          .catch((err) => {
+            log.warn('officer_portraits.failed', { error: String(err?.message || err) });
+          });
         const picture = await generateIslandImage({
           config: this.config,
           domain,
@@ -1635,7 +1810,7 @@ export class GameApp {
         });
         await this.emitOutbound(
           uid,
-          `Не удалось создать остров: ${err.message || err}. Можно поправить имя/теги и снова попросить старт.`,
+          `Не удалось создать остров: ${err.message || err}. Можно поправить имя или концепт и снова попросить старт.`,
           { channel, agent: 'onboarding', kind: 'generating_error', edit: 'genesis' },
         );
       } finally {
@@ -1696,7 +1871,7 @@ export class GameApp {
       pitchedName: draft.pitchedName,
       mode: draft.mode,
       phase: draft.phase,
-      tags: draft.tagChoices,
+      tags: Object.keys(draft.axes || {}).length,
     });
 
     const saveDraft = async () => {
@@ -1706,465 +1881,19 @@ export class GameApp {
       await this.storage.saveUserBinding(binding);
     };
 
-    const tools = [
-      {
-        name: 'get_setup',
-        description: 'Текущий черновик старта: теги, brief, имя, готовность',
-        parameters: { type: 'object', properties: {} },
-        handler: async () => ({
-          ok: true,
-          mode: draft.mode || null,
-          phase: deriveOnboardingPhase(draft, { generating: this.isGenerating(userId) }),
-          tagChoices: draft.tagChoices,
-          playerBrief: {
-            city: String(draft.playerBrief?.city || '').slice(0, BRIEF_CITY_MAX),
-            ruler: String(draft.playerBrief?.ruler || '').slice(0, BRIEF_RULER_MAX),
-            freeform: String(draft.playerBrief?.freeform || '').slice(0, BRIEF_FREEFORM_MAX),
-          },
-          cityName: draft.cityName,
-          cityNameApproved: draft.cityNameApproved,
-          patronName: draft.patronName,
-          patronNameApproved: Boolean(draft.patronNameApproved),
-          canStart: canStartOnboarding(draft),
-          pitchedName: draft.pitchedName || null,
-          pitched: hasPitchedCity(draft),
-          modes: {
-            quick: 'Рандом черт → предложить имя+атмосферу+все черты → аппрув/правки → старт',
-            brief: 'Игрок дал краткое описание → додумать → аппрув → старт',
-            questions: 'Наводящие вопросы по ходу, tools по ответам',
-            dossier: 'Игрок несёт длинное ТЗ: пересказ, дыры, противоречия; старт только по «создавай»',
-          },
-        }),
-      },
-      {
-        name: 'set_onboarding_mode',
-        description: 'Зафиксировать режим онбординга: quick | brief | questions | dossier',
-        parameters: {
-          type: 'object',
-          required: ['mode'],
-          properties: {
-            mode: {
-              type: 'string',
-              enum: ['quick', 'brief', 'questions', 'dossier'],
-            },
-          },
-        },
-        handler: async ({ mode }) => {
-          draft.mode = mode;
-          draft.phase = deriveOnboardingPhase(draft);
-          await saveDraft();
-          return { ok: true, mode: draft.mode, phase: draft.phase };
-        },
-      },
-      {
-        name: 'randomize_all_tags',
-        description:
-          'Быстрый режим: ОДИН раз заполнить все группы черт. Повторять только если игрок просит другой город. После питча forPlayer перескажи целиком.',
-        parameters: { type: 'object', properties: {} },
-        handler: async () => {
-          const alreadyPitched = hasPitchedCity(draft);
-          if (alreadyPitched && !playerAsksReroll(text)) {
-            const held = draft.pitchedName || draft.cityName || lastPitchedCityName(draft);
-            return toolFail(
-              'already_pitched',
-              `Город уже предложен${held ? ` («${held}»)` : ''}. Не бросай теги заново. ` +
-                'Если игрок согласен — set_city_name(это имя) и start_new_game. ' +
-                'randomize_all_tags — только после явной просьбы «другой город / заново».',
-            );
-          }
-          const { chosen, applied, forPlayer } = randomizeAllTags(this.config);
-          draft.tagChoices = chosen;
-          draft.pitchedName = null;
-          draft.pitched = false;
-          draft.cityName = null;
-          draft.cityNameApproved = false;
-          draft.pitchedTagChoices = { ...chosen };
-          draft.phase = deriveOnboardingPhase(draft);
-          await saveDraft();
-          return {
-            ok: true,
-            applied,
-            chosen: draft.tagChoices,
-            forPlayer,
-            next:
-              'Запиши атмосферу и правителя в set_player_brief. Сам придумай звучный топоним. ' +
-              'Перед речью игроку — check_city_name; если занято, другое имя, чужие города не перечисляй. ' +
-              'В речи игроку: имя + ВСЕ черты из forPlayer своими словами + атмосфера + правитель. ' +
-              'Без слов «теги/изюминка/пакет/рандом». Этот набор держи, пока игрок не попросит другой город.',
-          };
-        },
-      },
-      {
-        name: 'set_player_brief',
-        description:
-          'Записать/обновить бриф пожеланий для генезиса (город и правитель-связной). Для длинного ТЗ пиши подробно: детали игрока важнее краткости. Можно вызывать несколько раз.',
-        parameters: {
-          type: 'object',
-          properties: {
-            city: {
-              type: 'string',
-              description: 'Пожелания к городу/острову: тон, проблемы, атмосфера…',
-            },
-            ruler: {
-              type: 'string',
-              description: 'Каким видит правителя-связного: характер, титул, слабости…',
-            },
-            freeform: {
-              type: 'string',
-              description: 'Прочие пожелания одной прозой',
-            },
-            replace: {
-              type: 'boolean',
-              description: 'Если true — заменить brief целиком; иначе дополнить непустые поля',
-            },
-          },
-        },
-        handler: async ({ city, ruler, freeform, replace = false }) => {
-          if (!draft.playerBrief) {
-            draft.playerBrief = { city: '', ruler: '', freeform: '' };
-          }
-          if (replace) {
-            draft.playerBrief = {
-              city: city || '',
-              ruler: ruler || '',
-              freeform: freeform || '',
-            };
-          } else {
-            if (city) draft.playerBrief.city = city;
-            if (ruler) draft.playerBrief.ruler = ruler;
-            if (freeform) draft.playerBrief.freeform = freeform;
-          }
-          clipOnboardingBrief(draft.playerBrief);
-          draft.phase = deriveOnboardingPhase(draft);
-          await saveDraft();
-          return { ok: true, playerBrief: draft.playerBrief };
-        },
-      },
-      {
-        name: 'check_city_name',
-        description:
-          'Проверить имя города: форма и свободно ли. Вызови до речи игроку и до set_city_name. Не возвращает чужие имена.',
-        parameters: {
-          type: 'object',
-          required: ['name'],
-          properties: {
-            name: { type: 'string' },
-          },
-        },
-        handler: async ({ name }) => {
-          const occupied = await this.occupiedCityNames(userId);
-          const v = validateCityNameAvailable(name, occupied);
-          if (!v.ok) {
-            return {
-              ok: true,
-              available: false,
-              name: String(name || '').trim(),
-              reason: v.reason,
-            };
-          }
-          return { ok: true, available: true, name: v.name };
-        },
-      },
-      {
-        name: 'set_city_name',
-        description:
-          'Зафиксировать имя города после check_city_name (available=true) и согласия игрока.',
-        parameters: {
-          type: 'object',
-          required: ['name'],
-          properties: {
-            name: { type: 'string' },
-          },
-        },
-        handler: async ({ name }) => {
-          const occupied = await this.occupiedCityNames(userId);
-          const v = validateCityNameAvailable(name, occupied);
-          if (!v.ok) {
-            draft.cityNameApproved = false;
-            await saveDraft();
-            return toolFail(
-              isCityNameOccupied(name, occupied) ? 'city_name_taken' : 'invalid_city_name',
-              v.reason,
-              { reason: v.reason },
-            );
-          }
-          draft.cityName = v.name;
-          draft.cityNameApproved = true;
-          draft.pitchedName = v.name;
-          draft.pitched = true;
-          draft.phase = deriveOnboardingPhase(draft);
-          await saveDraft();
-          return { ok: true, cityName: v.name };
-        },
-      },
-      {
-        name: 'set_patron_name',
-        description:
-          'Зафиксировать имя бога-покровителя, как его назвал игрок. Не выдумывай имя сам. Без этого start_new_game нельзя.',
-        parameters: {
-          type: 'object',
-          required: ['name'],
-          properties: {
-            name: { type: 'string', description: 'Как к игроку будут обращаться в городе' },
-          },
-        },
-        handler: async ({ name }) => {
-          const v = validatePatronName(name);
-          if (!v.ok) {
-            draft.patronNameApproved = false;
-            await saveDraft();
-            return toolFail('invalid_patron_name', v.reason, { reason: v.reason });
-          }
-          draft.patronName = v.name;
-          draft.patronNameApproved = true;
-          await saveDraft();
-          return { ok: true, patronName: v.name };
-        },
-      },
-      {
-        name: 'list_tag_groups',
-        description: 'Показать группы характеристик острова и варианты (климат, уклад…)',
-        parameters: { type: 'object', properties: {} },
-        handler: async () => ({
-          ok: true,
-          groups: listTagCatalog(this.config),
-          chosen: draft.tagChoices,
-        }),
-      },
-      {
-        name: 'set_tag_choices',
-        description:
-          'Задать теги по группам. Можно tagId из каталога ИЛИ свободные слова (tagLabel) — любые формулировки игрока. Остальные группы — random из каталога.',
-        parameters: {
-          type: 'object',
-          required: ['choices'],
-          properties: {
-            choices: {
-              type: 'array',
-              items: {
-                type: 'object',
-                required: ['groupId'],
-                properties: {
-                  groupId: { type: 'string' },
-                  tagId: {
-                    type: 'string',
-                    description: 'id из каталога (опционально)',
-                  },
-                  tagLabel: {
-                    type: 'string',
-                    description: 'Свободные слова игрока (предпочтительно, если говорил своими словами)',
-                  },
-                },
-              },
-            },
-          },
-        },
-        handler: async ({ choices }) => {
-          const applied = [];
-          const errors = [];
-          for (const c of choices || []) {
-            const group = (this.config.genesis.tagGroups || []).find((g) => g.id === c.groupId);
-            if (!group) {
-              errors.push(`неизвестная группа «${c.groupId}»`);
-              continue;
-            }
-            const label = String(c.tagLabel || '').trim();
-            if (label) {
-              draft.tagChoices[c.groupId] = label;
-              applied.push({ group: group.name, tag: label, freeform: true });
-              continue;
-            }
-            const tag = group.tags.find((t) => t.id === c.tagId);
-            if (!tag) {
-              errors.push(`для «${c.groupId}» нужен tagId из каталога или свободный tagLabel`);
-              continue;
-            }
-            draft.tagChoices[c.groupId] = c.tagId;
-            applied.push({ group: group.name, tag: tag.name, freeform: false });
-          }
-          await saveDraft();
-          const total = (this.config.genesis.tagGroups || []).length;
-          if (errors.length) {
-            const groupIds = (this.config.genesis.tagGroups || []).map((g) => g.id).join(', ');
-            return toolFail(
-              'tag_choices_partial',
-              'Часть choices не применена. Для каждой группы нужен известный groupId и tagId из каталога ' +
-                `или свободный tagLabel. Допустимые groupId: ${groupIds}. Смотри errors[].`,
-              { applied, errors, chosen: draft.tagChoices },
-            );
-          }
-          return {
-            ok: true,
-            applied,
-            errors,
-            chosen: draft.tagChoices,
-            note: `${Object.keys(draft.tagChoices).length}/${total} групп задано; остальное random из каталога.`,
-          };
-        },
-      },
-      {
-        name: 'set_tag_choice',
-        description:
-          'Один тег в группе: либо tagId из каталога, либо свободные слова (tagLabel). Без выбора — random.',
-        parameters: {
-          type: 'object',
-          required: ['groupId'],
-          properties: {
-            groupId: { type: 'string' },
-            tagId: { type: 'string' },
-            tagLabel: {
-              type: 'string',
-              description: 'Свободные слова (не обязаны совпадать с каталогом)',
-            },
-          },
-        },
-        handler: async ({ groupId, tagId, tagLabel }) => {
-          const group = (this.config.genesis.tagGroups || []).find((g) => g.id === groupId);
-          if (!group) {
-            const groupIds = (this.config.genesis.tagGroups || []).map((g) => g.id).join(', ');
-            return toolFail(
-              'unknown_group',
-              `Неизвестная группа «${groupId}». Допустимые groupId: ${groupIds}. Вызови list_tag_groups.`,
-            );
-          }
-          const label = String(tagLabel || '').trim();
-          if (label) {
-            draft.tagChoices[groupId] = label;
-            await saveDraft();
-            return {
-              ok: true,
-              group: group.name,
-              tag: label,
-              freeform: true,
-              chosen: draft.tagChoices,
-            };
-          }
-          const tag = group.tags.find((t) => t.id === tagId);
-          if (!tag) {
-            return toolFail(
-              'tag_required',
-              `Для группы «${group.name}» нужен tagId из каталога или свободный tagLabel. Вызови list_tag_groups.`,
-            );
-          }
-          draft.tagChoices[groupId] = tagId;
-          await saveDraft();
-          const totalGroups = (this.config.genesis.tagGroups || []).length;
-          const chosenCount = Object.keys(draft.tagChoices).length;
-          return {
-            ok: true,
-            group: group.name,
-            tag: tag.name,
-            freeform: false,
-            chosen: draft.tagChoices,
-            note: `Выбрано ${chosenCount} из ${totalGroups} групп; остальные — random из каталога.`,
-          };
-        },
-      },
-      {
-        name: 'clear_tag_choice',
-        description: 'Сбросить ручной выбор тега в группе — снова случайный',
-        parameters: {
-          type: 'object',
-          required: ['groupId'],
-          properties: { groupId: { type: 'string' } },
-        },
-        handler: async ({ groupId }) => {
-          delete draft.tagChoices[groupId];
-          await saveDraft();
-          return { ok: true, chosen: draft.tagChoices };
-        },
-      },
-      {
-        name: 'start_new_game',
-        description:
-          'Запуск генерации. Нужны утверждённые имя города и имя бога. Невыбранные теги — случайные. Brief уходит в генезис.',
-        parameters: { type: 'object', properties: {} },
-        handler: async () => {
-          const world = await this.storage.getWorld();
-          const existing = await this.storage.getDomainForUser(userId, world.id);
-          if (existing) {
-            return toolFail(
-              'already_has_domain',
-              'У игрока уже есть домен в этом сезоне. Не запускай генерацию повторно; направь к правителю города.',
-            );
-          }
-          if (!draft.cityNameApproved || !draft.cityName) {
-            const occupied = await this.occupiedCityNames(userId);
-            const fallback = lastPitchedCityName(draft);
-            const v = fallback ? validateCityNameAvailable(fallback, occupied) : { ok: false };
-            if (v.ok) {
-              draft.cityName = v.name;
-              draft.cityNameApproved = true;
-              await saveDraft();
-            } else {
-              return toolFail(
-                fallback && isCityNameOccupied(fallback, occupied)
-                  ? 'city_name_taken'
-                  : 'city_name_required',
-                fallback && isCityNameOccupied(fallback, occupied)
-                  ? occupiedCityNameError(fallback)
-                  : 'Сначала утверди имя города через set_city_name (с согласия игрока), затем start_new_game.',
-              );
-            }
-          } else {
-            const occupied = await this.occupiedCityNames(userId);
-            const v = validateCityNameAvailable(draft.cityName, occupied);
-            if (!v.ok) {
-              draft.cityNameApproved = false;
-              await saveDraft();
-              return toolFail(
-                isCityNameOccupied(draft.cityName, occupied)
-                  ? 'city_name_taken'
-                  : 'invalid_city_name',
-                v.reason,
-              );
-            }
-          }
-          if (!draft.patronName) {
-            return toolFail(
-              'patron_name_required',
-              'Сначала спроси, как к игроку-богу обращаться, вызови set_patron_name с его именем, затем start_new_game. Имя бога игрок придумывает сам.',
-            );
-          }
-
-          if (this.isGenerating(userId)) {
-            return { ok: true, status: 'generating' };
-          }
-
-          // Если агент назвал теги словами, но не вызвал tools — добираем из brief/реплик.
-          const prefText = collectOnboardingPreferenceText(draft);
-          const before = { ...draft.tagChoices };
-          draft.tagChoices = inferTagChoicesFromText(
-            this.config,
-            prefText,
-            draft.tagChoices || {},
-          );
-          if (Object.keys(draft.tagChoices).length !== Object.keys(before).length) {
-            await saveDraft();
-          }
-
-          this.startDomainGeneration(userId, {
-            channel,
-            forcedName: draft.cityName,
-            forcedPatronName: draft.patronName,
-            forcedTagChoices: { ...draft.tagChoices },
-            playerBrief: { ...(draft.playerBrief || {}) },
-          });
-          startedGenerating = true;
-          const forced = Object.keys(draft.tagChoices).length;
-          const total = (this.config.genesis.tagGroups || []).length;
-          return {
-            ok: true,
-            status: 'generating',
-            cityName: draft.cityName,
-            tagsForced: forced,
-            tagsRandom: Math.max(0, total - forced),
-            briefPreview: formatPlayerBrief(draft.playerBrief),
-            inferredTags: draft.tagChoices,
-          };
-        },
-      },
-    ];
+    const startFlag = { started: false };
+    const tools = buildOnboardingTools({
+      app: this,
+      draft,
+      userId,
+      channel,
+      text,
+      saveDraft,
+      startFlag,
+    });
+    const markStarted = () => {
+      if (startFlag.started) startedGenerating = true;
+    };
 
     const history = (draft.messages || []).slice(-ONBOARDING_HISTORY_MESSAGES).map((m) => ({
       role: m.role === 'assistant' ? 'assistant' : 'user',
@@ -2179,18 +1908,15 @@ export class GameApp {
       : text;
 
     const extraSystem = [
-      'КАТАЛОГ ТЕГОВ (базис для random / быстрой генерации; группы не выдумывай):',
-      formatTagCatalogForPrompt(this.config),
-      '',
       isIntroPitch
         ? [
             'ПЕРВЫЙ КОНТАКТ — только речь, без tools (кроме set_onboarding_mode после явного выбора — можно отложить).',
             'Расскажи: игрок — бог-покровитель; город-государство на изолированном летающем острове;',
             'правитель — НПС-связной; дальше диалог с ним; месяц сдвигает мир.',
             'Предложи пути (своими словами, без нумерации 1.2.3.):',
-            'быстрая генерация; краткое описание «чего хочу»; наводящие вопросы;',
-            'или пусть пришлёт готовое подробное описание — тогда не стартуй, а разбери его.',
-            'Не вызывай start_new_game и не рандомь теги в питче.',
+            'быстрый город — всё само; описание любой длины — собираем заготовку, по пробелам спрашиваем;',
+            'анкета — вопросы по осям, в конце можно добавить изюминку.',
+            'Не вызывай start_new_game и не семплируй оси в питче.',
           ].join(' ')
         : formatOnboardingStatusCard(draft, this.config, {
             generating: this.isGenerating(userId),
@@ -2208,6 +1934,7 @@ export class GameApp {
       log,
       scene: 'onboarding',
     });
+    if (startFlag.started) startedGenerating = true;
 
     // Страховка: агент сказал «записал», но не вызвал tools.
     const usedTools = new Set((result.toolTrace || []).map((t) => t.name));
@@ -2229,15 +1956,6 @@ export class GameApp {
       }
       rememberLongUserBrief(draft, chunk, { usedBriefTool: usedTools.has('set_player_brief') });
     }
-    if (
-      userSaidSomething &&
-      !usedTools.has('set_tag_choices') &&
-      !usedTools.has('set_tag_choice') &&
-      !usedTools.has('start_new_game')
-    ) {
-      const prefText = collectOnboardingPreferenceText(draft);
-      draft.tagChoices = inferTagChoicesFromText(this.config, prefText, draft.tagChoices || {});
-    }
 
     let reply = result.text;
     const rawReply = String(reply || '');
@@ -2254,19 +1972,11 @@ export class GameApp {
       occupiedByKey,
     });
     if (auto.start) {
-      if (usedTools.has('randomize_all_tags') && Object.keys(draft.pitchedTagChoices || {}).length) {
-        draft.tagChoices = { ...draft.pitchedTagChoices };
-      }
       draft.cityName = auto.name;
       draft.cityNameApproved = true;
       draft.pitchedName = auto.name;
       draft.pitched = true;
-      const prefText = collectOnboardingPreferenceText(draft);
-      draft.tagChoices = inferTagChoicesFromText(
-        this.config,
-        prefText,
-        draft.tagChoices || {},
-      );
+      if (draft.concept?.status === 'READY') draft.concept.name = auto.name;
       log.warn('onboarding.auto_start_new_game', {
         cityName: draft.cityName,
         patronName: draft.patronName,
@@ -2276,7 +1986,9 @@ export class GameApp {
         channel,
         forcedName: draft.cityName,
         forcedPatronName: draft.patronName,
-        forcedTagChoices: { ...draft.tagChoices },
+        frozenConcept: draft.concept,
+        axes: draft.axes,
+        playerDirectives: draft.playerDirectives,
         playerBrief: { ...(draft.playerBrief || {}) },
       });
       startedGenerating = true;
@@ -2338,9 +2050,6 @@ export class GameApp {
     if (nameInReply && !draft.cityNameApproved) {
       draft.pitchedName = nameInReply;
       draft.pitched = true;
-      if (Object.keys(draft.tagChoices || {}).length) {
-        draft.pitchedTagChoices = { ...draft.tagChoices };
-      }
     }
     draft.phase = deriveOnboardingPhase(draft, {
       generating: startedGenerating || this.isGenerating(userId),
@@ -2358,7 +2067,7 @@ export class GameApp {
       setup: {
         cityName: draft.cityName,
         cityNameApproved: draft.cityNameApproved,
-        tagChoices: draft.tagChoices,
+        concept: draft.concept?.name || null,
       },
     });
 
@@ -2371,7 +2080,7 @@ export class GameApp {
       setup: {
         cityName: draft.cityName,
         cityNameApproved: draft.cityNameApproved,
-        tagChoices: draft.tagChoices,
+        concept: draft.concept?.name || null,
         playerBrief: draft.playerBrief,
       },
       toolTrace: result.toolTrace,
@@ -2502,8 +2211,10 @@ export class GameApp {
         ? [
             'ЖИВЫЕ НИТИ СЮЖЕТА (внутренняя правда; вплетай в речь, не рапортуй списком):',
             plotBrief,
-            'id нити — только в инструменты (plotId). В речи не называй историю заголовком и не бери название в кавычки: говори о месте, людях и случившемся.',
+            'id нити — только в инструменты (plotId). В речи не называй историю заголовком и не бери название в кавычки: говори о месте, людях и случившемся. Не говори «доска» и «карточка».',
             'Каждая нить сама по себе. Общее место или общие люди не делают их одним делом.',
+            'plotId вешай на ту живую историю, которую покровитель этим делом пытается сдвинуть — читай замысел из разговора, не «единственную открытую» карточку. Закрытую нить не подставляй: продолжение закрытого — новое поручение без plotId.',
+            'Если неясно, про какую беду приказ или это отдельное хозяйство — спроси (commitment=clarify), не гадай id. Лучше спросить до приказа, чем потом снимать дело с истории.',
             'Приказ по истории без поручения — новое дело с plotId этой истории, не правка соседнего.',
             conflux
               ? 'Чужой след без карточки — не история. Если покровитель хочет знать, что это, intel=true с chronicleId. Вмешательство в уже раскрытую чужую нить — обычное дело с plotId.'
@@ -2513,6 +2224,7 @@ export class GameApp {
             .join('\n')
         : '',
       `Известные люди города:\n${formatCastForPrompt(domain.lore, { limit: 16 })}`,
+      formatOfficersForPrompt(domain, this.config),
       firstMentionHintForSpeech(),
       conflux
         ? [
@@ -2703,12 +2415,12 @@ export class GameApp {
         ].join('\n')
       : '';
     const facts = (mine.length ? mine : forNews)
-      .map((c) => `- [${c.importance || 'event'}] ${formatChronicleScope(c)}${c.text}`)
+      .map((c) => `- [${c.importance || 'event'}] ${formatChronicleScope(c)}${c.text}${formatChroniclePriestMark(c)}`)
       .join('\n');
     const foreignBlock = foreign.length
       ? [
           'ЧУЖОЙ ГОРОД (это НЕ новости твоего города):',
-          ...foreign.map((c) => `- ${formatChronicleScope(c)}${c.text}`),
+          ...foreign.map((c) => `- ${formatChronicleScope(c)}${c.text}${formatChroniclePriestMark(c)}`),
         ].join('\n')
       : '';
     const patronName = domain.state?.patronName || null;
@@ -2762,13 +2474,13 @@ export class GameApp {
     const stewardActs = (opts.stewardActs || []).filter((a) => a && a.kind && a.kind !== 'none');
     const stewardHint = stewardActs.length
       ? [
-          'В этом месяце ТЫ САМ отдал приказ — совета покровителя не дождался. Это правда, так и скажи.',
+          'В этом месяце, пока покровитель молчал, действовал столп — не ты сам. Назови его должность и имя.',
           ...stewardActs.map((a) =>
-            a.kind === 'standing_order'
-              ? `- постоянный порядок: ${a.text}`
-              : `- дело: ${a.summary}`,
+            a.kind === 'process'
+              ? `- ${a.office ? `${a.office} ` : ''}${a.officerName || ''} взялся за дело: ${a.summary}`
+              : `- ${a.kind}: ${a.summary || a.text || ''}`,
           ),
-          'Коротко признайся: решил сам, потому что от него совета не дождался. Не прячь это за «город сам».',
+          'Не приписывай решение себе. Жрец только передаёт, что столп распорядился.',
         ].join('\n')
       : '';
     const silenceAngles = [
@@ -2899,6 +2611,9 @@ export class GameApp {
           addressHint,
           undockSystem,
           'Ты пишешь покровителю новости месяца живой речью, как человек, а не сводку событий.',
+          'Если у записи есть пометка [ЭТА ЗАПИСЬ ЗАКРЫЛА ПРОБЛЕМУ] — эта хроника закрыла историю. ' +
+            'Начни с исхода как с завершения, не как с текущей работы. Пометку вслух не произноси. ' +
+            'Бытовой вопрос после закрытия — последствия, не продолжение беды.',
           firstMentionHintForSpeech(),
           peopleHint,
           `Не начинай письмо с «${character.name}:».`,

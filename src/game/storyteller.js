@@ -25,12 +25,15 @@ import {
   chronicleEntries,
   castRecords,
   newCharactersSchema,
+  markChroniclePlotClosed,
+  formatChroniclePriestMark,
 } from './models.js';
 import {
   createPlotline,
   findPlotline,
   closePlotline,
   plotHasActiveProcess,
+  plotHasAttendingProcess,
   attachChronicleToPlotlines,
   plotConfig,
   clipPlotText,
@@ -99,6 +102,7 @@ import {
 import { refillMysteryAnnotationPool, refillSuspenseAnnotationPool } from './annotationCatalog.js';
 import { selectAnnotations } from './annotationSelector.js';
 import { maybeAppendStoryCityModifier } from './cityModifier.js';
+import { formatOfficersCastHint } from './officers.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 
@@ -111,11 +115,17 @@ function cityBrief(domain) {
   return formatCityForAgents(domain);
 }
 
+function extraCity(domain, extras = []) {
+  return [`Город «${domain.name}». ${cityBrief(domain)}`, formatOfficersCastHint(domain), ...extras]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
 /** Контекст города для завязки: генезис, свежая хроника, дела, люди. */
 function cityStoryContext(domain, { chronicleLimit = 8 } = {}) {
   const recent = chronicleEntries(domain.lore)
     .slice(-chronicleLimit)
-    .map((e) => `- ${e.gameDateLabel || '?'}: ${e.text}`)
+    .map((e) => `- ${e.gameDateLabel || '?'}: ${e.text}${formatChroniclePriestMark(e)}`)
     .join('\n');
   const processes = (domain.state?.pendingActions || [])
     .filter((p) => !p.status || p.status === 'active')
@@ -398,7 +408,9 @@ async function seedSuspensePlot({
   maxChars,
   statIds,
 }) {
-  await refillSuspenseAnnotationPool({ world, storage, runtime, config, log });
+  if (!opening) {
+    await refillSuspenseAnnotationPool({ world, storage, runtime, config, log });
+  }
   const cards = await pickAnnotationShortlist({
     runtime,
     domain,
@@ -588,7 +600,9 @@ async function seedMysteryPlot({
   maxChars,
   statIds,
 }) {
-  await refillMysteryAnnotationPool({ world, storage, runtime, config, log });
+  if (!opening) {
+    await refillMysteryAnnotationPool({ world, storage, runtime, config, log });
+  }
   const cards = await pickAnnotationShortlist({
     runtime,
     domain,
@@ -1084,7 +1098,7 @@ async function askMysteryCore({
     log,
     scene: 'mystery_core',
     domainId: domain.id,
-    extraSystem: `Город «${domain.name}».\n${city.genesis}`,
+    extraSystem: extraCity(domain),
     userMessages: [
       {
         role: 'user',
@@ -1208,7 +1222,7 @@ async function askMysteryPresentation({
     log,
     scene: 'mystery_presentation',
     domainId: domain.id,
-    extraSystem: `Город «${domain.name}». ${cityBrief(domain)}`,
+    extraSystem: extraCity(domain),
     userMessages: [
       {
         role: 'user',
@@ -1227,6 +1241,7 @@ async function askMysteryPresentation({
           '',
           'Можно сокращать, менять порядок, перефразировать, писать голосом жреца.',
           'Нельзя: новый предмет, след, реакцию города, гипотезу как факт, вывод из скрытого.',
+          'Группу называй из FACTS ALLOWED: местом, должностью, именем. Не голое «соседи», «его люди», «остальные», если из видимого не ясно, чьи.',
           'Хроника — видимое плюс зацепка: странность, по которой захочется поручить проверку. Не разгадка.',
           formatJudgeRevisionForPrompt(revision),
           'Вызови submit_mystery_presentation.',
@@ -1465,7 +1480,7 @@ async function askPlotSeed({
     log,
     scene: 'plot_seed',
     domainId: domain.id,
-    extraSystem: `Город «${domain.name}».\n${city.genesis}`,
+    extraSystem: extraCity(domain),
     userMessages: [
       {
         role: 'user',
@@ -1563,7 +1578,7 @@ export function priorPlotChronicle(domain, plot, limit = PRIOR_CHRONICLE_LIMIT) 
     .filter((e) => ids.has(String(e.id)) || (e.relatedPlotlineIds || []).includes(plot.id))
     .sort((a, b) => (Number(a.tick) || 0) - (Number(b.tick) || 0))
     .slice(-limit)
-    .map((e) => `- ${e.gameDateLabel || '?'}: ${e.text}`);
+    .map((e) => `- ${e.gameDateLabel || '?'}: ${e.text}${formatChroniclePriestMark(e)}`);
 }
 
 /** Имя в поручении может стоять в падеже: Левра / Левры / Иару. */
@@ -1619,7 +1634,7 @@ export async function beatPlot({
 
   const threeAct = isThreeActPlot(plot);
   const mystery = threeAct && plot.storyType === 'mystery';
-  const engineEnding = beat.actMove?.ending || plot.ending || null;
+  const engineEnding = beat.actMove?.ending || null;
   const finale = Boolean(beat.finale || engineEnding);
   // У финала своя длина и свой контракт: развязка не влезает в сухую строку.
   const entryMax = finale ? Math.round(maxChars * 1.6) : maxChars;
@@ -1730,9 +1745,10 @@ export async function beatPlot({
     scene: 'plot_beat',
     domainId: domain.id,
     extraSystem: [
-      `Город «${domain.name}». ${cityBrief(domain)}`,
-      ruler ? `Правитель города — ${ruler}. Этого человека в newCharacters не заводи, второго с тем же именем тоже.` : null,
-      `Известные люди города:\n${formatCastForPrompt(domain.lore, { limit: 12 })}`,
+      extraCity(domain, [
+        ruler ? `Правитель города — ${ruler}. Этого человека в newCharacters не заводи, второго с тем же именем тоже.` : null,
+        `Известные люди города:\n${formatCastForPrompt(domain.lore, { limit: 12 })}`,
+      ]),
       occupancy ? formatOccupancyForPrompt(occupancy) : null,
       mystery && plot.truthGraph
         ? `${formatTruthGraphForPrompt(plot.truthGraph)}\nСкрытое в запись не выноси, кроме узлов и рёбер, которые блок ТАКТОВКА открывает в этом месяце.`
@@ -1829,7 +1845,8 @@ export async function beatPlot({
   plot.beatCount += 1;
 
   const wantClose = threeAct ? Boolean(engineEnding) : Boolean(d.closes || beat.finale);
-  const closed = wantClose && !plotHasActiveProcess(domain, plot);
+  const stillBusy = threeAct ? plotHasAttendingProcess(domain, plot) : plotHasActiveProcess(domain, plot);
+  const closed = wantClose && !stillBusy;
   if (engineEnding && !plot.ending) plot.ending = engineEnding;
   const closeReason = threeAct
     ? engineEnding === 'crit'
@@ -1846,6 +1863,7 @@ export async function beatPlot({
       reason: closeReason,
       sequelHook,
     });
+    markChroniclePlotClosed(fact, { reason: closeReason });
     await maybeAppendStoryCityModifier({ runtime, domain, world, plot, config, log });
   } else if (wantClose) {
     log.info('storyteller.beat_close_held', { plotId: plot.id, reason: 'active_process' });
@@ -1991,9 +2009,10 @@ export async function tickOrder({
     scene: resolvedMode === 'story' ? 'order_story' : 'order_chronicle',
     domainId: domain.id,
     extraSystem: [
-      `Город «${domain.name}». ${cityBrief(domain)}`,
-      ruler ? `Правитель города — ${ruler}. Этого человека в newCharacters не заводи.` : null,
-      `Известные люди города:\n${formatCastForPrompt(domain.lore, { limit: 12 })}`,
+      extraCity(domain, [
+        ruler ? `Правитель города — ${ruler}. Этого человека в newCharacters не заводи.` : null,
+        `Известные люди города:\n${formatCastForPrompt(domain.lore, { limit: 12 })}`,
+      ]),
     ]
       .filter(Boolean)
       .join('\n\n'),
@@ -2133,6 +2152,7 @@ export function fadeQuietPlot({ domain, plot, world }) {
     tick: world.tickIndex,
     reason: 'угасла: город перестал о ней говорить',
   });
+  markChroniclePlotClosed(fact, { reason: 'угасла: город перестал о ней говорить' });
   return { fact, plot, closed: true, fade: true };
 }
 
@@ -2168,7 +2188,7 @@ function mirrorBeatToPartner({ partner, domain, plot, fact, note, world, conflux
     mirrorPlot.beatCount += 1;
   }
 
-  const copy = createLoreFact({
+    const copy = createLoreFact({
     id: newId('lore'),
     text,
     tags: ['chronicle', 'conflux', confluxId ? `conflux:${confluxId}` : 'conflux', 'shared'],
@@ -2180,6 +2200,8 @@ function mirrorBeatToPartner({ partner, domain, plot, fact, note, world, conflux
     location: domain.name,
     concernsDomainIds: [domain.id, partner.id],
     concernsDomainNames: [domain.name, partner.name],
+    plotClosed: Boolean(fact.plotClosed),
+    plotCloseReason: fact.plotCloseReason || null,
   });
   partner.lore = partner.lore || [];
   partner.lore.push(copy);

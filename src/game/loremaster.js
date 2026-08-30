@@ -1,5 +1,5 @@
 import { newId } from './ids.js';
-import { createLoreFact, formatCastForPrompt, chronicleEntries } from './models.js';
+import { createLoreFact, formatCastForPrompt, chronicleEntries, formatChroniclePriestMark } from './models.js';
 import { formatFullChronicleForPrompt, formatFactsForPrompt } from './memory.js';
 import { findActiveConfluxForDomain, monthsUntilDock } from './conflux.js';
 import { attachFactToPlotlines, isOrderPlot } from './plotlines.js';
@@ -256,6 +256,7 @@ export async function askLoremaster({
               'писать её нельзя, инструмент — факты. ' +
               'openStories — краткие карточки идущих историй без канона истины. Не решай их и не выдумывай скрытое. ' +
               'Сыгранную историю читай только по хронике. ' +
+              'Если у записи есть пометка [ЭТА ЗАПИСЬ ЗАКРЫЛА ПРОБЛЕМУ] — история закрыта этой записью; не описывай её как текущую беду. ' +
               'Если хроника упоминает явление без деталей и это не защищённый вопрос — add_fact. ' +
               '«Неизвестно» — редко: только когда ответ защищён или противоречил бы канону. ' +
               'Факт, противоречащий хронике или состоянию, — устарел: update_fact или retire_fact.',
@@ -266,7 +267,7 @@ export async function askLoremaster({
             viewerId: working.id,
           });
           const chronLines = chronicleEntries(linked).map(
-            (f) => `- (${f.gameDateLabel || '?'}) ${f.text}`,
+            (f) => `- (${f.gameDateLabel || '?'}) ${f.text}${formatChroniclePriestMark(f)}`,
           );
           payload.storyChronicle = chronLines.length
             ? chronLines.join('\n')

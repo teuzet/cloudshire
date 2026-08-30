@@ -7,14 +7,12 @@
  */
 
 import { newId } from './ids.js';
-import { createLoreFact, normalizeDomain } from './models.js';
+import { createLoreFact, markChroniclePlotClosed, normalizeDomain } from './models.js';
 import { FINISH_SHORT } from './rolls.js';
 import { refreshChronicleDigest } from './memory.js';
 import {
   normalizeDomainProcesses,
   activeProcesses,
-  rollAllProcessAdvances,
-  applyEngineProgress,
 } from './processes.js';
 import {
   normalizePlotlines,
@@ -36,6 +34,8 @@ import {
   ensureErrandForProcess,
   formatBeatPlanForLog,
   clearMonthLog,
+  applyQueuedEngineProgress,
+  rehomeUnrelatedOnDomain,
 } from './plotEngine.js';
 import { planOrderTicks, pickOrderOutcome, expireTimedOrders } from './orders.js';
 import { resolvePendingOrders } from './orderSmith.js';
@@ -139,13 +139,11 @@ export async function resolveDomainMonth({
   for (const process of activeProcesses(working, config)) {
     ensureErrandForProcess(working, process, { tick: world.tickIndex, config });
   }
-  const processRolls = rollAllProcessAdvances(working, config).filter((r) => {
-    const proc = (working.state?.pendingActions || []).find((p) => p.id === r.processId);
-    return !proc?.confluxId;
-  });
-  const localOutcomes = applyEngineProgress(working, processRolls, {
+  rehomeUnrelatedOnDomain(working, { tick: world.tickIndex, config });
+  const localOutcomes = applyQueuedEngineProgress(working, {
     tick: world.tickIndex,
     config,
+    skipProcess: (p) => Boolean(p?.confluxId),
   });
   const extra = (extraProcessOutcomes || []).filter((o) => {
     const plots = (working.plotlines || []).filter((p) =>
@@ -155,12 +153,33 @@ export async function resolveDomainMonth({
   });
   const processOutcomes = [...localOutcomes, ...extra];
   await realignFinishedOutcomes({ runtime, domain: working, outcomes: processOutcomes, log });
+  rehomeUnrelatedOnDomain(working, { tick: world.tickIndex, config });
 
   // 2. Часы доски (нити указов не стареют). На конфлюксе часы shared/локальных уже тикнули.
   if (!skipPlotClocks) advancePlotMonth(working, cfg);
 
   // 3. План битов: процессы всегда, истории — в остаток.
   const { beats, slotsUsed, cap } = planBeats({ domain: working, config, processOutcomes });
+  for (const beat of beats) {
+    for (const row of beat.mootedProcesses || []) {
+      const fact = createLoreFact({
+        id: newId('lore'),
+        text: `Поручение «${row.summary}» свернули: нужда отпала.`,
+        tags: ['chronicle'],
+        gameDateLabel: world.gameDate?.label,
+        tick: world.tickIndex,
+        author: 'engine:moot',
+        importance: 'minor',
+        relatedPendingId: row.id,
+        relatedPlotlineIds: [beat.plotId],
+        sourcePlotId: beat.plotId,
+      });
+      working.lore = working.lore || [];
+      working.lore.push(fact);
+      attachChronicleToPlotlines(working, fact.id, [beat.plotId]);
+      chronicleAdds.push(fact);
+    }
+  }
   let used = slotsUsed;
   log.info('month.plan', {
     beats: beats.length,
@@ -297,6 +316,7 @@ export async function resolveDomainMonth({
       plot.beatCount += 1;
       if (beat.finale && !plotHasActiveProcess(working, plot)) {
         closePlotline(working, beat.plotId, { tick: world.tickIndex, reason: 'fallback' });
+        markChroniclePlotClosed(fact, { reason: 'fallback' });
       }
     }
   }

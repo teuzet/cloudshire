@@ -16,6 +16,7 @@ import { chronicleEntries, castRecords } from '../../game/models.js';
 import { stripPlotSecrets } from '../../game/plotlines.js';
 import { FINISH_SHORT } from '../../game/rolls.js';
 import { resolveIslandImage } from '../../game/islandImage.js';
+import { resolveOfficerPortrait } from '../../game/officerImage.js';
 import { knownPartnerLore } from '../../game/confluxBoard.js';
 import { genesisTutorialText } from '../../game/progressBar.js';
 import { orderMonthsLeft } from '../../game/orders.js';
@@ -336,6 +337,24 @@ export function createWebServer({ config, app, runtime, storage }) {
     } catch (err) {
       req.log?.error('http.error', { error: err.message });
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  server.get('/api/mini/officer-portrait/:officerId', async (req, res) => {
+    try {
+      const who = resolveMiniUser(req);
+      if (!who.ok) return res.status(who.status).end();
+      const world = await storage.getWorld();
+      const domain = await storage.getDomainForUser(who.userId, world.id);
+      const officer = (domain?.officers || []).find((o) => o.id === req.params.officerId);
+      if (!officer) return res.status(404).end();
+      const picture = await resolveOfficerPortrait({ domain, officer, config });
+      if (!picture?.abs) return res.status(404).end();
+      res.type('png').sendFile(picture.abs);
+    } catch (err) {
+      if (err.code === 'ENOENT') return res.status(404).end();
+      req.log?.error('http.error', { error: err.message });
+      res.status(500).end();
     }
   });
 

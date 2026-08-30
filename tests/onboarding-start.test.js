@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { loadConfig } from '../src/config.js';
 import {
   extractPitchedCityName,
   extractUserCityName,
@@ -18,10 +19,14 @@ import {
   emptyOnboardingDraft,
   formatPlayerBrief,
   collectOccupiedCityNames,
+  occupiedNameList,
   isCityNameOccupied,
   validateCityNameAvailable,
+  canStartOnboarding,
   ONBOARDING_NEED_NAME_NOTE,
 } from '../src/game/onboarding.js';
+import { sampleGenesisAxes } from '../src/game/genesisAxes.js';
+import { buildOnboardingTools } from '../src/game/onboardingTools.js';
 
 const varkenPitch = `Твой город — **Варкен**.
 
@@ -104,6 +109,7 @@ test('«Начинаем» после питча и имени бога стар
     pitchedName: 'Варкен',
     patronName: 'Астра',
     patronNameApproved: true,
+    concept: { status: 'READY', name: 'Варкен' },
     messages: [{ role: 'assistant', content: varkenPitch }],
   };
   const plan = planOnboardingAutoStart({
@@ -141,7 +147,7 @@ test('длинный пересказ с «создаёт» в лоре не с�
   const plan = planOnboardingAutoStart({
     userText: 'Представь полное описание текущей концепции',
     reply: recap,
-    draft: { pitched: false, messages: [], tagChoices: { terrain: 'кальдера / кратер' } },
+    draft: { pitched: false, messages: [], axes: { climateBand: { value: 'COLD', source: 'sampled' } } },
   });
   assert.equal(plan.start, false);
   assert.equal(plan.stripFalseStart, false);
@@ -179,18 +185,36 @@ test('вопрос «создаётся?» сам по себе не запус�
   assert.equal(lastPitchedCityName(draft), 'Сарвел');
 });
 
-test('теги без имени — не питч; карточка не врёт «город уже предложен»', () => {
+test('оси без концепта — не питч; карточка не врёт «город уже предложен»', () => {
   const draft = emptyOnboardingDraft();
-  draft.tagChoices = { terrain: 'кальдера / кратер', temper: 'набожный' };
+  draft.axes = { climateBand: { value: 'COLD', source: 'sampled' } };
   draft.messages = [{ role: 'user', content: 'лонгрид' }];
   assert.equal(hasPitchedCity(draft), false);
   assert.equal(deriveOnboardingPhase(draft), 'collecting');
-  const card = formatOnboardingStatusCard(draft, {
-    genesis: { tagGroups: [{ id: 'terrain' }, { id: 'temper' }] },
-  });
-  assert.match(card, /это не питч/);
+  const card = formatOnboardingStatusCard(draft, { genesis: { axes: [] } });
   assert.match(card, /Город ещё не предложен/);
   assert.doesNotMatch(card, /Имя уже названо/);
+  assert.match(card, /концепт=нет/);
+});
+
+test('карточка questions держит агента на следующей оси', () => {
+  const draft = emptyOnboardingDraft();
+  draft.mode = 'questions';
+  const cfg = loadConfig();
+  const card = formatOnboardingStatusCard(draft, cfg);
+  assert.match(card, /АНКЕТА/);
+  assert.match(card, /Задай ОДИН вопрос/);
+  assert.match(card, /Не sample_genesis_axes/);
+});
+
+test('карточка questions после осей просит изюминку', () => {
+  const cfg = loadConfig();
+  const draft = emptyOnboardingDraft();
+  draft.mode = 'questions';
+  draft.axes = sampleGenesisAxes(cfg);
+  const card = formatOnboardingStatusCard(draft, cfg);
+  assert.match(card, /изюминк/);
+  assert.match(card, /set_unique_feature/);
 });
 
 test('анкета: ответы не стартуют; после имени «начинаем» стартует', () => {
@@ -211,6 +235,7 @@ test('анкета: ответы не стартуют; после имени «
     pitchedName: 'Цитадель Нокс',
     patronName: 'Нокс',
     patronNameApproved: true,
+    concept: { status: 'READY', name: 'Цитадель Нокс' },
     mode: 'dossier',
     messages: [{ role: 'user', content: 'город называется Цитадель Нокс' }],
   };
@@ -223,11 +248,11 @@ test('анкета: ответы не стартуют; после имени «
   assert.equal(go.name, 'Цитадель Нокс');
 });
 
-test('длинное ТЗ переключает в dossier и кладёт саммари в city, не в бесконечный freeform', () => {
+test('длинное ТЗ переключает в brief и кладёт саммари в city, не в бесконечный freeform', () => {
   const draft = emptyOnboardingDraft();
   const wall = `С тех пор прошли многие столетия. ${'Липкая Тьма. '.repeat(80)}`;
   assert.equal(maybeSwitchToDossier(draft, wall), true);
-  assert.equal(draft.mode, 'dossier');
+  assert.equal(draft.mode, 'brief');
   rememberLongUserBrief(draft, wall);
   assert.ok(draft.playerBrief.city.length > 200);
   assert.equal(draft.playerBrief.freeform, '');
@@ -245,7 +270,7 @@ test('подробное ТЗ игрока целиком уходит в бри
   assert.ok(draft.playerBrief.city.includes('Чёрное озеро') || brief.includes('таблички'));
   assert.ok(brief.length > 8000);
   assert.ok(brief.length <= 32000);
-  const card = formatOnboardingStatusCard(draft, { genesis: { tagGroups: [] } });
+  const card = formatOnboardingStatusCard(draft, { genesis: { axes: [] } });
   assert.ok(card.includes('Ноксианская Цитадель'));
   assert.match(card, /бриф города для генезиса/);
 });
@@ -286,6 +311,11 @@ test('занятое имя: уникальность без списка чуж
   assert.equal(isCityNameOccupied('Варкен', occupied), true);
   assert.equal(isCityNameOccupied('Нарвел', occupied), false);
   assert.equal(isCityNameOccupied('Элвар', occupied), false);
+  const names = occupiedNameList(occupied);
+  assert.ok(names.includes('Севрайн'));
+  assert.ok(names.includes('Варкен'));
+  assert.equal(occupiedNameList(null).length, 0);
+  assert.deepEqual(occupiedNameList(['А', 'Б']), ['А', 'Б']);
 
   const taken = validateCityNameAvailable('Севрайн', occupied);
   assert.equal(taken.ok, false);
@@ -318,10 +348,48 @@ test('занятое имя: уникальность без списка чуж
 
   const card = formatOnboardingStatusCard(
     { pitchedName: 'Севрайн', pitched: true },
-    { genesis: { tagGroups: [] } },
+    { genesis: { axes: [] } },
     { occupiedByKey: occupied },
   );
   assert.match(card, /Севрайн/);
   assert.match(card, /занят/);
   assert.equal(card.includes('Варкен'), false);
+});
+
+test('старт только при READY концепте, имени бога и без конфликтов космологии', () => {
+  const draft = emptyOnboardingDraft();
+  draft.cityName = 'Варкен';
+  draft.cityNameApproved = true;
+  draft.patronName = 'Астра';
+  draft.patronNameApproved = true;
+  assert.equal(canStartOnboarding(draft), false);
+  draft.concept = { status: 'READY', name: 'Варкен' };
+  assert.equal(canStartOnboarding(draft), true);
+  draft.playerDirectives = {
+    unresolvedConflicts: [{ requested: 'эльфы', reason: 'все жители — люди', adaptations: ['люди'] }],
+  };
+  assert.equal(canStartOnboarding(draft), false);
+});
+
+test('онбординг-tools: оси через resolve_axis, концепт без прогресс-бара', () => {
+  const tools = buildOnboardingTools({
+    app: { config: {}, isGenerating: () => false, occupiedCityNames: async () => [] },
+    draft: emptyOnboardingDraft(),
+    userId: '1',
+    channel: 'cli',
+    text: '',
+    saveDraft: async () => {},
+    startFlag: { started: false },
+  });
+  const names = tools.map((t) => t.name);
+  assert.ok(names.includes('resolve_axis'));
+  assert.ok(names.includes('set_unique_feature'));
+  assert.ok(names.includes('request_city_concept'));
+  assert.equal(names.includes('answer_questionnaire'), false);
+  const concept = tools.find((t) => t.name === 'request_city_concept');
+  assert.doesNotMatch(concept.description, /собираю остров/i);
+  const mode = tools.find((t) => t.name === 'set_onboarding_mode');
+  assert.match(mode.description, /quick/);
+  assert.match(mode.description, /brief/);
+  assert.match(mode.description, /questions/);
 });

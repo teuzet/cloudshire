@@ -2,6 +2,16 @@
  * Длительные процессы города (бывш. pending): ожидаемый срок + статы → бросок прогресса на тике.
  */
 
+import {
+  findOfficer,
+  freeOfficers,
+  bindOfficerProcess,
+  releaseOfficerProcess,
+  syncOfficerSlots,
+  listOfficers,
+  ensureOfficersFromLore,
+} from './officers.js';
+
 export function listStatIds(config) {
   return (config?.stats || []).map((s) => s.id);
 }
@@ -43,9 +53,15 @@ export function normalizeProcess(action, config = null) {
   } else {
     action.linkedStats = [...new Set(action.linkedStats.map(String))];
   }
+  if (action.linkedStats.length > 1) action.linkedStats = action.linkedStats.slice(0, 1);
 
   if (!action.status) action.status = 'active';
   if (!action.initiative) action.initiative = 'patron';
+  action.offPortfolio = Boolean(action.offPortfolio);
+  if (action.officerId) action.officerId = String(action.officerId);
+  else action.officerId = action.officerId || null;
+  if (action.office) action.office = String(action.office);
+  else action.office = action.office || null;
   action.blessed = Boolean(action.blessed);
   action.intel = Boolean(action.intel);
   if (action.sourceOrderId) action.sourceOrderId = String(action.sourceOrderId);
@@ -119,7 +135,7 @@ export function pausedProcesses(domain, config = null) {
   return (domain.state?.pendingActions || []).filter((a) => a.status === 'paused');
 }
 
-export function pauseProcess(process) {
+export function pauseProcess(process, domain = null) {
   if (!process || typeof process !== 'object') return { ok: false, error: 'not_found' };
   normalizeProcess(process);
   if (process.status && process.status !== 'active') {
@@ -128,6 +144,7 @@ export function pauseProcess(process) {
   process.status = 'paused';
   process.pausedAt = new Date().toISOString();
   process.updatedAt = process.pausedAt;
+  if (domain) releaseOfficerProcess(domain, process);
   return { ok: true, process };
 }
 
@@ -135,12 +152,19 @@ export function resumeProcess(process, domain, config = null) {
   if (!process || typeof process !== 'object') return { ok: false, error: 'not_found' };
   normalizeProcess(process, config);
   if (process.status !== 'paused') return { ok: false, error: 'not_paused', process };
+  const officer = process.officerId
+    ? findOfficer(domain, { officerId: process.officerId })
+    : null;
+  if (officer && officer.processId && officer.processId !== process.id) {
+    return { ok: false, error: 'officer_busy', process };
+  }
   const slots = canStartProcess(domain, config);
-  if (!slots.ok) {
+  if (!slots.ok && !(officer && !officer.processId)) {
     return { ok: false, error: 'too_many_processes', active: slots.active, max: slots.max, process };
   }
   process.status = 'active';
   process.updatedAt = new Date().toISOString();
+  if (officer) bindOfficerProcess(domain, officer, process);
   return { ok: true, process };
 }
 
@@ -223,6 +247,7 @@ export function normalizeDomainProcesses(domain, config = null) {
   if (!domain?.state) return domain;
   if (!Array.isArray(domain.state.pendingActions)) domain.state.pendingActions = [];
   for (const a of domain.state.pendingActions) normalizeProcess(a, config);
+  ensureOfficersFromLore(domain, config);
   return domain;
 }
 
@@ -231,19 +256,18 @@ export function activeProcesses(domain, config = null) {
   return (domain.state?.pendingActions || []).filter((a) => a.status === 'active');
 }
 
-/** Среднее связанных статов; если пусто — среднее всех статов домена или 50. */
+/** Стат дела; при чужом портфеле −40 только на этот бросок. */
 export function processStatAverage(domain, process, config = null) {
   normalizeProcess(process, config);
   const stats = domain.stats || {};
-  let ids = process.linkedStats || [];
-  if (!ids.length) {
-    ids = Object.keys(stats);
+  const id = (process.linkedStats || [])[0];
+  let value = Number.isFinite(Number(stats[id])) ? Number(stats[id]) : 50;
+  if (!id) {
+    const vals = Object.values(stats).map(Number).filter((n) => Number.isFinite(n));
+    value = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : 50;
   }
-  const vals = ids
-    .map((id) => Number(stats[id]))
-    .filter((n) => Number.isFinite(n));
-  if (!vals.length) return 50;
-  return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+  if (process.offPortfolio) value -= 40;
+  return Math.max(0, Math.min(100, Math.round(value)));
 }
 
 // Бросок хода дела живёт в едином модуле бросков.
@@ -328,6 +352,7 @@ export function applyEngineProgress(domain, rolls, { tick = null, config = null,
         process.finishRoll = rolled.roll;
         process.finishWeights = rolled.weights;
       }
+      releaseOfficerProcess(domain, process);
     }
     outcomes.push({
       processId: r.processId,
@@ -417,15 +442,18 @@ export function formatProcessRollsForPrompt(rolls) {
     .join('\n');
 }
 
+/** Связанный стат дела; ровно один id. */
 export function resolveLinkedStats(raw, config) {
   const allowed = listStatIds(config);
   const set = new Set(allowed);
   let ids = Array.isArray(raw) ? raw.map(String) : [];
   ids = [...new Set(ids.filter((id) => set.has(id)))];
-  return ids;
+  return ids.slice(0, 1);
 }
 
-export function maxActiveProcesses(config) {
+export function maxActiveProcesses(config, domain = null) {
+  const officers = listOfficers(domain);
+  if (officers.length) return officers.length;
   const n = Number(config?.tick?.maxActiveProcesses);
   return Number.isFinite(n) && n >= 1 ? Math.min(12, Math.round(n)) : 4;
 }
@@ -473,7 +501,20 @@ export function recentlyClosedProcesses(domain, currentTick, { withinTicks = 2 }
 }
 
 export function canStartProcess(domain, config = null) {
-  const max = maxActiveProcesses(config);
+  ensureOfficersFromLore(domain, config);
+  syncOfficerSlots(domain);
+  const officers = listOfficers(domain);
+  if (officers.length) {
+    const free = freeOfficers(domain);
+    return {
+      ok: free.length > 0,
+      active: officers.length - free.length,
+      max: officers.length,
+      busy: officers.filter((o) => o.processId).map((o) => `${o.title} ${o.name}`),
+      freeOffices: free.map((o) => o.office),
+    };
+  }
+  const max = maxActiveProcesses(config, domain);
   const occupying = activeProcesses(domain, config).filter((a) => !a.slotless);
   return {
     ok: occupying.length < max,
@@ -632,8 +673,12 @@ export function textsLookSame(a, b, { minShared = null } = {}) {
 
 /**
  * Найти уже идущее дело той же смысловой нити (не только точное совпадение summary).
+ * Сейчас выключен: ложно склеивал разные поручения (стая vs склон).
  */
+export const PROCESS_DEDUP_ENABLED = false;
+
 export function findDuplicateProcess(domain, summary, detail = '') {
+  if (!PROCESS_DEDUP_ENABLED) return null;
   const needle = normProcessText(`${summary} ${detail}`);
   if (needle.length < 4) return null;
   const needleTokens = new Set(processTokens(needle));

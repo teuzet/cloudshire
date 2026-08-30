@@ -1,10 +1,8 @@
 import { newId } from './ids.js';
 import {
-  rollDomainStats,
   rollPopulation,
-  pickTags,
-  formatStatsForPrompt,
-  formatTagsForPrompt,
+  allocateStats,
+  syncFaith,
   isForbiddenDomainName,
 } from './stats.js';
 import {
@@ -22,6 +20,10 @@ import { clipCityText, CITY_BRIEF_MAX } from './cityContext.js';
 import { takeName } from './names.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
+import { formatWorldContractForPrompt } from './worldContract.js';
+import { formatFrozenConceptForPrompt, openingLoreFromConcept } from './genesisConcept.js';
+import { axesSnapshotTags, normalizeAxesState } from './genesisAxes.js';
+import { generateOfficers, requestCityStrengths } from './officers.js';
 
 function aspectDefs(config) {
   return config.genesis.aspects || [];
@@ -108,30 +110,32 @@ function defaultGreeting(domainName, patronName = null) {
   );
 }
 
-function fallbackCore(lockedName, playerBrief, patronName = null) {
-  const name = lockedName || fallbackName();
-  const rulerWish = playerBrief?.ruler || 'Сдержанный правитель, внимательный к знамениям покровителя.';
+function fallbackCore(lockedName, playerBrief, patronName = null, frozenConcept = null) {
+  const name = frozenConcept?.name || lockedName || fallbackName();
+  const rulerWish =
+    frozenConcept?.ruler?.description ||
+    playerBrief?.ruler ||
+    'Сдержанный правитель, внимательный к знамениям покровителя.';
+  const lore = openingLoreFromConcept(frozenConcept || { name });
   return {
     domainName: name,
     rulerName: /жриц/i.test(rulerWish) ? 'Ицка' : 'Кайрен',
-    rulerTitle: /жриц/i.test(rulerWish) ? 'Верховная жрица' : 'Правитель',
+    rulerTitle: frozenConcept?.ruler?.title || (/жриц/i.test(rulerWish) ? 'Верховная жрица' : 'Правитель'),
     rulerAge: 40,
     rulerDescription: rulerWish,
     greeting: defaultGreeting(name, patronName),
-    openingLore: [
-      `Город «${name}» стоит в центре летающего острова.`,
-      'От стен до края острова — порядка двадцати километров земли.',
-      'За обрывом — облака и ветер.',
-      'Жители чтят покровителя и местные обряды.',
-      'Главная площадь открыта к небу.',
-      'Питьевую воду собирают и хранят в цистернах.',
-      'Рынок собирается трижды в неделю.',
-      'Стража несёт вахту у края острова.',
-      'Совет старейшин собирается при храме.',
-      'Дети учат предания у края обрыва, но не подходят близко.',
-      'Чужаков встречают осторожно, но с угощением.',
-      'В тумане иногда мелькает далёкий силуэт чужого острова — курс его неподвластен людям.',
-    ],
+    openingLore: lore.length
+      ? lore
+      : [
+          `Город «${name}» стоит в центре летающего острова.`,
+          'От стен до края острова — порядка двадцати километров земли.',
+          'За обрывом — облака и ветер.',
+          'Жители чтят покровителя и местные обряды.',
+          'Главная площадь открыта к небу.',
+          'Рынок собирается трижды в неделю.',
+          'Стража несёт вахту у края острова.',
+          'Совет старейшин собирается при храме.',
+        ],
   };
 }
 
@@ -141,19 +145,22 @@ function fallbackCore(lockedName, playerBrief, patronName = null) {
 async function generateCore({
   config,
   runtime,
-  stats,
   population,
-  tags,
   forcedName,
   forcedPatronName = null,
   playerBrief,
+  frozenConcept = null,
   onProgress,
   log: parentLog,
 }) {
   const log = (parentLog || getLogger()).child({ step: 'core' });
   const loreMin = Math.min(8, config.genesis.openingLoreCount?.min || 12);
   const draft = { submitted: null, lastError: null };
-  const lockedName = forcedName ? String(forcedName).trim() : null;
+  const lockedName = frozenConcept?.name
+    ? String(frozenConcept.name).trim()
+    : forcedName
+      ? String(forcedName).trim()
+      : null;
   const lockedPatron = forcedPatronName ? String(forcedPatronName).trim() : null;
   const briefText = formatPlayerBrief(playerBrief);
 
@@ -278,13 +285,16 @@ async function generateCore({
     'ПОЖЕЛАНИЯ ИГРОКА:',
     briefText,
     '',
-    'Статы (не называй в текстах):',
-    formatStatsForPrompt(stats, config),
+    frozenConcept
+      ? [
+          'ЗАМОРОЖЕННЫЙ КОНЦЕПТ (не выдумывай другой город):',
+          formatFrozenConceptForPrompt(frozenConcept),
+          '',
+          'openingLore: скопируй постоянные факты из концепта (не новости месяца). Не выдумывай цистерны и прочий канон «по умолчанию».',
+        ].join('\n')
+      : `openingLore: минимум ${loreMin} коротких ПОСТОЯННЫХ фактов (не новости месяца).`,
     '',
-    'Теги / тон (свободные слова игрока или random-базис; не механика):',
-    formatTagsForPrompt(tags),
-    '',
-    `openingLore: минимум ${loreMin} коротких ПОСТОЯННЫХ фактов (не новости месяца).`,
+    `openingLore: минимум ${loreMin} коротких строк.`,
     'Учти изоляцию острова: без паломников/торговцев «из соседних регионов».',
     '',
     lockedPatron
@@ -363,7 +373,7 @@ async function generateCore({
 
   if (!draft.submitted) {
     log.warn('genesis.core.fallback', { lastError: draft.lastError });
-    draft.submitted = fallbackCore(lockedName, playerBrief, lockedPatron);
+    draft.submitted = fallbackCore(lockedName, playerBrief, lockedPatron, frozenConcept);
   }
   return draft.submitted;
 }
@@ -375,10 +385,9 @@ async function generateAspectBatch({
   config,
   runtime,
   core,
-  stats,
-  tags,
   population,
   playerBrief,
+  frozenConcept = null,
   batch,
   already,
   onProgress,
@@ -391,6 +400,9 @@ async function generateAspectBatch({
   const minChars = config.genesis.aspectMinChars || 280;
   const draft = { texts: null };
   const briefText = formatPlayerBrief(playerBrief);
+  const conceptBlock = frozenConcept
+    ? formatFrozenConceptForPrompt(frozenConcept)
+    : '(концепт не передан — пиши только из ядра и пожеланий, не выдумывай другой город)';
 
   const props = {};
   for (const def of batch) {
@@ -450,9 +462,11 @@ async function generateAspectBatch({
         content: [
           `Город «${core.domainName}», правитель ${core.rulerName}.`,
           cosmologyBlock(),
-          `Население ~${population}. Теги / тон: ${formatTagsForPrompt(tags)}`,
-          'Статы (скрыто):',
-          formatStatsForPrompt(stats, config),
+          formatWorldContractForPrompt(config),
+          `Население ~${population}.`,
+          '',
+          'ЗАМОРОЖЕННЫЙ КОНЦЕПТ (не выдумывай другой город, не добавляй эльфов/школу магии/аэропорт без PLAYER_REQUIRED):',
+          conceptBlock,
           '',
           'ПОЖЕЛАНИЯ ИГРОКА:',
           briefText,
@@ -462,6 +476,7 @@ async function generateAspectBatch({
           'Заполни ТОЛЬКО эти аспекты через submit_aspects. Каждый уникален и конкретен.',
           'Пиши устойчивый лор (годы), не сиюминутные события — те для хроники/тика.',
           'Изоляция острова: без регулярных гостей с чужих островов и «соседних земель».',
+          'Не пиши статы, офицеров и столпы власти — только жизнь города.',
           titles,
         ].join('\n'),
       },
@@ -534,6 +549,7 @@ async function generateCityBrief({ runtime, domain, log }) {
             'Собери КОМПАКТНЫЙ фактический бриф этого города для других агентов.',
             'Не пересказывай генезис литературно. Не пиши хронику месяца и не выдумывай тайну.',
             'Оставь: рельеф и хозяйство, институты, ключевые места, устойчивые напряжения, необычные постоянные черты.',
+            'Только извлекай, ничего не добавляй. Не выдумывай офицеров, столпов и статы.',
             'Бриф потом не переписывают: к нему только дописывают постоянные изменения.',
             'Вызови submit_city_brief.',
           ].join('\n'),
@@ -555,37 +571,46 @@ export async function generateDomain({
   onProgress,
   forcedName = null,
   forcedPatronName = null,
-  forcedTagChoices = {},
+  frozenConcept = null,
+  axes = null,
+  playerDirectives = null,
   playerBrief = null,
   log: parentLog,
 }) {
+  if (!frozenConcept || frozenConcept.status !== 'READY') {
+    throw new Error('generateDomain requires frozenConcept with status READY');
+  }
   const log = (parentLog || getLogger()).child({ ownerUserId: String(ownerUserId) });
   const world = await storage.getWorld();
-  const stats = rollDomainStats(config);
+  const axesState = normalizeAxesState(axes || frozenConcept.axes || {});
+  const tags = axesSnapshotTags(config, axesState);
   const population = rollPopulation(config);
-  const tags = pickTags(config, Math.random, forcedTagChoices || {});
   const aspectsConfig = aspectDefs(config);
   const batchSize = config.genesis.aspectBatchSize || 4;
+  const lockedName = frozenConcept.name || forcedName || null;
 
   log.info('genesis.roll', {
-    forcedName,
+    forcedName: lockedName,
     forcedPatronName,
     population,
-    tags: tags.map((t) => `${t.groupId}:${t.tagId}`),
+    concept: frozenConcept.name,
+    axes: Object.fromEntries(Object.entries(axesState).map(([k, v]) => [k, v.value])),
   });
 
   const core = await generateCore({
     config,
     runtime,
-    stats,
     population,
-    tags,
-    forcedName,
+    forcedName: lockedName,
     forcedPatronName,
     playerBrief,
+    frozenConcept,
     onProgress,
     log,
   });
+  const loreFromConcept = openingLoreFromConcept(frozenConcept);
+  if (loreFromConcept.length) core.openingLore = loreFromConcept;
+  if (frozenConcept.name) core.domainName = frozenConcept.name;
   bindRulerName(world, core, config);
   await storage.saveWorld(world);
 
@@ -598,10 +623,9 @@ export async function generateDomain({
       config,
       runtime,
       core,
-      stats,
-      tags,
       population,
       playerBrief,
+      frozenConcept,
       batch,
       already: aspects,
       onProgress,
@@ -610,7 +634,6 @@ export async function generateDomain({
     Object.assign(aspects, part);
   }
 
-  // Sanity: no global identical paste
   const samples = Object.values(aspects).map((t) => String(t).replace(/\s+/g, ' ').slice(0, 80));
   const unique = new Set(samples);
   if (unique.size < Math.min(5, samples.length)) {
@@ -619,6 +642,10 @@ export async function generateDomain({
   }
 
   const description = assembleDescription(aspects, aspectsConfig);
+
+  await onProgress?.('силы города');
+  const scores = await requestCityStrengths({ runtime, config, description, frozenConcept, log });
+  const stats = allocateStats(scores, config);
 
   const character = createCharacter({
     id: newId('char'),
@@ -642,7 +669,9 @@ export async function generateDomain({
     }),
   );
 
-  const domainName = isForbiddenDomainName(core.domainName) ? fallbackName() : core.domainName;
+  const domainName = isForbiddenDomainName(core.domainName)
+    ? frozenConcept.name || fallbackName()
+    : core.domainName;
 
   lore.unshift(
     createLoreFact({
@@ -670,11 +699,19 @@ export async function generateDomain({
     lore,
     createdTick: world.tickIndex || 0,
     playerBrief,
+    concept: frozenConcept,
+    genesisSeed: axesState,
+    playerDirectives,
   });
+  syncFaith(domain);
 
   if (forcedPatronName) {
     applyPatronName(domain, forcedPatronName, { world, allowReplace: true });
   }
+
+  await onProgress?.('столпы города');
+  await generateOfficers({ domain, world, config, runtime, log });
+  await storage.saveWorld(world);
 
   await onProgress?.('бриф города');
   domain.cityBrief = await generateCityBrief({ runtime, domain, log });
@@ -707,6 +744,9 @@ export async function generateDomain({
     domainId: domain.id,
     name: domain.name,
     ruler: character.name,
+    stats: domain.stats,
+    faith: domain.state?.faith,
+    officers: (domain.officers || []).map((o) => `${o.office}:${o.name}`),
     aspectChars: Object.fromEntries(
       Object.entries(aspects).map(([k, v]) => [k, String(v).length]),
     ),

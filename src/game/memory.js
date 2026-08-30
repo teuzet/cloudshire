@@ -5,7 +5,7 @@
  * - плотлайны — короткие rolling summary (режиссёр переписывает).
  */
 
-import { chronicleEntries, loreToPromptText } from './models.js';
+import { chronicleEntries, loreToPromptText, formatChroniclePriestMark } from './models.js';
 
 export function memoryConfig(config) {
   const m = config?.tick?.memory || {};
@@ -40,7 +40,8 @@ export function refreshChronicleDigest(domain, config = null) {
   const older = chron.slice(0, -chronicleRecent);
   const lines = older.map((e) => {
     const label = e.gameDateLabel || `тик ${e.tick ?? '?'}`;
-    return `${label}: ${oneLine(e.text, 100)}`;
+    const closed = e.plotClosed ? ' [закрыла проблему]' : '';
+    return `${label}: ${oneLine(e.text, 100)}${closed}`;
   });
   domain.chronicleDigest = lines.slice(-chronicleDigestMaxLines).join('\n');
   const lastOlder = older[older.length - 1];
@@ -84,7 +85,7 @@ export function formatFullChronicleForPrompt(
   const line = (e, max) => {
     const label = e.gameDateLabel || `тик ${e.tick ?? '?'}`;
     const imp = e.importance && e.importance !== 'minor' ? ` {${e.importance}}` : '';
-    return `${label}${imp}: ${oneLine(e.text, max)}`;
+    return `${label}${imp}: ${oneLine(e.text, max)}${formatChroniclePriestMark(e)}`;
   };
 
   const recent = chron.slice(-recentFull);

@@ -24,6 +24,31 @@ function clamp100(n, fallback = 0) {
   return Math.max(0, Math.min(100, Math.round(v)));
 }
 
+export function ensurePlotStatBudget(plot, config = null) {
+  if (!plot || plot.kind === 'order' || plot.kind === 'errand') return plot;
+  const gravityVal = Number(plot.gravity ?? plot.importance ?? 0);
+  const div = Number(config?.tick?.plot?.stats?.gravityDivisor ?? 5);
+  const budget = Math.max(0, Math.round(gravityVal / div));
+  if (!plot.stats || typeof plot.stats !== 'object') plot.stats = {};
+  if (!Number.isFinite(Number(plot.stats.budget))) plot.stats.budget = budget;
+  if (!Number.isFinite(Number(plot.stats.remaining))) plot.stats.remaining = plot.stats.budget;
+  return plot;
+}
+
+/** Сила хроники истории. Стартовая доля remaining не ест. */
+export function plotStatForce(plot, { opening = false, config = null } = {}) {
+  if (!plot || plot.kind === 'order' || plot.kind === 'errand') return 0;
+  ensurePlotStatBudget(plot, config);
+  const share = Number(config?.tick?.plot?.stats?.beatShare ?? 0.25);
+  const openingShare = Number(config?.tick?.plot?.stats?.openingShare ?? 0.25);
+  const B = Number(plot.stats?.budget) || 0;
+  const force = Math.max(0, Math.round(B * (opening ? openingShare : share)));
+  if (!opening && plot.stats) {
+    plot.stats.remaining = Math.max(0, Number(plot.stats.remaining || 0) - force);
+  }
+  return force;
+}
+
 /** Обрезка по границе слова: обрубки в середине слова копятся из тика в тик. */
 function clipText(s, max) {
   const t = String(s || '').trim();
@@ -289,6 +314,9 @@ export function plotConfig(config) {
       finishFailCurve: Array.isArray(roll.finishFailCurve) ? roll.finishFailCurve : [],
     },
     stats: {
+      gravityDivisor: Math.max(1, Number(stats.gravityDivisor ?? 5)),
+      openingShare: Number(stats.openingShare ?? 0.25),
+      beatShare: Number(stats.beatShare ?? 0.25),
       playerBudget: Math.max(1, Number(stats.playerBudget ?? 6)),
       worldBudget: Math.max(1, Number(stats.worldBudget ?? 8)),
       importanceScale: Number(stats.importanceScale ?? 0.08),
@@ -458,6 +486,10 @@ function applyPlotShape(p, config = null) {
   p.kind = PLOT_KINDS.includes(p.kind) ? p.kind : 'story';
   p.tags = Array.isArray(p.tags) ? p.tags : [];
   p.relatedStats = normalizeStatIds(p.relatedStats, config);
+  if (Array.isArray(p.relatedStats) && p.relatedStats.length > 1) {
+    p.relatedStats = p.relatedStats.slice(0, 1);
+  }
+  ensurePlotStatBudget(p, config);
   p.chronicleIds = Array.isArray(p.chronicleIds) ? p.chronicleIds.map(String) : [];
   p.factIds = Array.isArray(p.factIds) ? p.factIds.map(String) : [];
   p.relatedProcessIds = Array.isArray(p.relatedProcessIds) ? p.relatedProcessIds.map(String) : [];
@@ -692,8 +724,8 @@ export function countOpen(domain) {
   const errands = list.filter((p) => p.kind === 'errand').length;
   const orders = list.filter((p) => p.kind === 'order').length;
   return {
-    // Доска историй: указы слот не занимают.
-    total: stories + errands,
+    // Доска историй: errand и указы слот не занимают.
+    total: stories,
     stories,
     errands,
     orders,
@@ -702,10 +734,11 @@ export function countOpen(domain) {
 }
 
 export function boardHasRoom(domain, cfg) {
-  const { total, errands } = countOpen(domain);
+  const { stories } = countOpen(domain);
+  const maxOpen = cfg?.board?.maxOpen ?? 5;
   return {
-    story: total < cfg.board.maxOpen,
-    errand: total < cfg.board.maxOpen && errands < cfg.board.maxErrands,
+    story: stories < maxOpen,
+    errand: true,
   };
 }
 
@@ -1882,7 +1915,9 @@ export function formatBoardForSpeech(domain, { statsFeel = null, max = 8, viewer
             ? 'дела нет'
             : 'поручения ещё нет';
       const syn = clipText(p.synopsis || 'только началось', 180);
-      return `[${p.id}] (${kind}, ${duty}): ${syn}${feel}`;
+      const toward =
+        p.kind === 'story' && p.closeWhen ? ` К чему идёт: ${clipText(p.closeWhen, 120)}.` : '';
+      return `[${p.id}] (${kind}, ${duty}): ${syn}${toward}${feel}`;
     })
     .join('\n');
 }

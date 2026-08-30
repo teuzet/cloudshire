@@ -4,8 +4,8 @@ import { sourceForFact, applyFallbackStatDrift, factsForStatJudge, enforceFinish
 
 const STAT_CONFIG = {
   stats: [
-    { id: 'prosperity', name: 'Достаток' },
-    { id: 'faith', name: 'Вера' },
+    { id: 'prosperity', name: 'Благосостояние' },
+    { id: 'knowledge', name: 'Знание' },
   ],
 };
 
@@ -16,28 +16,9 @@ test('указ покровителя считается его волей, а �
   assert.equal(sourceForFact({ author: 'storyteller:quiet' }), 'world');
 });
 
-test('если оценщик молчит, месяц всё равно сдвигает стат', () => {
-  const domain = { stats: { prosperity: 46, faith: 39 } };
-  const fact = { id: 'lore_1', text: 'Тихо.' };
-  const rng = () => 0.1;
-  const result = applyFallbackStatDrift({
-    domain,
-    config: STAT_CONFIG,
-    chronicleAdds: [fact],
-    rng,
-  });
-  assert.ok(result);
-  assert.ok(fact.statChanges);
-  assert.notEqual(domain.stats.prosperity + domain.stats.faith, 46 + 39);
-});
-
-test('если след уже есть, запасной сдвиг не дублирует его', () => {
-  const domain = { stats: { prosperity: 46, faith: 39 } };
-  const fact = {
-    id: 'lore_1',
-    text: 'Указ.',
-    statChanges: { prosperity: { from: 51, to: 46, delta: -5 } },
-  };
+test('тихий месяц и пропуски оценщика статы не двигают', () => {
+  const domain = { stats: { prosperity: 46, knowledge: 39 }, state: {} };
+  const fact = { id: 'lore_1', text: 'Тихо.', author: 'storyteller:quiet' };
   const result = applyFallbackStatDrift({
     domain,
     config: STAT_CONFIG,
@@ -45,7 +26,9 @@ test('если след уже есть, запасной сдвиг не дуб
     rng: () => 0.1,
   });
   assert.equal(result, null);
+  assert.equal(fact.statChanges, undefined);
   assert.equal(domain.stats.prosperity, 46);
+  assert.equal(domain.stats.knowledge, 39);
 });
 
 test('тихий месяц оценщику не отдаём', () => {
@@ -57,7 +40,7 @@ test('тихий месяц оценщику не отдаём', () => {
 });
 
 test('крит без минусов, провал без плюсов', () => {
-  assert.deepEqual(enforceFinishPolarity({ prosperity: 3, faith: -2 }, 'crit'), { prosperity: 3 });
-  assert.deepEqual(enforceFinishPolarity({ prosperity: 3, faith: -2 }, 'fail'), { faith: -2 });
-  assert.deepEqual(enforceFinishPolarity({ prosperity: 3, faith: -2 }, 'ok'), { prosperity: 3, faith: -2 });
+  assert.deepEqual(enforceFinishPolarity({ prosperity: 3, knowledge: -2 }, 'crit'), { prosperity: 3 });
+  assert.deepEqual(enforceFinishPolarity({ prosperity: 3, knowledge: -2 }, 'fail'), { knowledge: -2 });
+  assert.deepEqual(enforceFinishPolarity({ prosperity: 3, knowledge: -2 }, 'ok'), { prosperity: 3, knowledge: -2 });
 });

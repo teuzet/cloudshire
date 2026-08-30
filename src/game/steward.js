@@ -1,27 +1,30 @@
 /**
- * Наместник: когда покровитель долго молчит, правитель сам отдаёт один приказ.
- * Движок решает КОГДА; агент — ЧТО. Приказ пишется в дела/указы с initiative=ruler.
+ * Наместник больше не правит сам: при молчании покровителя ходит случайный свободный столп.
+ * Движок решает КОГДА и КОГО; агент officerAct — ЧТО в рамках должности.
  */
 
 import { newId } from './ids.js';
-import { createLoreFact, chronicleEntries, formatCastForPrompt } from './models.js';
+import { createLoreFact, chronicleEntries } from './models.js';
 import {
   activeProcesses,
   canStartProcess,
   findDuplicateProcess,
   resolveLinkedStats,
   applyObjectiveSchedule,
-  pausedProcesses,
-  resumeProcess,
 } from './processes.js';
 import { estimateProcessDuration } from './durationJudge.js';
 import { formatBoardForPrompt, isThreeActPlot } from './plotlines.js';
-import { queueOrderRequest, listStandingOrders } from './orders.js';
-import { ensureErrandForProcess, linkProcessToPlotline } from './plotEngine.js';
-import { judgeProcessAlignment } from './plotAlign.js';
+import { ensureErrandForProcess, linkProcessToPlotline, rehomeUnrelatedProcess } from './plotEngine.js';
+import { judgeProcessAlignment, engagementOf } from './plotAlign.js';
 import { qualitativeStatsBrief, qualitativePopulation } from './stats.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
+import {
+  pickRandomFreeOfficer,
+  bindOfficerProcess,
+  isOffPortfolio,
+  formatOfficersForPrompt,
+} from './officers.js';
 
 export function countTrailingUnansweredNews(dialogHistory = []) {
   let n = 0;
@@ -67,25 +70,25 @@ export function clearPatronPresenceAsked(domain) {
   if (domain?.state) domain.state.patronPresenceAsked = false;
 }
 
-function rememberFact(domain, { text, world, character, chronicleAdds }) {
+function rememberFact(domain, { text, world, officer, chronicleAdds }) {
   domain.lore = domain.lore || [];
   const fact = createLoreFact({
     id: newId('lore'),
     text,
-    tags: ['chronicle', 'fact', 'steward'],
+    tags: ['chronicle', 'fact', 'officer'],
     gameDateLabel: world?.gameDate?.label || null,
     tick: world?.tickIndex ?? null,
-    author: `steward:${character?.name || 'ruler'}`,
+    author: `officer:${officer?.office || 'unknown'}`,
   });
   domain.lore.push(fact);
   if (chronicleAdds) chronicleAdds.push(fact);
   return fact;
 }
 
-async function applyProcess(domain, args, { config, runtime, world, character, log, chronicleAdds }) {
+async function applyProcess(domain, args, { config, runtime, world, officer, log, chronicleAdds }) {
   const slots = canStartProcess(domain, config);
-  if (!slots.ok) {
-    return { error: 'too_many_processes', message: `Уже ${slots.active}/${slots.max} дел.` };
+  if (!slots.ok || !officer) {
+    return { error: 'too_many_processes', message: 'Все столпы заняты.' };
   }
   const summary = String(args.summary || '').trim();
   const detail = String(args.detail || '').trim();
@@ -98,8 +101,9 @@ async function applyProcess(domain, args, { config, runtime, world, character, l
   }
   const linked = resolveLinkedStats(args.linkedStats, config);
   if (!linked.length) {
-    return { error: 'linked_stats_required', message: 'Нужен хотя бы один стат.' };
+    return { error: 'linked_stats_required', message: 'Нужен один стат характера дела.' };
   }
+  const linkedStat = linked[0];
   const action = {
     id: newId('act'),
     summary,
@@ -109,18 +113,23 @@ async function applyProcess(domain, args, { config, runtime, world, character, l
     durationMonths: 1,
     monthsLeft: 1,
     monthsDone: 0,
-    linkedStats: linked,
-    onBehalfOf: character?.name || 'правитель',
-    characterId: character?.id || null,
-    characterName: character?.name || null,
+    linkedStats: [linkedStat],
+    officerId: officer.id,
+    office: officer.office,
+    offPortfolio: isOffPortfolio(officer, linkedStat),
+    onBehalfOf: officer.name,
+    characterId: officer.id,
+    characterName: officer.name,
     characterNote: args.note || null,
     hardDeadline: false,
     status: 'active',
-    initiative: 'ruler',
+    initiative: 'officer',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
+  domain.state.pendingActions = domain.state.pendingActions || [];
   domain.state.pendingActions.push(action);
+  bindOfficerProcess(domain, officer, action);
   const estimated = await estimateProcessDuration({
     config,
     runtime,
@@ -140,73 +149,62 @@ async function applyProcess(domain, args, { config, runtime, world, character, l
   action.plotlineId = plot?.id || null;
   if (plot && isThreeActPlot(plot)) {
     await judgeProcessAlignment({ runtime, domain, process: action, plot, log });
+    if (engagementOf(action) === 'UNRELATED') {
+      const moved = rehomeUnrelatedProcess(domain, action, {
+        tick: world?.tickIndex ?? null,
+        config,
+      });
+      plot = moved.plot;
+      action.plotlineId = plot?.id || null;
+    }
   }
   rememberFact(domain, {
     world,
-    character,
+    officer,
     chronicleAdds,
-    text: `Правитель ${character?.name || ''} сам, без воли покровителя, поручил: ${summary}.`,
+    text: `${officer.title} ${officer.name} сам взялся за дело: ${summary}.`,
   });
   return { action, plot };
 }
 
-function applyOrder(domain, text, { world, character }) {
-  return queueOrderRequest(domain, {
-    action: 'create',
-    text,
-    by: character?.name || 'правитель',
-    initiative: 'ruler',
-    tick: world?.tickIndex ?? null,
-  });
-}
-
 /**
- * Один ход наместника в начале месяца, если покровитель молчит.
+ * Ход столпа в начале месяца, если покровитель молчит.
  * @returns {{ silent: number, act: object|null, chronicleAdds: object[] }}
  */
-export async function runSteward({ config, runtime, domain, world, log: parentLog }) {
+export async function runOfficerAct({ config, runtime, domain, world, log: parentLog, rng = Math.random }) {
   const gate = shouldRunSteward(domain, config);
   if (!gate.ok) return { silent: gate.silent, act: null, chronicleAdds: [] };
 
-  const character = domain.characters?.[0];
-  if (!character) return { silent: gate.silent, act: null, chronicleAdds: [] };
-  const chronicleAdds = [];
+  const officer = pickRandomFreeOfficer(domain, rng);
+  if (!officer) return { silent: gate.silent, act: null, chronicleAdds: [] };
 
-  const log = (parentLog || getLogger()).child({ scope: 'steward', domainId: domain.id });
+  const chronicleAdds = [];
+  const log = (parentLog || getLogger()).child({ scope: 'officerAct', domainId: domain.id });
   const statIds = (config.stats || []).map((s) => s.id).join(', ');
   const draft = { data: null };
 
   const tools = [
     {
-      name: 'submit_steward_act',
+      name: 'submit_officer_act',
       description:
-        'Одно решение правителя, пока бог молчит. process — новое дело, standing_order — постоянный порядок, none — ничего не менять.',
+        'Одно дело от лица выбранного столпа. process — новое дело на одну открытую историю, none — ничего.',
       parameters: {
         type: 'object',
         required: ['action'],
         properties: {
-          action: { type: 'string', enum: ['none', 'process', 'standing_order', 'resume'] },
+          action: { type: 'string', enum: ['none', 'process'] },
           summary: { type: 'string', description: 'Название дела, 1–8 слов' },
-          detail: { type: 'string', description: 'Что именно поручено и кому' },
-          goal: {
-            type: 'string',
-            description: 'Одной фразой: что считается достигнутой целью. Не обязательно.',
-          },
+          detail: { type: 'string', description: 'Что именно делает этот столп' },
+          goal: { type: 'string' },
           linkedStats: {
             type: 'array',
             items: { type: 'string' },
-            description: `1–3 из: ${statIds}`,
+            description: `Ровно один стат характера ДЕЛА из: ${statIds}`,
           },
           plotId: {
             type: 'string',
-            description:
-              'id истории без поручения, если дело про неё. Не подставляй соседнюю нить.',
+            description: 'id одной открытой истории без поручения.',
           },
-          processId: {
-            type: 'string',
-            description: 'Для resume — id дела на паузе.',
-          },
-          text: { type: 'string', description: 'Формулировка постоянного порядка' },
           note: { type: 'string' },
         },
       },
@@ -221,46 +219,21 @@ export async function runSteward({ config, runtime, domain, world, log: parentLo
             config,
             runtime,
             world,
-            character,
+            officer,
             log,
             chronicleAdds,
           });
           if (applied.error) return toolFail(applied.error, applied.message);
-          draft.data = { kind: 'process', summary: applied.action.summary, id: applied.action.id };
+          draft.data = {
+            kind: 'process',
+            summary: applied.action.summary,
+            id: applied.action.id,
+            office: officer.office,
+            officerName: officer.name,
+          };
           return { ok: true };
         }
-        if (kind === 'resume') {
-          const paused = pausedProcesses(domain, config);
-          const raw = String(args.processId || args.summary || '').trim().toLowerCase();
-          const action =
-            paused.find((a) => a.id === args.processId) ||
-            paused.find((a) => String(a.summary || '').toLowerCase().includes(raw));
-          if (!action) return toolFail('not_paused', 'Нет такого дела на паузе.');
-          const applied = resumeProcess(action, domain, config);
-          if (!applied.ok) {
-            return toolFail(
-              applied.error,
-              applied.error === 'too_many_processes'
-                ? `Уже ${applied.active}/${applied.max} дел, слота нет.`
-                : applied.error,
-            );
-          }
-          rememberFact(domain, {
-            world,
-            character,
-            chronicleAdds,
-            text: `Правитель ${character?.name || ''} сам возобновил дело: ${action.summary}.`,
-          });
-          draft.data = { kind: 'resume', summary: action.summary, id: action.id };
-          return { ok: true };
-        }
-        if (kind === 'standing_order') {
-          const applied = applyOrder(domain, args.text, { world, character });
-          if (applied.error) return toolFail(applied.error, applied.message);
-          draft.data = { kind: 'standing_order', text: applied.request.text, id: applied.request.id };
-          return { ok: true };
-        }
-        return toolFail('bad_action', 'action: none, process, resume или standing_order.');
+        return toolFail('bad_action', 'action: none или process.');
       },
     },
   ];
@@ -270,40 +243,39 @@ export async function runSteward({ config, runtime, domain, world, log: parentLo
     .map((e) => `- ${e.gameDateLabel || '?'}: ${e.text}`)
     .join('\n');
   const processes = activeProcesses(domain, config)
-    .map((p) => `- ${p.summary} (ещё ~${p.monthsLeft} мес.${p.initiative === 'ruler' ? ', сам правитель' : ''})`)
+    .map((p) => `- ${p.summary} (ещё ~${p.monthsLeft} мес.)`)
     .join('\n');
-  const orders = listStandingOrders(domain)
-    .map((m) => `- ${m.text}${m.initiative === 'ruler' ? ' (сам правитель)' : ''}${m.pending ? ` [${m.pending}]` : ''}`)
-    .join('\n');
-  const openStories = (domain.plotlines || []).filter((p) => p.kind === 'story' && !(p.relatedProcessIds || []).length);
+  const openStories = (domain.plotlines || []).filter(
+    (p) => p.kind === 'story' && !(p.relatedProcessIds || []).length,
+  );
 
   await runtime.run({
-    agentId: 'steward',
+    agentId: 'officerAct',
     tools,
     maxTurns: 3,
-    toolChoice: { type: 'function', function: { name: 'submit_steward_act' } },
+    toolChoice: { type: 'function', function: { name: 'submit_officer_act' } },
     log,
-    scene: 'steward',
+    scene: 'officer_act',
     domainId: domain.id,
-    extraSystem: `Ты ${character.name}, ${character.title || 'правитель'} города «${domain.name}». Покровитель молчит.`,
+    extraSystem: `Ты действуешь от лица столпа: ${officer.title} ${officer.name}. Покровитель молчит. Жрец не правит сам.`,
     userMessages: [
       {
         role: 'user',
         content: [
-          `Покровитель молчит уже ${gate.silent} месяца. Письмо ему пишет другой — ты только одно поручение.`,
-          'По сводке ниже заведи дело, объяви порядок — или ничего. Это ТВОЁ решение, не воля бога.',
-          'Одно действие. Если город и так занят и ничего не горит — action=none.',
-          'Дела на паузе можно возобновить (action=resume), если слот свободен.',
-          pausedProcesses(domain, config).length
-            ? `На паузе:\n${pausedProcesses(domain, config)
-                .map((p) => `- [${p.id}] ${p.summary} (ещё ~${p.monthsLeft} мес.)`)
-                .join('\n')}`
-            : null,
+          `Покровитель молчит уже ${gate.silent} месяца.`,
+          `Движок выбрал столпа: ${officer.title} ${officer.name} (${officer.office}, стат ${officer.statId}).`,
+          officer.nature ? `Характер: ${officer.nature}` : '',
+          'Заведи ОДНО дело в рамках своего класса на ОДНУ открытую историю без поручения (включая сопряжение).',
+          'Если история требует чужого умения — всё равно делай её ты, linkedStats от характера задачи (чужое дело).',
+          'Не заводи указы. Не возобновляй паузы. Не резюмируй от жреца.',
+          'Если не за что браться — action=none.',
           openStories.length
-            ? `Истории без поручения (если действовать — plotId одной из них):\n${openStories
+            ? `Истории без поручения:\n${openStories
                 .map((p) => `- [${p.id}] «${p.title}»: ${p.synopsis || ''}`)
                 .join('\n')}`
-            : null,
+            : 'Открытых историй без поручения нет — можно none.',
+          '',
+          formatOfficersForPrompt(domain, config),
           '',
           `Город: ${qualitativePopulation(domain.population || 0)}`,
           qualitativeStatsBrief(domain.stats || {}, config),
@@ -314,16 +286,10 @@ export async function runSteward({ config, runtime, domain, world, log: parentLo
           'Уже идут дела:',
           processes || '- (нет)',
           '',
-          'Постоянные порядки:',
-          orders || '- (нет)',
-          '',
-          'Люди:',
-          formatCastForPrompt(domain.lore, { limit: 12 }),
-          '',
           'Недавняя хроника:',
           recent || '- (нет)',
           '',
-          'Вызови submit_steward_act.',
+          'Вызови submit_officer_act.',
         ]
           .filter(Boolean)
           .join('\n'),
@@ -331,10 +297,13 @@ export async function runSteward({ config, runtime, domain, world, log: parentLo
     ],
   });
 
-  log.info('steward.done', {
+  log.info('officerAct.done', {
     silent: gate.silent,
-    act: draft.data ? `${draft.data.kind}:${draft.data.summary || draft.data.text || 'none'}` : 'no_tool',
-    preview: truncate(draft.data?.summary || draft.data?.text || '', 120),
+    office: officer.office,
+    act: draft.data ? `${draft.data.kind}:${draft.data.summary || 'none'}` : 'no_tool',
+    preview: truncate(draft.data?.summary || '', 120),
   });
   return { silent: gate.silent, act: draft.data, chronicleAdds };
 }
+
+export const runSteward = runOfficerAct;

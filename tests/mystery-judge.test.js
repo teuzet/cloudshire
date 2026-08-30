@@ -10,6 +10,8 @@ import {
   judgeMysteryPresentation,
   formatJudgeRevisionForPrompt,
   literaryJudgeAccepts,
+  MYSTERY_JUDGE_CODES,
+  MYSTERY_PRESENTATION_JUDGE_CODES,
 } from '../src/game/mysteryJudge.js';
 
 function graph() {
@@ -41,6 +43,14 @@ test('вердикт PASS чистит issues, FAIL без issues станови
   assert.equal(fail.issues[0].code, 'OTHER');
   const bad = parseMysteryJudgeVerdict({ verdict: 'maybe' });
   assert.equal(bad.verdict, 'UNCERTAIN');
+  const dangling = parseMysteryJudgeVerdict({
+    verdict: 'FAIL',
+    issues: [{ code: 'DANGLING_REFERENT', location: 'X', reason: 'соседи без антецедента' }],
+    summary: 'висящий референт',
+  });
+  assert.equal(dangling.issues[0].code, 'DANGLING_REFERENT');
+  assert.ok(MYSTERY_JUDGE_CODES.includes('DANGLING_REFERENT'));
+  assert.ok(MYSTERY_PRESENTATION_JUDGE_CODES.includes('DANGLING_REFERENT'));
 });
 
 test('пакет judge компактный: якоря и граф, без описания города', () => {
@@ -65,6 +75,7 @@ test('пакет judge компактный: якоря и граф, без оп
   assert.match(text, /Эрвен/);
   assert.match(text, /Ярус слышит знамение/);
   assert.match(text, /observedFacts:/);
+  assert.match(text, /X понятен без скрытых/);
   assert.match(text, /Колокол звонил сам/);
   assert.match(text, /resolutionFacts:/);
   assert.match(text, /язык колокола/);
@@ -161,6 +172,12 @@ test('конфиг каскада и агенты judge на месте', () => 
   assert.equal(config.agents.mysteryPresentation.reasoningEffort, undefined);
   assert.equal(config.agents.mysteryPresentationJudge.reasoningEffort, undefined);
   assert.equal(config.agents.suspenseJudge.reasoningEffort, undefined);
+  assert.match(config.agents.mysteryStart.instructions, /X САМ ДОСТАТОЧЕН/);
+  assert.match(config.agents.mysteryStart.instructions, /Антецедент не имеет права жить/);
+  assert.match(config.agents.mysteryPresentation.instructions, /дыра экспозиции/);
+  assert.match(config.agents.mysteryJudge.instructions, /DANGLING_REFERENT/);
+  assert.match(config.agents.mysteryJudgeTerra.instructions, /DANGLING_REFERENT/);
+  assert.match(config.agents.mysteryPresentationJudge.instructions, /соседи/);
 });
 
 test('ассоциация в промпте — слабый импульс', () => {
@@ -195,6 +212,7 @@ test('пакет подачи: известные узлы отдельно от
   });
   assert.match(text, /ИЗВЕСТНЫЕ УЗЛЫ/);
   assert.match(text, /Ярус слышит знамение/);
+  assert.match(text, /называй самостоятельно/);
   assert.match(text, /СКРЫТЫЕ УЗЛЫ/);
   assert.match(text, /Цистерну перестали чистить/);
   assert.match(text, /synopsis: Ярус слышит ночной гул/);

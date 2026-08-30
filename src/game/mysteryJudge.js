@@ -28,6 +28,7 @@ export const MYSTERY_JUDGE_CODES = [
   'MYSTERY_INCOMPLETE',
   'UNSUPPORTED_X',
   'MASK_LEAK',
+  'DANGLING_REFERENT',
   'SYNOPSIS_ENTRY_INVENTION',
   'CLOSE_WHEN_INVENTION',
   'REDUNDANT_STRUCTURE',
@@ -36,6 +37,7 @@ export const MYSTERY_JUDGE_CODES = [
 
 export const MYSTERY_PRESENTATION_JUDGE_CODES = [
   'MASK_LEAK',
+  'DANGLING_REFERENT',
   'SYNOPSIS_NOT_FROM_KNOWN',
   'ENTRY_NOT_FROM_KNOWN',
   'ENTRY_NO_HOOK',
@@ -163,7 +165,7 @@ export function formatMysteryJudgeCase({
     draft.asksSequel === true || draft.asksSequel === 'true' ? 'true' : 'false';
   return [
     'ПАКЕТ НА ПРОВЕРКУ (только это; полного лора города нет).',
-    'Не сверяй фактологию с энциклопедией острова. Смотри причинность, маску и type.about.',
+    'Не сверяй фактологию с энциклопедией острова. Смотри причинность, маску, type.about и что X понятен без скрытых узлов.',
     '',
     `ТИП: ${type?.tagName || '—'}`,
     type?.about ? `about: ${type.about}` : null,
@@ -332,7 +334,7 @@ export async function judgeMysteryCascade({
     agentId: 'mysteryJudgeTerra',
     caseText,
     extraUser:
-      'Ты финальный acceptor core. Дешёвый rejector не нашёл жёсткой ошибки. Проверь самостоятельно с нуля: причинность, время, поступки, X, type. Подачу (synopsis/entry) не оценивай — её ещё нет.',
+      'Ты финальный acceptor core. Дешёвый rejector не нашёл жёсткой ошибки. Проверь самостоятельно с нуля: причинность, время, поступки, X, type. X должен читаться без скрытых узлов. Подачу (synopsis/entry) не оценивай — её ещё нет.',
     log,
     domainId,
   });
@@ -380,6 +382,7 @@ export function formatMysteryPresentationJudgeCase({
   return [
     'ПАКЕТ НА ПРОВЕРКУ ПОДАЧИ (core уже принят; лора города нет).',
     'Синопсис и хроника имеют право только на известные узлы и observedFacts.',
+    'Группу в подаче называй самостоятельно: из известных узлов должно быть ясно, кто это, без скрытых.',
     title ? `Название: ${title}` : null,
     '',
     'ИЗВЕСТНЫЕ УЗЛЫ (единственный источник синопсиса и хроники):',
@@ -411,6 +414,7 @@ const PRESENTATION_JUDGE_PROMPT = [
   'FAIL если:',
   '- synopsis или entry выдают скрытый узел (виновный, мотив, механизм, улика из hidden), даже другими словами;',
   '- synopsis или entry добавляют факты, которых нет в известных узлах и observedFacts;',
+  '- группа названа относительно («соседи», «его люди», «остальные»), а из известных узлов и observedFacts не ясно, чьи они: антецедент только в скрытом узле;',
   '- хроника (entry) не оставляет зацепки: нет странности или открытого «почему», по которому захочется поручить проверку;',
   '- closeWhen называет разгадку или склеивает несколько условий через «и»;',
   '- mootWhen пустой или повторяет closeWhen.',

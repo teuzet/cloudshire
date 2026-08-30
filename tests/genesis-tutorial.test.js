@@ -23,6 +23,7 @@ test('тутор генезиса — статичный текст в конф�
   assert.match(text, /\/city/);
   assert.match(text, /информаци[яи] о городе/i);
   assert.doesNotMatch(text, /^\s*\d+\)/m);
+  assert.doesNotMatch(text, /столп|казнач|воевод|хранитель|канцлер/i);
 });
 
 test('в начале генезиса тутор уходит отдельным сообщением, не правкой полоски', async () => {

@@ -6,9 +6,15 @@ import { validateTelegramInitData, miniAppUrl } from '../src/clients/telegram/in
 import { createWebServer } from '../src/clients/web/server.js';
 
 const statsCfg = {
+  faith: {
+    name: 'Вера',
+    about: 'Насколько город ещё верит, что ты — его бог.',
+  },
   stats: [
-    { id: 'faith', name: 'Вера', about: 'Доверие к покровителю.' },
-    { id: 'might', name: 'Мощь', about: 'Войско и стены.' },
+    { id: 'prosperity', name: 'Благосостояние', about: 'Сыты ли дворы и полны ли склады.' },
+    { id: 'security', name: 'Безопасность', about: 'Спит ли улица спокойно.' },
+    { id: 'knowledge', name: 'Знание', about: 'Помнит ли город, как лечить и читать.' },
+    { id: 'influence', name: 'Влияние', about: 'Слушают ли город его собственные дома.' },
   ],
   statEpithets: { 0: 'ужасающе', 50: 'обычно', 100: 'божественно' },
 };
@@ -70,7 +76,13 @@ test('мини-аппка: свои истории и участие в сопр
   const domain = {
     id: 'd1',
     name: 'Саркум',
-    stats: { faith: 62, might: 40 },
+    stats: { prosperity: 55, security: 40, knowledge: 62, influence: 50 },
+    officers: [
+      { id: 'off_t', office: 'treasurer', statId: 'prosperity', title: 'Казначей', name: 'Элара', processId: null },
+      { id: 'off_m', office: 'marshal', statId: 'security', title: 'Воевода', name: 'Кален', processId: 'act_cf' },
+      { id: 'off_k', office: 'keeper', statId: 'knowledge', title: 'Хранитель', name: 'Мира', processId: 'act_1' },
+      { id: 'off_c', office: 'chancellor', statId: 'influence', title: 'Канцлер', name: 'Орен', processId: null },
+    ],
     plotlines: [
       { id: 'local', kind: 'story', title: 'Гул колодца', synopsis: 'Вода поёт.' },
       {
@@ -91,10 +103,11 @@ test('мини-аппка: свои истории и участие в сопр
           detail: 'Спуститься ночью.',
           monthsLeft: 2,
           status: 'active',
-          linkedStats: ['faith'],
+          linkedStats: ['knowledge'],
         },
       ],
       modifiers: [],
+      faith: 52,
     },
   };
   const conflux = {
@@ -133,7 +146,7 @@ test('мини-аппка: свои истории и участие в сопр
         monthsLeft: 1,
         status: 'active',
         ownerDomainId: 'd1',
-        linkedStats: ['might'],
+        linkedStats: ['security'],
       },
     ],
   };
@@ -147,9 +160,15 @@ test('мини-аппка: свои истории и участие в сопр
   assert.equal(view.events.some((e) => e.title === 'Чужой храм'), false);
   const fight = view.events.find((e) => e.title === 'Общая драка');
   assert.equal(fight.processes[0].summary, 'Сторожить проход');
-  assert.equal(view.processes.length, 2);
-  assert.equal(view.processes.some((p) => p.monthsLeft === 2), true);
-  assert.equal(view.stats[0].value, 62);
+  assert.equal(view.processes.length, 4);
+  assert.equal(view.processes.some((p) => p.process?.monthsLeft === 2), true);
+  const knowledge = view.stats.find((s) => s.id === 'knowledge');
+  assert.equal(knowledge.value, 62);
+  assert.equal(knowledge.officer.name, 'Мира');
+  assert.equal(view.faith.value, 52);
+  assert.equal(view.faith.name, 'Вера');
+  assert.match(view.faith.about, /верит/);
+  assert.equal(knowledge.about, 'Помнит ли город, как лечить и читать.');
   assert.equal(view.orders[0].indefinite, false);
   assert.equal(view.orders[0].remainingMonths, 2);
   assert.match(view.orders[0].since, /Год 1, месяц 4/);

@@ -69,6 +69,7 @@ async function seedOne(kind, opts) {
 /**
  * Если стартер+каталог короче порога — долить пачку с фабрики и сохранить в каталог.
  * Не гоняет до poolMin за один вызов: максимум refillBatch карточек.
+ * На генезисе (opening plots) не вызывается: первые истории берут готовую карточку из пула.
  */
 export async function refillAnnotationPool({
   world,

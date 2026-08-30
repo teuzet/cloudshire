@@ -13,18 +13,10 @@ function clamp(n, min, max) {
 
 /**
  * Independent normal rolls biased to center (no fixed sum).
+ * @deprecated Genesis 2 allocates after prose; kept for leftover callers.
  */
 export function rollDomainStats(config, rng = Math.random) {
-  const defs = config.stats;
-  const mean = config.genesis.statMean ?? 50;
-  const std = config.genesis.statStd ?? 12;
-  const min = config.genesis.statMin ?? 18;
-  const max = config.genesis.statMax ?? 82;
-  const stats = {};
-  for (const def of defs) {
-    stats[def.id] = clamp(mean + gaussian(rng) * std, min, max);
-  }
-  return stats;
+  return allocateStats({}, config);
 }
 
 export function rollPopulation(config, rng = Math.random) {
@@ -155,6 +147,88 @@ export function applyStatDeltas(stats, deltas) {
     stats[key] = to;
     changes[key] = { from, to, delta: applied };
   }
+  return changes;
+}
+
+export function statBudgetConfig(config = {}) {
+  return {
+    budget: Math.round(Number(config?.genesis?.statBudget) || 220),
+    min: Math.round(Number(config?.genesis?.statMin) ?? 35),
+    max: Math.round(Number(config?.genesis?.statMax) ?? 75),
+  };
+}
+
+/**
+ * Относительные скоры (0–10) → сумма budget, каждый в [min, max].
+ * Равные скоры → ровная раздача (55×4 при 220).
+ */
+export function allocateStats(scores = {}, config = {}) {
+  const ids = (config.stats || []).map((d) => d.id);
+  const { budget, min, max } = statBudgetConfig(config);
+  if (!ids.length) return {};
+
+  const even = Math.round(budget / ids.length);
+  const raw = ids.map((id) => Math.max(0, Number(scores?.[id]) || 0));
+  const allEqual = raw.every((v) => v === raw[0]);
+  let floats;
+  if (allEqual) {
+    floats = ids.map(() => budget / ids.length);
+  } else {
+    const shift = Math.max(0, 0.01 - Math.min(...raw));
+    const shifted = raw.map((v) => v + shift);
+    const sum = shifted.reduce((a, b) => a + b, 0) || 1;
+    floats = shifted.map((v) => (v / sum) * budget);
+  }
+  let ints = floats.map((v) => clamp(v, min, max));
+  let cur = ints.reduce((a, b) => a + b, 0);
+  let guard = 0;
+  while (cur !== budget && guard < 500) {
+    guard += 1;
+    const dir = cur < budget ? 1 : -1;
+    let idx = -1;
+    let best = -1;
+    for (let i = 0; i < ints.length; i += 1) {
+      if (dir > 0 && ints[i] >= max) continue;
+      if (dir < 0 && ints[i] <= min) continue;
+      const room = dir > 0 ? max - ints[i] : ints[i] - min;
+      if (room > best) {
+        best = room;
+        idx = i;
+      }
+    }
+    if (idx < 0) break;
+    ints[idx] += dir;
+    cur += dir;
+  }
+  if (cur !== budget && ints.every((v) => v === even || v === min || v === max)) {
+    // last-ditch: if stuck, prefer even split already clipped
+  }
+  const out = {};
+  ids.forEach((id, i) => {
+    out[id] = ints[i];
+  });
+  return out;
+}
+
+const FAITH_FROM = ['prosperity', 'security', 'knowledge', 'influence'];
+
+export function syncFaith(domain) {
+  if (!domain || typeof domain !== 'object') return null;
+  if (!domain.state || typeof domain.state !== 'object') domain.state = {};
+  const stats = domain.stats || {};
+  const ids = (FAITH_FROM.length ? FAITH_FROM : Object.keys(stats)).filter((id) => id in stats);
+  const vals = ids.map((id) => Number(stats[id])).filter((n) => Number.isFinite(n));
+  domain.state.faith = vals.length
+    ? Math.max(0, Math.min(100, Math.round(vals.reduce((a, b) => a + b, 0) / vals.length)))
+    : 55;
+  return domain.state.faith;
+}
+
+export function applyStatDeltasToDomain(domain, deltas) {
+  if (!domain) return {};
+  if (!domain.stats || typeof domain.stats !== 'object') domain.stats = {};
+  const changes = applyStatDeltas(domain.stats, deltas);
+  syncFaith(domain);
   return changes;
 }
 

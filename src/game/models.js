@@ -28,6 +28,8 @@ export function emptyState() {
     quietPicks: [],
     // Как обращаться к божеству-покровителю; null = ещё не названо
     patronName: null,
+    // Вера — среднее четырёх статов, не ключ в domain.stats
+    faith: null,
   };
 }
 
@@ -44,7 +46,9 @@ export function normalizeDomain(domain) {
     if (!Array.isArray(domain.state.monthLog)) domain.state.monthLog = [];
     if (!Array.isArray(domain.state.quietPicks)) domain.state.quietPicks = [];
     if (!('patronName' in domain.state)) domain.state.patronName = null;
+    if (!Number.isFinite(Number(domain.state.faith))) domain.state.faith = null;
   }
+  if (!Array.isArray(domain.officers)) domain.officers = [];
   if (!Array.isArray(domain.tags)) domain.tags = [];
   if (!Array.isArray(domain.plotlines)) domain.plotlines = [];
   if (typeof domain.chronicleDigest !== 'string') domain.chronicleDigest = domain.chronicleDigest || '';
@@ -176,6 +180,10 @@ export function createDomainRecord({
   lore = [],
   createdTick = 0,
   playerBrief = null,
+  concept = null,
+  genesisSeed = null,
+  playerDirectives = null,
+  officers = [],
 }) {
   const now = new Date().toISOString();
   return {
@@ -226,6 +234,10 @@ export function createDomainRecord({
           freeform: String(playerBrief.freeform || ''),
         }
       : null,
+    concept: concept || null,
+    genesisSeed: genesisSeed || null,
+    playerDirectives: playerDirectives || null,
+    officers: Array.isArray(officers) ? officers : [],
   };
 }
 
@@ -364,8 +376,10 @@ export function castRecords(lore = []) {
 }
 
 /** Живой каст города для промптов: коротко, кто есть кто. */
-export function formatCastForPrompt(lore = [], { limit = 20 } = {}) {
-  const cast = castRecords(lore).slice(-limit);
+export function formatCastForPrompt(lore = [], { limit = 20, includeOfficers = false } = {}) {
+  const cast = castRecords(lore)
+    .filter((c) => includeOfficers || !(c.tags || []).includes('officer'))
+    .slice(-limit);
   if (!cast.length) return '(названных людей пока нет)';
   const sexWord = { male: 'он', female: 'она' };
   const stateWord = { dead: 'мёртв', gone: 'пропал без вести' };
@@ -424,6 +438,8 @@ export function createLoreFact({
   location = null,
   concernsDomainIds = null,
   concernsDomainNames = null,
+  plotClosed = false,
+  plotCloseReason = null,
 }) {
   const fact = {
     id,
@@ -454,7 +470,27 @@ export function createLoreFact({
   if (Array.isArray(concernsDomainNames) && concernsDomainNames.length) {
     fact.concernsDomainNames = concernsDomainNames.map(String);
   }
+  if (plotClosed) markChroniclePlotClosed(fact, { reason: plotCloseReason });
   return fact;
+}
+
+/** Жрецу: эта хроника закрыла историю. Покровителю пометку не произносят. */
+export const CHRONICLE_PLOT_CLOSED_MARK = 'ЭТА ЗАПИСЬ ЗАКРЫЛА ПРОБЛЕМУ';
+
+export function markChroniclePlotClosed(entry, { reason } = {}) {
+  if (!entry) return entry;
+  entry.plotClosed = true;
+  const r = String(reason || '').trim();
+  if (r) entry.plotCloseReason = r;
+  return entry;
+}
+
+export function formatChroniclePriestMark(entry) {
+  if (!entry?.plotClosed) return '';
+  const reason = String(entry.plotCloseReason || '').trim();
+  return reason
+    ? ` [${CHRONICLE_PLOT_CLOSED_MARK}: ${reason}]`
+    : ` [${CHRONICLE_PLOT_CLOSED_MARK}]`;
 }
 
 export function patronFactText(patronName, cityName) {
@@ -544,7 +580,8 @@ export function loreToPromptText(lore = [], { excludeTags = [] } = {}) {
       }
       const scope = formatChronicleScope(f);
       const plotRef = f.sourcePlotId ? ` ⟨${f.sourcePlotId}⟩` : '';
-      return `#${n} (${date})${tags}${imp}${stats}: ${scope}${f.text}${plotRef}`;
+      const closed = formatChroniclePriestMark(f);
+      return `#${n} (${date})${tags}${imp}${stats}: ${scope}${f.text}${plotRef}${closed}`;
     })
     .join('\n');
 }

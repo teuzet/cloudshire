@@ -1,5 +1,6 @@
 import { newId } from './ids.js';
 import { createLoreFact, createCharacterRecord, formatCastForPrompt, findCharacterByName, newCharactersSchema } from './models.js';
+import { formatOfficersCastHint } from './officers.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { attachChronicleToPlotlines, clipPlotText, PLOT_HOOK_MAX } from './plotlines.js';
@@ -85,6 +86,7 @@ function packCity(domain) {
     `Город «${domain.name}». ${formatCityForAgents(domain)}`,
     ruler ? `Правитель — ${ruler}. Этого человека в newCharacters не заводи.` : null,
     `Известные люди:\n${formatCastForPrompt(domain.lore, { limit: 10 })}`,
+    formatOfficersCastHint(domain),
   ]
     .filter(Boolean)
     .join('\n');

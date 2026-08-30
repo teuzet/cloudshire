@@ -42,8 +42,25 @@ test('стартовый пул тайны — arena, footprint, ifSolved', () =
   assert.ok(pool.every((c) => (c.storyFootprint?.domains || []).length || (c.storyFootprint?.motifs || []).length));
 });
 
-test('стартовый пул саспенса пока пуст', () => {
-  assert.equal(loadStarterSuspensePool().length, 0);
+test('стартовый пул саспенса — situation, threat, footprint', () => {
+  const pool = loadStarterSuspensePool();
+  assert.ok(pool.length >= 10);
+  assert.ok(pool.length <= 15);
+  assert.ok(
+    pool.every(
+      (c) =>
+        c.situation &&
+        c.threat &&
+        c.whyNotSolvedNow &&
+        c.escalation &&
+        c.pointOfNoReturn &&
+        c.ifPrevented &&
+        c.ifNotPrevented,
+    ),
+  );
+  assert.ok(pool.every((c) => c.kind === 'suspense' && c.source === 'starter'));
+  assert.ok(pool.every((c) => c.axes.arena && !c.axes.truthArena));
+  assert.ok(pool.every((c) => (c.storyFootprint?.domains || []).length || (c.storyFootprint?.motifs || []).length));
 });
 
 test('normalize принимает truthArena как arena', () => {
@@ -135,24 +152,24 @@ test('пул мира склеивает стартер и каталог без
 
 test('саспенс-каталог не смешивается с тайной', () => {
   const world = { suspenseAnnotationPool: [] };
-  mergeWorldSuspensePool(world, [
-    {
-      id: 'sus_1',
-      kind: 'suspense',
-      title: 'Кладка',
-      situation: 'на склоне уже видны личинки, пастухи обходят полосу',
-      threat: 'если не выжечь край, популяция займёт основное пастбище',
-      whyNotSolvedNow: 'выжигать нельзя без жертвы раннего выпаса',
-      escalation: 'кладки густеют каждую неделю',
-      pointOfNoReturn: 'когда личинки уйдут под дерн основного склона',
-      ifPrevented: 'стада держат на прежнем склоне',
-      ifNotPrevented: 'выпас сокращают на годы',
-      axes: { arena: 'ECOLOGY', gravity: 58 },
-    },
-  ]);
-  assert.equal(world.suspenseAnnotationPool.length, 1);
-  assert.equal(world.suspenseAnnotationPool[0].kind, 'suspense');
-  assert.ok(world.suspenseAnnotationPool[0].ifPrevented);
+  const extra = {
+    id: 'sus_1',
+    kind: 'suspense',
+    title: 'Кладка',
+    situation: 'на склоне уже видны личинки, пастухи обходят полосу',
+    threat: 'если не выжечь край, популяция займёт основное пастбище',
+    whyNotSolvedNow: 'выжигать нельзя без жертвы раннего выпаса',
+    escalation: 'кладки густеют каждую неделю',
+    pointOfNoReturn: 'когда личинки уйдут под дерн основного склона',
+    ifPrevented: 'стада держат на прежнем склоне',
+    ifNotPrevented: 'выпас сокращают на годы',
+    axes: { arena: 'ECOLOGY', gravity: 58 },
+  };
+  mergeWorldSuspensePool(world, [extra]);
+  assert.ok(world.suspenseAnnotationPool.length > 1);
+  assert.ok(world.suspenseAnnotationPool.every((c) => c.kind === 'suspense'));
+  const added = world.suspenseAnnotationPool.find((c) => c.id === 'sus_1');
+  assert.ok(added?.ifPrevented);
 });
 
 test('mergeAnnotationCatalog не теряет сгенерированные', () => {
@@ -190,6 +207,15 @@ test('конфиг саспенс-аннотаций совпадает по п�
   const cfg = plotConfig(loadConfig());
   assert.equal(cfg.suspenseAnnotation.shortlistSize, 10);
   assert.equal(cfg.mysteryAnnotation.shortlistSize, 10);
-  assert.equal(cfg.suspenseAnnotation.poolMin, 60);
+  assert.equal(cfg.suspenseAnnotation.poolMin, 10);
+  assert.equal(cfg.mysteryAnnotation.poolMin, 10);
   assert.ok(cfg.suspenseAnnotation.tagGroups.some((g) => g.id === 'truthArena'));
+});
+
+test('стартер не короче poolMin — фабрика не доливает поверх пула', () => {
+  const cfg = plotConfig(loadConfig());
+  const mystery = loadStarterMysteryPool();
+  const suspense = loadStarterSuspensePool();
+  assert.ok(mystery.length >= cfg.mysteryAnnotation.poolMin);
+  assert.ok(suspense.length >= cfg.suspenseAnnotation.poolMin);
 });
