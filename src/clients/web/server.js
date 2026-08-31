@@ -22,6 +22,7 @@ import { knownPartnerLore } from '../../game/confluxBoard.js';
 import { genesisTutorialText } from '../../game/progressBar.js';
 import { orderMonthsLeft } from '../../game/orders.js';
 import { miniCityPayload } from '../../game/miniCity.js';
+import { mountFreeformLab } from './freeformLab.js';
 import {
   validateTelegramInitData,
   telegramBotToken,
@@ -194,6 +195,19 @@ function statsWithEpithets(stats, config) {
   });
 }
 
+function isFreeformPath(req) {
+  const path = String(req.path || '');
+  const url = String(req.originalUrl || '').split('?')[0];
+  return (
+    path === '/freeform' ||
+    path.startsWith('/freeform/') ||
+    path.startsWith('/api/freeform') ||
+    url === '/freeform' ||
+    url.startsWith('/freeform/') ||
+    url.startsWith('/api/freeform')
+  );
+}
+
 function adminBasicAuth(config) {
   const user = config.admin?.user || '';
   const password = config.admin?.password || '';
@@ -201,6 +215,7 @@ function adminBasicAuth(config) {
 
   return (req, res, next) => {
     if (req.path === '/health') return next();
+    if (isFreeformPath(req)) return next();
 
     if (!user || !password) {
       if (required) {
@@ -630,6 +645,11 @@ export function createWebServer({ config, app, runtime, storage }) {
       getLogger().info('play.new_slot', { userId });
       res.json({ userId });
     });
+  }
+
+  const onPaaS = Boolean(process.env.DYNO || process.env.RAILWAY_ENVIRONMENT);
+  if (playEnabled || !onPaaS) {
+    mountFreeformLab(server, { config, runtime });
   }
 
   // ------------------------------------------------------------------

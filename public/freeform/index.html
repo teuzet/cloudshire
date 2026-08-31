@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Freeform — лаборатория</title>
+  <link rel="stylesheet" href="/freeform/style.css" />
+</head>
+<body>
+  <header class="top">
+    <div>
+      <strong id="cityName">…</strong>
+      <span id="gameDate" class="muted"></span>
+    </div>
+    <div class="row">
+      <span id="modeLabel" class="pill">нет истории</span>
+      <button type="button" id="btnReset">заново</button>
+    </div>
+  </header>
+
+  <p id="banner" class="banner hidden"></p>
+
+  <main class="layout">
+    <section class="col">
+      <h2>Хроника</h2>
+      <ol id="chronicle" class="chronicle"></ol>
+    </section>
+
+    <section class="col">
+      <article id="plotCard" class="card hidden"></article>
+
+      <form id="seedForm" class="card">
+        <h2>Стартовая хроника</h2>
+        <p class="muted">Напиши свершившееся событие. Город не меняется — три затравки одной gravity, чтобы прочитать посадку.</p>
+        <textarea id="seedText" rows="5" placeholder="Что случилось…"></textarea>
+        <label>Gravity
+          <select id="seedGravity">
+            <option value="SITUATION">SITUATION — узкий случай</option>
+            <option value="EPISODE" selected>EPISODE — общее событие на недели</option>
+            <option value="CRISIS">CRISIS — глава в истории города</option>
+            <option value="RUPTURE">RUPTURE — ломается прежний порядок</option>
+          </select>
+        </label>
+        <p class="muted">Посадка истории — чем она кончится, не размер первой сцены. У всех трёх кандидатов одна.</p>
+        <button type="submit" id="btnSeed">Сгенерировать затравки</button>
+      </form>
+
+      <section id="candidates" class="card hidden">
+        <h2>Три затравки</h2>
+        <p id="candidatesMeta" class="muted"></p>
+        <div id="candidatesList"></div>
+      </section>
+
+      <form id="deedForm" class="card hidden">
+        <h2>Дело</h2>
+        <textarea id="deedText" rows="4" placeholder="Что делал город / столп…"></textarea>
+        <label>Длительность, мес.
+          <input id="deedMonths" type="number" min="1" max="24" value="1" />
+        </label>
+        <label>Исход
+          <select id="deedFinish">
+            <option value="fail">провал</option>
+            <option value="ok" selected>успех</option>
+            <option value="crit">критический успех</option>
+          </select>
+        </label>
+        <button type="submit" id="btnDeed">ОК</button>
+      </form>
+
+      <p id="closedNote" class="card hidden">История закончена. Можно прочитать последний шаг. Чтобы начать другую — «заново».</p>
+
+      <aside id="rejected" class="card hidden">
+        <h2>Забракованные варианты</h2>
+        <p id="judgeWhy" class="muted"></p>
+        <div id="rejectedList"></div>
+      </aside>
+    </section>
+  </main>
+
+  <aside id="architectPrompt" class="card prompt-card hidden">
+    <h2>Промпт генератора затравок</h2>
+    <pre id="architectPromptText"></pre>
+  </aside>
+
+  <p id="busy" class="busy hidden">Думает…</p>
+  <script src="/freeform/app.js"></script>
+</body>
+</html>

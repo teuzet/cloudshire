@@ -238,6 +238,7 @@ export async function runVerdictJudge({
   agentId,
   caseText,
   extraUser = '',
+  extraSystem = '',
   log: parentLog,
   domainId = null,
   codes = MYSTERY_JUDGE_CODES,
@@ -268,7 +269,7 @@ export async function runVerdictJudge({
       log,
       scene,
       domainId,
-      extraSystem: '',
+      extraSystem,
       userMessages: [
         {
           role: 'user',

@@ -19,6 +19,7 @@ import {
   clipPlotText,
   PLOT_SUMMARY_MAX,
   isThreeActPlot,
+  isFreeformPlot,
   plotHasActiveProcess,
   closePlotline,
 } from './plotlines.js';
@@ -343,6 +344,7 @@ export function planBeats({
     if (!outcome?.mustNarrate) continue;
     if (outcome.intel) continue;
     for (const plot of plotsForProcess(domain, outcome.processId)) {
+      if (isFreeformPlot(plot)) continue;
       if (isThreeActPlot(plot) && !engagementAttends(outcome.plotEngagement || engagementOf(findProcessById(domain, outcome.processId)))) {
         continue;
       }
@@ -378,7 +380,7 @@ export function planBeats({
   // 2. Сход забытой нити — служебное закрытие, слот не занимает. Трёхтактные так не гаснут.
   for (const plot of domain.plotlines) {
     if (plot.kind === 'order') continue;
-    if (isThreeActPlot(plot)) continue;
+    if (isThreeActPlot(plot) || isFreeformPlot(plot)) continue;
     if (!plotCanFade(domain, plot, cfg)) continue;
     addBeat(plot, { mandatory: true, reason: 'fade', fade: true, tint: 'dual' });
   }
@@ -399,6 +401,7 @@ export function planBeats({
   // Трёхтактные: только если нет ни одного активного дела; без окраски.
   for (const plot of domain.plotlines) {
     if (plot.kind !== 'story') continue;
+    if (isFreeformPlot(plot)) continue;
     if (taken.has(plot.id)) continue;
     if (slotsUsed >= cap) break;
     if (isThreeActPlot(plot) && plotHasAttendingProcess(domain, plot)) continue;

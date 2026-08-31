@@ -28,7 +28,7 @@ export class LlmError extends Error {
   }
 }
 
-export const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+export const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
 export function normalizeReasoningEffort(raw) {
   const s = String(raw || '').trim().toLowerCase();

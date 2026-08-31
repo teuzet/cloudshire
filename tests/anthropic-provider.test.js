@@ -8,6 +8,8 @@ import {
   toAnthropicToolChoice,
   toAnthropicRequest,
   fromAnthropicMessage,
+  buildAnthropicChatBody,
+  resolveAnthropicThinking,
   AnthropicProvider,
 } from '../src/llm/anthropic.js';
 
@@ -98,6 +100,45 @@ test('без ключа Anthropic падает понятной ошибкой',
     () => p.chat({ messages: [{ role: 'user', content: 'hi' }] }),
     /MISSING_ANTHROPIC_TEST_KEY_ZZZ/,
   );
+});
+
+test('reasoningEffort агента Claude → output_config.effort', () => {
+  assert.deepEqual(resolveAnthropicThinking('high'), { output_config: { effort: 'high' } });
+  assert.deepEqual(resolveAnthropicThinking('xhigh'), { output_config: { effort: 'xhigh' } });
+  assert.deepEqual(resolveAnthropicThinking('minimal'), { output_config: { effort: 'low' } });
+  assert.deepEqual(resolveAnthropicThinking('none'), { thinking: { type: 'disabled' } });
+  assert.deepEqual(resolveAnthropicThinking(undefined), {});
+  const body = buildAnthropicChatBody({
+    defaultModel: 'claude-sonnet-5',
+    messages: [{ role: 'user', content: 'hi' }],
+    reasoningEffort: 'high',
+    maxTokens: 16000,
+  });
+  assert.equal(body.model, 'claude-sonnet-5');
+  assert.equal(body.max_tokens, 16000);
+  assert.deepEqual(body.output_config, { effort: 'high' });
+  assert.equal(body.thinking, undefined);
+});
+
+test('thinking-блоки Claude уходят обратно с tool-результатом', () => {
+  const message = fromAnthropicMessage({
+    content: [
+      { type: 'thinking', thinking: '', signature: 'sig-1' },
+      { type: 'tool_use', id: 'tu_1', name: 'submit_freeform_seed_blanks', input: { variants: [] } },
+    ],
+  });
+  assert.equal(message.anthropicContent[0].type, 'thinking');
+  assert.equal(message.anthropicContent[0].signature, 'sig-1');
+  assert.equal(message.tool_calls[0].function.name, 'submit_freeform_seed_blanks');
+  const { messages } = toAnthropicRequest([
+    { role: 'user', content: 'пакет' },
+    message,
+    { role: 'tool', tool_call_id: 'tu_1', content: '{"ok":true}' },
+  ]);
+  assert.equal(messages[1].role, 'assistant');
+  assert.equal(messages[1].content[0].type, 'thinking');
+  assert.equal(messages[1].content[0].signature, 'sig-1');
+  assert.equal(messages[1].content[1].type, 'tool_use');
 });
 
 test('mystery annotation: генератор Claude, судья Luna', () => {

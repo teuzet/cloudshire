@@ -66,7 +66,7 @@ export { clipText as clipPlotText };
 
 export const PLOT_KINDS = ['story', 'errand', 'order'];
 export const THREE_ACT_TYPES = ['suspense', 'mystery'];
-export const STORY_TYPES = ['suspense', 'mystery', 'default'];
+export const STORY_TYPES = ['suspense', 'mystery', 'freeform', 'default'];
 
 export function isStoryPlot(plot) {
   return plot?.kind === 'story';
@@ -87,6 +87,7 @@ export function storyTypeOf(plot) {
   if (!plot || plot.kind !== 'story' || plot.isMainConflux) {
     return 'default';
   }
+  if (plot.storyType === 'freeform') return 'freeform';
   if (THREE_ACT_TYPES.includes(plot.storyType)) return plot.storyType;
   return 'default';
 }
@@ -94,6 +95,39 @@ export function storyTypeOf(plot) {
 export function isThreeActPlot(plot) {
   const t = storyTypeOf(plot);
   return t === 'suspense' || t === 'mystery';
+}
+
+export function isFreeformPlot(plot) {
+  return plot?.kind === 'story' && plot.storyType === 'freeform' && !plot.isMainConflux;
+}
+
+/** closeWhen у freeform — список завершающих исходов. У остальных — одна фраза. */
+export function normalizeCloseWhenList(raw) {
+  const items = Array.isArray(raw)
+    ? raw
+    : String(raw || '')
+        .split(/\n|;/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+  const out = [];
+  const seen = new Set();
+  for (const item of items) {
+    const t = clipText(String(item), PLOT_HOOK_MAX);
+    if (!t) continue;
+    const key = t.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  return out;
+}
+
+export function formatCloseWhen(plot) {
+  if (Array.isArray(plot?.closeWhen)) {
+    if (!plot.closeWhen.length) return '—';
+    return plot.closeWhen.map((x, i) => `${i + 1}. ${x}`).join('\n');
+  }
+  return String(plot?.closeWhen || '').trim() || '—';
 }
 
 /** Масштаб истории для механики: у трёхтактных gravity, иначе внутренний importance. */
@@ -106,6 +140,7 @@ export function plotBeatAgentId(plot) {
   const t = storyTypeOf(plot);
   if (t === 'mystery') return 'mysteryBeat';
   if (t === 'suspense') return 'suspenseBeat';
+  if (t === 'freeform') return 'freeformTell';
   return 'storyBeat';
 }
 
@@ -115,8 +150,59 @@ function clampStakes(n, fallback = 40) {
   return Math.max(0, Math.min(100, v));
 }
 
+export const FREEFORM_GRAVITY = ['SITUATION', 'EPISODE', 'CRISIS', 'RUPTURE'];
+
+/** Freeform gravity — качественный уровень, не шкала 0–100. Старые числа мапятся. */
+export function parseFreeformGravity(raw, fallback = 'EPISODE') {
+  const key = String(raw || '').trim().toUpperCase();
+  if (FREEFORM_GRAVITY.includes(key)) return key;
+  const n = Number(raw);
+  if (Number.isFinite(n)) {
+    if (n <= 20) return 'SITUATION';
+    if (n <= 45) return 'EPISODE';
+    if (n <= 75) return 'CRISIS';
+    return 'RUPTURE';
+  }
+  return fallback;
+}
+
 function storyActState(p = {}) {
   const type = storyTypeOf(p);
+  if (type === 'freeform') {
+    return {
+      storyType: 'freeform',
+      act: null,
+      urgency: clampStakes(p.urgency, 40),
+      gravity: parseFreeformGravity(p.gravity),
+      urgency0: clampStakes(p.urgency0 ?? p.urgency, 40),
+      gravity0: parseFreeformGravity(p.gravity0 ?? p.gravity),
+      escalationLevel: null,
+      maxEscalations: null,
+      truth: '',
+      truthGraph: null,
+      observedFacts: [],
+      resolutionFacts: [],
+      ending: p.ending || null,
+      asksSequel: false,
+      annotationId: null,
+      ifSolved: '',
+      ifUnsolved: '',
+      ifPrevented: '',
+      ifNotPrevented: '',
+      depth: null,
+      hiddenPremises: normalizeHiddenPremises(p.hiddenPremises),
+      discoveryLadder: null,
+      closureGate: '',
+      closureUnlocked: null,
+      tonePrimary: null,
+      toneSecondary: null,
+      source: null,
+      situation: null,
+      dynamic: null,
+      legacyAxes: [],
+      unattendedBeats: 0,
+    };
+  }
   if (type === 'default') {
     return {
       storyType: 'default',
@@ -465,7 +551,11 @@ function applyPlotShape(p, config = null) {
   p.id = p.id || newId('plot');
   p.title = clipText(p.title || 'Сюжет', PLOT_TITLE_MAX);
   p.synopsis = clipText(p.synopsis ?? p.summary ?? '', PLOT_SUMMARY_MAX);
-  p.closeWhen = clipText(p.closeWhen, PLOT_HOOK_MAX);
+  if (p.storyType === 'freeform' || Array.isArray(p.closeWhen)) {
+    p.closeWhen = normalizeCloseWhenList(p.closeWhen);
+  } else {
+    p.closeWhen = clipText(p.closeWhen, PLOT_HOOK_MAX);
+  }
   p.mootWhen = clipText(p.mootWhen, PLOT_HOOK_MAX);
   p.kind = PLOT_KINDS.includes(p.kind) ? p.kind : 'story';
   p.tags = Array.isArray(p.tags) ? p.tags : [];
@@ -588,7 +678,10 @@ export function createPlotline({
     id: newId('plot'),
     title: clipText(title || (resolvedKind === 'order' ? 'Порядок' : 'Сюжет'), PLOT_TITLE_MAX),
     synopsis: clipText(synopsis || summary, PLOT_SUMMARY_MAX),
-    closeWhen: clipText(closeWhen, PLOT_HOOK_MAX),
+    closeWhen:
+      storyType === 'freeform' || Array.isArray(closeWhen)
+        ? normalizeCloseWhenList(closeWhen)
+        : clipText(closeWhen, PLOT_HOOK_MAX),
     mootWhen: clipText(mootWhen, PLOT_HOOK_MAX),
     kind: resolvedKind,
     tags: Array.isArray(tags) ? tags : [],
@@ -777,7 +870,7 @@ function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } =
     id: plot.id,
     title: plot.title,
     synopsis: plot.synopsis || '',
-    closeWhen: plot.closeWhen || '',
+    closeWhen: Array.isArray(plot.closeWhen) ? [...plot.closeWhen] : plot.closeWhen || '',
     mootWhen: plot.mootWhen || '',
     kind: plot.kind || 'story',
     tags: Array.isArray(plot.tags) ? plot.tags : [],

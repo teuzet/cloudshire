@@ -1,8 +1,19 @@
-import { LlmError } from './openai.js';
+import { LlmError, normalizeReasoningEffort } from './openai.js';
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
 const DEFAULT_MAX_TOKENS = 8192;
+const ANTHROPIC_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+/** Claude: none → thinking off; иначе output_config.effort. Без поля — дефолт модели. */
+export function resolveAnthropicThinking(reasoningEffort) {
+  const requested = normalizeReasoningEffort(reasoningEffort);
+  if (requested === 'none') return { thinking: { type: 'disabled' } };
+  if (!requested) return {};
+  const effort = requested === 'minimal' ? 'low' : requested;
+  if (!ANTHROPIC_EFFORTS.includes(effort)) return {};
+  return { output_config: { effort } };
+}
 
 function asText(content) {
   if (content == null) return '';
@@ -87,6 +98,10 @@ export function toAnthropicRequest(openaiMessages = []) {
       continue;
     }
     if (m.role === 'assistant') {
+      if (Array.isArray(m.anthropicContent) && m.anthropicContent.length) {
+        raw.push({ role: 'assistant', content: m.anthropicContent });
+        continue;
+      }
       const blocks = [];
       const text = asText(m.content).trim();
       if (text) blocks.push({ type: 'text', text });
@@ -155,7 +170,36 @@ export function fromAnthropicMessage(resp) {
     content: texts.join('\n') || null,
   };
   if (tool_calls.length) message.tool_calls = tool_calls;
+  if (blocks.length) message.anthropicContent = blocks;
   return message;
+}
+
+export function buildAnthropicChatBody({
+  model,
+  defaultModel,
+  messages,
+  tools,
+  toolChoice,
+  maxTokens,
+  reasoningEffort,
+}) {
+  const { system, messages: converted } = toAnthropicRequest(messages || []);
+  if (!converted.length) {
+    throw new LlmError('Empty messages for Anthropic');
+  }
+  const body = {
+    model: model || defaultModel,
+    max_tokens: Math.max(1, Number(maxTokens) || DEFAULT_MAX_TOKENS),
+    messages: converted,
+    ...resolveAnthropicThinking(reasoningEffort),
+  };
+  if (system) body.system = system;
+  if (tools?.length) {
+    body.tools = toAnthropicTools(tools);
+    const choice = toAnthropicToolChoice(toolChoice);
+    if (choice) body.tool_choice = choice;
+  }
+  return body;
 }
 
 export class AnthropicProvider {
@@ -179,23 +223,17 @@ export class AnthropicProvider {
     }
   }
 
-  async chat({ model, messages, tools, toolChoice, maxTokens, timeoutMs }) {
+  async chat({ model, messages, tools, toolChoice, maxTokens, reasoningEffort, timeoutMs }) {
     this.ensureClient();
-    const { system, messages: converted } = toAnthropicRequest(messages || []);
-    if (!converted.length) {
-      throw new LlmError('Empty messages for Anthropic');
-    }
-    const body = {
-      model: model || this.defaultModel,
-      max_tokens: Math.max(1, Number(maxTokens) || DEFAULT_MAX_TOKENS),
-      messages: converted,
-    };
-    if (system) body.system = system;
-    if (tools?.length) {
-      body.tools = toAnthropicTools(tools);
-      const choice = toAnthropicToolChoice(toolChoice);
-      if (choice) body.tool_choice = choice;
-    }
+    const body = buildAnthropicChatBody({
+      model,
+      defaultModel: this.defaultModel,
+      messages,
+      tools,
+      toolChoice,
+      maxTokens,
+      reasoningEffort,
+    });
 
     const ctrl = timeoutMs ? AbortSignal.timeout(Math.max(1, timeoutMs)) : undefined;
     let resp;

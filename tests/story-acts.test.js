@@ -102,12 +102,15 @@ test('движок ставит default поручениям, указам, гл
   assert.equal(createPlotline({ title: 'Старая', kind: 'story' }).storyType, 'default');
   assert.equal(createPlotline({ title: 'Гул', kind: 'story', storyType: 'suspense' }).storyType, 'suspense');
   assert.equal(createPlotline({ title: 'Тайна', kind: 'story', storyType: 'mystery' }).storyType, 'mystery');
+  assert.equal(createPlotline({ title: 'Свободная', kind: 'story', storyType: 'freeform' }).storyType, 'freeform');
   assert.equal(plotBeatAgentId({ kind: 'errand' }), 'storyBeat');
   assert.equal(plotBeatAgentId({ kind: 'story', isMainConflux: true }), 'storyBeat');
   assert.equal(plotBeatAgentId(three()), 'suspenseBeat');
   assert.equal(plotBeatAgentId(three({ storyType: 'mystery' })), 'mysteryBeat');
   assert.equal(plotBeatAgentId(three({ confluxId: 'c1' })), 'suspenseBeat');
+  assert.equal(plotBeatAgentId({ kind: 'story', storyType: 'freeform' }), 'freeformTell');
   assert.equal(storyTypeOf({ kind: 'story' }), 'default');
+  assert.equal(storyTypeOf({ kind: 'story', storyType: 'freeform' }), 'freeform');
 });
 
 test('саспенс такт 1: холостой тик остаётся в экспозиции и эскалирует', () => {

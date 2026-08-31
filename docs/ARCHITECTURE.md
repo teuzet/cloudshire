@@ -5,7 +5,7 @@
 ```
 src/index.js
   bootstrap.createAppContext     config, storage, AgentRuntime, GameApp
-  clients/web/server.js          /play /mini /admin
+  clients/web/server.js          /play /mini /admin /freeform
   scheduler/ticks.js             clock-aligned interval
   clients/telegram/bot.js        polling → GameApp.handleUserMessage
 
@@ -49,6 +49,7 @@ src/index.js
 | `plotlines.js` | Модель нитей, конфиг, жребий аннотаций |
 | `plotEngine.js` | Часы, очередь дел, биты без LLM |
 | `storyteller.js` | Авторы завязки, бита, указа, тихого месяца |
+| `freeform*.js` | Лаборатория свободной истории: стартер, рассказчик, судья |
 | `monthResolve.js` / `tick.js` | Оркестрация месяца / мира |
 | `conflux*.js` | Стыковка островов |
 | `annotationPool.js` / `annotationCatalog.js` | Пулы и wipe-resistant каталог |

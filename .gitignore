@@ -8,4 +8,5 @@ logs/
 .DS_Store
 data-prepivot/
 data-prod-snapshot-*/
+data-freeform/
 *.deb
