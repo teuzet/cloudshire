@@ -70,10 +70,6 @@ export const TEMPORAL_SHAPES = [
     id: 'DELAYED_BOMB',
     hint: 'решение или повреждение уже есть; разрыв ещё впереди',
   },
-  {
-    id: 'ALREADY_CLIMAX',
-    hint: 'кульминация уже идёт; входишь в неё, а не начинаешь расследование с нуля',
-  },
 ];
 
 function pickWithoutReplacement(items, n, rng) {
