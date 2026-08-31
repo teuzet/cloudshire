@@ -1,17 +1,27 @@
 /**
  * Генератор трёх затравок: код бросает оси, модель раскрывает их в четыре поля.
- * Судью и карточку истории не вызывает — лаборатория читает пачку как есть.
+ * Лаборатория: пачка → один судья по всем трём → одна правка архитектора.
  */
 
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
-import { parseFreeformGravity, formatFreeformGravityForPrompt, freeformConfig } from './freeform.js';
+import {
+  parseFreeformGravity,
+  formatFreeformGravityForPrompt,
+  formatBrainstormCandidateForPrompt,
+  freeformConfig,
+} from './freeform.js';
 import {
   pickFreeformSeedAxisPairs,
   normalizeSeedBlank,
   captureAgentPrompt,
   formatFreeformArenaRelationCatalogs,
 } from './freeformArchitect.js';
+import {
+  parseFreeformPackReview,
+  reviewNeedsRepair,
+  FREEFORM_PACK_JUDGE_CODES,
+} from './freeformJudge.js';
 
 export const CONFLICT_SOURCES = [
   {
@@ -160,6 +170,91 @@ function logAxisEchoMismatch(log, index, raw, roll) {
   log.warn('freeform.brainstorm.axis_echo_mismatch', { index, expected, got, mismatched });
 }
 
+export function rollFromBrainstormCandidate(candidate) {
+  return {
+    pair: [
+      {
+        groupId: 'truthArena',
+        tagId: String(candidate?.arena || '')
+          .trim()
+          .toLowerCase(),
+        tagName: candidate?.arena || '',
+      },
+      {
+        groupId: 'worldRelation',
+        tagId: String(candidate?.worldRelation || '')
+          .trim()
+          .toLowerCase(),
+        tagName: candidate?.worldRelation || '',
+      },
+    ],
+    conflictSource: { id: candidate?.conflictSource || '' },
+    temporalShape: { id: candidate?.temporalShape || '' },
+  };
+}
+
+function emitCandidatesTool({ n, rolls, draft, log }) {
+  return {
+    name: 'emit_freeform_candidates',
+    description: `Ровно ${n} кандидатов: четыре поля на каждый набор осей, в том же порядке. Оси в ответе — эхо входа, не новый выбор.`,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['candidates'],
+      properties: {
+        candidates: {
+          type: 'array',
+          minItems: n,
+          maxItems: n,
+          items: {
+            type: 'object',
+            required: ['hook', 'conflict', 'dynamics', 'consequences'],
+            properties: {
+              hook: {
+                type: 'string',
+                description: 'Затравка: компактная сцена, 1–2 предложения. Что уже произошло. Фитиль, не взрыв.',
+              },
+              conflict: {
+                type: 'string',
+                description: 'Конфликт: что сейчас двигает сюжет.',
+              },
+              dynamics: {
+                type: 'string',
+                description: 'Динамика: процесс, которым ситуация вырастет до посадки Gravity.',
+              },
+              consequences: {
+                type: 'string',
+                description: 'Последствия: посадка истории на уровне Gravity. Динамика должна её зарабатывать, не приклеивать.',
+              },
+              threatArena: { type: 'string', description: 'Эхо оси threatArena этого набора.' },
+              worldRelation: { type: 'string', description: 'Эхо оси worldRelation этого набора.' },
+              conflictSource: { type: 'string', description: 'Эхо оси conflictSource этого набора.' },
+              temporalShape: { type: 'string', description: 'Эхо оси temporalShape этого набора.' },
+            },
+          },
+        },
+      },
+    },
+    handler: async (args) => {
+      const list = Array.isArray(args?.candidates) ? args.candidates : [];
+      const variants = rolls
+        .map((roll, i) => {
+          logAxisEchoMismatch(log, i + 1, list[i], roll);
+          return normalizeBrainstormCandidate(list[i], roll, i + 1);
+        })
+        .filter(Boolean);
+      if (variants.length < n) {
+        return toolFail(
+          'thin',
+          `Нужно ровно ${n} кандидатов: у каждого затравка, конфликт, динамика и последствия.`,
+        );
+      }
+      draft.variants = variants;
+      return { ok: true, count: n };
+    },
+  };
+}
+
 export async function brainstormFreeformSeeds({ runtime, seedText, gravity, config, log: parentLog }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm' });
   const cfg = freeformConfig(config);
@@ -181,67 +276,7 @@ export async function brainstormFreeformSeeds({ runtime, seedText, gravity, conf
   const draft = { variants: null };
   const runOpts = {
     agentId: 'freeformBrainstorm',
-    tools: [
-      {
-        name: 'emit_freeform_candidates',
-        description: `Ровно ${n} кандидатов: четыре поля на каждый набор осей, в том же порядке. Оси в ответе — эхо входа, не новый выбор.`,
-        parameters: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['candidates'],
-          properties: {
-            candidates: {
-              type: 'array',
-              minItems: n,
-              maxItems: n,
-              items: {
-                type: 'object',
-                required: ['hook', 'conflict', 'dynamics', 'consequences'],
-                properties: {
-                  hook: {
-                    type: 'string',
-                    description: 'Затравка: компактная сцена, 1–2 предложения. Что уже произошло. Фитиль, не взрыв.',
-                  },
-                  conflict: {
-                    type: 'string',
-                    description: 'Конфликт: что сейчас двигает сюжет.',
-                  },
-                  dynamics: {
-                    type: 'string',
-                    description: 'Динамика: процесс, которым ситуация вырастет до посадки Gravity.',
-                  },
-                  consequences: {
-                    type: 'string',
-                    description: 'Последствия: посадка истории на уровне Gravity. Динамика должна её зарабатывать, не приклеивать.',
-                  },
-                  threatArena: { type: 'string', description: 'Эхо оси threatArena этого набора.' },
-                  worldRelation: { type: 'string', description: 'Эхо оси worldRelation этого набора.' },
-                  conflictSource: { type: 'string', description: 'Эхо оси conflictSource этого набора.' },
-                  temporalShape: { type: 'string', description: 'Эхо оси temporalShape этого набора.' },
-                },
-              },
-            },
-          },
-        },
-        handler: async (args) => {
-          const list = Array.isArray(args?.candidates) ? args.candidates : [];
-          const variants = rolls
-            .map((roll, i) => {
-              logAxisEchoMismatch(log, i + 1, list[i], roll);
-              return normalizeBrainstormCandidate(list[i], roll, i + 1);
-            })
-            .filter(Boolean);
-          if (variants.length < n) {
-            return toolFail(
-              'thin',
-              `Нужно ровно ${n} кандидатов: у каждого затравка, конфликт, динамика и последствия.`,
-            );
-          }
-          draft.variants = variants;
-          return { ok: true, count: n };
-        },
-      },
-    ],
+    tools: [emitCandidatesTool({ n, rolls, draft, log })],
     maxTurns: 3,
     toolChoice: { type: 'function', function: { name: 'emit_freeform_candidates' } },
     log,
@@ -282,5 +317,231 @@ export async function brainstormFreeformSeeds({ runtime, seedText, gravity, conf
     rolls,
     candidates,
     prompt,
+  };
+}
+
+function formatPackForJudge(candidates) {
+  return candidates
+    .map((c, i) => formatBrainstormCandidateForPrompt(c, c.index || i + 1))
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+export async function reviewBrainstormPack({ runtime, seedText, gravity, candidates, log: parentLog }) {
+  const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.judge' });
+  const n = candidates.length;
+  const g = parseFreeformGravity(gravity);
+  if (!n) return { reviews: [], prompt: '' };
+  const draft = { reviews: null };
+  const runOpts = {
+    agentId: 'freeformBrainstormJudge',
+    tools: [
+      {
+        name: 'submit_freeform_pack_review',
+        description: `Вердикт и правка по каждому из ${n} кандидатов. Победителя не выбирай.`,
+        parameters: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['reviews'],
+          properties: {
+            reviews: {
+              type: 'array',
+              minItems: n,
+              maxItems: n,
+              items: {
+                type: 'object',
+                required: ['index', 'verdict'],
+                properties: {
+                  index: { type: 'integer', description: `Номер кандидата от 1 до ${n}.` },
+                  verdict: { type: 'string', enum: ['PASS', 'FAIL', 'UNCERTAIN'] },
+                  summary: { type: 'string', description: 'Одно предложение: что с этим кандидатом.' },
+                  repair: {
+                    type: 'string',
+                    description: 'Минимальная инструкция автору. Пусто, если чинить нечего.',
+                  },
+                  issues: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      required: ['code', 'reason'],
+                      properties: {
+                        code: { type: 'string', enum: FREEFORM_PACK_JUDGE_CODES },
+                        reason: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        handler: async (args) => {
+          const reviews = parseFreeformPackReview(args, n);
+          if (reviews.length !== n) {
+            return toolFail('thin', `Нужен отзыв ровно по ${n} кандидатам.`);
+          }
+          draft.reviews = reviews;
+          return { ok: true, count: n };
+        },
+      },
+    ],
+    maxTurns: 2,
+    toolChoice: { type: 'function', function: { name: 'submit_freeform_pack_review' } },
+    log,
+    scene: 'freeform_brainstorm_judge',
+    extraSystem: '',
+    userMessages: [
+      {
+        role: 'user',
+        content: [
+          '====================',
+          'ХРОНИКА',
+          '====================',
+          seedText,
+          '',
+          formatFreeformGravityForPrompt(g),
+          '',
+          formatPackForJudge(candidates),
+          '',
+          `Кандидатов: ${n}. Вызови submit_freeform_pack_review по каждому, в том же порядке.`,
+          'Победителя не выбирай. Города нет. Gravity — посадка в «последствиях».',
+        ].join('\n'),
+      },
+    ],
+  };
+  const prompt = captureAgentPrompt(runtime, runOpts);
+  try {
+    await runtime.run(runOpts);
+  } catch (err) {
+    log.warn('freeform.brainstorm.judge_failed', { error: err.message });
+  }
+  const reviews = draft.reviews || parseFreeformPackReview({}, n);
+  log.info('freeform.brainstorm.judge', {
+    gravity: g,
+    verdicts: reviews.map((r) => r.verdict),
+    repairs: reviews.filter(reviewNeedsRepair).length,
+  });
+  return { reviews, prompt };
+}
+
+export async function repairBrainstormPack({
+  runtime,
+  seedText,
+  gravity,
+  drafts,
+  reviews,
+  log: parentLog,
+}) {
+  const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.repair' });
+  const n = drafts.length;
+  const g = parseFreeformGravity(gravity);
+  if (!n) return { candidates: [], prompt: '' };
+  const notes = (reviews || []).slice(0, n);
+  if (!notes.some(reviewNeedsRepair)) {
+    return { candidates: drafts, prompt: '' };
+  }
+
+  const rolls = drafts.map((c) => rollFromBrainstormCandidate(c));
+  const draft = { variants: null };
+  const pack = drafts
+    .map((c, i) => {
+      const review = notes[i] || { index: i + 1, verdict: 'PASS', repair: '', summary: '', issues: [] };
+      const issues = (review.issues || []).map((x) => `[${x.code}] ${x.reason}`).join('\n');
+      return [
+        formatBrainstormCandidateForPrompt(c, c.index || i + 1),
+        `вердикт: ${review.verdict}`,
+        review.summary ? `кратко: ${review.summary}` : null,
+        issues ? `замечания:\n${issues}` : null,
+        reviewNeedsRepair(review) ? `правка:\n${review.repair}` : 'правка: без изменений',
+      ]
+        .filter(Boolean)
+        .join('\n');
+    })
+    .join('\n\n');
+
+  const runOpts = {
+    agentId: 'freeformBrainstorm',
+    tools: [emitCandidatesTool({ n, rolls, draft, log })],
+    maxTurns: 3,
+    toolChoice: { type: 'function', function: { name: 'emit_freeform_candidates' } },
+    log,
+    scene: 'freeform_brainstorm_repair',
+    extraSystem: [
+      'Сейчас ты не придумываешь новую пачку. Ты правишь уже написанные три кандидата по замечаниям судьи.',
+      'Оси не меняй. Центральный механизм не подменяй, кроме случая, когда судья требует убрать новый закон мира — тогда тот же двигатель внутри уже данного порядка.',
+      'Не поднимай и не опускай Gravity риторикой. Правь посадку в «последствиях» и динамику, которая её зарабатывает.',
+      'Если просят обострить — конкретные ходы в динамике, не новая посадка и не новый конфликт. Если просят ужать — вырежи лишнее, механизм оставь.',
+      'Кандидат без замечания верни без изменений. Не делай кандидатов близнецами.',
+    ].join('\n'),
+    userMessages: [
+      {
+        role: 'user',
+        content: [
+          '====================',
+          'ХРОНИКА',
+          '====================',
+          seedText,
+          '',
+          formatFreeformGravityForPrompt(g),
+          '',
+          'ДОРАБОТКА. Ниже черновики и замечания судьи. Верни три полных кандидата в том же порядке.',
+          '',
+          pack,
+          '',
+          `Верни ровно ${n} кандидатов через emit_freeform_candidates.`,
+        ].join('\n'),
+      },
+    ],
+  };
+
+  const prompt = captureAgentPrompt(runtime, runOpts);
+  try {
+    await runtime.run(runOpts);
+  } catch (err) {
+    log.warn('freeform.brainstorm.repair_failed', { error: err.message });
+  }
+  const candidates = draft.variants?.length >= n ? draft.variants : drafts;
+  return { candidates, prompt };
+}
+
+export async function brainstormFreeformPack({ runtime, seedText, gravity, config, log: parentLog }) {
+  const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.pack' });
+  const drafted = await brainstormFreeformSeeds({ runtime, seedText, gravity, config, log });
+  if (!drafted.ok) {
+    return {
+      ok: false,
+      gravity: drafted.gravity,
+      drafts: drafted.candidates || [],
+      reviews: [],
+      candidates: drafted.candidates || [],
+      prompt: drafted.prompt || '',
+      judgePrompt: '',
+      repairPrompt: '',
+    };
+  }
+  const judged = await reviewBrainstormPack({
+    runtime,
+    seedText,
+    gravity: drafted.gravity,
+    candidates: drafted.candidates,
+    log,
+  });
+  const repaired = await repairBrainstormPack({
+    runtime,
+    seedText,
+    gravity: drafted.gravity,
+    drafts: drafted.candidates,
+    reviews: judged.reviews,
+    log,
+  });
+  return {
+    ok: true,
+    gravity: drafted.gravity,
+    drafts: drafted.candidates,
+    reviews: judged.reviews,
+    candidates: repaired.candidates,
+    prompt: drafted.prompt,
+    judgePrompt: judged.prompt,
+    repairPrompt: repaired.prompt,
   };
 }

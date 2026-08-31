@@ -18,7 +18,7 @@ import {
   normalizeFinish,
   parseFreeformGravity,
 } from '../../game/freeform.js';
-import { brainstormFreeformSeeds } from '../../game/freeformBrainstorm.js';
+import { brainstormFreeformPack } from '../../game/freeformBrainstorm.js';
 import { tellFreeformBeat } from '../../game/freeformTeller.js';
 import { judgeFreeformRelated } from '../../game/freeformAlign.js';
 import { worldDateLabel } from '../../game/tickClock.js';
@@ -39,9 +39,13 @@ function emptySession(snapshot) {
     lastRejected: [],
     lastJudge: null,
     lastArchitectPrompt: '',
+    lastJudgePrompt: '',
+    lastRepairPrompt: '',
     lastChronicle: '',
     lastGravity: null,
+    lastDrafts: [],
     lastCandidates: [],
+    lastJudgeReviews: [],
     lastWarning: null,
     frozenAt: snapshot.frozenAt || null,
     cityName: snapshot.cityName || domain.name,
@@ -121,9 +125,13 @@ export function sessionPayload(session) {
     lastRejected: session.lastRejected || [],
     lastJudge: session.lastJudge,
     lastArchitectPrompt: session.lastArchitectPrompt || '',
+    lastJudgePrompt: session.lastJudgePrompt || '',
+    lastRepairPrompt: session.lastRepairPrompt || '',
     lastChronicle: session.lastChronicle || '',
     lastGravity: session.lastGravity || null,
+    lastDrafts: session.lastDrafts || [],
     lastCandidates: session.lastCandidates || [],
+    lastJudgeReviews: session.lastJudgeReviews || [],
     lastWarning: session.lastWarning,
   };
 }
@@ -161,7 +169,7 @@ export async function seedFreeformLab({ config, runtime, text, gravity, log: par
     session.lastChronicle = seedText;
     session.lastGravity = g;
 
-    const drafted = await brainstormFreeformSeeds({
+    const drafted = await brainstormFreeformPack({
       config,
       runtime,
       seedText,
@@ -169,8 +177,12 @@ export async function seedFreeformLab({ config, runtime, text, gravity, log: par
       log,
     });
     session.lastArchitectPrompt = drafted.prompt || '';
+    session.lastJudgePrompt = drafted.judgePrompt || '';
+    session.lastRepairPrompt = drafted.repairPrompt || '';
     if (!drafted.ok) {
+      session.lastDrafts = [];
       session.lastCandidates = [];
+      session.lastJudgeReviews = [];
       session.lastWarning = 'Не получилось породить затравки. Попробуй другую хронику или ещё раз.';
       await writeSession(session);
       const err = new Error(session.lastWarning);
@@ -179,7 +191,9 @@ export async function seedFreeformLab({ config, runtime, text, gravity, log: par
       throw err;
     }
 
+    session.lastDrafts = drafted.drafts;
     session.lastCandidates = drafted.candidates;
+    session.lastJudgeReviews = drafted.reviews;
     session.lastRejected = [];
     session.lastJudge = null;
     session.lastWarning = null;

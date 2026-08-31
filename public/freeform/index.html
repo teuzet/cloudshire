@@ -31,7 +31,7 @@
 
       <form id="seedForm" class="card">
         <h2>Стартовая хроника</h2>
-        <p class="muted">Напиши свершившееся событие. Город не меняется — три затравки одной gravity, чтобы прочитать посадку.</p>
+        <p class="muted">Напиши свершившееся событие. Три затравки одной gravity, затем судья по всем трём и одна правка. Черновик и замечания остаются на экране.</p>
         <textarea id="seedText" rows="5" placeholder="Что случилось…"></textarea>
         <label>Gravity
           <select id="seedGravity">
@@ -80,6 +80,16 @@
   <aside id="architectPrompt" class="card prompt-card hidden">
     <h2>Промпт генератора затравок</h2>
     <pre id="architectPromptText"></pre>
+  </aside>
+
+  <aside id="judgePrompt" class="card prompt-card hidden">
+    <h2>Промпт судьи пачки</h2>
+    <pre id="judgePromptText"></pre>
+  </aside>
+
+  <aside id="repairPrompt" class="card prompt-card hidden">
+    <h2>Промпт правки архитектора</h2>
+    <pre id="repairPromptText"></pre>
   </aside>
 
   <p id="busy" class="busy hidden">Думает…</p>

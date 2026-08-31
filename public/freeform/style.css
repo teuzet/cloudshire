@@ -133,6 +133,29 @@ button:disabled { opacity: 0.5; cursor: wait; }
   margin-top: 0;
   padding-top: 0;
 }
+.candidate h3 {
+  margin: 0.85rem 0 0.25rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-weight: 600;
+}
+.judge-notes {
+  margin-top: 0.7rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  background: #221c1a;
+}
+.judge-verdict {
+  margin: 0;
+  color: #f0c4b6;
+}
+.judge-notes ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+}
+.judge-notes li { margin: 0.25rem 0; }
 .rejected-text {
   margin: 0.4rem 0 0;
   white-space: pre-wrap;

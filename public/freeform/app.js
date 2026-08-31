@@ -13,6 +13,10 @@ const judgeWhy = document.getElementById('judgeWhy');
 const busy = document.getElementById('busy');
 const architectPrompt = document.getElementById('architectPrompt');
 const architectPromptText = document.getElementById('architectPromptText');
+const judgePrompt = document.getElementById('judgePrompt');
+const judgePromptText = document.getElementById('judgePromptText');
+const repairPrompt = document.getElementById('repairPrompt');
+const repairPromptText = document.getElementById('repairPromptText');
 const candidates = document.getElementById('candidates');
 const candidatesMeta = document.getElementById('candidatesMeta');
 const candidatesList = document.getElementById('candidatesList');
@@ -65,7 +69,33 @@ function axesLine(v) {
   return parts.join(' · ');
 }
 
-function renderCandidates(list, gravity) {
+function fieldsEqual(a, b) {
+  if (!a || !b) return false;
+  return (
+    String(a.hook || '') === String(b.hook || '') &&
+    String(a.conflict || '') === String(b.conflict || '') &&
+    String(a.dynamics || '') === String(b.dynamics || '') &&
+    String(a.consequences || '') === String(b.consequences || '')
+  );
+}
+
+function judgeHtml(review) {
+  if (!review) return '';
+  const issues = (review.issues || [])
+    .map((x) => `<li><strong>${esc(x.code)}</strong> — ${esc(x.reason)}</li>`)
+    .join('');
+  const repair = String(review.repair || '').trim();
+  return `<aside class="judge-notes">
+    <p class="judge-verdict">${esc(review.verdict || 'PASS')}${
+      review.summary ? ` — ${esc(review.summary)}` : ''
+    }</p>
+    ${issues ? `<ul>${issues}</ul>` : ''}
+    ${repair ? `<p class="rejected-text"><strong>правка.</strong> ${esc(repair)}</p>` : '<p class="muted">без правки</p>'}
+  </aside>`;
+}
+
+function renderCandidates(drafts, repaired, reviews, gravity) {
+  const list = drafts?.length ? drafts : repaired;
   if (!list?.length) {
     candidates.classList.add('hidden');
     candidatesMeta.textContent = '';
@@ -74,14 +104,25 @@ function renderCandidates(list, gravity) {
   }
   candidates.classList.remove('hidden');
   const g = String(gravity || '').trim();
-  candidatesMeta.textContent = g ? `Gravity ${g} — одна посадка на всех трёх.` : '';
+  candidatesMeta.textContent = g
+    ? `Gravity ${g} — одна посадка на всех трёх. Сверху черновик, затем судья, затем правка.`
+    : '';
   candidatesList.innerHTML = list
     .map((v, i) => {
       const axes = axesLine(v);
       const n = v.index || i + 1;
+      const after = repaired?.[i];
+      const review = reviews?.[i];
+      const changed = after && !fieldsEqual(v, after);
+      const afterBlock =
+        after && (drafts?.length || changed)
+          ? `<h3>${changed ? 'После правки' : 'После правки — без изменений'}</h3>${
+              changed ? seedFieldsHtml(after) : '<p class="muted">тот же текст</p>'
+            }`
+          : '';
       return `<article class="candidate"><strong>${esc(n)}. ${esc(v.title || 'кандидат')}</strong>${
         axes ? `<p class="axes">${esc(axes)}</p>` : ''
-      }${seedFieldsHtml(v)}</article>`;
+      }<h3>Черновик</h3>${seedFieldsHtml(v)}${judgeHtml(review)}${afterBlock}</article>`;
     })
     .join('');
 }
@@ -135,15 +176,19 @@ function renderRejected(list, judge) {
     .join('');
 }
 
-function renderArchitectPrompt(text) {
+function renderPromptDump(el, pre, text) {
   const prompt = String(text || '');
   if (!prompt) {
-    architectPrompt.classList.add('hidden');
-    architectPromptText.textContent = '';
+    el.classList.add('hidden');
+    pre.textContent = '';
     return;
   }
-  architectPrompt.classList.remove('hidden');
-  architectPromptText.textContent = prompt;
+  el.classList.remove('hidden');
+  pre.textContent = prompt;
+}
+
+function renderArchitectPrompt(text) {
+  renderPromptDump(architectPrompt, architectPromptText, text);
 }
 
 function render() {
@@ -175,9 +220,11 @@ function render() {
   const seedGravity = document.getElementById('seedGravity');
   seedText.value = state.lastChronicle || '';
   seedGravity.value = state.lastGravity || 'EPISODE';
-  renderCandidates(state.lastCandidates, state.lastGravity);
+  renderCandidates(state.lastDrafts, state.lastCandidates, state.lastJudgeReviews, state.lastGravity);
   renderRejected(state.lastRejected, state.lastJudge);
   renderArchitectPrompt(state.lastArchitectPrompt);
+  renderPromptDump(judgePrompt, judgePromptText, state.lastJudgePrompt);
+  renderPromptDump(repairPrompt, repairPromptText, state.lastRepairPrompt);
 }
 
 async function load() {

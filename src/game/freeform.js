@@ -112,6 +112,22 @@ export function formatFreeformGravityForPrompt(gravity) {
   return formatGravityLevel(parseFreeformGravity(gravity));
 }
 
+export function formatBrainstormCandidateForPrompt(candidate, index) {
+  if (!candidate) return '';
+  const axes = [candidate.arena, candidate.worldRelation, candidate.conflictSource, candidate.temporalShape]
+    .map((s) => String(s || '').trim())
+    .filter(Boolean)
+    .join(' · ');
+  const n = Number.isInteger(Number(index)) ? Number(index) : candidate.index;
+  return [
+    `=== Кандидат ${n || '?'} ===`,
+    axes ? `оси: ${axes}` : null,
+    formatFreeformSeedBlank(candidate),
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 /** Четыре поля болванки завязки для промпта. */
 export function formatFreeformSeedBlank(blank) {
   if (!blank) return '';
