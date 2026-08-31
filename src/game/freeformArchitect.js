@@ -223,7 +223,7 @@ export function captureAgentPrompt(runtime, opts) {
   }
 }
 
-async function askSeedParagraphs({ runtime, seedText, pairs, gravity, log }) {
+async function askSeedParagraphs({ runtime, seedText, pairs, gravity, config, log }) {
   const draft = { variants: null };
   const n = pairs.length;
   const runOpts = {
@@ -294,7 +294,7 @@ async function askSeedParagraphs({ runtime, seedText, pairs, gravity, log }) {
           '====================',
           seedText,
           '',
-          formatFreeformGravityForPrompt(gravity),
+          formatFreeformGravityForPrompt(gravity, config),
           '',
           formatFreeformSeedAxisPairsForPrompt(pairs),
           '',
@@ -378,7 +378,7 @@ export async function inventSeedBlanks({ runtime, seedText, cfg, config, gravity
     gravity,
     tags: pairs.map((tags) => tags.map((t) => `${t.groupId}:${t.tagId}`).join('+')),
   });
-  return askSeedParagraphs({ runtime, seedText, pairs, gravity, log });
+  return askSeedParagraphs({ runtime, seedText, pairs, gravity, config, log });
 }
 
 export async function inventBeatBlanks({ runtime, domain, plot, deed, cfg, log }) {

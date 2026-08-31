@@ -32,75 +32,81 @@ const FINISH_LABEL = {
 
 export { parseFreeformGravity, FREEFORM_GRAVITY };
 
-const FREEFORM_GRAVITY_CATALOG = {
-  SITUATION: {
-    about:
-      'Посадка — узкий законченный случай. Задеты конкретные люди, двор, лавка, одна договорённость — не город как целое. ' +
-      'К исходу мало кто помнит, кроме участников. Порядок улиц, промыслов и обычаев тот же, что вчера.',
-    unlike: 'Не EPISODE: это ещё не общая речь города.',
-    examples: [
-      'Двое соседей спорят, кому чинить общую изгородь после ночной бури.',
-      'У пекаря пропала лучшая форма; ученик клянётся, что утром она ещё стояла на полке.',
-      'Семья не может решить, кому в этом году нести венок на праздник своей улицы.',
-      'Чабан нашёл в стаде чужую метку и должен вернуть одну овцу, пока не смешали окот.',
-      'На общей лестнице треснула ступень: жильцы торгуются, кто кладёт доску.',
-    ],
-  },
-  EPISODE: {
-    about:
-      'Посадка — событие, которое на какое-то время становится общей речью города: рынок, двор, очередь у воды. ' +
-      'Пока свежо — все знают и имеют мнение; когда стихнет, жизнь встаёт на прежние круги. ' +
-      'Может оставить след у одной группы или переменить привычку одного места, но карта города и его законы те же.',
-    unlike: 'Не один двор и не глава города: порядки те же.',
-    examples: [
-      'На площади при свидетелях расторгли помолвку двух известных домов — шутки держатся до следующего праздника.',
-      'Редкая птица неделю кружит над рядами; дети бегают смотреть, торговцы ставят приметы, потом птица уходит.',
-      'Ночной ливень затопил нижнюю улицу: сушат добро, спорят о жёлобе; через две недели луж нет.',
-      'Приезжий проповедник с соседнего края три базара собирает толпу и уходит — песни ещё поют, уклад тот же.',
-      'К ночи пропало праздничное знамя цеха; ищут, корят сторожа, потом шьют новое.',
-    ],
-  },
-  CRISIS: {
-    about:
-      'Посадка — испытание, которое город запомнит как собственную главу. Меняется какая-то область общей жизни: ' +
-      'кто кому должен, чем кормятся, какой обычай считают началом сезона, кому можно жить на этом склоне. ' +
-      'Остров узнаваем, но в одном существенном месте — уже другой. Цена высокая, привычный мир ещё держится.',
-    unlike: 'Не EPISODE (это глава города) и не RUPTURE (прежний порядок ещё можно считать нормой).',
-    examples: [
-      'Иссяк основной источник питья целого склона — делят чужой и решают, кому сходить с насиженных дворов.',
-      'Два дома рвут общий сезон подряд; без их согласия стоит половина строек.',
-      'Запретили обряд у кромки, от которого считали начало полевых работ — календарь труда сбился.',
-      'Падёж рабочего скота оставил без тяги несколько артелей сразу.',
-      'Суд признал недействительным старый раздел пастбищ: десятки семей теряют привычный выгон.',
-    ],
-  },
-  RUPTURE: {
-    about:
-      'Посадка, после которой прежний порядок нельзя считать нормой даже из вежливости. ' +
-      'На кону слом того, на чём держалась совместная жизнь: массовая потеря, раскол веры или права, ' +
-      'угроза району как несущей земле или острову как месту жить по-старому. ' +
-      'Если динамика дойдёт до конца — будет внятное «до» и «после».',
-    unlike:
-      'Не CRISIS: там меняется одна область жизни, привычный мир ещё держится. Квартал как несущая земля — достаточно; спор двух дворов — нет.',
-    examples: [
-      'Несущая терраса, на которой стоит целый квартал, пошла трещинами: решать, кого снимать и чем жертвовать.',
-      'Половина города перестаёт нести повинность храму — вера в покровителя больше не общая.',
-      'Основной урожайный склон осыпается в пустоту: зима без запаса уже не для бедных, а для всех.',
-      'Новый закон наследования отменяет старые дворы разом: кому жить в чьём доме — больше не ясно.',
-      'На курс острова легла буря, какой не помнят живущие; не укрытые районы, скорее всего, не переживут её прежними.',
-    ],
-  },
-};
+const DEFAULT_CONTINUATION_AUTHORS = [
+  { id: 'poe', name: 'Эдгар Аллан По' },
+  { id: 'lovecraft', name: 'Говард Лавкрафт' },
+  { id: 'le_guin', name: 'Урсула Ле Гуин' },
+  { id: 'dick', name: 'Филип К. Дик' },
+  { id: 'lem', name: 'Станислав Лем' },
+  { id: 'bradbury', name: 'Рэй Брэдбери' },
+  { id: 'jackson', name: 'Шерли Джексон' },
+  { id: 'borges', name: 'Хорхе Луис Борхес' },
+  { id: 'mieville', name: 'Чайна Мьевиль' },
+  { id: 'butler', name: 'Октавия Батлер' },
+  { id: 'ballard', name: 'Дж. Г. Баллард' },
+  { id: 'kafka', name: 'Франц Кафка' },
+  { id: 'shelley', name: 'Мэри Шелли' },
+  { id: 'vandermeer', name: 'Джефф Вандермеер' },
+  { id: 'wolfe', name: 'Джин Вулф' },
+];
 
-function formatGravityLevel(id) {
-  const entry = FREEFORM_GRAVITY_CATALOG[id];
-  if (!entry) return '';
+function normalizeContinuationAuthors(raw) {
+  const list = Array.isArray(raw) && raw.length ? raw : DEFAULT_CONTINUATION_AUTHORS;
+  return list
+    .map((item, i) => {
+      if (typeof item === 'string') {
+        const name = item.trim();
+        return { id: name.toLowerCase().replace(/[\s.]+/g, '_') || `author_${i}`, name };
+      }
+      const name = String(item?.name || '').trim();
+      const id = String(item?.id || name)
+        .trim()
+        .toLowerCase()
+        .replace(/[\s.]+/g, '_');
+      return { id: id || `author_${i}`, name: name || id };
+    })
+    .filter((a) => a.name);
+}
+
+function exampleLine(x) {
+  if (x && typeof x === 'object' && !Array.isArray(x)) {
+    return Object.entries(x)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(' ');
+  }
+  return String(x || '').trim();
+}
+
+function normalizeGravityLevel(raw) {
+  if (!raw || typeof raw !== 'object') return { about: '', examples: [] };
+  const examples = Array.isArray(raw.examples) ? raw.examples.map(exampleLine).filter(Boolean) : [];
+  return {
+    about: String(raw.about || '').trim(),
+    examples,
+  };
+}
+
+function normalizeGravityCatalog(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const levelsRaw = src.levels && typeof src.levels === 'object' ? src.levels : src;
+  const levels = {};
+  for (const id of FREEFORM_GRAVITY) {
+    levels[id] = normalizeGravityLevel(levelsRaw[id]);
+  }
+  return {
+    intro: String(src.intro || '').trim(),
+    examplesLead: String(src.examplesLead || 'Примеры масштаба — якоря, не сюжеты для копирования:').trim(),
+    levels,
+  };
+}
+
+function formatGravityLevel(id, catalog) {
+  const entry = catalog?.levels?.[id];
+  if (!entry) return `GRAVITY: ${id}`;
   return [
-    `GRAVITY: ${id} — посадка истории (поле «последствия»), не размер затравки.`,
-    'Затравка может быть узкой. Динамика делает эту посадку неизбежной, а не дописывает её словами.',
+    `GRAVITY: ${id}`,
     entry.about,
-    entry.unlike,
-    'Примеры масштаба — якоря, не сюжеты для копирования:',
+    entry.examples.length ? catalog.examplesLead : null,
     ...entry.examples.map((x) => `- ${x}`),
   ]
     .filter(Boolean)
@@ -108,21 +114,23 @@ function formatGravityLevel(id) {
 }
 
 /** Расшифровка выбранного freeform-gravity: только этот уровень, не вся шкала. */
-export function formatFreeformGravityForPrompt(gravity) {
-  return formatGravityLevel(parseFreeformGravity(gravity));
+export function formatFreeformGravityForPrompt(gravity, config) {
+  return formatGravityLevel(parseFreeformGravity(gravity), freeformConfig(config).gravity);
 }
 
-export function formatBrainstormCandidateForPrompt(candidate, index) {
+export function formatBrainstormCandidateForPrompt(candidate, index, { includeAuthor = false } = {}) {
   if (!candidate) return '';
   const axes = [candidate.arena, candidate.worldRelation, candidate.conflictSource, candidate.temporalShape]
     .map((s) => String(s || '').trim())
     .filter(Boolean)
     .join(' · ');
   const n = Number.isInteger(Number(index)) ? Number(index) : candidate.index;
+  const chronicle = String(candidate.chronicle || candidate.text || candidate.hook || '').trim();
   return [
     `=== Кандидат ${n || '?'} ===`,
     axes ? `оси: ${axes}` : null,
-    formatFreeformSeedBlank(candidate),
+    includeAuthor && candidate.authorName ? `автор: ${candidate.authorName}` : null,
+    chronicle ? `хроника: ${chronicle}` : null,
   ]
     .filter(Boolean)
     .join('\n');
@@ -157,6 +165,8 @@ export function freeformConfig(config) {
     seedAxes: (Array.isArray(raw.seedAxes) ? raw.seedAxes : ['truthArena', 'worldRelation'])
       .map((id) => String(id || '').trim())
       .filter(Boolean),
+    continuationAuthors: normalizeContinuationAuthors(raw.continuationAuthors),
+    gravity: normalizeGravityCatalog(raw.gravity),
   };
 }
 

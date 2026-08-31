@@ -254,6 +254,7 @@ export function formatFreeformCardJudgeCase({
   blank,
   card,
   gravity,
+  config,
 } = {}) {
   const close = Array.isArray(card?.closeWhen) ? card.closeWhen : [];
   const hidden = Array.isArray(card?.hiddenPremises) ? card.hiddenPremises : [];
@@ -269,7 +270,7 @@ export function formatFreeformCardJudgeCase({
     blank?.arena ? `arena: ${blank.arena}` : null,
     blank?.worldRelation ? `worldRelation: ${blank.worldRelation}` : null,
     Number.isFinite(Number(gravity)) || String(gravity || '').trim()
-      ? formatFreeformGravityForPrompt(gravity)
+      ? formatFreeformGravityForPrompt(gravity, config)
       : null,
     '',
     `title: ${card?.title || '—'}`,
@@ -308,13 +309,14 @@ export async function judgeFreeformCard({
   blank,
   card,
   gravity,
+  config,
   log: parentLog,
 } = {}) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.card_judge' });
   const verdict = await runVerdictJudge({
     runtime,
     agentId: 'freeformCardJudge',
-    caseText: formatFreeformCardJudgeCase({ seedText, blank, card, gravity }),
+    caseText: formatFreeformCardJudgeCase({ seedText, blank, card, gravity, config }),
     extraSystem,
     extraUser:
       'Проверка собранной карточки, не выбор из пачки. PASS если шарнир на месте, whyMoves — путь к посадке из динамики, closeWhen различны и хотя бы один держит масштаб последствий, карточка — тот же сюжет, gravity совпадает с посадкой (синопсис может быть меньше), космология цела, hiddenPremises не выдуманы. Иначе FAIL одним из HINGE / PLAUSIBLE_ENOUGH / WHY_MOVES / CLOSE_WHEN / PREMISE_DRIFT / GRAVITY_FIDELITY / WORLD_FIDELITY / HIDDEN_INVENTED. UNCERTAIN пайплайн принимает. Историю не чини.',

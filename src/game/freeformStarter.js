@@ -47,7 +47,7 @@ export function seedCardFromBlank(blank, cfg) {
   );
 }
 
-async function constructSeed({ runtime, domain, world, seedText, blank, repair = '', gravity, cfg, log }) {
+async function constructSeed({ runtime, domain, world, seedText, blank, repair = '', gravity, cfg, config, log }) {
   const draft = { card: null };
   await runtime.run({
     agentId: 'freeformStart',
@@ -114,7 +114,7 @@ async function constructSeed({ runtime, domain, world, seedText, blank, repair =
           architectShortText(blank) || JSON.stringify(blank, null, 2),
           blank.arena ? `arena: ${blank.arena}` : '',
           blank.worldRelation ? `worldRelation: ${blank.worldRelation}` : '',
-          gravity != null ? `\n${formatFreeformGravityForPrompt(gravity)}` : '',
+          gravity != null ? `\n${formatFreeformGravityForPrompt(gravity, config)}` : '',
           repair ? `\nЗамечание судьи (минимальная поправка, не новая история):\n${repair}` : '',
           '',
           'Посади ЭТОТ сюжет в город через submit_freeform_seed.',
@@ -138,7 +138,7 @@ async function constructSeed({ runtime, domain, world, seedText, blank, repair =
 export async function startFreeformStory({ config, runtime, domain, world, seedText, gravity, log: parentLog }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.start', domainId: domain?.id });
   const g = parseFreeformGravity(gravity);
-  const gravityLine = formatFreeformGravityForPrompt(g);
+  const gravityLine = formatFreeformGravityForPrompt(g, config);
   const { cfg, variants, prompt: architectPrompt = '' } = await architectFreeformBlanks({
     runtime,
     seedText,
@@ -186,6 +186,7 @@ export async function startFreeformStory({ config, runtime, domain, world, seedT
       repair: verdict.repair || '',
       gravity: g,
       cfg: builtCfg,
+      config,
       log,
     });
   } catch (err) {
@@ -207,6 +208,7 @@ export async function startFreeformStory({ config, runtime, domain, world, seedT
       blank,
       card: winner,
       gravity: g,
+      config,
       log,
     });
     cardJudge = judged.judge;
@@ -223,6 +225,7 @@ export async function startFreeformStory({ config, runtime, domain, world, seedT
             repair,
             gravity: g,
             cfg: builtCfg,
+            config,
             log,
           });
           if (patched) {

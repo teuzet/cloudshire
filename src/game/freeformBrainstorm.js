@@ -1,10 +1,11 @@
 /**
- * Генератор трёх затравок: код бросает оси, модель раскрывает их в четыре поля.
+ * Генератор трёх следующих хроник: код бросает оси, модель пишет один текст на набор.
  * Лаборатория: пачка → один судья по всем трём → одна правка архитектора.
  */
 
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
+import { clipPlotText, PLOT_TITLE_MAX, PLOT_SUMMARY_MAX } from './plotlines.js';
 import {
   parseFreeformGravity,
   formatFreeformGravityForPrompt,
@@ -13,9 +14,7 @@ import {
 } from './freeform.js';
 import {
   pickFreeformSeedAxisPairs,
-  normalizeSeedBlank,
   captureAgentPrompt,
-  formatFreeformArenaRelationCatalogs,
 } from './freeformArchitect.js';
 import {
   parseFreeformPackReview,
@@ -87,14 +86,6 @@ function pickWithoutReplacement(items, n, rng) {
   return out;
 }
 
-function formatCatalogBlock(title, entries) {
-  const lines = [title];
-  for (const entry of entries) {
-    lines.push(`${entry.id} — ${entry.hint}`);
-  }
-  return lines.join('\n');
-}
-
 function pairTagName(pair, groupId) {
   const aliases = groupId === 'threatArena' ? ['threatArena', 'truthArena'] : [groupId];
   return (pair || []).find((t) => aliases.includes(t.groupId))?.tagName || '';
@@ -112,43 +103,42 @@ export function pickFreeformBrainstormRolls(config, count, rng = Math.random) {
   const pairs = pickFreeformSeedAxisPairs(config, n, rng);
   const sources = pickWithoutReplacement(CONFLICT_SOURCES, n, rng);
   const shapes = pickWithoutReplacement(TEMPORAL_SHAPES, n, rng);
+  const authors = pickWithoutReplacement(freeformConfig(config).continuationAuthors, n, rng);
   return pairs.map((pair, i) => ({
     pair,
     conflictSource: sources[i] || sources[0],
     temporalShape: shapes[i] || shapes[0],
+    author: authors[i] || authors[0],
   }));
 }
 
 export function formatFreeformBrainstormRollsForPrompt(rolls) {
   if (!rolls?.length) return '';
-  const lines = [
-    'Оси уже брошены кодом. Не выбирай и не меняй их — раскрой в текст.',
-    'Метки — ассоциативные поля, не жанр и не обязательные существительные.',
-    '',
-    formatFreeformArenaRelationCatalogs(),
-    '',
-    formatCatalogBlock('conflictSource', CONFLICT_SOURCES),
-    '',
-    formatCatalogBlock('temporalShape', TEMPORAL_SHAPES),
-    '',
-    'Наборы. На каждый — четыре поля (затравка, конфликт, динамика, последствия), в этом порядке:',
-  ];
-  rolls.forEach((roll, i) => {
-    const arena = pairTagName(roll.pair, 'threatArena') || '?';
-    const rel = pairTagName(roll.pair, 'worldRelation') || '?';
-    lines.push(`${i + 1}. ${arena} · ${rel} · ${roll.conflictSource.id} · ${roll.temporalShape.id}`);
-  });
-  return lines.join('\n').trim();
+  return rolls
+    .map((roll, i) => {
+      const arena = pairTagName(roll.pair, 'threatArena') || '?';
+      const rel = pairTagName(roll.pair, 'worldRelation') || '?';
+      const author = roll.author?.name || roll.authorName || '?';
+      return `${i + 1}. threatArena ${arena} · worldRelation ${rel} · conflictSource ${roll.conflictSource.id} · temporalShape ${roll.temporalShape.id} · автор ${author}`;
+    })
+    .join('\n');
 }
 
 export function normalizeBrainstormCandidate(raw, roll, index = 1) {
-  const blank = normalizeSeedBlank(raw, roll?.pair || []);
-  if (!blank) return null;
+  const chronicle = clipPlotText(raw?.chronicle || raw?.text || raw?.hook, PLOT_SUMMARY_MAX);
+  if (!chronicle) return null;
   return {
-    ...blank,
+    title: clipPlotText(raw?.title, PLOT_TITLE_MAX) || '',
+    chronicle,
+    text: chronicle,
+    hook: chronicle,
     index,
+    arena: pairTagName(roll?.pair, 'threatArena'),
+    worldRelation: pairTagName(roll?.pair, 'worldRelation'),
     conflictSource: roll.conflictSource.id,
     temporalShape: roll.temporalShape.id,
+    authorId: roll.author?.id || '',
+    authorName: roll.author?.name || '',
   };
 }
 
@@ -190,13 +180,17 @@ export function rollFromBrainstormCandidate(candidate) {
     ],
     conflictSource: { id: candidate?.conflictSource || '' },
     temporalShape: { id: candidate?.temporalShape || '' },
+    author: {
+      id: candidate?.authorId || '',
+      name: candidate?.authorName || '',
+    },
   };
 }
 
 function emitCandidatesTool({ n, rolls, draft, log }) {
   return {
     name: 'emit_freeform_candidates',
-    description: `Ровно ${n} кандидатов: четыре поля на каждый набор осей, в том же порядке. Оси в ответе — эхо входа, не новый выбор.`,
+    description: `Ровно ${n} кандидатов: одна следующая хроника на каждый набор осей, в том же порядке. Оси в ответе — эхо входа, не новый выбор.`,
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -208,23 +202,12 @@ function emitCandidatesTool({ n, rolls, draft, log }) {
           maxItems: n,
           items: {
             type: 'object',
-            required: ['hook', 'conflict', 'dynamics', 'consequences'],
+            required: ['chronicle'],
             properties: {
-              hook: {
+              chronicle: {
                 type: 'string',
-                description: 'Затравка: компактная сцена, 1–2 предложения. Что уже произошло. Фитиль, не взрыв.',
-              },
-              conflict: {
-                type: 'string',
-                description: 'Конфликт: что сейчас двигает сюжет.',
-              },
-              dynamics: {
-                type: 'string',
-                description: 'Динамика: процесс, которым ситуация вырастет до посадки Gravity.',
-              },
-              consequences: {
-                type: 'string',
-                description: 'Последствия: посадка истории на уровне Gravity. Динамика должна её зарабатывать, не приклеивать.',
+                description:
+                  'Краткое описание сюжета: строго 4–5 предложений, не больше',
               },
               threatArena: { type: 'string', description: 'Эхо оси threatArena этого набора.' },
               worldRelation: { type: 'string', description: 'Эхо оси worldRelation этого набора.' },
@@ -244,10 +227,7 @@ function emitCandidatesTool({ n, rolls, draft, log }) {
         })
         .filter(Boolean);
       if (variants.length < n) {
-        return toolFail(
-          'thin',
-          `Нужно ровно ${n} кандидатов: у каждого затравка, конфликт, динамика и последствия.`,
-        );
+        return toolFail('thin', `Нужно ровно ${n} кандидатов: у каждого одна следующая хроника.`);
       }
       draft.variants = variants;
       return { ok: true, count: n };
@@ -269,6 +249,7 @@ export async function brainstormFreeformSeeds({ runtime, seedText, gravity, conf
         ...(roll.pair || []).map((t) => `${t.groupId}:${t.tagId}`),
         roll.conflictSource.id,
         roll.temporalShape.id,
+        roll.author?.id,
       ].join('+'),
     ),
   });
@@ -286,18 +267,14 @@ export async function brainstormFreeformSeeds({ runtime, seedText, gravity, conf
       {
         role: 'user',
         content: [
-          '====================',
-          'ХРОНИКА',
-          '====================',
+          'GRAVITY',
+          formatFreeformGravityForPrompt(g, config),
+          '',
+          'ЗАТРАВКА',
           seedText,
           '',
-          formatFreeformGravityForPrompt(g),
-          '',
+          'ОСИ',
           formatFreeformBrainstormRollsForPrompt(rolls),
-          '',
-          `Верни ровно ${n} кандидатов через emit_freeform_candidates, в порядке наборов.`,
-          'У каждого: затравка, конфликт, динамика, последствия. Gravity — посадка в поле «последствия», не размер затравки.',
-          'Оси в ответе верни такими, какими получил.',
         ].join('\n'),
       },
     ],
@@ -327,7 +304,7 @@ function formatPackForJudge(candidates) {
     .join('\n\n');
 }
 
-export async function reviewBrainstormPack({ runtime, seedText, gravity, candidates, log: parentLog }) {
+export async function reviewBrainstormPack({ runtime, seedText, gravity, candidates, config, log: parentLog }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.judge' });
   const n = candidates.length;
   const g = parseFreeformGravity(gravity);
@@ -394,17 +371,13 @@ export async function reviewBrainstormPack({ runtime, seedText, gravity, candida
       {
         role: 'user',
         content: [
-          '====================',
-          'ХРОНИКА',
-          '====================',
+          'GRAVITY',
+          formatFreeformGravityForPrompt(g, config),
+          '',
+          'ЗАТРАВКА',
           seedText,
           '',
-          formatFreeformGravityForPrompt(g),
-          '',
           formatPackForJudge(candidates),
-          '',
-          `Кандидатов: ${n}. Вызови submit_freeform_pack_review по каждому, в том же порядке.`,
-          'Победителя не выбирай. Города нет. Gravity — посадка в «последствиях».',
         ].join('\n'),
       },
     ],
@@ -430,6 +403,7 @@ export async function repairBrainstormPack({
   gravity,
   drafts,
   reviews,
+  config,
   log: parentLog,
 }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.repair' });
@@ -448,7 +422,7 @@ export async function repairBrainstormPack({
       const review = notes[i] || { index: i + 1, verdict: 'PASS', repair: '', summary: '', issues: [] };
       const issues = (review.issues || []).map((x) => `[${x.code}] ${x.reason}`).join('\n');
       return [
-        formatBrainstormCandidateForPrompt(c, c.index || i + 1),
+        formatBrainstormCandidateForPrompt(c, c.index || i + 1, { includeAuthor: true }),
         `вердикт: ${review.verdict}`,
         review.summary ? `кратко: ${review.summary}` : null,
         issues ? `замечания:\n${issues}` : null,
@@ -467,28 +441,24 @@ export async function repairBrainstormPack({
     log,
     scene: 'freeform_brainstorm_repair',
     extraSystem: [
-      'Сейчас ты не придумываешь новую пачку. Ты правишь уже написанные три кандидата по замечаниям судьи.',
-      'Оси не меняй. Центральный механизм не подменяй, кроме случая, когда судья требует убрать новый закон мира — тогда тот же двигатель внутри уже данного порядка.',
-      'Не поднимай и не опускай Gravity риторикой. Правь посадку в «последствиях» и динамику, которая её зарабатывает.',
-      'Если просят обострить — конкретные ходы в динамике, не новая посадка и не новый конфликт. Если просят ужать — вырежи лишнее, механизм оставь.',
+      'Сейчас ты не придумываешь новую пачку. Ты правишь уже написанные три хроники по замечаниям судьи.',
+      'Оси и автора не меняй. Центральный механизм не подменяй, кроме случая, когда судья требует убрать новый закон мира — тогда тот же двигатель внутри уже данного порядка.',
+      'Не поднимай и не опускай Gravity риторикой. Правь угрозу или возможность в хронике и динамику, которая её зарабатывает.',
+      'Если просят обострить — конкретный конфликт и явную динамику в том же тексте, не новая посадка. Если просят ужать — вырежи орнамент, механизм оставь.',
       'Кандидат без замечания верни без изменений. Не делай кандидатов близнецами.',
     ].join('\n'),
     userMessages: [
       {
         role: 'user',
         content: [
-          '====================',
-          'ХРОНИКА',
-          '====================',
+          'GRAVITY',
+          formatFreeformGravityForPrompt(g, config),
+          '',
+          'ЗАТРАВКА',
           seedText,
           '',
-          formatFreeformGravityForPrompt(g),
-          '',
-          'ДОРАБОТКА. Ниже черновики и замечания судьи. Верни три полных кандидата в том же порядке.',
-          '',
+          'ДОРАБОТКА',
           pack,
-          '',
-          `Верни ровно ${n} кандидатов через emit_freeform_candidates.`,
         ].join('\n'),
       },
     ],
@@ -524,6 +494,7 @@ export async function brainstormFreeformPack({ runtime, seedText, gravity, confi
     seedText,
     gravity: drafted.gravity,
     candidates: drafted.candidates,
+    config,
     log,
   });
   const repaired = await repairBrainstormPack({
@@ -532,6 +503,7 @@ export async function brainstormFreeformPack({ runtime, seedText, gravity, confi
     gravity: drafted.gravity,
     drafts: drafted.candidates,
     reviews: judged.reviews,
+    config,
     log,
   });
   return {

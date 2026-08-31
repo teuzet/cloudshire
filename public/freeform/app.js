@@ -47,6 +47,8 @@ function modeText(mode) {
 }
 
 function seedFieldsHtml(v) {
+  const chronicle = String(v?.chronicle || '').trim();
+  if (chronicle) return `<p class="rejected-text">${esc(chronicle)}</p>`;
   const rows = [
     ['затравка', v?.hook],
     ['конфликт', v?.conflict],
@@ -66,17 +68,15 @@ function axesLine(v) {
   const parts = [v?.arena, v?.worldRelation, v?.conflictSource, v?.temporalShape]
     .map((s) => String(s || '').trim())
     .filter(Boolean);
+  const author = String(v?.authorName || '').trim();
+  if (author) parts.push(`как ${author}`);
   return parts.join(' · ');
 }
 
 function fieldsEqual(a, b) {
   if (!a || !b) return false;
-  return (
-    String(a.hook || '') === String(b.hook || '') &&
-    String(a.conflict || '') === String(b.conflict || '') &&
-    String(a.dynamics || '') === String(b.dynamics || '') &&
-    String(a.consequences || '') === String(b.consequences || '')
-  );
+  const body = (v) => String(v?.chronicle || v?.text || v?.hook || '').trim();
+  return body(a) === body(b);
 }
 
 function judgeHtml(review) {

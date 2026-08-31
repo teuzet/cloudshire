@@ -31,7 +31,7 @@
 
       <form id="seedForm" class="card">
         <h2>Стартовая хроника</h2>
-        <p class="muted">Напиши свершившееся событие. Три затравки одной gravity, затем судья по всем трём и одна правка. Черновик и замечания остаются на экране.</p>
+        <p class="muted">Напиши свершившееся событие. Три следующие хроники одной gravity, затем судья по всем трём и одна правка. Черновик и замечания остаются на экране.</p>
         <textarea id="seedText" rows="5" placeholder="Что случилось…"></textarea>
         <label>Gravity
           <select id="seedGravity">
@@ -41,12 +41,12 @@
             <option value="RUPTURE">RUPTURE — ломается прежний порядок</option>
           </select>
         </label>
-        <p class="muted">Посадка истории — чем она кончится, не размер первой сцены. У всех трёх кандидатов одна.</p>
-        <button type="submit" id="btnSeed">Сгенерировать затравки</button>
+        <p class="muted">Посадка истории — чем она кончится, не размер первой сцены. У всех трёх кандидатов одна. Ориентир — 4–5 предложений с кликбейтом, без жёсткого лимита.</p>
+        <button type="submit" id="btnSeed">Сгенерировать хроники</button>
       </form>
 
       <section id="candidates" class="card hidden">
-        <h2>Три затравки</h2>
+        <h2>Три хроники</h2>
         <p id="candidatesMeta" class="muted"></p>
         <div id="candidatesList"></div>
       </section>
@@ -78,7 +78,7 @@
   </main>
 
   <aside id="architectPrompt" class="card prompt-card hidden">
-    <h2>Промпт генератора затравок</h2>
+    <h2>Промпт генератора хроник</h2>
     <pre id="architectPromptText"></pre>
   </aside>
 

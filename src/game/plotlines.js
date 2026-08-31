@@ -59,7 +59,7 @@ function clipText(s, max) {
   return `${body.replace(/[\s,;:—-]+$/, '')}…`;
 }
 
-export const PLOT_SUMMARY_MAX = 900;
+export const PLOT_SUMMARY_MAX = 1800;
 export const PLOT_HOOK_MAX = 160;
 export const PLOT_TITLE_MAX = 120;
 export { clipText as clipPlotText };
