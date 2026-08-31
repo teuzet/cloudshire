@@ -172,10 +172,12 @@ export const FREEFORM_PACK_JUDGE_CODES = [
   'CAUSALITY',
   'MOTION',
   'DRAMA',
+  'TEMPO',
   'ECONOMY',
   'CHEKHOV',
   'CHRONICLE',
   'AXIS',
+  'PATRON',
   'OTHER',
 ];
 
