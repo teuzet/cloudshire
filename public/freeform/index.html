@@ -31,7 +31,7 @@
 
       <form id="seedForm" class="card">
         <h2>Стартовая хроника</h2>
-        <p class="muted">Напиши свершившееся событие. Три следующие хроники одной gravity, затем судья по всем трём и одна правка. Черновик и замечания остаются на экране.</p>
+        <p class="muted">Напиши свершившееся событие. Три хроники одной gravity, судья. PASS сразу в пул. Если их меньше двух — правка не-PASS и второй судья. Из пула случайно выбирается одна, конструктор собирает карточку, отдельный агент ставит срок автотика.</p>
         <textarea id="seedText" rows="5" placeholder="Что случилось…"></textarea>
         <label>Gravity
           <select id="seedGravity">
@@ -41,7 +41,7 @@
             <option value="RUPTURE">RUPTURE — ломается прежний порядок</option>
           </select>
         </label>
-        <p class="muted">Посадка истории — чем она кончится, не размер первой сцены. У всех трёх кандидатов одна. Ориентир — 4–5 предложений с кликбейтом, без жёсткого лимита.</p>
+        <p class="muted">Посадка истории — чем она кончится, не размер первой сцены. У всех трёх кандидатов одна.</p>
         <div class="row seed-actions">
           <button type="submit" id="btnSeed">Сгенерировать хроники</button>
           <button type="button" id="btnSeedCity">Из хроники города</button>
@@ -81,20 +81,65 @@
     </section>
   </main>
 
-  <aside id="architectPrompt" class="card prompt-card hidden">
-    <h2>Промпт генератора хроник</h2>
-    <pre id="architectPromptText"></pre>
-  </aside>
+  <section id="promptTrail" class="prompt-trail hidden">
+    <h2>Промпты агентов</h2>
+    <p class="muted">Реальные пакеты, которые ушли моделям, по порядку пайплайна. Пустой шаг — агент не вызывался.</p>
 
-  <aside id="judgePrompt" class="card prompt-card hidden">
-    <h2>Промпт судьи пачки</h2>
-    <pre id="judgePromptText"></pre>
-  </aside>
+    <aside id="architectPrompt" class="card prompt-card hidden">
+      <h3>1. Генератор хроник</h3>
+      <pre id="architectPromptText"></pre>
+    </aside>
 
-  <aside id="repairPrompt" class="card prompt-card hidden">
-    <h2>Промпт правки архитектора</h2>
-    <pre id="repairPromptText"></pre>
-  </aside>
+    <aside id="judgePrompt" class="card prompt-card hidden">
+      <h3>2. Судья пачки</h3>
+      <pre id="judgePromptText"></pre>
+    </aside>
+
+    <aside id="repairPrompt" class="card prompt-card hidden">
+      <h3>3. Правка архитектора</h3>
+      <pre id="repairPromptText"></pre>
+    </aside>
+
+    <aside id="finalJudgePrompt" class="card prompt-card hidden">
+      <h3>4. Второй судья</h3>
+      <pre id="finalJudgePromptText"></pre>
+    </aside>
+
+    <aside id="assemblePrompt" class="card prompt-card hidden">
+      <h3>5. Конструктор истории</h3>
+      <pre id="assemblePromptText"></pre>
+    </aside>
+
+    <aside id="countdownPrompt" class="card prompt-card hidden">
+      <h3>6. Срок автотика</h3>
+      <pre id="countdownPromptText"></pre>
+    </aside>
+
+    <aside id="alignPrompt" class="card prompt-card hidden">
+      <h3>7. RELATED / UNRELATED</h3>
+      <pre id="alignPromptText"></pre>
+    </aside>
+
+    <aside id="beatArchitectPrompt" class="card prompt-card hidden">
+      <h3>8. Архитектор хода</h3>
+      <pre id="beatArchitectPromptText"></pre>
+    </aside>
+
+    <aside id="beatJudgePrompt" class="card prompt-card hidden">
+      <h3>9. Судья хода</h3>
+      <pre id="beatJudgePromptText"></pre>
+    </aside>
+
+    <aside id="beatRepairPrompt" class="card prompt-card hidden">
+      <h3>10. Правка хода</h3>
+      <pre id="beatRepairPromptText"></pre>
+    </aside>
+
+    <aside id="beatTellPrompt" class="card prompt-card hidden">
+      <h3>11. Конструктор хода</h3>
+      <pre id="beatTellPromptText"></pre>
+    </aside>
+  </section>
 
   <p id="busy" class="busy hidden">Думает…</p>
   <script src="/freeform/app.js"></script>

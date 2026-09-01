@@ -14,6 +14,9 @@ import {
 } from './freeform.js';
 import { repairFreeformVariant } from './freeformJudge.js';
 import { plotConfig, pickSuspenseAnnotationSeed } from './plotlines.js';
+import { captureAgentPrompt } from './agentPrompt.js';
+
+export { formatAgentPrompt, captureAgentPrompt } from './agentPrompt.js';
 
 export function pickFreeformSeedAxes(config, rng = Math.random) {
   const ids = new Set(freeformConfig(config).seedAxes);
@@ -185,44 +188,6 @@ export function normalizeBeatBlank(raw) {
   };
 }
 
-export function formatAgentPrompt(packed) {
-  if (!packed) return '';
-  const lines = [];
-  if (packed.agentId) lines.push(`agent: ${packed.agentId}`);
-  if (packed.provider || packed.model) {
-    lines.push(`model: ${[packed.provider, packed.model].filter(Boolean).join('/')}`);
-  }
-  lines.push('', '=== SYSTEM ===', packed.systemContent || '');
-  for (const msg of packed.messages || []) {
-    if (msg.role === 'system') continue;
-    lines.push('', `=== ${String(msg.role || 'user').toUpperCase()} ===`, msg.content || '');
-  }
-  if (packed.tools?.length) {
-    lines.push('', '=== TOOLS ===', JSON.stringify(packed.tools, null, 2));
-  }
-  return lines.join('\n').trim();
-}
-
-export function captureAgentPrompt(runtime, opts) {
-  const userOnly = (opts?.userMessages || [])
-    .map((m) => m.content || '')
-    .filter(Boolean)
-    .join('\n\n');
-  if (typeof runtime?.assembleChat !== 'function') return userOnly;
-  try {
-    return formatAgentPrompt(
-      runtime.assembleChat({
-        agentId: opts.agentId,
-        extraSystem: opts.extraSystem || '',
-        userMessages: opts.userMessages || [],
-        tools: opts.tools || [],
-      }),
-    );
-  } catch {
-    return userOnly;
-  }
-}
-
 async function askSeedParagraphs({ runtime, seedText, pairs, gravity, config, log }) {
   const draft = { variants: null };
   const n = pairs.length;
@@ -317,7 +282,7 @@ async function askBeatBlanks({ runtime, cfg, log, userContent }) {
   const draft = { variants: null };
   const min = cfg.variantsMin;
   const max = cfg.variantsMax;
-  await runtime.run({
+  const runOpts = {
     agentId: 'freeformArchitectTell',
     tools: [
       {
@@ -366,8 +331,14 @@ async function askBeatBlanks({ runtime, cfg, log, userContent }) {
     scene: 'freeform_architect_beat',
     extraSystem: '',
     userMessages: [{ role: 'user', content: userContent }],
-  });
-  return draft.variants;
+  };
+  const prompt = captureAgentPrompt(runtime, runOpts);
+  try {
+    await runtime.run(runOpts);
+  } catch (err) {
+    log.warn('freeform.architect_beat_failed', { error: err.message });
+  }
+  return { variants: draft.variants || [], prompt };
 }
 
 export async function inventSeedBlanks({ runtime, seedText, cfg, config, gravity, log }) {
@@ -411,7 +382,7 @@ export async function inventBeatBlanks({ runtime, domain, plot, deed, cfg, log }
 
 export async function repairFreeformBlank({ runtime, blank, repair, kind, log }) {
   const normalize = kind === 'beat' ? normalizeBeatBlank : (raw) => normalizeSeedBlank(raw);
-  const patched = await repairFreeformVariant({
+  const { variant: patched, prompt } = await repairFreeformVariant({
     runtime,
     agentId: freeformArchitectAgentId(kind),
     variant: blank,
@@ -419,7 +390,7 @@ export async function repairFreeformBlank({ runtime, blank, repair, kind, log })
     extraSystem: '',
     log,
   });
-  return normalize(patched) || blank;
+  return { blank: normalize(patched) || blank, prompt: prompt || '' };
 }
 
 export async function architectFreeformBlanks({
@@ -439,7 +410,9 @@ export async function architectFreeformBlanks({
   let prompt = '';
   try {
     if (kind === 'beat') {
-      variants = (await inventBeatBlanks({ runtime, domain, plot, deed, cfg, log })) || [];
+      const beaten = await inventBeatBlanks({ runtime, domain, plot, deed, cfg, log });
+      variants = beaten?.variants || [];
+      prompt = beaten?.prompt || '';
     } else {
       const seeded = await inventSeedBlanks({ runtime, seedText, cfg, config, gravity, log });
       variants = seeded?.variants || [];

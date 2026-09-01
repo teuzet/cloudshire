@@ -1,6 +1,7 @@
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { clipPlotText, PLOT_SUMMARY_MAX } from './plotlines.js';
+import { captureAgentPrompt } from './agentPrompt.js';
 import { normalizeHiddenPremises } from './suspenseGraph.js';
 import {
   freeformConfig,
@@ -49,7 +50,7 @@ export function beatCardFromBlank(blank, cfg) {
 
 async function constructBeat({ runtime, domain, world, plot, deed, blank, cfg, log }) {
   const draft = { card: null };
-  await runtime.run({
+  const runOpts = {
     agentId: 'freeformTell',
     tools: [
       {
@@ -115,8 +116,14 @@ async function constructBeat({ runtime, domain, world, plot, deed, blank, cfg, l
           .join('\n'),
       },
     ],
-  });
-  return draft.card;
+  };
+  const prompt = captureAgentPrompt(runtime, runOpts);
+  try {
+    await runtime.run(runOpts);
+  } catch (err) {
+    log.warn('freeform.construct_beat_failed', { error: err.message });
+  }
+  return { card: draft.card, prompt };
 }
 
 export async function tellFreeformBeat({ config, runtime, domain, world, plot, deed, log: parentLog }) {
@@ -125,7 +132,7 @@ export async function tellFreeformBeat({ config, runtime, domain, world, plot, d
     domainId: domain?.id,
     plotId: plot?.id,
   });
-  const { cfg, variants } = await architectFreeformBlanks({
+  const { cfg, variants, prompt: architectPrompt = '' } = await architectFreeformBlanks({
     runtime,
     domain,
     plot,
@@ -135,7 +142,16 @@ export async function tellFreeformBeat({ config, runtime, domain, world, plot, d
     log,
   });
   if (!variants.length) {
-    return { ok: false, error: 'architect_empty', variants: [], rejected: [] };
+    return {
+      ok: false,
+      error: 'architect_empty',
+      variants: [],
+      rejected: [],
+      architectPrompt,
+      judgePrompt: '',
+      repairPrompt: '',
+      tellPrompt: '',
+    };
   }
 
   const verdict = await pickFreeformVariant({
@@ -159,26 +175,41 @@ export async function tellFreeformBeat({ config, runtime, domain, world, plot, d
   });
 
   let blank = variants[verdict.index];
+  let repairPrompt = '';
   if (verdict.repair) {
-    blank = await repairFreeformBlank({
+    const repaired = await repairFreeformBlank({
       runtime,
       blank,
       repair: verdict.repair,
       kind: 'beat',
       log,
     });
+    blank = repaired.blank;
+    repairPrompt = repaired.prompt || '';
   }
 
   const builtCfg = cfg || freeformConfig(config);
   let winner = null;
+  let tellPrompt = '';
   try {
-    winner = await constructBeat({ runtime, domain, world, plot, deed, blank, cfg: builtCfg, log });
+    const built = await constructBeat({ runtime, domain, world, plot, deed, blank, cfg: builtCfg, log });
+    winner = built.card;
+    tellPrompt = built.prompt || '';
   } catch (err) {
     log.warn('freeform.construct_beat_failed', { error: err.message });
   }
   winner = winner || beatCardFromBlank(blank, builtCfg);
   if (!winner) {
-    return { ok: false, error: 'constructor_empty', variants, rejected: [] };
+    return {
+      ok: false,
+      error: 'constructor_empty',
+      variants,
+      rejected: [],
+      architectPrompt,
+      judgePrompt: verdict.prompt || '',
+      repairPrompt,
+      tellPrompt,
+    };
   }
 
   const rejected = packRejectedBlanks(variants, verdict.index);
@@ -189,5 +220,9 @@ export async function tellFreeformBeat({ config, runtime, domain, world, plot, d
     rejected,
     judge: { why: verdict.why, repair: verdict.repair, issues: verdict.issues },
     variants,
+    architectPrompt,
+    judgePrompt: verdict.prompt || '',
+    repairPrompt,
+    tellPrompt,
   };
 }

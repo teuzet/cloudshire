@@ -169,13 +169,16 @@ export function parseFreeformGravity(raw, fallback = 'EPISODE') {
 function storyActState(p = {}) {
   const type = storyTypeOf(p);
   if (type === 'freeform') {
+    const countdown = Math.round(Number(p.countdown));
     return {
       storyType: 'freeform',
       act: null,
-      urgency: clampStakes(p.urgency, 40),
+      urgency: clampStakes(p.urgency, 0),
       gravity: parseFreeformGravity(p.gravity),
-      urgency0: clampStakes(p.urgency0 ?? p.urgency, 40),
+      urgency0: clampStakes(p.urgency0 ?? p.urgency, 0),
       gravity0: parseFreeformGravity(p.gravity0 ?? p.gravity),
+      countdown: Number.isFinite(countdown) ? Math.max(1, Math.min(5, countdown)) : null,
+      whyMoves: clipText(p.whyMoves, PLOT_SUMMARY_MAX),
       escalationLevel: null,
       maxEscalations: null,
       truth: '',

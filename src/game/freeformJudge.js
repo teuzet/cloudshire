@@ -3,6 +3,7 @@ import { toolFail } from '../agents/toolResult.js';
 import { clipPlotText } from './plotlines.js';
 import { runVerdictJudge, literaryJudgeAccepts } from './mysteryJudge.js';
 import { formatFreeformGravityForPrompt, formatFreeformSeedBlank } from './freeform.js';
+import { captureAgentPrompt } from './agentPrompt.js';
 
 export const FREEFORM_JUDGE_CODES = [
   'HIDDEN_LEAK',
@@ -89,72 +90,74 @@ export async function pickFreeformVariant({
 }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.judge', kind });
   const n = variants.length;
-  if (!n) return { pick: 0, why: 'нет вариантов', repair: '', issues: [], verdict: null };
+  if (!n) return { pick: 0, why: 'нет вариантов', repair: '', issues: [], verdict: null, prompt: '' };
   const draft = { data: null };
-
-  try {
-    await runtime.run({
-      agentId: 'freeformJudge',
-      tools: [
-        {
-          name: 'submit_freeform_pick',
-          description: 'Выбери лучший вариант. Нумерация с 1.',
-          parameters: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['pick', 'why'],
-            properties: {
-              pick: { type: 'integer', description: `Номер варианта от 1 до ${n}.` },
-              why: { type: 'string', description: 'Почему этот вариант интереснее остальных.' },
-              repair: {
-                type: 'string',
-                description: 'Что починить в победителе. Пусто, если чинить нечего.',
-              },
-              issues: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  required: ['code', 'reason'],
-                  properties: {
-                    index: { type: 'integer' },
-                    code: { type: 'string', enum: FREEFORM_JUDGE_CODES },
-                    reason: { type: 'string' },
-                  },
+  const runOpts = {
+    agentId: 'freeformJudge',
+    tools: [
+      {
+        name: 'submit_freeform_pick',
+        description: 'Выбери лучший вариант. Нумерация с 1.',
+        parameters: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['pick', 'why'],
+          properties: {
+            pick: { type: 'integer', description: `Номер варианта от 1 до ${n}.` },
+            why: { type: 'string', description: 'Почему этот вариант интереснее остальных.' },
+            repair: {
+              type: 'string',
+              description: 'Что починить в победителе. Пусто, если чинить нечего.',
+            },
+            issues: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['code', 'reason'],
+                properties: {
+                  index: { type: 'integer' },
+                  code: { type: 'string', enum: FREEFORM_JUDGE_CODES },
+                  reason: { type: 'string' },
                 },
               },
             },
           },
-          handler: async (args) => {
-            draft.data = parseFreeformPick(args, n);
-            return { ok: true };
-          },
         },
-      ],
-      maxTurns: 2,
-      toolChoice: { type: 'function', function: { name: 'submit_freeform_pick' } },
-      log,
-      scene: `freeform_judge_${kind}`,
-      domainId,
-      extraSystem,
-      userMessages: [
-        {
-          role: 'user',
-          content: [
-            caseText,
-            '',
-            formatFreeformVariants(variants),
-            '',
-            `Вариантов: ${n}. Вызови submit_freeform_pick. pick — номер лучшего.`,
-            'Главное — интерес: какой сюжет хочется читать дальше.',
-            'Отсей то, чего вообще не бывает: космология или установленный лор города.',
-            'Выдуманный чужой остров и делегация, которая сейчас прибыла с него — отсев, не плюс.',
-            'Если по А судят о Б без шарнира (почему А следует из Б) — штраф или отсев.',
-            'То, насколько история «ложится» на ремёсла и должности, не достоинство.',
-            'Мелкие огрехи победителя — в repair. Не отбрасывай единственный живой вариант из-за шероховатости.',
-          ].join('\n'),
+        handler: async (args) => {
+          draft.data = parseFreeformPick(args, n);
+          return { ok: true };
         },
-      ],
-    });
+      },
+    ],
+    maxTurns: 2,
+    toolChoice: { type: 'function', function: { name: 'submit_freeform_pick' } },
+    log,
+    scene: `freeform_judge_${kind}`,
+    domainId,
+    extraSystem,
+    userMessages: [
+      {
+        role: 'user',
+        content: [
+          caseText,
+          '',
+          formatFreeformVariants(variants),
+          '',
+          `Вариантов: ${n}. Вызови submit_freeform_pick. pick — номер лучшего.`,
+          'Главное — интерес: какой сюжет хочется читать дальше.',
+          'Отсей то, чего вообще не бывает: космология или установленный лор города.',
+          'Выдуманный чужой остров и делегация, которая сейчас прибыла с него — отсев, не плюс.',
+          'Если по А судят о Б без шарнира (почему А следует из Б) — штраф или отсев.',
+          'То, насколько история «ложится» на ремёсла и должности, не достоинство.',
+          'Мелкие огрехи победителя — в repair. Не отбрасывай единственный живой вариант из-за шероховатости.',
+        ].join('\n'),
+      },
+    ],
+  };
+  const prompt = captureAgentPrompt(runtime, runOpts);
+
+  try {
+    await runtime.run(runOpts);
   } catch (err) {
     log.warn('freeform.judge_failed', { error: err.message });
   }
@@ -162,7 +165,7 @@ export async function pickFreeformVariant({
   const verdict = draft.data || { pick: 1, why: 'судья молчал, взят первый', repair: '', issues: [] };
   const index = Math.max(0, Math.min(n - 1, verdict.pick - 1));
   log.info('freeform.judge', { pick: index + 1, why: verdict.why, repair: Boolean(verdict.repair) });
-  return { ...verdict, index };
+  return { ...verdict, index, prompt };
 }
 
 export const FREEFORM_PACK_JUDGE_CODES = [
@@ -178,6 +181,7 @@ export const FREEFORM_PACK_JUDGE_CODES = [
   'CHRONICLE',
   'AXIS',
   'PATRON',
+  'CONFLUX',
   'OTHER',
 ];
 
@@ -237,6 +241,15 @@ export function parseFreeformPackReview(raw, variantCount) {
 
 export function reviewNeedsRepair(review) {
   return Boolean(String(review?.repair || '').trim());
+}
+
+export function isPackPass(review) {
+  return String(review?.verdict || '').toUpperCase() === 'PASS';
+}
+
+/** PASS не переписываем, даже если судья приложил совет. */
+export function reviewNeedsRewrite(review) {
+  return !isPackPass(review) && reviewNeedsRepair(review);
 }
 
 export const FREEFORM_CARD_JUDGE_CODES = [
@@ -349,72 +362,74 @@ export async function repairFreeformVariant({
   extraSystem,
   log: parentLog,
 }) {
-  if (!repair) return variant;
+  if (!repair) return { variant, prompt: '' };
   const log = (parentLog || getLogger()).child({ scope: 'freeform.repair' });
   const draft = { data: null };
+  const runOpts = {
+    agentId,
+    tools: [
+      {
+        name: 'submit_freeform_repair',
+        description: 'Исправленный победивший вариант. Поля те же, что у исходного варианта.',
+        parameters: {
+          type: 'object',
+          additionalProperties: true,
+          required: [],
+          properties: {
+            title: { type: 'string' },
+            hook: { type: 'string' },
+            conflict: { type: 'string' },
+            dynamics: { type: 'string' },
+            consequences: { type: 'string' },
+            text: { type: 'string' },
+            premise: { type: 'string' },
+            stakes: { type: 'string' },
+            whatHappens: { type: 'string' },
+            situationNow: { type: 'string' },
+            synopsis: { type: 'string' },
+            entry: { type: 'string' },
+            chronicle: { type: 'string' },
+            closeWhen: { type: 'array', items: { type: 'string' } },
+            hiddenPremises: { type: 'array', items: { type: 'string' } },
+            urgency: { type: 'integer' },
+            closed: { type: 'boolean' },
+            closedBy: { type: 'string' },
+          },
+        },
+        handler: async (args) => {
+          if (!args || typeof args !== 'object') return toolFail('empty', 'Верни исправленный вариант.');
+          draft.data = args;
+          return { ok: true };
+        },
+      },
+    ],
+    maxTurns: 2,
+    toolChoice: { type: 'function', function: { name: 'submit_freeform_repair' } },
+    log,
+    scene: 'freeform_repair',
+    extraSystem,
+    userMessages: [
+      {
+        role: 'user',
+        content: [
+          'ДОРАБОТКА выбранного варианта. Не меняй скрытый лор без нужды. Не пиши hiddenPremises в хронику.',
+          `Замечания судьи:\n${repair}`,
+          '',
+          'Исходный вариант:',
+          JSON.stringify(variant, null, 2),
+          '',
+          'Вызови submit_freeform_repair с полным исправленным вариантом.',
+        ].join('\n'),
+      },
+    ],
+  };
+  const prompt = captureAgentPrompt(runtime, runOpts);
   try {
-    await runtime.run({
-      agentId,
-      tools: [
-        {
-          name: 'submit_freeform_repair',
-          description: 'Исправленный победивший вариант. Поля те же, что у исходного варианта.',
-          parameters: {
-            type: 'object',
-            additionalProperties: true,
-            required: [],
-            properties: {
-              title: { type: 'string' },
-              hook: { type: 'string' },
-              conflict: { type: 'string' },
-              dynamics: { type: 'string' },
-              consequences: { type: 'string' },
-              text: { type: 'string' },
-              premise: { type: 'string' },
-              stakes: { type: 'string' },
-              whatHappens: { type: 'string' },
-              situationNow: { type: 'string' },
-              synopsis: { type: 'string' },
-              entry: { type: 'string' },
-              chronicle: { type: 'string' },
-              closeWhen: { type: 'array', items: { type: 'string' } },
-              hiddenPremises: { type: 'array', items: { type: 'string' } },
-              urgency: { type: 'integer' },
-              closed: { type: 'boolean' },
-              closedBy: { type: 'string' },
-            },
-          },
-          handler: async (args) => {
-            if (!args || typeof args !== 'object') return toolFail('empty', 'Верни исправленный вариант.');
-            draft.data = args;
-            return { ok: true };
-          },
-        },
-      ],
-      maxTurns: 2,
-      toolChoice: { type: 'function', function: { name: 'submit_freeform_repair' } },
-      log,
-      scene: 'freeform_repair',
-      extraSystem,
-      userMessages: [
-        {
-          role: 'user',
-          content: [
-            'ДОРАБОТКА выбранного варианта. Не меняй скрытый лор без нужды. Не пиши hiddenPremises в хронику.',
-            `Замечания судьи:\n${repair}`,
-            '',
-            'Исходный вариант:',
-            JSON.stringify(variant, null, 2),
-            '',
-            'Вызови submit_freeform_repair с полным исправленным вариантом.',
-          ].join('\n'),
-        },
-      ],
-    });
+    await runtime.run(runOpts);
   } catch (err) {
     log.warn('freeform.repair_failed', { error: err.message });
-    return variant;
+    return { variant, prompt };
   }
-  if (!draft.data) return variant;
-  return { ...variant, ...draft.data };
+  if (!draft.data) return { variant, prompt };
+  return { variant: { ...variant, ...draft.data }, prompt };
 }

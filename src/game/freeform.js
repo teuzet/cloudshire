@@ -196,6 +196,13 @@ export function clampUrgency(n, fallback = 40) {
   return Math.max(0, Math.min(100, v));
 }
 
+/** Месяцы до автотика freeform-истории, если ею не занимаются. */
+export function clampFreeformCountdown(n, fallback = null) {
+  const v = Math.round(Number(n));
+  if (!Number.isFinite(v)) return fallback;
+  return Math.max(1, Math.min(5, v));
+}
+
 /** Только названия живых нитей — для судьи, не бриф города. */
 export function openStoryTitlesLine(domain, exceptId = null) {
   const skip = exceptId ? String(exceptId) : null;
@@ -264,14 +271,15 @@ export function appendChronicle(domain, world, { text, plotId = null, author, im
 }
 
 export function createFreeformPlot({ domain, world, variant, config, seedChronicleId = null }) {
+  const countdown = clampFreeformCountdown(variant.countdown);
   const plot = createPlotline({
     title: variant.title,
-    synopsis: variant.synopsis,
+    synopsis: variant.synopsis || variant.chronicle,
     closeWhen: variant.closeWhen,
     kind: 'story',
     storyType: 'freeform',
     hiddenPremises: variant.hiddenPremises,
-    urgency: variant.urgency,
+    urgency: Number.isFinite(Number(variant.urgency)) ? variant.urgency : 0,
     gravity: parseFreeformGravity(variant.gravity),
     tick: world.tickIndex,
     config,
@@ -279,8 +287,12 @@ export function createFreeformPlot({ domain, world, variant, config, seedChronic
   if (seedChronicleId) plot.chronicleIds.push(seedChronicleId);
   if (variant.arena) plot.arena = String(variant.arena);
   if (variant.worldRelation) plot.worldRelation = String(variant.worldRelation);
+  if (variant.conflictSource) plot.conflictSource = String(variant.conflictSource);
+  if (variant.temporalShape) plot.temporalShape = String(variant.temporalShape);
   if (variant.whyMoves) plot.whyMoves = clipPlotText(variant.whyMoves, PLOT_SUMMARY_MAX);
+  if (countdown != null) plot.countdown = countdown;
   if (variant.hook) plot.hook = clipPlotText(variant.hook, PLOT_SUMMARY_MAX);
+  if (variant.chronicle) plot.hook = plot.hook || clipPlotText(variant.chronicle, PLOT_SUMMARY_MAX);
   if (variant.conflict) plot.conflict = clipPlotText(variant.conflict, PLOT_SUMMARY_MAX);
   if (variant.dynamics) plot.dynamics = clipPlotText(variant.dynamics, PLOT_SUMMARY_MAX);
   if (variant.consequences) plot.consequences = clipPlotText(variant.consequences, PLOT_SUMMARY_MAX);
@@ -294,8 +306,12 @@ export function applyFreeformState(plot, patch = {}) {
   if (patch.synopsis) plot.synopsis = clipPlotText(patch.synopsis, PLOT_SUMMARY_MAX);
   if (patch.closeWhen) plot.closeWhen = normalizeCloseWhenList(patch.closeWhen);
   if (patch.hiddenPremises) plot.hiddenPremises = normalizeHiddenPremises(patch.hiddenPremises);
+  if (patch.whyMoves) plot.whyMoves = clipPlotText(patch.whyMoves, PLOT_SUMMARY_MAX);
   if (Number.isFinite(Number(patch.urgency))) {
     plot.urgency = Math.max(0, Math.min(100, Math.round(Number(patch.urgency))));
+  }
+  if (Number.isFinite(Number(patch.countdown))) {
+    plot.countdown = clampFreeformCountdown(patch.countdown);
   }
   if (patch.closed) {
     plot.ending = patch.closedBy || 'resolved';
@@ -333,7 +349,9 @@ export function plotCardForPrompt(plot, { revealHidden = true } = {}) {
     plot.whyMoves
       ? `whyMoves: ${plot.whyMoves}`
       : 'whyMoves: не задан.',
-    `urgency: ${plot.urgency ?? '—'} (0 — сама не тикает, 100 — каждый месяц без RELATED-дела).`,
+    plot.countdown != null
+      ? `через ${plot.countdown} мес. без дела ситуация сама сделает ход.`
+      : `urgency: ${plot.urgency ?? '—'} (0 — сама не тикает, 100 — каждый месяц без RELATED-дела).`,
     `gravity: ${plot.gravity || '—'}`,
   ];
   if (revealHidden) {

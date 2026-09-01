@@ -1,6 +1,8 @@
 /**
  * Генератор трёх следующих хроник: код бросает оси, модель пишет один текст на набор.
- * Лаборатория: пачка → один судья по всем трём → одна правка архитектора.
+ * Лаборатория: пачка → судья. PASS сразу в пул и не чинится.
+ * Если PASS уже ≥2 — правка и второй судья не запускаются.
+ * Иначе чинятся только не-PASS, второй судья только их пропускает в пул.
  */
 
 import { getLogger } from '../log.js';
@@ -18,7 +20,8 @@ import {
 } from './freeformArchitect.js';
 import {
   parseFreeformPackReview,
-  reviewNeedsRepair,
+  reviewNeedsRewrite,
+  isPackPass,
   FREEFORM_PACK_JUDGE_CODES,
 } from './freeformJudge.js';
 
@@ -388,7 +391,7 @@ export async function reviewBrainstormPack({ runtime, seedText, gravity, candida
   log.info('freeform.brainstorm.judge', {
     gravity: g,
     verdicts: reviews.map((r) => r.verdict),
-    repairs: reviews.filter(reviewNeedsRepair).length,
+    repairs: reviews.filter(reviewNeedsRewrite).length,
   });
   return { reviews, prompt };
 }
@@ -407,7 +410,7 @@ export async function repairBrainstormPack({
   const g = parseFreeformGravity(gravity);
   if (!n) return { candidates: [], prompt: '' };
   const notes = (reviews || []).slice(0, n);
-  if (!notes.some(reviewNeedsRepair)) {
+  if (!notes.some(reviewNeedsRewrite)) {
     return { candidates: drafts, prompt: '' };
   }
 
@@ -422,7 +425,7 @@ export async function repairBrainstormPack({
         `вердикт: ${review.verdict}`,
         review.summary ? `кратко: ${review.summary}` : null,
         issues ? `замечания:\n${issues}` : null,
-        reviewNeedsRepair(review) ? `правка:\n${review.repair}` : 'правка: без изменений',
+        reviewNeedsRewrite(review) ? `правка:\n${review.repair}` : 'правка: без изменений',
       ]
         .filter(Boolean)
         .join('\n');
@@ -470,7 +473,31 @@ export async function repairBrainstormPack({
   return { candidates, prompt };
 }
 
-export async function brainstormFreeformPack({ runtime, seedText, gravity, config, log: parentLog }) {
+export function collectBrainstormPool(drafts, firstReviews, repaired = null, secondReviews = null) {
+  const pool = [];
+  for (let i = 0; i < (drafts || []).length; i += 1) {
+    if (isPackPass(firstReviews?.[i])) {
+      pool.push(drafts[i]);
+      continue;
+    }
+    if (repaired && isPackPass(secondReviews?.[i])) pool.push(repaired[i]);
+  }
+  return pool;
+}
+
+function pickFromPool(pool, rng = Math.random) {
+  if (!pool.length) return null;
+  const idx = Math.min(pool.length - 1, Math.max(0, Math.floor(rng() * pool.length)));
+  return pool[idx];
+}
+
+export function pickPassedBrainstormCandidate(candidates, reviews, rng = Math.random) {
+  return pickFromPool(collectBrainstormPool(candidates, reviews), rng);
+}
+
+const MIN_PASS_SKIP_SECOND = 2;
+
+export async function brainstormFreeformPack({ runtime, seedText, gravity, config, log: parentLog, rng = Math.random }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.pack' });
   const drafted = await brainstormFreeformSeeds({ runtime, seedText, gravity, config, log });
   if (!drafted.ok) {
@@ -479,10 +506,14 @@ export async function brainstormFreeformPack({ runtime, seedText, gravity, confi
       gravity: drafted.gravity,
       drafts: drafted.candidates || [],
       reviews: [],
+      finalReviews: [],
       candidates: drafted.candidates || [],
+      winner: null,
+      pickedIndex: null,
       prompt: drafted.prompt || '',
       judgePrompt: '',
       repairPrompt: '',
+      finalJudgePrompt: '',
     };
   }
   const judged = await reviewBrainstormPack({
@@ -493,6 +524,27 @@ export async function brainstormFreeformPack({ runtime, seedText, gravity, confi
     config,
     log,
   });
+  const firstPassCount = (judged.reviews || []).filter(isPackPass).length;
+  if (firstPassCount >= MIN_PASS_SKIP_SECOND) {
+    const winner = pickPassedBrainstormCandidate(drafted.candidates, judged.reviews, rng);
+    const pickedIndex = winner
+      ? Number(winner.index) || drafted.candidates.indexOf(winner) + 1
+      : null;
+    return {
+      ok: Boolean(winner),
+      gravity: drafted.gravity,
+      drafts: drafted.candidates,
+      reviews: judged.reviews,
+      finalReviews: [],
+      candidates: drafted.candidates,
+      winner,
+      pickedIndex,
+      prompt: drafted.prompt,
+      judgePrompt: judged.prompt,
+      repairPrompt: '',
+      finalJudgePrompt: '',
+    };
+  }
   const repaired = await repairBrainstormPack({
     runtime,
     seedText,
@@ -502,14 +554,34 @@ export async function brainstormFreeformPack({ runtime, seedText, gravity, confi
     config,
     log,
   });
+  const candidates = (repaired.candidates || []).map((c, i) =>
+    isPackPass(judged.reviews[i]) ? drafted.candidates[i] : c,
+  );
+  const gated = await reviewBrainstormPack({
+    runtime,
+    seedText,
+    gravity: drafted.gravity,
+    candidates,
+    config,
+    log,
+  });
+  const pool = collectBrainstormPool(drafted.candidates, judged.reviews, candidates, gated.reviews);
+  const winner = pickFromPool(pool, rng);
+  const pickedIndex = winner
+    ? Number(winner.index) || candidates.indexOf(winner) + 1 || drafted.candidates.indexOf(winner) + 1
+    : null;
   return {
-    ok: true,
+    ok: Boolean(winner),
     gravity: drafted.gravity,
     drafts: drafted.candidates,
     reviews: judged.reviews,
-    candidates: repaired.candidates,
+    finalReviews: gated.reviews,
+    candidates,
+    winner,
+    pickedIndex,
     prompt: drafted.prompt,
     judgePrompt: judged.prompt,
     repairPrompt: repaired.prompt,
+    finalJudgePrompt: gated.prompt,
   };
 }

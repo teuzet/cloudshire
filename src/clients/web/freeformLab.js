@@ -13,6 +13,7 @@ import {
   advanceWorldMonths,
   appendChronicle,
   applyFreeformState,
+  createFreeformPlot,
   findFreeformPlot,
   formatFreeformChronicleSeed,
   freeformChronicles,
@@ -20,6 +21,7 @@ import {
   parseFreeformGravity,
 } from '../../game/freeform.js';
 import { brainstormFreeformPack } from '../../game/freeformBrainstorm.js';
+import { assembleFreeformLabStory } from '../../game/freeformAssemble.js';
 import { tellFreeformBeat } from '../../game/freeformTeller.js';
 import { judgeFreeformRelated } from '../../game/freeformAlign.js';
 import { worldDateLabel } from '../../game/tickClock.js';
@@ -42,11 +44,21 @@ function emptySession(snapshot) {
     lastArchitectPrompt: '',
     lastJudgePrompt: '',
     lastRepairPrompt: '',
+    lastFinalJudgePrompt: '',
+    lastAssemblePrompt: '',
+    lastCountdownPrompt: '',
+    lastAlignPrompt: '',
+    lastBeatArchitectPrompt: '',
+    lastBeatJudgePrompt: '',
+    lastBeatRepairPrompt: '',
+    lastBeatTellPrompt: '',
     lastChronicle: '',
     lastGravity: null,
     lastDrafts: [],
     lastCandidates: [],
     lastJudgeReviews: [],
+    lastFinalReviews: [],
+    lastPickedIndex: null,
     lastWarning: null,
     frozenAt: snapshot.frozenAt || null,
     cityName: snapshot.cityName || domain.name,
@@ -128,11 +140,21 @@ export function sessionPayload(session) {
     lastArchitectPrompt: session.lastArchitectPrompt || '',
     lastJudgePrompt: session.lastJudgePrompt || '',
     lastRepairPrompt: session.lastRepairPrompt || '',
+    lastFinalJudgePrompt: session.lastFinalJudgePrompt || '',
+    lastAssemblePrompt: session.lastAssemblePrompt || '',
+    lastCountdownPrompt: session.lastCountdownPrompt || '',
+    lastAlignPrompt: session.lastAlignPrompt || '',
+    lastBeatArchitectPrompt: session.lastBeatArchitectPrompt || '',
+    lastBeatJudgePrompt: session.lastBeatJudgePrompt || '',
+    lastBeatRepairPrompt: session.lastBeatRepairPrompt || '',
+    lastBeatTellPrompt: session.lastBeatTellPrompt || '',
     lastChronicle: session.lastChronicle || '',
     lastGravity: session.lastGravity || null,
     lastDrafts: session.lastDrafts || [],
     lastCandidates: session.lastCandidates || [],
     lastJudgeReviews: session.lastJudgeReviews || [],
+    lastFinalReviews: session.lastFinalReviews || [],
+    lastPickedIndex: session.lastPickedIndex ?? null,
     lastWarning: session.lastWarning,
   };
 }
@@ -190,11 +212,25 @@ export async function seedFreeformLab({ config, runtime, text, gravity, fromCity
     session.lastArchitectPrompt = drafted.prompt || '';
     session.lastJudgePrompt = drafted.judgePrompt || '';
     session.lastRepairPrompt = drafted.repairPrompt || '';
-    if (!drafted.ok) {
-      session.lastDrafts = [];
-      session.lastCandidates = [];
-      session.lastJudgeReviews = [];
+    session.lastFinalJudgePrompt = drafted.finalJudgePrompt || '';
+    session.lastDrafts = drafted.drafts || [];
+    session.lastCandidates = drafted.candidates || [];
+    session.lastJudgeReviews = drafted.reviews || [];
+    session.lastFinalReviews = drafted.finalReviews || [];
+    session.lastPickedIndex = drafted.pickedIndex ?? null;
+    session.lastRejected = [];
+    session.lastJudge = null;
+    session.lastAssemblePrompt = '';
+    session.lastCountdownPrompt = '';
+    session.lastAlignPrompt = '';
+    session.lastBeatArchitectPrompt = '';
+    session.lastBeatJudgePrompt = '';
+    session.lastBeatRepairPrompt = '';
+    session.lastBeatTellPrompt = '';
+
+    if (!drafted.candidates?.length) {
       session.lastWarning = 'Не получилось породить затравки. Попробуй другую хронику или ещё раз.';
+      if (session.mode === 'idle') session.mode = 'seeds';
       await writeSession(session);
       const err = new Error(session.lastWarning);
       err.status = 502;
@@ -202,15 +238,50 @@ export async function seedFreeformLab({ config, runtime, text, gravity, fromCity
       throw err;
     }
 
-    session.lastDrafts = drafted.drafts;
-    session.lastCandidates = drafted.candidates;
-    session.lastJudgeReviews = drafted.reviews;
-    session.lastRejected = [];
-    session.lastJudge = null;
+    if (!drafted.winner) {
+      session.mode = 'seeds';
+      session.lastWarning = 'Судья не пропустил ни одну хронику. Попробуй другую затравку или ещё раз.';
+      await writeSession(session);
+      log.info('freeform.lab.brainstormed.no_pass', { gravity: g, count: drafted.candidates.length });
+      return sessionPayload(session);
+    }
+
+    session.domain.plotlines = (session.domain.plotlines || []).filter((p) => !isFreeformPlot(p));
+    session.plotId = null;
+
+    const assembled = await assembleFreeformLabStory({
+      config,
+      runtime,
+      domain: session.domain,
+      world: session.world,
+      candidate: drafted.winner,
+      gravity: g,
+      log,
+    });
+    session.lastAssemblePrompt = assembled.assemblePrompt || '';
+    session.lastCountdownPrompt = assembled.countdownPrompt || '';
+
+    const plot = createFreeformPlot({
+      domain: session.domain,
+      world: session.world,
+      variant: assembled,
+      config,
+    });
+    appendChronicle(session.domain, session.world, {
+      text: assembled.chronicle,
+      plotId: plot.id,
+      author: 'freeform:seed',
+    });
+    session.plotId = plot.id;
+    session.mode = 'story';
     session.lastWarning = null;
-    if (session.mode === 'idle' || session.mode === 'seeds') session.mode = 'seeds';
     await writeSession(session);
-    log.info('freeform.lab.brainstormed', { gravity: g, count: drafted.candidates.length });
+    log.info('freeform.lab.assembled', {
+      gravity: g,
+      plotId: plot.id,
+      pickedIndex: drafted.pickedIndex,
+      countdown: plot.countdown,
+    });
     return sessionPayload(session);
   });
 }
@@ -251,6 +322,11 @@ export async function playFreeformDeed({ config, runtime, summary, detail, durat
       detail,
       log,
     });
+    session.lastAlignPrompt = related.prompt || '';
+    session.lastBeatArchitectPrompt = '';
+    session.lastBeatJudgePrompt = '';
+    session.lastBeatRepairPrompt = '';
+    session.lastBeatTellPrompt = '';
     if (!related.related) {
       appendChronicle(session.domain, session.world, {
         text: `Поручение в сторону: ${text}. К истории «${plot.title}» это не относится.`,
@@ -276,6 +352,10 @@ export async function playFreeformDeed({ config, runtime, summary, detail, durat
       log,
     });
     if (!told.ok) {
+      session.lastBeatArchitectPrompt = told.architectPrompt || '';
+      session.lastBeatJudgePrompt = told.judgePrompt || '';
+      session.lastBeatRepairPrompt = told.repairPrompt || '';
+      session.lastBeatTellPrompt = told.tellPrompt || '';
       session.lastWarning = 'Не получилось продолжить историю. Попробуй другую формулировку дела.';
       await writeSession(session);
       const err = new Error(session.lastWarning);
@@ -292,6 +372,10 @@ export async function playFreeformDeed({ config, runtime, summary, detail, durat
     });
     session.lastRejected = told.rejected;
     session.lastJudge = told.judge;
+    session.lastBeatArchitectPrompt = told.architectPrompt || '';
+    session.lastBeatJudgePrompt = told.judgePrompt || '';
+    session.lastBeatRepairPrompt = told.repairPrompt || '';
+    session.lastBeatTellPrompt = told.tellPrompt || '';
 
     if (told.winner.closed) {
       closePlotline(session.domain, plot.id, {
