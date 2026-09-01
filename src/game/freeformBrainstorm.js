@@ -2,7 +2,7 @@
  * Генератор трёх следующих хроник: код бросает оси, модель пишет один текст на набор.
  * Лаборатория: пачка → судья. PASS сразу в пул и не чинится.
  * Если PASS уже ≥2 — правка и второй судья не запускаются.
- * Иначе чинятся только не-PASS, второй судья только их пропускает в пул.
+ * Иначе чинятся только не-PASS; второй судья видит только их.
  */
 
 import { getLogger } from '../log.js';
@@ -306,15 +306,17 @@ function formatPackForJudge(candidates) {
 export async function reviewBrainstormPack({ runtime, seedText, gravity, candidates, config, log: parentLog }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.judge' });
   const n = candidates.length;
+  const indices = candidates.map((c, i) => Number(c.index) || i + 1);
   const g = parseFreeformGravity(gravity);
   if (!n) return { reviews: [], prompt: '' };
   const draft = { reviews: null };
+  const indexHint = indices.join(', ');
   const runOpts = {
     agentId: 'freeformBrainstormJudge',
     tools: [
       {
         name: 'submit_freeform_pack_review',
-        description: `Вердикт и правка по каждому из ${n} кандидатов. Победителя не выбирай.`,
+        description: `Вердикт и правка по каждому из ${n} кандидатов (${indexHint}). Победителя не выбирай.`,
         parameters: {
           type: 'object',
           additionalProperties: false,
@@ -328,7 +330,7 @@ export async function reviewBrainstormPack({ runtime, seedText, gravity, candida
                 type: 'object',
                 required: ['index', 'verdict'],
                 properties: {
-                  index: { type: 'integer', description: `Номер кандидата от 1 до ${n}.` },
+                  index: { type: 'integer', description: `Номер кандидата: ${indexHint}.` },
                   verdict: { type: 'string', enum: ['PASS', 'FAIL', 'UNCERTAIN'] },
                   summary: { type: 'string', description: 'Одно предложение: что с этим кандидатом.' },
                   repair: {
@@ -352,7 +354,7 @@ export async function reviewBrainstormPack({ runtime, seedText, gravity, candida
           },
         },
         handler: async (args) => {
-          const reviews = parseFreeformPackReview(args, n);
+          const reviews = parseFreeformPackReview(args, n, indices);
           if (reviews.length !== n) {
             return toolFail('thin', `Нужен отзыв ровно по ${n} кандидатам.`);
           }
@@ -387,7 +389,7 @@ export async function reviewBrainstormPack({ runtime, seedText, gravity, candida
   } catch (err) {
     log.warn('freeform.brainstorm.judge_failed', { error: err.message });
   }
-  const reviews = draft.reviews || parseFreeformPackReview({}, n);
+  const reviews = draft.reviews || parseFreeformPackReview({}, n, indices);
   log.info('freeform.brainstorm.judge', {
     gravity: g,
     verdicts: reviews.map((r) => r.verdict),
@@ -495,6 +497,15 @@ export function pickPassedBrainstormCandidate(candidates, reviews, rng = Math.ra
   return pickFromPool(collectBrainstormPool(candidates, reviews), rng);
 }
 
+function scatterPackReviews(slotCount, reviews) {
+  const out = Array.from({ length: slotCount }, () => null);
+  for (const review of reviews || []) {
+    const i = Number(review?.index) - 1;
+    if (i >= 0 && i < slotCount) out[i] = review;
+  }
+  return out;
+}
+
 const MIN_PASS_SKIP_SECOND = 2;
 
 export async function brainstormFreeformPack({ runtime, seedText, gravity, config, log: parentLog, rng = Math.random }) {
@@ -557,15 +568,19 @@ export async function brainstormFreeformPack({ runtime, seedText, gravity, confi
   const candidates = (repaired.candidates || []).map((c, i) =>
     isPackPass(judged.reviews[i]) ? drafted.candidates[i] : c,
   );
-  const gated = await reviewBrainstormPack({
-    runtime,
-    seedText,
-    gravity: drafted.gravity,
-    candidates,
-    config,
-    log,
-  });
-  const pool = collectBrainstormPool(drafted.candidates, judged.reviews, candidates, gated.reviews);
+  const retry = candidates.filter((_, i) => !isPackPass(judged.reviews[i]));
+  const gated = retry.length
+    ? await reviewBrainstormPack({
+        runtime,
+        seedText,
+        gravity: drafted.gravity,
+        candidates: retry,
+        config,
+        log,
+      })
+    : { reviews: [], prompt: '' };
+  const finalReviews = scatterPackReviews(candidates.length, gated.reviews);
+  const pool = collectBrainstormPool(drafted.candidates, judged.reviews, candidates, finalReviews);
   const winner = pickFromPool(pool, rng);
   const pickedIndex = winner
     ? Number(winner.index) || candidates.indexOf(winner) + 1 || drafted.candidates.indexOf(winner) + 1
@@ -575,7 +590,7 @@ export async function brainstormFreeformPack({ runtime, seedText, gravity, confi
     gravity: drafted.gravity,
     drafts: drafted.candidates,
     reviews: judged.reviews,
-    finalReviews: gated.reviews,
+    finalReviews,
     candidates,
     winner,
     pickedIndex,

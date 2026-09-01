@@ -119,7 +119,9 @@ test('конфиг freeform читается из YAML', () => {
   assert.doesNotMatch(agents.freeformBrainstorm.instructions, /позже подставит/);
   const gravity = freeformConfig(loadConfig()).gravity;
   assert.match(gravity.intro, /Судьбоносность/);
-  assert.equal(gravity.levels.SITUATION.examples.length, 5);
+  assert.equal(gravity.levels.SITUATION.examples.length, 7);
+  assert.equal(gravity.levels.EPISODE.examples.length, 8);
+  assert.equal(gravity.levels.CRISIS.examples.length, 10);
   assert.match(gravity.levels.RUPTURE.about, /до.*после/);
   assert.match(gravity.levels.RUPTURE.examples[0], /Война/);
   assert.equal(agents.freeformBrainstormJudge.provider, 'openai');
@@ -190,7 +192,7 @@ test('конфиг freeform читается из YAML', () => {
   assert.equal(agents.freeformCountdown.maxTokens, 400);
   assert.deepEqual(agents.freeformCountdown.canon, ['world']);
   assert.match(agents.freeformCountdown.instructions, /set_freeform_countdown/);
-  assert.match(agents.freeformCountdown.instructions, /от 1 до 5/);
+  assert.match(agents.freeformCountdown.instructions, /от 1 месяца до 5 месяцев/);
   assert.doesNotMatch(agents.freeformCountdown.instructions, /depth|не ставь/i);
 });
 
@@ -217,8 +219,8 @@ test('gravity для архитектора — enum и расшифровка �
   assert.match(episode, /GRAVITY: EPISODE/);
   assert.doesNotMatch(episode, /RUPTURE/);
   assert.doesNotMatch(episode, /изгородь|венок/);
-  assert.match(formatFreeformGravityForPrompt('SITUATION', cfg), /изгородь|венок|ступен/);
-  assert.match(formatFreeformGravityForPrompt('CRISIS', cfg), /пастбищ|повинност|артел|источник/);
+  assert.match(formatFreeformGravityForPrompt('SITUATION', cfg), /родов|гильдий|скандал/);
+  assert.match(formatFreeformGravityForPrompt('CRISIS', cfg), /пожар|осада|Восстание/);
 });
 
 test('затравка брейншторма — одна запись или несколько', () => {
@@ -779,6 +781,24 @@ test('судья пачки разбирает отзыв по всем трём
   assert.equal(reviews[2].verdict, 'PASS');
 });
 
+test('судья пачки сохраняет исходные номера при частичном наборе', () => {
+  const reviews = parseFreeformPackReview(
+    {
+      reviews: [
+        { index: 3, verdict: 'PASS', summary: 'ок' },
+        { index: 1, verdict: 'FAIL', repair: 'чини', issues: [{ code: 'gravity', reason: 'мелко' }] },
+      ],
+    },
+    2,
+    [1, 3],
+  );
+  assert.equal(reviews.length, 2);
+  assert.equal(reviews[0].index, 1);
+  assert.equal(reviews[0].verdict, 'FAIL');
+  assert.equal(reviews[1].index, 3);
+  assert.equal(reviews[1].verdict, 'PASS');
+});
+
 test('пачка: два PASS после первого судьи — без правки и второго цикла', async () => {
   const real = new AgentRuntime(loadConfig());
   const calls = [];
@@ -835,7 +855,7 @@ test('пачка: два PASS после первого судьи — без п
   assert.doesNotMatch(packed.judgePrompt, /cityBrief/i);
 });
 
-test('пачка: один PASS — чинятся только FAIL, первый PASS в пуле даже если второй его завалил', async () => {
+test('пачка: один PASS — чинятся только FAIL, второй судья видит только их', async () => {
   const real = new AgentRuntime(loadConfig());
   const calls = [];
   let judgeN = 0;
@@ -877,7 +897,6 @@ test('пачка: один PASS — чинятся только FAIL, первы
               : [
                   { index: 1, verdict: 'PASS', summary: 'починилось' },
                   { index: 2, verdict: 'FAIL', summary: 'всё ещё мелко' },
-                  { index: 3, verdict: 'FAIL', summary: 'передумал' },
                 ],
         });
       }
@@ -895,10 +914,71 @@ test('пачка: один PASS — чинятся только FAIL, первы
   assert.match(packed.repairPrompt, /убери новый закон/);
   assert.equal(packed.candidates[2].chronicle, 'Хроника сапога 3');
   assert.equal(packed.candidates[0].chronicle, 'Починка 1');
-  assert.equal(packed.finalReviews[2].verdict, 'FAIL');
+  assert.equal(packed.finalReviews[0].verdict, 'PASS');
+  assert.equal(packed.finalReviews[1].verdict, 'FAIL');
+  assert.equal(packed.finalReviews[2], null);
+  assert.doesNotMatch(packed.finalJudgePrompt, /Хроника сапога 3/);
+  assert.doesNotMatch(packed.finalJudgePrompt, /Кандидат 3/);
+  assert.match(packed.finalJudgePrompt, /Починка 1/);
+  assert.match(packed.finalJudgePrompt, /Починка 2/);
+  assert.match(packed.finalJudgePrompt, /2 кандидатов \(1, 2\)/);
   assert.equal(packed.ok, true);
   assert.equal(packed.winner.chronicle, 'Починка 1');
   assert.equal(packed.pickedIndex, 1);
+});
+
+test('пачка: второй судья не видит средний PASS и сохраняет номера 1 и 3', async () => {
+  const real = new AgentRuntime(loadConfig());
+  let judgeN = 0;
+  const runtime = {
+    assembleChat: (opts) => real.assembleChat(opts),
+    async run(opts) {
+      const tool = opts.tools?.[0];
+      if (!tool) return;
+      if (opts.agentId === 'freeformBrainstorm') {
+        const isRepair = /ДОРАБОТКА/.test(opts.userMessages?.[0]?.content || '');
+        await tool.handler({
+          candidates: [1, 2, 3].map((i) => ({
+            chronicle: isRepair ? `Починка ${i}` : `Хроника сапога ${i}`,
+          })),
+        });
+      } else if (opts.agentId === 'freeformBrainstormJudge') {
+        judgeN += 1;
+        await tool.handler({
+          reviews:
+            judgeN === 1
+              ? [
+                  { index: 1, verdict: 'FAIL', repair: 'чини 1', summary: 'дыряво' },
+                  { index: 2, verdict: 'PASS', summary: 'держит' },
+                  { index: 3, verdict: 'FAIL', repair: 'чини 3', summary: 'мелко' },
+                ]
+              : [
+                  { index: 1, verdict: 'PASS', summary: 'починилось' },
+                  { index: 3, verdict: 'PASS', summary: 'тоже' },
+                ],
+        });
+      }
+    },
+  };
+  const packed = await brainstormFreeformPack({
+    config: loadConfig(),
+    runtime,
+    seedText: 'На площади нашли чужой сапог и двор его держит.',
+    gravity: 'RUPTURE',
+    rng: () => 0,
+  });
+  assert.equal(packed.candidates[1].chronicle, 'Хроника сапога 2');
+  assert.equal(packed.candidates[0].chronicle, 'Починка 1');
+  assert.equal(packed.candidates[2].chronicle, 'Починка 3');
+  assert.equal(packed.finalReviews[0].verdict, 'PASS');
+  assert.equal(packed.finalReviews[1], null);
+  assert.equal(packed.finalReviews[2].verdict, 'PASS');
+  assert.doesNotMatch(packed.finalJudgePrompt, /Хроника сапога 2/);
+  assert.doesNotMatch(packed.finalJudgePrompt, /Кандидат 2/);
+  assert.match(packed.finalJudgePrompt, /Кандидат 1/);
+  assert.match(packed.finalJudgePrompt, /Кандидат 3/);
+  assert.match(packed.finalJudgePrompt, /2 кандидатов \(1, 3\)/);
+  assert.equal(packed.winner.chronicle, 'Починка 1');
 });
 
 test('правка пропускается, если судья ничего не просит', async () => {

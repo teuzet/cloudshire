@@ -201,16 +201,23 @@ function asPackVerdict(raw) {
   return 'PASS';
 }
 
-export function parseFreeformPackReview(raw, variantCount) {
-  const n = Math.max(0, Math.round(Number(variantCount) || 0));
+export function parseFreeformPackReview(raw, variantCount, allowedIndices = null) {
+  const allowed = (Array.isArray(allowedIndices) && allowedIndices.length
+    ? allowedIndices
+    : Array.from({ length: Math.max(0, Math.round(Number(variantCount) || 0)) }, (_, i) => i + 1)
+  )
+    .map((n) => Math.round(Number(n)))
+    .filter((n) => Number.isInteger(n) && n >= 1);
+  const allowedSet = new Set(allowed);
   const list = Array.isArray(raw?.reviews) ? raw.reviews : [];
   const byIndex = new Map();
   for (const item of list) {
     let index = Math.round(Number(item?.index));
-    if (!Number.isInteger(index) || index < 1 || index > n) {
-      index = byIndex.size + 1;
+    if (!allowedSet.has(index)) {
+      index = allowed.find((i) => !byIndex.has(i));
+      if (index == null) continue;
     }
-    if (index < 1 || index > n || byIndex.has(index)) continue;
+    if (byIndex.has(index)) continue;
     const issues = [];
     for (const issue of item?.issues || []) {
       const reason = clipPlotText(issue?.reason, 400);
@@ -225,18 +232,16 @@ export function parseFreeformPackReview(raw, variantCount) {
       repair: clipPlotText(item?.repair, 800),
     });
   }
-  return Array.from({ length: n }, (_, i) => {
-    const index = i + 1;
-    return (
+  return allowed.map(
+    (index) =>
       byIndex.get(index) || {
         index,
         verdict: 'PASS',
         summary: '',
         issues: [],
         repair: '',
-      }
-    );
-  });
+      },
+  );
 }
 
 export function reviewNeedsRepair(review) {
