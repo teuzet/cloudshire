@@ -263,6 +263,14 @@ seedForm.addEventListener('submit', (e) => {
   });
 });
 
+document.getElementById('btnSeedCity').addEventListener('click', () => {
+  if (pending) return;
+  void post('/api/freeform/seed', {
+    fromCity: true,
+    gravity: document.getElementById('seedGravity').value,
+  });
+});
+
 deedForm.addEventListener('submit', (e) => {
   e.preventDefault();
   if (pending) return;

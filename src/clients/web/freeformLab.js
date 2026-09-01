@@ -14,6 +14,7 @@ import {
   appendChronicle,
   applyFreeformState,
   findFreeformPlot,
+  formatFreeformChronicleSeed,
   freeformChronicles,
   normalizeFinish,
   parseFreeformGravity,
@@ -155,18 +156,28 @@ export async function resetFreeformLab() {
   });
 }
 
-export async function seedFreeformLab({ config, runtime, text, gravity, log: parentLog }) {
+export async function seedFreeformLab({ config, runtime, text, gravity, fromCity, log: parentLog }) {
   return serialize(async () => {
     const log = (parentLog || getLogger()).child({ scope: 'freeform.lab.seed' });
-    const seedText = String(text || '').trim();
-    if (seedText.length < 20) {
-      const err = new Error('Хроника слишком короткая.');
-      err.status = 400;
-      throw err;
-    }
     const session = await loadSession();
+    let seedText;
+    if (fromCity) {
+      seedText = formatFreeformChronicleSeed(chronicleEntries(session.domain?.lore || []).slice(-80));
+      if (!seedText) {
+        const err = new Error('В хронике города нет записей.');
+        err.status = 400;
+        throw err;
+      }
+    } else {
+      seedText = String(text || '').trim();
+      if (seedText.length < 20) {
+        const err = new Error('Хроника слишком короткая.');
+        err.status = 400;
+        throw err;
+      }
+      session.lastChronicle = seedText;
+    }
     const g = parseFreeformGravity(gravity);
-    session.lastChronicle = seedText;
     session.lastGravity = g;
 
     const drafted = await brainstormFreeformPack({
@@ -337,6 +348,7 @@ export function mountFreeformLab(server, { config, runtime }) {
           runtime,
           text: req.body?.text,
           gravity: req.body?.gravity,
+          fromCity: Boolean(req.body?.fromCity),
           log: req.log,
         }),
       );

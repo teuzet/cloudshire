@@ -118,6 +118,22 @@ export function formatFreeformGravityForPrompt(gravity, config) {
   return formatGravityLevel(parseFreeformGravity(gravity), freeformConfig(config).gravity);
 }
 
+/** Затравка брейншторма: одна запись или несколько, от старых к новым. */
+export function formatFreeformChronicleSeed(entries) {
+  const list = Array.isArray(entries) ? entries : entries == null || entries === '' ? [] : [entries];
+  return list
+    .map((e) => {
+      if (e == null) return '';
+      if (typeof e === 'string') return e.trim();
+      const text = String(e.text || e.chronicle || '').trim();
+      if (!text) return '';
+      const when = String(e.gameDateLabel || '').trim();
+      return when ? `${when} — ${text}` : text;
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
 export function formatBrainstormCandidateForPrompt(candidate, index, { includeAuthor = false } = {}) {
   if (!candidate) return '';
   const axes = [candidate.arena, candidate.worldRelation, candidate.conflictSource, candidate.temporalShape]

@@ -9,7 +9,7 @@ import {
   normalizeCloseWhenList,
   plotBeatAgentId,
 } from '../src/game/plotlines.js';
-import { advanceWorldMonths, normalizeFinish, freeformConfig, openStoryTitlesLine, formatFreeformGravityForPrompt, formatBrainstormCandidateForPrompt, parseFreeformGravity, FREEFORM_GRAVITY } from '../src/game/freeform.js';
+import { advanceWorldMonths, normalizeFinish, freeformConfig, openStoryTitlesLine, formatFreeformGravityForPrompt, formatFreeformChronicleSeed, formatBrainstormCandidateForPrompt, parseFreeformGravity, FREEFORM_GRAVITY } from '../src/game/freeform.js';
 import { parseFreeformPick, formatFreeformVariants, formatFreeformCardJudgeCase, formatFreeformCardJudgeRepair, parseFreeformPackReview } from '../src/game/freeformJudge.js';
 import { normalizeSeedBlank, pickFreeformSeedAxes, pickFreeformSeedAxisPairs, formatFreeformSeedAxesForPrompt, formatFreeformSeedAxisPairsForPrompt } from '../src/game/freeformArchitect.js';
 import {
@@ -103,6 +103,8 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformBrainstorm.instructions, /бюрократическую путаницу/);
   assert.match(agents.freeformBrainstorm.instructions, /бога-покровителя и верховного жреца/);
   assert.match(agents.freeformBrainstorm.instructions, /наблюдаемый слой/);
+  assert.match(agents.freeformBrainstorm.instructions, /записей хроники/);
+  assert.match(agents.freeformBrainstorm.instructions, /не обязательно из последней строки/);
   assert.match(agents.freeformBrainstorm.instructions, /threatArena/);
   assert.match(agents.freeformBrainstorm.instructions, /HUMAN —/);
   assert.match(agents.freeformBrainstorm.instructions, /emit_freeform_candidates/);
@@ -129,6 +131,7 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformBrainstormJudge.instructions, /верховный жрец/);
   assert.match(agents.freeformBrainstormJudge.instructions, /СОВЕТЫ/);
   assert.match(agents.freeformBrainstormJudge.instructions, /не повод для FAIL/);
+  assert.match(agents.freeformBrainstormJudge.instructions, /не обязательно из последней строки/);
   assert.match(agents.freeformBrainstormJudge.instructions, /repair всё равно напиши/);
   assert.doesNotMatch(agents.freeformBrainstormJudge.instructions, /вход для дела/);
   assert.doesNotMatch(agents.freeformBrainstormJudge.instructions, /4–5 предложен|Шестое/);
@@ -196,6 +199,19 @@ test('gravity для архитектора — enum и расшифровка �
   assert.doesNotMatch(episode, /изгородь|венок/);
   assert.match(formatFreeformGravityForPrompt('SITUATION', cfg), /изгородь|венок|ступен/);
   assert.match(formatFreeformGravityForPrompt('CRISIS', cfg), /пастбищ|повинност|артел|источник/);
+});
+
+test('затравка брейншторма — одна запись или несколько', () => {
+  assert.equal(formatFreeformChronicleSeed([]), '');
+  assert.equal(formatFreeformChronicleSeed('  сапог  '), 'сапог');
+  assert.equal(formatFreeformChronicleSeed([{ text: 'На площади нашли сапог.' }]), 'На площади нашли сапог.');
+  assert.equal(
+    formatFreeformChronicleSeed([
+      { text: 'Нашли сапог.', gameDateLabel: 'Год 1, месяц 2' },
+      { text: 'Двор его держит.', gameDateLabel: 'Год 1, месяц 3' },
+    ]),
+    'Год 1, месяц 2 — Нашли сапог.\nГод 1, месяц 3 — Двор его держит.',
+  );
 });
 
 test('пакет судьи карточки — абзац, whyMoves, gravity, без угрозы', () => {
@@ -953,6 +969,7 @@ test('GET /freeform отдаёт лабораторию', async () => {
     assert.match(html, /Промпт генератора хроник/);
     assert.match(html, /Промпт судьи пачки/);
     assert.match(html, /Три хроники/);
+  assert.match(html, /Из хроники города/);
   } finally {
     await new Promise((resolve, reject) => http.close((err) => (err ? reject(err) : resolve())));
   }
