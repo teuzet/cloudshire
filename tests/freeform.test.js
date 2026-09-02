@@ -283,9 +283,13 @@ test('конфиг freeform читается из YAML', () => {
   assert.equal(Boolean(agents.freeformArchitect), false);
   assert.equal(agents.freeformTell.provider, 'anthropic');
   assert.equal(agents.freeformTell.model, 'claude-haiku-4-5');
-  assert.match(agents.freeformTell.instructions, /пересказ сюжета/);
+  assert.match(agents.freeformTell.instructions, /пересказ всего сюжета/);
   assert.match(agents.freeformTell.instructions, /Год 3, месяц 6/);
   assert.match(agents.freeformTell.instructions, /нумерованн/);
+  assert.match(agents.freeformTell.instructions, /hiddenPremises/);
+  assert.match(agents.freeformTell.instructions, /НА САМОМ ДЕЛЕ/);
+  assert.match(agents.freeformArchitectTell.instructions, /НА САМОМ ДЕЛЕ/);
+  assert.match(agents.freeformEndings.instructions, /хотя бы по одной/);
   assert.equal(agents.freeformAssemble.model, 'gpt-5.6-luna');
   assert.deepEqual(agents.freeformAssemble.canon, ['world', 'patron', 'ruler', 'time', 'foreign']);
   assert.match(agents.freeformAssemble.instructions, /submit_freeform_story/);
