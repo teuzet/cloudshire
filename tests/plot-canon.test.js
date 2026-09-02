@@ -22,6 +22,7 @@ import {
   judgePlotSeed,
   reopenClosedPlotline,
   plotScale,
+  storyTypeOf,
 } from '../src/game/plotlines.js';
 import { ensureErrandForProcess, planBeats } from '../src/game/plotEngine.js';
 import { peopleUnderWatch, priorPlotChronicle, mintSeedCast, offerMysterySeedNames } from '../src/game/storyteller.js';
@@ -273,22 +274,24 @@ test('закрытая нить помнит крючок на продолже�
   assert.match(archived.sequelHook, /угроза/);
 });
 
-test('стартер тайны может пометить, что история просит сиквела', () => {
+test('mystery/suspense-поля не оседают на карточке истории', () => {
   const seeded = createPlotline({
     title: 'Гул в трубах',
+    kind: 'story',
     storyType: 'mystery',
     asksSequel: true,
     observedFacts: ['Ярус слышит гул.', 'На площади спорят, колокол это или вода.'],
     resolutionFacts: ['Почему гудит цистерна', 'Кто перестал её чистить'],
   });
-  assert.equal(seeded.asksSequel, true);
-  assert.equal(seeded.observedFacts.length, 2);
-  assert.equal(seeded.resolutionFacts.length, 2);
+  assert.equal(storyTypeOf(seeded), 'story');
+  assert.equal(seeded.asksSequel, undefined);
+  assert.equal(seeded.observedFacts, undefined);
+  assert.equal(seeded.resolutionFacts, undefined);
   const domain = { plotlines: [seeded], closedPlotlines: [] };
   normalizePlotlines(domain);
-  assert.equal(domain.plotlines[0].asksSequel, true);
+  assert.equal(domain.plotlines[0].asksSequel, undefined);
   closePlotline(domain, seeded.id, { tick: 4, reason: 'Разгадали.', sequelHook: 'Яд шёл из соседней мастерской.' });
-  assert.equal(findClosedPlotline(domain, seeded.id).asksSequel, true);
+  assert.equal(findClosedPlotline(domain, seeded.id).asksSequel, undefined);
   assert.equal(allowSequelAfter({ storyType: 'mystery', asksSequel: true, ending: 'ok', kind: 'story' }), true);
   assert.equal(allowSequelAfter({ storyType: 'mystery', asksSequel: true, ending: 'crit', kind: 'story' }), true);
   assert.equal(allowSequelAfter({ storyType: 'mystery', asksSequel: true, ending: 'fail', kind: 'story' }), false);

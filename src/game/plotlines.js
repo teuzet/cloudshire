@@ -258,73 +258,72 @@ export function parseFreeformGravity(raw, fallback = 'EPISODE') {
   return fallback;
 }
 
-function emptyActState(storyType) {
-  return {
-    storyType,
-    act: null,
-    urgency: null,
-    gravity: null,
-    urgency0: null,
-    gravity0: null,
-    escalationLevel: null,
-    maxEscalations: null,
-    truth: '',
-    truthGraph: null,
-    observedFacts: [],
-    resolutionFacts: [],
-    ending: null,
-    asksSequel: false,
-    annotationId: null,
-    ifSolved: '',
-    ifUnsolved: '',
-    ifPrevented: '',
-    ifNotPrevented: '',
-    depth: null,
-    hiddenPremises: [],
-    discoveryLadder: null,
-    closureGate: '',
-    closureUnlocked: null,
-    tonePrimary: null,
-    toneSecondary: null,
-    source: null,
-    situation: null,
-    dynamic: null,
-    legacyAxes: [],
-    unattendedBeats: null,
-  };
+/** Поля трёхтакта, аннотации и старого четырёхпольного посева — не часть карточки. */
+const STALE_PLOT_FIELDS = [
+  'importance',
+  'summary',
+  'act',
+  'urgency0',
+  'gravity0',
+  'escalationLevel',
+  'maxEscalations',
+  'truth',
+  'truthGraph',
+  'observedFacts',
+  'resolutionFacts',
+  'asksSequel',
+  'annotationId',
+  'ifSolved',
+  'ifUnsolved',
+  'ifPrevented',
+  'ifNotPrevented',
+  'discoveryLadder',
+  'closureGate',
+  'closureUnlocked',
+  'tonePrimary',
+  'toneSecondary',
+  'source',
+  'situation',
+  'dynamic',
+  'legacyAxes',
+  'unattendedBeats',
+  'arena',
+  'worldRelation',
+  'conflictSource',
+  'temporalShape',
+  'hook',
+  'conflict',
+  'dynamics',
+  'consequences',
+];
+
+function stripStalePlotFields(p) {
+  if (!p || typeof p !== 'object') return p;
+  for (const key of STALE_PLOT_FIELDS) delete p[key];
+  return p;
+}
+
+function parseStoryCountdown(raw) {
+  if (raw == null || raw === '') return null;
+  const n = Math.round(Number(raw));
+  if (!Number.isFinite(n)) return null;
+  return Math.max(1, Math.min(8, n));
 }
 
 function storyActState(p = {}) {
   const type = storyTypeOf(p);
   if (type === 'story') {
-    const countdown = Math.round(Number(p.countdown));
     const gravity = parseFreeformGravity(p.gravity);
     const maxDepth = clampFreeformDepth(p.maxDepth, defaultFreeformMaxDepth(gravity));
     const depth = Math.max(0, Math.round(Number(p.depth) || 0));
     const failRaw = Math.round(Number(p.failCount));
-    const endings = normalizeFreeformEndings(p.endings);
     return {
       storyType: 'story',
-      act: null,
       urgency: parseFreeformUrgency(p.urgency),
       gravity,
-      urgency0: parseFreeformUrgency(p.urgency0 ?? p.urgency),
-      gravity0: parseFreeformGravity(p.gravity0 ?? p.gravity),
-      countdown: Number.isFinite(countdown) ? Math.max(1, Math.min(8, countdown)) : null,
+      countdown: parseStoryCountdown(p.countdown),
       whyMoves: clipText(p.whyMoves, PLOT_SUMMARY_MAX),
-      escalationLevel: null,
-      maxEscalations: null,
-      truth: '',
-      truthGraph: null,
-      observedFacts: [],
-      resolutionFacts: [],
       ending: p.ending || null,
-      asksSequel: false,
-      annotationId: null,
-      ifSolved: '',
-      ifUnsolved: '',
-      ifPrevented: '',
-      ifNotPrevented: '',
       depth,
       maxDepth,
       failCount: Number.isFinite(failRaw) ? failRaw : 0,
@@ -332,21 +331,11 @@ function storyActState(p = {}) {
         p.maxFails == null || p.maxFails === ''
           ? maxFailsForGravity(gravity)
           : Math.max(0, Math.round(Number(p.maxFails))),
-      endings,
+      endings: normalizeFreeformEndings(p.endings),
       hiddenPremises: normalizeHiddenPremises(p.hiddenPremises),
-      discoveryLadder: null,
-      closureGate: '',
-      closureUnlocked: null,
-      tonePrimary: null,
-      toneSecondary: null,
-      source: null,
-      situation: null,
-      dynamic: null,
-      legacyAxes: [],
-      unattendedBeats: 0,
     };
   }
-  return emptyActState(type === 'freeform' ? 'freeform' : 'default');
+  return { storyType: type === 'freeform' ? 'freeform' : 'default' };
 }
 
 export function isOrderPlot(plot) {
@@ -627,7 +616,6 @@ function applyPlotShape(p, config = null) {
   p.factIds = Array.isArray(p.factIds) ? p.factIds.map(String) : [];
   p.relatedProcessIds = Array.isArray(p.relatedProcessIds) ? p.relatedProcessIds.map(String) : [];
   p.relatedPlotlineIds = Array.isArray(p.relatedPlotlineIds) ? p.relatedPlotlineIds.map(String) : [];
-  delete p.importance;
   p.maxAgeMonths = Math.max(1, Math.min(36, Math.round(Number(p.maxAgeMonths) || 6)));
   p.ageMonths = Math.max(0, Math.round(Number(p.ageMonths) || 0));
   p.temperature = clamp100(p.temperature, 30);
@@ -647,6 +635,7 @@ function applyPlotShape(p, config = null) {
   p.lastBeatTick = p.lastBeatTick == null ? null : Number(p.lastBeatTick);
   p.beatCount = Math.max(0, Math.round(Number(p.beatCount) || 0));
   Object.assign(p, storyActState(p));
+  stripStalePlotFields(p);
   if (isStakedStory(p) && Array.isArray(p.endings) && p.endings.length) {
     p.closeWhen = p.endings.map((e) => e.text);
   } else if (isStakedStory(p) || Array.isArray(p.closeWhen)) {
@@ -673,6 +662,9 @@ export function normalizePlotlines(domain, config = null) {
     next.push(p);
   }
   domain.plotlines = next;
+  if (Array.isArray(domain.closedPlotlines)) {
+    for (const closed of domain.closedPlotlines) stripStalePlotFields(closed);
+  }
   return domain;
 }
 
@@ -706,40 +698,17 @@ export function createPlotline({
   durationMonths = null,
   expiresTick = null,
   storyType = null,
-  act = 1,
   urgency = null,
   gravity = null,
-  urgency0 = null,
-  gravity0 = null,
   failCount = 0,
   maxFails = null,
   endings = [],
-  escalationLevel = 0,
-  maxEscalations = 3,
-  truth = '',
-  truthGraph = null,
-  observedFacts = [],
-  resolutionFacts = [],
   ending = null,
-  asksSequel = false,
-  annotationId = null,
-  ifSolved = '',
-  ifUnsolved = '',
-  ifPrevented = '',
-  ifNotPrevented = '',
   depth = null,
   maxDepth = null,
   hiddenPremises = [],
-  discoveryLadder = null,
-  closureGate = '',
-  closureUnlocked = null,
-  tonePrimary = null,
-  toneSecondary = null,
-  source = null,
-  situation = null,
-  dynamic = null,
-  legacyAxes = [],
-  unattendedBeats = 0,
+  whyMoves = '',
+  countdown = null,
   config = null,
 }) {
   const resolvedKind = PLOT_KINDS.includes(kind) ? kind : 'story';
@@ -792,46 +761,24 @@ export function createPlotline({
       : {}),
     ...storyActState({
       storyType,
-      act,
       urgency,
       gravity,
-      urgency0,
-      gravity0,
-      escalationLevel,
-      maxEscalations,
-      truth,
-      truthGraph,
-      observedFacts,
-      resolutionFacts,
       ending,
-      asksSequel,
-      annotationId,
-      ifSolved,
-      ifUnsolved,
-      ifPrevented,
-      ifNotPrevented,
       depth,
       maxDepth,
       failCount,
       maxFails,
       endings,
       hiddenPremises,
-      discoveryLadder,
-      closureGate,
-      closureUnlocked,
-      tonePrimary,
-      toneSecondary,
-      source,
-      situation,
-      dynamic,
-      legacyAxes,
-      unattendedBeats,
+      whyMoves,
+      countdown,
       kind: resolvedKind,
       isMainConflux,
       shared,
       confluxId,
     }),
   };
+  stripStalePlotFields(plot);
   if (plot.storyType === 'story' && Array.isArray(plot.endings) && plot.endings.length) {
     plot.closeWhen = plot.endings.map((e) => e.text);
   }
@@ -947,7 +894,7 @@ export function plotHasAttendingProcess(domain, plot) {
 function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } = {}) {
   const closeReason = reason || plot.closeReason || '';
   const hook = clipText(sequelHook || plot.sequelHook, PLOT_HOOK_MAX);
-  return {
+  const closed = {
     id: plot.id,
     title: plot.title,
     synopsis: plot.synopsis || '',
@@ -995,6 +942,7 @@ function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } =
     closeReason,
     sequelHook: hook,
   };
+  return stripStalePlotFields(closed);
 }
 
 /** Вернуть закрытую нить на доску: поручение ещё живо, развязку забывать нельзя. */
@@ -1047,6 +995,7 @@ export function reopenClosedPlotline(domain, closedOrId) {
     ...storyActState(closed),
     ...(closed.kind === 'order' ? orderCadence(closed) : {}),
   };
+  stripStalePlotFields(plot);
   domain.plotlines = domain.plotlines || [];
   domain.plotlines.push(plot);
   domain.closedPlotlines = (domain.closedPlotlines || []).filter((p) => p.id !== closed.id);
@@ -1883,10 +1832,8 @@ export function formatBoardForPrompt(domain) {
             ? `срок=${p.durationMonths}мес.${p.expiresTick != null ? ` до тика ${p.expiresTick}` : ''}`
             : 'бессрочно'
           : `возраст=${p.ageMonths}/${p.maxAgeMonths}`;
-      const three = isThreeActPlot(p);
-      const meters = three
-        ? `urgency=${p.urgency} gravity=${p.gravity} эск=${p.escalationLevel}/${p.maxEscalations} такт=${p.act} тип=${p.storyType}` +
-          (p.storyType === 'suspense' && p.depth ? ` depth=${p.depth}` : '')
+      const meters = isStakedStory(p)
+        ? `urgency=${p.urgency} gravity=${p.gravity} depth=${p.depth ?? 0}/${p.maxDepth ?? '—'} тип=story`
         : `T=${p.temperature} тип=${p.storyType || 'default'}`;
       return (
         `- [${p.id}] «${p.title}» ${kindLabel} ${meters} ${term}` +

@@ -374,12 +374,10 @@ function plotCard(p, names = {}) {
   const host = p.hostDomainId ? names[p.hostDomainId] || p.hostDomainId : null;
   const meta = [
     p.kind,
-    p.storyType === 'mystery' ? 'тайна' : p.storyType === 'suspense' ? 'саспенс' : null,
-    p.act ? `такт ${p.act}` : null,
-    p.escalationLevel != null ? `кризис ${p.escalationLevel}/${p.maxEscalations ?? 3}` : null,
+    p.storyType === 'story' ? 'история' : p.storyType === 'freeform' ? 'сопряжение' : null,
     p.urgency != null ? `срочность ${p.urgency}` : null,
     p.gravity != null ? `масштаб ${p.gravity}` : null,
-    p.maxDepth != null ? `глубина ${p.depth ?? 1}/${p.maxDepth}` : p.storyType === 'suspense' && p.depth != null ? `глубина ${p.depth}` : null,
+    p.maxDepth != null ? `глубина ${p.depth ?? 0}/${p.maxDepth}` : null,
     p.isMainConflux ? 'главная нить сопряжения' : null,
     p.shared ? 'общая' : concerns.length ? 'локальная' : null,
     p.sharedReason ? `стала общей: ${p.sharedReason}` : null,

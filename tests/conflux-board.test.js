@@ -206,7 +206,7 @@ test('до стыковки хроника нити не идёт в чужой 
   );
 });
 
-test('нативный саспенс на доске сопряжения сохраняет тип и скрытые посылки', () => {
+test('городская история на доске сопряжения остаётся story и держит скрытые посылки', () => {
   const plot = createPlotline({
     title: 'Седьмая капля',
     kind: 'story',
@@ -221,12 +221,12 @@ test('нативный саспенс на доске сопряжения со�
   takeDomainBoardIntoConflux(a, c);
   const live = c.plotlines[0];
   assert.equal(live, plot);
-  assert.equal(isThreeActPlot(live), true);
-  assert.equal(live.storyType, 'suspense');
+  assert.equal(isThreeActPlot(live), false);
+  assert.equal(live.storyType, 'story');
   assert.equal(live.hiddenPremises.length, 1);
   normalizePlotlines(c);
   assert.equal(c.plotlines[0], live);
-  assert.equal(live.storyType, 'suspense');
+  assert.equal(live.storyType, 'story');
   assert.equal(live.hiddenPremises[0], 'Седьмой удар открывает лишний сток.');
   assert.equal(live.mootWhen.includes('обряд'), true);
 });

@@ -435,21 +435,12 @@ export function createFreeformPlot({ domain, world, variant, config, seedChronic
     failCount: Math.round(Number(variant.failCount) || 0),
     maxFails: maxFailsForGravity(gravity),
     endings: variant.endings,
+    whyMoves: variant.whyMoves,
+    countdown,
     tick: world.tickIndex,
     config,
   });
   if (seedChronicleId) plot.chronicleIds.push(seedChronicleId);
-  if (variant.arena) plot.arena = String(variant.arena);
-  if (variant.worldRelation) plot.worldRelation = String(variant.worldRelation);
-  if (variant.conflictSource) plot.conflictSource = String(variant.conflictSource);
-  if (variant.temporalShape) plot.temporalShape = String(variant.temporalShape);
-  if (variant.whyMoves) plot.whyMoves = clipPlotText(variant.whyMoves, PLOT_SUMMARY_MAX);
-  if (countdown != null) plot.countdown = countdown;
-  if (variant.hook) plot.hook = clipPlotText(variant.hook, PLOT_SUMMARY_MAX);
-  if (variant.chronicle) plot.hook = plot.hook || clipPlotText(variant.chronicle, PLOT_SUMMARY_MAX);
-  if (variant.conflict) plot.conflict = clipPlotText(variant.conflict, PLOT_SUMMARY_MAX);
-  if (variant.dynamics) plot.dynamics = clipPlotText(variant.dynamics, PLOT_SUMMARY_MAX);
-  if (variant.consequences) plot.consequences = clipPlotText(variant.consequences, PLOT_SUMMARY_MAX);
   domain.plotlines = domain.plotlines || [];
   domain.plotlines.push(plot);
   return plot;

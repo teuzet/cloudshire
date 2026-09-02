@@ -187,19 +187,22 @@ test('mergeAnnotationCatalog не теряет сгенерированные', 
   assert.equal(merged.filter((c) => c.id === starter[0].id).length, 1);
 });
 
-test('саспенс-плот хранит ifPrevented и annotationId', () => {
+test('саспенс-поля не оседают на карточке истории', () => {
   const plot = createPlotline({
     title: 'Кладка',
+    kind: 'story',
     storyType: 'suspense',
     annotationId: 'sus_1',
     ifPrevented: 'удержали склон',
     ifNotPrevented: 'потеряли выпас',
-    gravity: 58,
+    gravity: 'EPISODE',
     depth: 2,
   });
-  assert.equal(plot.annotationId, 'sus_1');
-  assert.match(plot.ifPrevented, /склон/);
-  assert.match(plot.ifNotPrevented, /выпас/);
+  assert.equal(plot.storyType, 'story');
+  assert.equal(plot.annotationId, undefined);
+  assert.equal(plot.ifPrevented, undefined);
+  assert.equal(plot.ifNotPrevented, undefined);
+  assert.equal(plot.depth, 2);
   assert.equal(allowSequelAfter(plot), true);
 });
 

@@ -9,6 +9,7 @@ import {
   formatCloseWhen,
   normalizeCloseWhenList,
   normalizeFreeformEndings,
+  normalizePlotlines,
   plotBeatAgentId,
   PLOT_ENDING_MAX,
   PLOT_HOOK_MAX,
@@ -117,11 +118,60 @@ test('freeform — отдельный тип, не трёхтакт', () => {
   assert.match(formatCloseWhen(plot), /1\. Найти источник соли/);
   assert.equal(plot.urgency, 'FAST');
   assert.ok(plot.hiddenPremises.length);
-  assert.equal(plot.act, null);
+  assert.equal(plot.act, undefined);
+  assert.equal(plot.truth, undefined);
+  assert.equal(plot.asksSequel, undefined);
   assert.equal(plot.depth, 0);
   assert.equal(plot.maxDepth, 3);
   assert.equal(plot.failCount, 0);
   assert.equal(plot.maxFails, 1);
+});
+
+test('нормализация снимает трёхтактный блоб и оси посева', () => {
+  const domain = {
+    plotlines: [
+      {
+        id: 'plot_old',
+        title: 'Сапог',
+        kind: 'story',
+        storyType: 'story',
+        gravity: 'EPISODE',
+        act: 2,
+        truth: 'соль из края',
+        truthGraph: { nodes: [] },
+        asksSequel: true,
+        annotationId: 'ann_1',
+        arena: 'HUMAN',
+        hook: 'старый хук',
+        conflict: 'старый конфликт',
+        importance: 80,
+      },
+    ],
+    closedPlotlines: [
+      {
+        id: 'plot_closed',
+        title: 'Было',
+        kind: 'story',
+        storyType: 'mystery',
+        truth: 'секрет',
+        status: 'closed',
+      },
+    ],
+  };
+  normalizePlotlines(domain);
+  const live = domain.plotlines[0];
+  assert.equal(live.storyType, 'story');
+  assert.equal(live.gravity, 'EPISODE');
+  assert.equal(live.act, undefined);
+  assert.equal(live.truth, undefined);
+  assert.equal(live.truthGraph, undefined);
+  assert.equal(live.asksSequel, undefined);
+  assert.equal(live.annotationId, undefined);
+  assert.equal(live.arena, undefined);
+  assert.equal(live.hook, undefined);
+  assert.equal(live.conflict, undefined);
+  assert.equal(live.importance, undefined);
+  assert.equal(domain.closedPlotlines[0].truth, undefined);
 });
 
 test('closeWhen список нормализуется', () => {
@@ -1702,7 +1752,9 @@ test('конструктор собирает хронику, hidden и whyMoves
   assert.equal(plot.urgency, 'MEDIUM');
   assert.equal(plot.countdown, null);
   assert.equal(plot.whyMoves, out.whyMoves);
-  assert.equal(plot.arena, 'HUMAN');
+  assert.equal(plot.arena, undefined);
+  assert.equal(plot.hook, undefined);
+  assert.equal(plot.conflict, undefined);
   assert.equal(plot.depth, 0);
   assert.equal(plot.maxDepth, 2);
   assert.equal(plot.maxFails, 1);
