@@ -19,6 +19,7 @@ import {
   clipPlotText,
   PLOT_SUMMARY_MAX,
   isThreeActPlot,
+  isStakedStory,
   isFreeformPlot,
   plotHasActiveProcess,
   closePlotline,
@@ -139,7 +140,7 @@ export function rehomeUnrelatedProcess(domain, process, { tick = null, config = 
   if (engagementAttends(engagementOf(process))) {
     return { plot: attached[0] || findPlotline(domain, process.plotlineId) || null, rehomed: false, originPlot: null };
   }
-  const stories = attached.filter((p) => isThreeActPlot(p));
+    const stories = attached.filter((p) => p.kind === 'story' && !isFreeformPlot(p));
   const errands = attached.filter((p) => p.kind === 'errand');
   if (!stories.length) {
     return { plot: errands[0] || findPlotline(domain, process.plotlineId) || null, rehomed: false, originPlot: null };
@@ -223,7 +224,7 @@ export function collectProcessAdvanceBatch(domain, alreadyAdvanced = new Set()) 
   );
   const due = [];
   for (const process of active) {
-    const stories = plotsForProcess(domain, process.id).filter((p) => isThreeActPlot(p));
+    const stories = plotsForProcess(domain, process.id).filter((p) => p.kind === 'story' && !isFreeformPlot(p));
     if (!stories.length || !engagementAttends(engagementOf(process))) {
       due.push(process);
       continue;
@@ -344,7 +345,7 @@ export function planBeats({
     if (!outcome?.mustNarrate) continue;
     if (outcome.intel) continue;
     for (const plot of plotsForProcess(domain, outcome.processId)) {
-      if (isFreeformPlot(plot)) continue;
+      if (isStakedStory(plot) || isFreeformPlot(plot)) continue;
       if (isThreeActPlot(plot) && !engagementAttends(outcome.plotEngagement || engagementOf(findProcessById(domain, outcome.processId)))) {
         continue;
       }
@@ -380,7 +381,7 @@ export function planBeats({
   // 2. Сход забытой нити — служебное закрытие, слот не занимает. Трёхтактные так не гаснут.
   for (const plot of domain.plotlines) {
     if (plot.kind === 'order') continue;
-    if (isThreeActPlot(plot) || isFreeformPlot(plot)) continue;
+    if (isThreeActPlot(plot) || isStakedStory(plot) || isFreeformPlot(plot)) continue;
     if (!plotCanFade(domain, plot, cfg)) continue;
     addBeat(plot, { mandatory: true, reason: 'fade', fade: true, tint: 'dual' });
   }
@@ -401,7 +402,7 @@ export function planBeats({
   // Трёхтактные: только если нет ни одного активного дела; без окраски.
   for (const plot of domain.plotlines) {
     if (plot.kind !== 'story') continue;
-    if (isFreeformPlot(plot)) continue;
+    if (isStakedStory(plot) || isFreeformPlot(plot)) continue;
     if (taken.has(plot.id)) continue;
     if (slotsUsed >= cap) break;
     if (isThreeActPlot(plot) && plotHasAttendingProcess(domain, plot)) continue;

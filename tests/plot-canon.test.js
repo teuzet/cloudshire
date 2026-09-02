@@ -490,8 +490,8 @@ test('процессы занимают лимит тика, случайная 
   assert.equal(beats.some((b) => b.plotId === 'p_story' && !b.fade), false);
 });
 
-test('масштаб трёхтактной истории берётся из gravity, не из importance', () => {
-  assert.equal(plotScale({ kind: 'story', storyType: 'suspense', gravity: 80, importance: 10 }), 80);
+test('масштаб story берётся из gravity, не из importance', () => {
+  assert.equal(plotScale({ kind: 'story', storyType: 'story', gravity: 'RUPTURE', importance: 10 }), 85);
   assert.equal(plotScale({ kind: 'story', importance: 55 }), 55);
   assert.equal(
     liveStoryImportance({

@@ -144,6 +144,7 @@ test('главная нить стыка задевает оба города', 
     world: { tickIndex: 3 },
   });
   assert.equal(main.isMainConflux, true);
+  assert.equal(main.storyType, 'freeform');
   assert.equal(isSharedPlot(main), true);
   assert.deepEqual(main.concernsDomainIds.sort(), ['a', 'b']);
 });

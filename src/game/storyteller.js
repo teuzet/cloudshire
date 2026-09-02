@@ -326,9 +326,12 @@ export async function seedPlot({
   storyType: forcedType = null,
   log: parentLog,
 }) {
-  const storyType =
-    forcedType === 'mystery' || forcedType === 'suspense' ? forcedType : pickStoryType();
+  const storyType = pickStoryType();
   const log = (parentLog || getLogger()).child({ scope: 'storyteller.seed', domainId: domain.id, storyType });
+  if (storyType === 'story' || storyType === 'freeform') {
+    log.info('storyteller.seed_skipped', { reason: 'typed_story_not_in_live_month', storyType });
+    return null;
+  }
   const cfg = plotConfig(config);
   const maxChars = chronicleMaxChars(config);
   const statIds = (config.stats || []).map((s) => s.id).join(', ');

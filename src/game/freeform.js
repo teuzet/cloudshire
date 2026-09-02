@@ -7,7 +7,7 @@
 import { newId } from './ids.js';
 import {
   createPlotline,
-  isFreeformPlot,
+  isStakedStory,
   normalizeCloseWhenList,
   formatCloseWhen,
   clipPlotText,
@@ -69,7 +69,7 @@ const FREEFORM_MAX_DEPTH_TABLE = {
 };
 
 function freeformDepthPair(plot) {
-  if (!plot || plot.storyType !== 'freeform') return null;
+  if (!plot || !isStakedStory(plot)) return null;
   const max = clampFreeformDepth(plot.maxDepth, defaultFreeformMaxDepth(plot.gravity));
   const cur = Math.max(0, Math.round(Number(plot.depth) || 0));
   return { cur, max };
@@ -87,7 +87,7 @@ export function sampleFreeformMaxDepth(gravity, rng = Math.random) {
 }
 
 export function advanceFreeformDepth(plot) {
-  if (!plot || plot.storyType !== 'freeform') return plot;
+  if (!plot || !isStakedStory(plot)) return plot;
   plot.depth = Math.max(0, Math.round(Number(plot.depth) || 0)) + 1;
   return plot;
 }
@@ -98,7 +98,7 @@ export function formatFreeformDepth(plot) {
 }
 
 export function formatFreeformProgress(plot) {
-  if (!plot || !isFreeformPlot(plot)) return '';
+  if (!plot || !isStakedStory(plot)) return '';
   const urgency = parseFreeformUrgency(plot.urgency);
   const maxFails = Number.isFinite(Number(plot.maxFails))
     ? Math.max(0, Math.floor(Number(plot.maxFails)))
@@ -113,7 +113,7 @@ export function formatFreeformProgress(plot) {
 }
 
 export function applyFreeformProgress(plot, { finish = 'ok', autotick = false } = {}) {
-  if (!plot || plot.storyType !== 'freeform') return plot;
+  if (!plot || !isStakedStory(plot)) return plot;
   plot.depth = Math.max(0, Math.round(Number(plot.depth) || 0)) + 1;
   if (autotick || finish === 'fail') {
     plot.failCount = Math.round(Number(plot.failCount) || 0) + 1;
@@ -370,9 +370,9 @@ export function normalizeFinish(raw) {
 export function findFreeformPlot(domain, plotId = null) {
   const id = plotId ? String(plotId) : null;
   if (id) {
-    return (domain?.plotlines || []).find((p) => p.id === id && isFreeformPlot(p)) || null;
+    return (domain?.plotlines || []).find((p) => p.id === id && isStakedStory(p)) || null;
   }
-  return (domain?.plotlines || []).find((p) => isFreeformPlot(p) && p.status !== 'closed') || null;
+  return (domain?.plotlines || []).find((p) => isStakedStory(p) && p.status !== 'closed') || null;
 }
 
 export function freeformChronicles(domain, plot) {
@@ -426,7 +426,7 @@ export function createFreeformPlot({ domain, world, variant, config, seedChronic
     synopsis: variant.synopsis || variant.chronicle,
     closeWhen: variant.closeWhen,
     kind: 'story',
-    storyType: 'freeform',
+    storyType: 'story',
     hiddenPremises: variant.hiddenPremises,
     urgency,
     gravity,

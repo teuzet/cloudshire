@@ -21,15 +21,6 @@ function mystery(extra = {}) {
     synopsis: 'В нижней цистерне ночами гудит вода.',
     closeWhen: 'Найдут источник гула.',
     kind: 'story',
-    storyType: 'suspense',
-    depth: 3,
-    act: 1,
-    urgency: 40,
-    gravity: 40,
-    urgency0: 40,
-    gravity0: 40,
-    escalationLevel: 0,
-    maxEscalations: 3,
     relatedProcessIds: [],
     relatedStats: ['security'],
     tags: [],
@@ -59,7 +50,7 @@ function process(id, extra = {}) {
   };
 }
 
-test('UNRELATED снимается с тайны на свою нить-поручение', () => {
+test('UNRELATED снимается с истории на свою нить-поручение', () => {
   const plot = mystery({ relatedProcessIds: ['act_side'] });
   const action = process('act_side');
   applyEngagement(action, 'UNRELATED');
@@ -84,48 +75,6 @@ test('повторный rehome уже на поручении ничего не
   const again = rehomeUnrelatedProcess(domain, action, { tick: 2 });
   assert.equal(again.rehomed, false);
   assert.equal(domain.plotlines.filter((p) => p.kind === 'errand').length, errandsBefore);
-});
-
-test('план битов: UNRELATED на трёхтактной нити не даёт ход истории', () => {
-  const plot = mystery({ relatedProcessIds: ['act_u', 'act_d'] });
-  const domain = {
-    plotlines: [plot],
-    state: {
-      pendingActions: [
-        process('act_u', { plotEngagement: 'UNRELATED', plotAligned: false }),
-        process('act_d', { plotEngagement: 'DIRECT', plotAligned: true }),
-      ],
-    },
-  };
-  const { beats } = planBeats({
-    domain,
-    config: ACTS,
-    processOutcomes: [
-      {
-        processId: 'act_u',
-        mustNarrate: true,
-        finished: true,
-        finish: 'crit',
-        plotEngagement: 'UNRELATED',
-        summary: 'Водоотвод',
-      },
-      {
-        processId: 'act_d',
-        mustNarrate: true,
-        finished: true,
-        finish: 'ok',
-        plotEngagement: 'DIRECT',
-        plotAligned: true,
-        summary: 'Найти источник',
-      },
-    ],
-    rng: () => 1,
-  });
-  const storyBeats = beats.filter((b) => b.plotId === plot.id);
-  assert.equal(storyBeats.length, 1);
-  assert.equal(storyBeats[0].processOutcome.processId, 'act_d');
-  assert.equal(plot.act, 2);
-  assert.equal(Boolean(plot.ending), false);
 });
 
 test('два DIRECT на одной нити: второе дело видит состояние после первого', () => {
@@ -173,10 +122,7 @@ test('два DIRECT на одной нити: второе дело видит �
   const story = beats.filter((b) => b.plotId === plot.id && b.reason === 'process_finished');
   assert.equal(story.length, 2);
   assert.equal(story[0].processOutcome.processId, 'act_a');
-  assert.equal(story[0].actMove.actFrom, 1);
-  assert.equal(story[0].actMove.actTo, 2);
   assert.equal(story[1].processOutcome.processId, 'act_b');
-  assert.equal(story[1].actMove.actFrom, 2);
 });
 
 test('на одной нити в месяц тикает только старшее DIRECT дело', () => {
@@ -249,51 +195,6 @@ test('UNRELATED на доске снимается пачкой и не держ
   const due = collectProcessAdvanceBatch(domain);
   assert.ok(due.some((p) => p.id === 'act_side'));
   assert.ok(due.some((p) => p.id === 'act_main'));
-});
-
-test('развязка сворачивает остальные дела на нити и не плодит поручение', () => {
-  const plot = mystery({ depth: 1, relatedProcessIds: ['act_a', 'act_b'] });
-  const a = process('act_a', {
-    plotEngagement: 'DIRECT',
-    plotAligned: true,
-    createdAt: '2026-08-30T11:00:00.000Z',
-  });
-  const b = process('act_b', {
-    plotEngagement: 'DIRECT',
-    plotAligned: true,
-    createdAt: '2026-08-30T12:00:00.000Z',
-  });
-  const domain = { plotlines: [plot], officers: [], state: { pendingActions: [a, b] } };
-  const { beats } = planBeats({
-    domain,
-    config: ACTS,
-    processOutcomes: [
-      {
-        processId: 'act_a',
-        mustNarrate: true,
-        finished: true,
-        finish: 'ok',
-        plotEngagement: 'DIRECT',
-        plotAligned: true,
-      },
-      {
-        processId: 'act_b',
-        mustNarrate: true,
-        finished: true,
-        finish: 'ok',
-        plotEngagement: 'DIRECT',
-        plotAligned: true,
-      },
-    ],
-    rng: () => 1,
-  });
-  const story = beats.filter((row) => row.plotId === plot.id);
-  assert.equal(story.length, 1);
-  assert.equal(story[0].actMove.ending, 'ok');
-  assert.equal(b.status, 'revoked');
-  assert.equal(b.revokeReason, 'нужда отпала');
-  assert.equal(domain.plotlines.filter((p) => p.kind === 'errand').length, 0);
-  assert.ok(story[0].mootedProcesses.some((m) => m.id === 'act_b'));
 });
 
 test('отмена поручения закрывает пустую errand-нить', () => {

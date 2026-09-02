@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   createPlotline,
   isThreeActPlot,
+  isStakedStory,
   isFreeformPlot,
   storyTypeOf,
   formatCloseWhen,
@@ -99,16 +100,17 @@ test('freeform — отдельный тип, не трёхтакт', () => {
   const plot = createPlotline({
     title: 'Соль на ветру',
     kind: 'story',
-    storyType: 'freeform',
+    storyType: 'story',
     closeWhen: ['Найти источник соли', 'Признать, что соли нет'],
     hiddenPremises: ['Соль сыплется из разлома края, не из склада.'],
     urgency: 70,
     gravity: 'EPISODE',
   });
-  assert.equal(plot.storyType, 'freeform');
-  assert.equal(isFreeformPlot(plot), true);
+  assert.equal(plot.storyType, 'story');
+  assert.equal(isStakedStory(plot), true);
+  assert.equal(isFreeformPlot(plot), false);
   assert.equal(isThreeActPlot(plot), false);
-  assert.equal(storyTypeOf(plot), 'freeform');
+  assert.equal(storyTypeOf(plot), 'story');
   assert.equal(plotBeatAgentId(plot), 'freeformTell');
   assert.deepEqual(plot.closeWhen, ['Найти источник соли', 'Признать, что соли нет']);
   assert.match(formatCloseWhen(plot), /1\. Найти источник соли/);
@@ -140,7 +142,7 @@ test('текст эндинга не режется лимитом closeWhen', (
   const plot = createPlotline({
     title: 'Провал',
     kind: 'story',
-    storyType: 'freeform',
+    storyType: 'story',
     gravity: 'CRISIS',
     endings: [
       { id: 'g', kind: 'GOOD_ENDING', text: long },
@@ -162,7 +164,7 @@ test('freeform глубина — с нуля и без потолка теку�
   const plot = createPlotline({
     title: 'Сапог',
     kind: 'story',
-    storyType: 'freeform',
+    storyType: 'story',
     gravity: 'EPISODE',
     depth: 0,
     maxDepth: 3,
@@ -676,7 +678,7 @@ test('продолжение: архитектор без города, конс
   const plot = createPlotline({
     title: 'Чужой сапог',
     kind: 'story',
-    storyType: 'freeform',
+    storyType: 'story',
     closeWhen: ['Найти хозяина', 'Выбросить сапог'],
     synopsis: 'На площади нашли сапог.',
     urgency: 40,
@@ -791,7 +793,7 @@ test('автотик: архитектор без дела, с динамика�
   const plot = createPlotline({
     title: 'Чужой сапог',
     kind: 'story',
-    storyType: 'freeform',
+    storyType: 'story',
     closeWhen: ['Найти хозяина'],
     synopsis: 'На площади нашли сапог.',
   });
@@ -831,7 +833,7 @@ test('urgency enum, провалы и решение хода', () => {
   const plot = createPlotline({
     title: 'Сапог',
     kind: 'story',
-    storyType: 'freeform',
+    storyType: 'story',
     gravity: 'EPISODE',
     maxDepth: 3,
     endings: LAB_ENDINGS,
@@ -862,7 +864,7 @@ test('urgency enum, провалы и решение хода', () => {
   const sit = createPlotline({
     title: 'Мелочь',
     kind: 'story',
-    storyType: 'freeform',
+    storyType: 'story',
     gravity: 'SITUATION',
   });
   applyFreeformProgress(sit, { autotick: true });
@@ -888,7 +890,7 @@ test('DIRECT успех на maxDepth являет связанную концо
   const plot = createPlotline({
     title: 'Чужой сапог',
     kind: 'story',
-    storyType: 'freeform',
+    storyType: 'story',
     gravity: 'EPISODE',
     maxDepth: 2,
     depth: 1,
@@ -922,7 +924,7 @@ test('RELATED на maxDepth не закрывает, провал DIRECT даё�
   const plot = createPlotline({
     title: 'Сапог',
     kind: 'story',
-    storyType: 'freeform',
+    storyType: 'story',
     gravity: 'SITUATION',
     maxDepth: 1,
     endings: LAB_ENDINGS,
@@ -1537,7 +1539,7 @@ test('конструктор собирает хронику, hidden и whyMoves
     config: loadConfig(),
     rng: () => 0,
   });
-  assert.equal(plot.storyType, 'freeform');
+  assert.equal(plot.storyType, 'story');
   assert.equal(plot.urgency, 'MEDIUM');
   assert.equal(plot.countdown, null);
   assert.equal(plot.whyMoves, out.whyMoves);

@@ -26,7 +26,7 @@ function clamp100(n, fallback = 0) {
 
 export function ensurePlotStatBudget(plot, config = null) {
   if (!plot || plot.kind === 'order' || plot.kind === 'errand') return plot;
-  const gravityVal = Number(plot.gravity ?? plot.importance ?? 0);
+  const gravityVal = gravityScore(plot.gravity, Number(plot.importance) || 0);
   const div = Number(config?.tick?.plot?.stats?.gravityDivisor ?? 5);
   const budget = Math.max(0, Math.round(gravityVal / div));
   if (!plot.stats || typeof plot.stats !== 'object') plot.stats = {};
@@ -66,43 +66,48 @@ export const PLOT_TITLE_MAX = 120;
 export { clipText as clipPlotText };
 
 export const PLOT_KINDS = ['story', 'errand', 'order'];
-export const THREE_ACT_TYPES = ['suspense', 'mystery'];
-export const STORY_TYPES = ['suspense', 'mystery', 'freeform', 'default'];
+export const STORY_TYPES = ['story', 'freeform', 'default'];
+/** @deprecated трёхтакт удалён; оставлено, чтобы старые импорты не падали. */
+export const THREE_ACT_TYPES = [];
 
 export function isStoryPlot(plot) {
   return plot?.kind === 'story';
 }
 
-/** Только для посева городской истории. Поручения, указы и сопряжение движок ставит в default. */
-export function pickStoryType(rng = Math.random) {
-  return rng() < 0.5 ? 'mystery' : 'suspense';
+/** Городская история — всегда story. Сопряжение ставит freeform само. */
+export function pickStoryType() {
+  return 'story';
 }
 
 /**
- * Тип, который выставил движок: suspense | mystery | default.
- * Default — поручение, указ, главная нить стыка, наследие без типа.
- * Нативная городская история остаётся трёхтактной и на доске сопряжения,
- * пока не станет главной нитью встречи. Contested меняет рассказчика, не тип.
+ * story — городская нить со ставками (бывший lab freeform).
+ * freeform — главная нить сопряжения, без глубины и концовок.
+ * default — поручение, указ, наследие без типа.
+ * Старые mystery/suspense/lab-freeform при чтении становятся story.
  */
 export function storyTypeOf(plot) {
-  if (!plot || plot.kind !== 'story' || plot.isMainConflux) {
-    return 'default';
-  }
-  if (plot.storyType === 'freeform') return 'freeform';
-  if (THREE_ACT_TYPES.includes(plot.storyType)) return plot.storyType;
+  if (!plot || plot.kind !== 'story') return 'default';
+  if (plot.isMainConflux) return 'freeform';
+  const raw = plot.storyType;
+  if (raw === 'story' || raw === 'freeform' || raw === 'mystery' || raw === 'suspense') return 'story';
   return 'default';
 }
 
-export function isThreeActPlot(plot) {
-  const t = storyTypeOf(plot);
-  return t === 'suspense' || t === 'mystery';
+export function isThreeActPlot() {
+  return false;
 }
 
+/** Главная нить сопряжения. */
 export function isFreeformPlot(plot) {
-  return plot?.kind === 'story' && plot.storyType === 'freeform' && !plot.isMainConflux;
+  return plot?.kind === 'story' && storyTypeOf(plot) === 'freeform';
 }
 
-/** closeWhen у freeform — список завершающих исходов. У остальных — одна фраза. */
+/** Городская история со ставками, концовками и глубиной. */
+export function isStakedStory(plot) {
+  return plot?.kind === 'story' && storyTypeOf(plot) === 'story';
+}
+
+/** closeWhen у story — список завершающих исходов. У остальных — одна фраза. */
 export function normalizeCloseWhenList(raw) {
   const items = Array.isArray(raw)
     ? raw
@@ -134,17 +139,32 @@ export function formatCloseWhen(plot) {
   return String(plot?.closeWhen || '').trim() || '—';
 }
 
-/** Масштаб истории для механики: у трёхтактных gravity, иначе внутренний importance. */
+export const GRAVITY_SCORE = {
+  SITUATION: 20,
+  EPISODE: 40,
+  CRISIS: 65,
+  RUPTURE: 85,
+};
+
+export function gravityScore(raw, fallback = 40) {
+  const key = String(raw || '')
+    .trim()
+    .toUpperCase();
+  if (GRAVITY_SCORE[key] != null) return GRAVITY_SCORE[key];
+  const n = Number(raw);
+  if (Number.isFinite(n)) return clamp100(n, fallback);
+  return fallback;
+}
+
+/** Масштаб истории для механики: у story — gravity, иначе importance. */
 export function plotScale(plot) {
-  if (isThreeActPlot(plot)) return clamp100(plot?.gravity, 40);
+  if (isStakedStory(plot)) return gravityScore(plot.gravity, 40);
   return clamp100(plot?.importance, 40);
 }
 
 export function plotBeatAgentId(plot) {
   const t = storyTypeOf(plot);
-  if (t === 'mystery') return 'mysteryBeat';
-  if (t === 'suspense') return 'suspenseBeat';
-  if (t === 'freeform') return 'freeformTell';
+  if (t === 'story') return 'freeformTell';
   return 'storyBeat';
 }
 
@@ -255,9 +275,45 @@ export function parseFreeformGravity(raw, fallback = 'EPISODE') {
   return fallback;
 }
 
+function emptyActState(storyType) {
+  return {
+    storyType,
+    act: null,
+    urgency: null,
+    gravity: null,
+    urgency0: null,
+    gravity0: null,
+    escalationLevel: null,
+    maxEscalations: null,
+    truth: '',
+    truthGraph: null,
+    observedFacts: [],
+    resolutionFacts: [],
+    ending: null,
+    asksSequel: false,
+    annotationId: null,
+    ifSolved: '',
+    ifUnsolved: '',
+    ifPrevented: '',
+    ifNotPrevented: '',
+    depth: null,
+    hiddenPremises: [],
+    discoveryLadder: null,
+    closureGate: '',
+    closureUnlocked: null,
+    tonePrimary: null,
+    toneSecondary: null,
+    source: null,
+    situation: null,
+    dynamic: null,
+    legacyAxes: [],
+    unattendedBeats: null,
+  };
+}
+
 function storyActState(p = {}) {
   const type = storyTypeOf(p);
-  if (type === 'freeform') {
+  if (type === 'story') {
     const countdown = Math.round(Number(p.countdown));
     const gravity = parseFreeformGravity(p.gravity);
     const maxDepth = clampFreeformDepth(p.maxDepth, defaultFreeformMaxDepth(gravity));
@@ -265,7 +321,7 @@ function storyActState(p = {}) {
     const failRaw = Math.round(Number(p.failCount));
     const endings = normalizeFreeformEndings(p.endings);
     return {
-      storyType: 'freeform',
+      storyType: 'story',
       act: null,
       urgency: parseFreeformUrgency(p.urgency),
       gravity,
@@ -307,84 +363,7 @@ function storyActState(p = {}) {
       unattendedBeats: 0,
     };
   }
-  if (type === 'default') {
-    return {
-      storyType: 'default',
-      act: null,
-      urgency: null,
-      gravity: null,
-      urgency0: null,
-      gravity0: null,
-      escalationLevel: null,
-      maxEscalations: null,
-      truth: '',
-      truthGraph: null,
-      observedFacts: [],
-      resolutionFacts: [],
-      ending: null,
-      asksSequel: false,
-      annotationId: null,
-      ifSolved: '',
-      ifUnsolved: '',
-      ifPrevented: '',
-      ifNotPrevented: '',
-      depth: null,
-      hiddenPremises: [],
-      discoveryLadder: null,
-      closureGate: '',
-      closureUnlocked: null,
-      tonePrimary: null,
-      toneSecondary: null,
-      source: null,
-      situation: null,
-      dynamic: null,
-      legacyAxes: [],
-      unattendedBeats: null,
-    };
-  }
-  const urgency = clampStakes(p.urgency, 40);
-  const gravity = clampStakes(p.gravity, 40);
-  const graph = type === 'mystery' ? normalizeTruthGraph(p.truthGraph) : null;
-  const maxEsc = Math.max(1, Math.round(Number(p.maxEscalations ?? 3)));
-  const depth =
-    type === 'suspense' ? Math.max(1, Math.min(4, Math.round(Number(p.depth) || 1))) : null;
-  const ladder =
-    type === 'suspense' ? normalizeDiscoveryLadder(p.discoveryLadder, depth) : null;
-  return {
-    storyType: type,
-    act: Number(p.act) === 2 ? 2 : 1,
-    urgency,
-    gravity,
-    urgency0: clampStakes(p.urgency0 ?? urgency, urgency),
-    gravity0: clampStakes(p.gravity0 ?? gravity, gravity),
-    escalationLevel: Math.max(0, Math.min(maxEsc, Math.round(Number(p.escalationLevel) || 0))),
-    maxEscalations: maxEsc,
-    truth: type === 'mystery' && !graph ? String(p.truth || '') : '',
-    truthGraph: graph,
-    observedFacts: type === 'mystery' ? normalizeFactList(p.observedFacts).facts : [],
-    resolutionFacts:
-      type === 'mystery' ? normalizeFactList(p.resolutionFacts, { maxLen: RESOLUTION_FACT_MAX }).facts : [],
-    ending: ['crit', 'ok', 'fail'].includes(p.ending) ? p.ending : null,
-    asksSequel: Boolean(p.asksSequel),
-    annotationId:
-      (type === 'mystery' || type === 'suspense') && p.annotationId ? String(p.annotationId) : null,
-    ifSolved: type === 'mystery' ? clipText(String(p.ifSolved || ''), 900) : '',
-    ifUnsolved: type === 'mystery' ? clipText(String(p.ifUnsolved || ''), 900) : '',
-    ifPrevented: type === 'suspense' ? clipText(String(p.ifPrevented || ''), 900) : '',
-    ifNotPrevented: type === 'suspense' ? clipText(String(p.ifNotPrevented || ''), 900) : '',
-    depth,
-    hiddenPremises: type === 'suspense' ? normalizeHiddenPremises(p.hiddenPremises, depth) : [],
-    discoveryLadder: ladder,
-    closureGate: type === 'suspense' ? clipText(p.closureGate, PLOT_HOOK_MAX * 2) : '',
-    closureUnlocked: type === 'suspense' ? (depth <= 1 ? true : Boolean(p.closureUnlocked)) : null,
-    tonePrimary: type === 'suspense' ? String(p.tonePrimary || '').trim() || null : null,
-    toneSecondary: type === 'suspense' ? String(p.toneSecondary || '').trim() || null : null,
-    source: type === 'suspense' ? String(p.source || '').trim() || null : null,
-    situation: type === 'suspense' ? String(p.situation || '').trim() || null : null,
-    dynamic: type === 'suspense' ? String(p.dynamic || '').trim() || null : null,
-    legacyAxes: type === 'suspense' && Array.isArray(p.legacyAxes) ? p.legacyAxes.map(String).filter(Boolean) : [],
-    unattendedBeats: type === 'suspense' ? Math.max(0, Math.round(Number(p.unattendedBeats) || 0)) : null,
-  };
+  return emptyActState(type === 'freeform' ? 'freeform' : 'default');
 }
 
 export function isOrderPlot(plot) {
@@ -655,11 +634,6 @@ function applyPlotShape(p, config = null) {
   p.id = p.id || newId('plot');
   p.title = clipText(p.title || 'Сюжет', PLOT_TITLE_MAX);
   p.synopsis = clipText(p.synopsis ?? p.summary ?? '', PLOT_SUMMARY_MAX);
-  if (p.storyType === 'freeform' || Array.isArray(p.closeWhen)) {
-    p.closeWhen = normalizeCloseWhenList(p.closeWhen);
-  } else {
-    p.closeWhen = clipText(p.closeWhen, PLOT_HOOK_MAX);
-  }
   p.mootWhen = clipText(p.mootWhen, PLOT_HOOK_MAX);
   p.kind = PLOT_KINDS.includes(p.kind) ? p.kind : 'story';
   p.tags = Array.isArray(p.tags) ? p.tags : [];
@@ -692,8 +666,12 @@ function applyPlotShape(p, config = null) {
   p.lastBeatTick = p.lastBeatTick == null ? null : Number(p.lastBeatTick);
   p.beatCount = Math.max(0, Math.round(Number(p.beatCount) || 0));
   Object.assign(p, storyActState(p));
-  if (p.storyType === 'freeform' && Array.isArray(p.endings) && p.endings.length) {
+  if (isStakedStory(p) && Array.isArray(p.endings) && p.endings.length) {
     p.closeWhen = p.endings.map((e) => e.text);
+  } else if (isStakedStory(p) || Array.isArray(p.closeWhen)) {
+    p.closeWhen = normalizeCloseWhenList(p.closeWhen);
+  } else {
+    p.closeWhen = clipText(p.closeWhen, PLOT_HOOK_MAX);
   }
   if (p.kind === 'order') Object.assign(p, orderCadence(p, config));
   return p;
@@ -785,12 +763,19 @@ export function createPlotline({
   config = null,
 }) {
   const resolvedKind = PLOT_KINDS.includes(kind) ? kind : 'story';
+  const staked =
+    resolvedKind === 'story' &&
+    !isMainConflux &&
+    (storyType === 'story' ||
+      storyType === 'freeform' ||
+      storyType === 'mystery' ||
+      storyType === 'suspense');
   const plot = {
     id: newId('plot'),
     title: clipText(title || (resolvedKind === 'order' ? 'Порядок' : 'Сюжет'), PLOT_TITLE_MAX),
     synopsis: clipText(synopsis || summary, PLOT_SUMMARY_MAX),
     closeWhen:
-      storyType === 'freeform' || Array.isArray(closeWhen)
+      staked || Array.isArray(closeWhen)
         ? normalizeCloseWhenList(closeWhen)
         : clipText(closeWhen, PLOT_HOOK_MAX),
     mootWhen: clipText(mootWhen, PLOT_HOOK_MAX),
@@ -868,7 +853,7 @@ export function createPlotline({
       confluxId,
     }),
   };
-  if (plot.storyType === 'freeform' && Array.isArray(plot.endings) && plot.endings.length) {
+  if (plot.storyType === 'story' && Array.isArray(plot.endings) && plot.endings.length) {
     plot.closeWhen = plot.endings.map((e) => e.text);
   }
   return refreshPlotAwareness(plot);
@@ -906,7 +891,7 @@ export function isOverdue(plotline) {
  */
 export function plotCanFade(domain, plot, cfg) {
   if (isOrderPlot(plot)) return false;
-  if (isThreeActPlot(plot)) return false;
+  if (isStakedStory(plot) || isFreeformPlot(plot)) return false;
   if (!isOverdue(plot)) return false;
   if (plotHasActiveProcess(domain, plot)) return false;
   const floor = Number(cfg?.temperature?.fadeBelow ?? 18);

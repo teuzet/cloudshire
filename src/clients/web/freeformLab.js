@@ -8,7 +8,7 @@ import express from 'express';
 import { projectRoot } from '../../config.js';
 import { getLogger } from '../../log.js';
 import { normalizeDomain, chronicleEntries } from '../../game/models.js';
-import { normalizePlotlines, closePlotline, isFreeformPlot, stripPlotSecrets } from '../../game/plotlines.js';
+import { normalizePlotlines, closePlotline, isStakedStory, stripPlotSecrets } from '../../game/plotlines.js';
 import {
   advanceWorldMonths,
   appendChronicle,
@@ -322,7 +322,7 @@ export async function seedFreeformLab({ config, runtime, text, gravity, fromCity
       return sessionPayload(session);
     }
 
-    session.domain.plotlines = (session.domain.plotlines || []).filter((p) => !isFreeformPlot(p));
+    session.domain.plotlines = (session.domain.plotlines || []).filter((p) => !isStakedStory(p));
     session.plotId = null;
 
     const assembled = await assembleFreeformLabStory({
@@ -406,7 +406,7 @@ export async function playFreeformDeed({
       throw err;
     }
     const plot = plotOf(session);
-    if (!plot || !isFreeformPlot(plot)) {
+    if (!plot || !isStakedStory(plot)) {
       const err = new Error('Нет живой freeform-истории.');
       err.status = 409;
       throw err;
@@ -545,7 +545,7 @@ export async function playFreeformAutotick({ config, runtime, log: parentLog }) 
       throw err;
     }
     const plot = plotOf(session);
-    if (!plot || !isFreeformPlot(plot)) {
+    if (!plot || !isStakedStory(plot)) {
       const err = new Error('Нет живой freeform-истории.');
       err.status = 409;
       throw err;

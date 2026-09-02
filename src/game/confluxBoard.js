@@ -611,6 +611,8 @@ export function createMainConfluxPlot({ a, b, conflux, world, config }) {
       `Сопряжение неизбежно; встреча будет длиться, пока края снова не разойдутся.`,
     closeWhen: 'Острова разошлись в небе, пути между ними больше нет.',
     kind: 'story',
+    storyType: 'freeform',
+    isMainConflux: true,
     importance: 85,
     maxAgeMonths: eta + dur + 1,
     temperature: 70,
@@ -618,7 +620,6 @@ export function createMainConfluxPlot({ a, b, conflux, world, config }) {
     confluxId: conflux.id,
     config,
   });
-  plot.isMainConflux = true;
   plot.shared = true;
   plot.hostDomainId = null;
   plot.concernsDomainIds = [a.id, b.id];
