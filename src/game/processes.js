@@ -11,6 +11,15 @@ import {
   listOfficers,
   ensureOfficersFromLore,
 } from './officers.js';
+import { blessManaCost, spendMana } from './mana.js';
+import {
+  rollProcessAdvance,
+  rollProcessFinish,
+  applyBlessShift,
+  FINISH_LABELS,
+  FINISH_SHORT,
+  formatFinishForPrompt,
+} from './rolls.js';
 
 export function listStatIds(config) {
   return (config?.stats || []).map((s) => s.id);
@@ -115,19 +124,26 @@ export function processOwnedBy(process, domainId) {
 }
 
 /**
- * Покровитель благословляет своё ещё идущее дело: при завершении исход будет критическим.
+ * Покровитель благословляет своё ещё идущее дело: +1 к исходу (провал→успех, успех→крит).
+ * Стоимость — 10 маны за месяц базовой длительности (objectiveMonths).
  */
-export function blessProcess(process, { tick = null } = {}) {
+export function blessProcess(process, { tick = null, domain = null } = {}) {
   if (!process || typeof process !== 'object') return { ok: false, error: 'not_found' };
   normalizeProcess(process);
   if (process.status && process.status !== 'active') {
     return { ok: false, error: 'not_active', process };
   }
   if (process.blessed) return { ok: false, error: 'already_blessed', process };
+  const cost = blessManaCost(process);
+  if (domain) {
+    const paid = spendMana(domain, cost);
+    if (!paid.ok) return { ...paid, process };
+  }
   process.blessed = true;
+  process.blessCost = cost;
   if (tick != null) process.blessedTick = tick;
   process.updatedAt = new Date().toISOString();
-  return { ok: true, process };
+  return { ok: true, process, cost, mana: domain ? domain.state?.mana : null };
 }
 
 export function pausedProcesses(domain, config = null) {
@@ -270,15 +286,6 @@ export function processStatAverage(domain, process, config = null) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
-// Бросок хода дела живёт в едином модуле бросков.
-import {
-  rollProcessAdvance,
-  rollProcessFinish,
-  FINISH_LABELS,
-  FINISH_SHORT,
-  formatFinishForPrompt,
-} from './rolls.js';
-
 export { rollProcessAdvance, rollProcessFinish, FINISH_LABELS, FINISH_SHORT, formatFinishForPrompt };
 
 /** Броски для всех active процессов домена (до резолва). */
@@ -336,22 +343,17 @@ export function applyEngineProgress(domain, rolls, { tick = null, config = null,
     let finishLabel = null;
     let blessed = Boolean(process.blessed);
     if (finished) {
-      if (blessed) {
-        finish = 'crit';
-        finishLabel = FINISH_LABELS.blessed;
-        process.finishKind = 'crit';
-        process.finishBlessed = true;
-        process.finishRoll = null;
-        process.finishWeights = { fail: 0, ok: 0, crit: 100 };
-      } else {
-        const avg = processStatAverage(domain, process, config);
-        const rolled = rollProcessFinish(avg, processPaceRatio(process), rng, config?.tick?.plot?.roll || {});
-        finish = rolled.finish;
-        finishLabel = FINISH_LABELS[finish];
-        process.finishKind = finish;
-        process.finishRoll = rolled.roll;
-        process.finishWeights = rolled.weights;
-      }
+      const avg = processStatAverage(domain, process, config);
+      const rolled = rollProcessFinish(avg, processPaceRatio(process), rng, config?.tick?.plot?.roll || {});
+      finish = blessed ? applyBlessShift(rolled.finish) : rolled.finish;
+      finishLabel = blessed
+        ? `${FINISH_LABELS[finish]} ${FINISH_LABELS.blessed}`
+        : FINISH_LABELS[finish];
+      process.finishKind = finish;
+      process.finishBlessed = Boolean(blessed);
+      process.finishRolled = rolled.finish;
+      process.finishRoll = rolled.roll;
+      process.finishWeights = rolled.weights;
       releaseOfficerProcess(domain, process);
     }
     outcomes.push({
@@ -421,7 +423,7 @@ export function formatProcessLine(process, config = null) {
     `| ожидание ~${process.monthsLeft} мес. (оценка ${process.expectedMonths}) ` +
     `| статы: ${stats} (от ${process.onBehalfOf || process.characterName || '?'})` +
     (process.status === 'paused' ? ' | на паузе, слот свободен' : '') +
-    (process.blessed ? ' | благословлено: исход будет [КРИТИЧЕСКИЙ УСПЕХ]' : '')
+    (process.blessed ? ' | благословлено: исход +1 ступень (провал→успех, успех→крит)' : '')
   );
 }
 
@@ -468,11 +470,9 @@ export function processProgressFeel(process) {
 }
 
 function closedProcessOutcome(process) {
-  if (process.finishBlessed || (process.blessed && process.finishKind === 'crit')) {
-    return FINISH_LABELS.blessed;
-  }
   if (process.finishKind && FINISH_LABELS[process.finishKind]) {
-    return FINISH_LABELS[process.finishKind];
+    const gloss = FINISH_LABELS[process.finishKind];
+    return process.finishBlessed || process.blessed ? `${gloss} ${FINISH_LABELS.blessed}` : gloss;
   }
   if (process.status === 'failed') return FINISH_LABELS.fail;
   if (process.status === 'cancelled') {

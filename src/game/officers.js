@@ -1,5 +1,5 @@
 /**
- * Четыре столпа города: слоты дел, характер, формат для промптов.
+ * Четыре сановника города: слоты дел, характер, формат для промптов.
  */
 
 import { newId } from './ids.js';
@@ -18,14 +18,17 @@ export const DEFAULT_OFFICES = [
     titleGen: 'казначея',
     focus:
       'хозяйство: казна, склады, закуп, раздача, стройка, кровля, укрепление склонов и оград руками мастеров, рынок, цех, голод',
+    strategy:
+      'В основном интересуется ресурсами, собственностью и инфраструктурой, даже в ущерб людям.',
   },
   {
     office: 'marshal',
     statId: 'security',
-    title: 'Воевода',
-    titleGen: 'воеводу',
+    title: 'Маршал',
+    titleGen: 'маршала',
     focus:
       'общественный порядок, война, преступления, стража, арест, дозор улиц; не стройка и не укрепление стен',
+    strategy: 'Всегда действует решительно, даже не разобравшись в вопросе.',
   },
   {
     office: 'keeper',
@@ -33,6 +36,8 @@ export const DEFAULT_OFFICES = [
     title: 'Хранитель',
     titleGen: 'хранителя',
     focus: 'архив, школа, болезнь, чертёж, исследование, алхимия',
+    strategy:
+      'Предпочитает сбор сведений. Часто медлит и не всегда действует решительно.',
   },
   {
     office: 'chancellor',
@@ -40,6 +45,8 @@ export const DEFAULT_OFFICES = [
     title: 'Канцлер',
     titleGen: 'канцлера',
     focus: 'переговоры, гильдия, слух, дипломатия сопряжения, суд чести, указ в народе',
+    strategy:
+      'В основном интересуется людьми и наплевательски относится к ресурсам и собственности.',
   },
 ];
 
@@ -106,6 +113,7 @@ export function officeCatalog(config) {
         title: o.title,
         titleGen: o.titleGen || String(o.title || '').toLowerCase(),
         focus: String(o.focus || o.about || fallback?.focus || '').trim(),
+        strategy: String(o.strategy || fallback?.strategy || '').trim(),
       };
     });
   }
@@ -118,6 +126,12 @@ export function officeByStat(config, statId) {
 
 export function officeById(config, office) {
   return officeCatalog(config).find((o) => o.office === office) || null;
+}
+
+export function officeStrategy(officerOrOffice, config = null) {
+  const office = typeof officerOrOffice === 'string' ? officerOrOffice : officerOrOffice?.office;
+  const def = officeById(config, office) || DEFAULT_OFFICES.find((d) => d.office === office);
+  return def?.strategy || '';
 }
 
 export function axisLabels(config) {
@@ -228,22 +242,28 @@ export function officerBusy(officer, domain = null) {
 }
 
 export function officerBusyAgentMessage(officer, process) {
-  const who = `${officer?.title || 'Столп'} ${officer?.name || ''}`.trim();
+  const who = `${officer?.title || 'Сановник'} ${officer?.name || ''}`.trim();
   const duty = String(process?.summary || '').trim() || 'другое поручение';
   return (
     `ОТКАЗ: ${who} уже ведёт дело «${duty}» (id ${process?.id || '?'}). ` +
-    'Если покровитель хочет именно этого столпа на новое — в речи назови текущее дело и спроси: ' +
+    'Если покровитель хочет именно этого сановника на новое — в речи назови текущее дело и спроси: ' +
     'приостановить (pause_process) или свернуть (revoke_process), и только потом declare_process. ' +
-    'Не обещай новое, пока старое не снято. Не путай с недавно закрытым: законченное столпа не занимает.'
+    'Не обещай новое, пока старое не снято. Не путай с недавно закрытым: законченное сановника не занимает.'
   );
 }
 
-/** Если столпов меньше каталога — добрать из lore (битый сейв не должен терять хранителя). */
+/** Если сановников меньше каталога — добрать из lore (битый сейв не должен терять хранителя). */
 export function ensureOfficersFromLore(domain, config = null) {
   if (!domain || typeof domain !== 'object') return domain;
   const catalog = officeCatalog(config);
   if (!catalog.length) return domain;
   domain.officers = Array.isArray(domain.officers) ? domain.officers : [];
+  for (const o of domain.officers) {
+    const def = catalog.find((d) => d.office === o.office);
+    if (!def) continue;
+    o.title = def.title;
+    o.titleGen = def.titleGen;
+  }
   const have = new Set(domain.officers.map((o) => o.office));
   const loreOfficers = (domain.lore || []).filter(
     (f) => f && (f.kind === 'officer' || (f.tags || []).includes('officer')),
@@ -327,33 +347,38 @@ export function isOffPortfolio(officer, linkedStat) {
 export function formatOfficersForPrompt(domain, config) {
   ensureOfficersFromLore(domain, config);
   const list = listOfficers(domain);
-  if (!list.length) return '(столпов ещё нет)';
+  if (!list.length) return '(сановников ещё нет)';
   const lines = [
-    'СТОЛПЫ ГОРОДА (жрец только передаёт им волю; игрок со столпами не говорит; не герои историй):',
+    'САНОВНИКИ ГОРОДА (жрец только передаёт им волю; игрок с сановниками не говорит; не герои историй):',
   ];
   for (const o of list) {
     const duty = officerActiveProcess(domain, o);
     const busy = duty ? `занят идущим делом «${duty.summary}»` : 'свободен';
+    const strategy = officeStrategy(o, config);
     lines.push(
-      `- ${o.title} ${o.name} (${o.office}, стат ${o.statId}): ${o.nature || formatAxesForSpeech(o.axes, config)}. Сейчас ${busy}.`,
+      `- ${o.title} ${o.name} (${o.office}, стат ${o.statId}): ${o.nature || formatAxesForSpeech(o.axes, config)}. ` +
+        (strategy ? `Как действует: ${strategy} ` : '') +
+        `Сейчас ${busy}.`,
     );
   }
   const catalog = officeCatalog(config);
   for (const def of catalog) {
     if (def.focus) lines.push(`${def.title} — ${def.focus}.`);
+    if (def.strategy) lines.push(`${def.title} всегда: ${def.strategy}`);
   }
   if (!catalog.some((d) => d.focus)) {
     for (const def of DEFAULT_OFFICES) {
       lines.push(`${def.title} — ${def.focus}.`);
+      if (def.strategy) lines.push(`${def.title} всегда: ${def.strategy}`);
     }
   }
   lines.push(
-    'Стройка, кровля, укрепление склона или ограды — казначей и мастера, не воевода.',
-    'Воевода — порядок, война и преступления; стены стережёт, но не возводит.',
-    'Если покровитель шлёт не того столпа — сначала поспорь и предупреди, что справится плохо.',
+    'Стройка, кровля, укрепление склона или ограды — казначей и мастера, не маршал.',
+    'Маршал — порядок, война и преступления; стены стережёт, но не возводит.',
+    'Если покровитель шлёт не того сановника — сначала поспорь и предупреди, что справится плохо.',
     '«Разберитесь сами» — не выбирай лучшего: движок даст случайного свободного.',
-    'Занятость — только идущее дело. Недавно закрытое столпа не занимает.',
-    'Если покровитель хочет занятого столпа на новое: назови текущее дело и предложи паузу или отмену, затем новое.',
+    'Занятость — только идущее дело. Недавно закрытое сановника не занимает.',
+    'Если покровитель хочет занятого сановника на новое: назови текущее дело и предложи паузу или отмену, затем новое.',
   );
   return lines.join('\n');
 }
@@ -362,7 +387,7 @@ export function formatOfficersCastHint(domain) {
   const list = listOfficers(domain);
   if (!list.length) return '';
   return [
-    'СТОЛПЫ НЕ ГЕРОИ ИСТОРИЙ:',
+    'САНОВНИКИ НЕ ГЕРОИ ИСТОРИЙ:',
     list.map((o) => `${o.title} ${o.name}`).join(', ') +
       ' — могут мелькнуть в отчёте («казначей велела…»), но не действующие лица тайны/распри.',
   ].join('\n');
@@ -516,7 +541,7 @@ async function requestOfficerNatures({ runtime, domain, officers, config, log })
       tools: [
         {
           name: 'submit_officer_natures',
-          description: 'Характер каждого столпа: 1–2 предложения, не биография.',
+          description: 'Характер каждого сановника: 1–2 предложения, не биография.',
           parameters: {
             type: 'object',
             additionalProperties: false,
@@ -544,7 +569,7 @@ async function requestOfficerNatures({ runtime, domain, officers, config, log })
               }
             }
             if (offices.some((id) => !map[id])) {
-              return toolFail('thin', 'Нужен nature на каждого столпа, 1–2 предложения.');
+              return toolFail('thin', 'Нужен nature на каждого сановника, 1–2 предложения.');
             }
             draft.rows = map;
             return { ok: true };
@@ -560,7 +585,7 @@ async function requestOfficerNatures({ runtime, domain, officers, config, log })
         {
           role: 'user',
           content: [
-            `Город «${domain?.name}». Напиши характер четырёх столпов: как решают, чего не выносят, чем славятся.`,
+            `Город «${domain?.name}». Напиши характер четырёх сановников: как решают, чего не выносят, чем славятся.`,
             'По 1–2 предложения. Не биография, не диалоговая карточка. Не делай их героями историй.',
             '',
             ...officers.map(

@@ -26,7 +26,7 @@ const cfg = {
 function makeOfficers(busyIds = {}) {
   return [
     { id: 'off_t', office: 'treasurer', statId: 'prosperity', title: 'Казначей', name: 'Элара', processId: busyIds.treasurer || null },
-    { id: 'off_m', office: 'marshal', statId: 'security', title: 'Воевода', name: 'Кален', processId: busyIds.marshal || null },
+    { id: 'off_m', office: 'marshal', statId: 'security', title: 'Маршал', name: 'Кален', processId: busyIds.marshal || null },
     { id: 'off_k', office: 'keeper', statId: 'knowledge', title: 'Хранитель', name: 'Мира', processId: busyIds.keeper || null },
     { id: 'off_c', office: 'chancellor', statId: 'influence', title: 'Канцлер', name: 'Орен', processId: busyIds.chancellor || null },
   ];
@@ -40,7 +40,7 @@ function domainWith(officers, processes = []) {
   };
 }
 
-test('четыре дела ок, пятое — все столпы заняты', () => {
+test('четыре дела ок, пятое — все сановники заняты', () => {
   const officers = makeOfficers();
   const processes = [];
   const domain = domainWith(officers, processes);
@@ -91,7 +91,7 @@ test('«разберитесь сами» берёт случайного сво
   assert.deepEqual([...picks], ['keeper']);
 });
 
-test('пауза освобождает столпа, возобновление снова занимает того же', () => {
+test('пауза освобождает сановника, возобновление снова занимает того же', () => {
   const officers = makeOfficers();
   const process = normalizeProcess(
     { id: 'act_1', summary: 'Розыск', status: 'active', officerId: 'off_k', office: 'keeper' },
@@ -108,13 +108,19 @@ test('пауза освобождает столпа, возобновление
   assert.equal(process.status, 'active');
 });
 
-test('воевода — порядок и война, не стройка; казначей — укрепления как работы', () => {
+test('маршал — порядок и война, не стройка; казначей — укрепления как работы; у каждого своя стратегия', () => {
   const text = formatOfficersForPrompt(domainWith(makeOfficers()), cfg);
-  assert.match(text, /Воевода — общественный порядок, война, преступления/);
+  assert.match(text, /Маршал — общественный порядок, война, преступления/);
   assert.match(text, /не стройка и не укрепление стен/);
   assert.match(text, /Казначей — хозяйство/);
   assert.match(text, /укрепление склонов/);
-  assert.doesNotMatch(text, /Воевода — стража, арест, стены/);
+  assert.match(text, /САНОВНИКИ ГОРОДА/);
+  assert.match(text, /Маршал всегда: Всегда действует решительно/);
+  assert.match(text, /Хранитель всегда: Предпочитает сбор сведений/);
+  assert.match(text, /Канцлер всегда: В основном интересуется людьми/);
+  assert.match(text, /Казначей всегда: В основном интересуется ресурсами/);
+  assert.doesNotMatch(text, /Воевода/);
+  assert.doesNotMatch(text, /столп/i);
 });
 
 test('дедуп поручений выключен: разные и одинаковые summary не склеиваются', () => {
@@ -122,7 +128,7 @@ test('дедуп поручений выключен: разные и одина
     {
       id: 'act_1',
       summary: 'Осмотр и укрепление северного склона',
-      detail: 'Послать воеводу на пастбище.',
+      detail: 'Послать маршала на пастбище.',
       status: 'active',
     },
   ]);
@@ -131,12 +137,12 @@ test('дедуп поручений выключен: разные и одина
     null,
   );
   assert.equal(
-    findDuplicateProcess(domain, 'Осмотр и укрепление северного склона', 'Послать воеводу на пастбище.'),
+    findDuplicateProcess(domain, 'Осмотр и укрепление северного склона', 'Послать маршала на пастбище.'),
     null,
   );
 });
 
-test('закончившееся дело освобождает столпа, промпт не держит его занятым', () => {
+test('закончившееся дело освобождает сановника, промпт не держит его занятым', () => {
   const officers = makeOfficers();
   const process = {
     id: 'act_flock',
@@ -160,7 +166,7 @@ test('закончившееся дело освобождает столпа, �
   assert.doesNotMatch(prompt, /занят идущим делом «Исследование бело-серой стаи»/);
 });
 
-test('битый сейв добирает столпов из lore и не считает закрытое дело занятостью', () => {
+test('битый сейв добирает сановников из lore и не считает закрытое дело занятостью', () => {
   const domain = {
     id: 'domain_x',
     officers: [
@@ -197,7 +203,7 @@ test('битый сейв добирает столпов из lore и не сч
   assert.doesNotMatch(prompt, /занят идущим делом «Стая»/);
 });
 
-test('отказ занятому столпу предлагает паузу или отмену текущего дела', () => {
+test('отказ занятому сановнику предлагает паузу или отмену текущего дела', () => {
   const officer = { title: 'Хранитель', name: 'Елана' };
   const msg = officerBusyAgentMessage(officer, { id: 'act_1', summary: 'Наблюдение за стаей' });
   assert.match(msg, /Наблюдение за стаей/);

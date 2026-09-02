@@ -1,5 +1,5 @@
 /**
- * Наместник больше не правит сам: при молчании покровителя ходит случайный свободный столп.
+ * Наместник больше не правит сам: при молчании покровителя ходит случайный свободный сановник.
  * Движок решает КОГДА и КОГО; агент officerAct — ЧТО в рамках должности.
  */
 
@@ -24,6 +24,7 @@ import {
   bindOfficerProcess,
   isOffPortfolio,
   formatOfficersForPrompt,
+  officeStrategy,
 } from './officers.js';
 
 export function countTrailingUnansweredNews(dialogHistory = []) {
@@ -88,7 +89,7 @@ function rememberFact(domain, { text, world, officer, chronicleAdds }) {
 async function applyProcess(domain, args, { config, runtime, world, officer, log, chronicleAdds }) {
   const slots = canStartProcess(domain, config);
   if (!slots.ok || !officer) {
-    return { error: 'too_many_processes', message: 'Все столпы заняты.' };
+    return { error: 'too_many_processes', message: 'Все сановники заняты.' };
   }
   const summary = String(args.summary || '').trim();
   const detail = String(args.detail || '').trim();
@@ -168,7 +169,7 @@ async function applyProcess(domain, args, { config, runtime, world, officer, log
 }
 
 /**
- * Ход столпа в начале месяца, если покровитель молчит.
+ * Ход сановника в начале месяца, если покровитель молчит.
  * @returns {{ silent: number, act: object|null, chronicleAdds: object[] }}
  */
 export async function runOfficerAct({ config, runtime, domain, world, log: parentLog, rng = Math.random }) {
@@ -187,14 +188,14 @@ export async function runOfficerAct({ config, runtime, domain, world, log: paren
     {
       name: 'submit_officer_act',
       description:
-        'Одно дело от лица выбранного столпа. process — новое дело на одну открытую историю, none — ничего.',
+        'Одно дело от лица выбранного сановника. process — новое дело на одну открытую историю, none — ничего.',
       parameters: {
         type: 'object',
         required: ['action'],
         properties: {
           action: { type: 'string', enum: ['none', 'process'] },
           summary: { type: 'string', description: 'Название дела, 1–8 слов' },
-          detail: { type: 'string', description: 'Что именно делает этот столп' },
+          detail: { type: 'string', description: 'Что именно делает этот сановник' },
           goal: { type: 'string' },
           linkedStats: {
             type: 'array',
@@ -257,14 +258,20 @@ export async function runOfficerAct({ config, runtime, domain, world, log: paren
     log,
     scene: 'officer_act',
     domainId: domain.id,
-    extraSystem: `Ты действуешь от лица столпа: ${officer.title} ${officer.name}. Покровитель молчит. Жрец не правит сам.`,
+    extraSystem: [
+      `Ты действуешь от лица сановника: ${officer.title} ${officer.name}. Покровитель молчит. Жрец не правит сам.`,
+      officeStrategy(officer, config) ? `Как ты действуешь: ${officeStrategy(officer, config)}` : '',
+    ]
+      .filter(Boolean)
+      .join(' '),
     userMessages: [
       {
         role: 'user',
         content: [
           `Покровитель молчит уже ${gate.silent} месяца.`,
-          `Движок выбрал столпа: ${officer.title} ${officer.name} (${officer.office}, стат ${officer.statId}).`,
+          `Движок выбрал сановника: ${officer.title} ${officer.name} (${officer.office}, стат ${officer.statId}).`,
           officer.nature ? `Характер: ${officer.nature}` : '',
+          officeStrategy(officer, config) ? `Стратегия должности: ${officeStrategy(officer, config)}` : '',
           'Заведи ОДНО дело в рамках своего класса на ОДНУ открытую историю без поручения (включая сопряжение).',
           'Если история требует чужого умения — всё равно делай её ты, linkedStats от характера задачи (чужое дело).',
           'Не заводи указы. Не возобновляй паузы. Не резюмируй от жреца.',

@@ -1,6 +1,7 @@
 /**
- * Город для агентов: компактный cityBrief + постоянные дописки (modifiers).
- * Указы живут на plotline, не здесь.
+ * Город для агентов: компактный cityBrief.
+ * Постоянный след города теперь в самом брифе (cityGenesisRewrite).
+ * Старые modifiers не отдаём в промпт. Указы живут на plotline.
  */
 
 import { newId } from './ids.js';
@@ -73,12 +74,11 @@ export function formatCityModifiersForPrompt(domain) {
   return `Постоянные изменения города:\n${lines.join('\n')}`;
 }
 
-/** То, что видят агенты вместо полного генезиса: бриф, сразу после него — modifiers. */
+/** То, что видят агенты вместо полного генезиса: только бриф. */
 export function formatCityForAgents(domain) {
-  const brief =
+  return (
     clipCityText(domain?.cityBrief, CITY_BRIEF_MAX) ||
     String(domain?.description || '').trim() ||
-    '(описание пусто)';
-  const mods = formatCityModifiersForPrompt(domain);
-  return mods ? `${brief}\n\n${mods}` : brief;
+    '(описание пусто)'
+  );
 }

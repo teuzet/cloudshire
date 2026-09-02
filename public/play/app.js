@@ -303,6 +303,8 @@ function renderCityTab(d) {
         ['канал', d.channel],
         ['население', d.population],
         ['покровителя зовут', d.patronName || 'ещё не назван'],
+        ['вера', d.faith != null ? d.faith : null],
+        ['мана', d.mana != null ? `${d.mana} / 100` : null],
         ['основан на тике', d.createdTick],
         ['последний тик', d.lastTickAt],
       ]),
@@ -547,12 +549,12 @@ function renderConfluxTab(d) {
   out.push(
     block(
       `Дела сопряжения (${active.length})`,
-      active.length ? active.map((p) => processCard(p, { viewerId: d.id })).join('') : '<p class="muted">дел на сопряжении нет</p>',
+      active.length ? active.map((p) => processCard(p, { viewerId: d.id, mana: d.mana })).join('') : '<p class="muted">дел на сопряжении нет</p>',
     ),
   );
   if (done.length) {
     out.push(
-      block(`Закрытые дела сопряжения (${done.length})`, done.map((p) => processCard(p, { viewerId: d.id })).join('')),
+      block(`Закрытые дела сопряжения (${done.length})`, done.map((p) => processCard(p, { viewerId: d.id, mana: d.mana })).join('')),
     );
   }
 
@@ -589,6 +591,26 @@ function renderOrdersBlocks(d) {
   );
 }
 
+function blessCostOf(p) {
+  const months = Math.max(1, Math.round(Number(p?.objectiveMonths || p?.expectedMonths || 1)));
+  return months * 10;
+}
+
+function finishGloss(p) {
+  if (!p.finishKind) return null;
+  const tag =
+    p.finishKind === 'fail'
+      ? '[ПРОВАЛ]'
+      : p.finishKind === 'crit'
+        ? '[КРИТИЧЕСКИЙ УСПЕХ]'
+        : p.finishKind === 'ok'
+          ? '[УСПЕХ]'
+          : null;
+  if (!tag) return null;
+  const bless = p.finishBlessed || p.blessed ? ' (благословение +1)' : '';
+  return `исход: ${tag}${bless}`;
+}
+
 function processCard(p, opts = {}) {
   const total = p.expectedMonths ?? p.durationMonths ?? '?';
   const objective = p.objectiveMonths;
@@ -607,20 +629,12 @@ function processCard(p, opts = {}) {
       : objective
         ? `оценка ${objective} мес.`
         : null;
-  const finish =
-    p.finishBlessed || (p.blessed && p.finishKind === 'crit')
-      ? 'исход: [КРИТИЧЕСКИЙ УСПЕХ] (благословение)'
-      : p.finishKind === 'fail'
-        ? 'исход: [ПРОВАЛ]'
-        : p.finishKind === 'crit'
-          ? 'исход: [КРИТИЧЕСКИЙ УСПЕХ]'
-          : p.finishKind === 'ok'
-            ? 'исход: [УСПЕХ]'
-            : null;
+  const cost = blessCostOf(p);
+  const mana = Number(opts.mana);
   const meta = [
     clock,
     pace,
-    finish,
+    finishGloss(p),
     p.blessed && active ? 'благословлено' : null,
     p.linkedStats?.length ? `статы: ${p.linkedStats.join(', ')}` : null,
     p.initiative === 'ruler' ? 'сам правитель' : null,
@@ -628,10 +642,13 @@ function processCard(p, opts = {}) {
   ]
     .filter(Boolean)
     .join(' · ');
-  const blessBtn =
-    active && own && opts.viewerId && !p.blessed
-      ? `<button type="button" class="bless-btn" data-bless="${esc(p.id)}">благословить</button>`
-      : '';
+  let blessBtn = '';
+  if (active && own && opts.viewerId && !p.blessed) {
+    blessBtn =
+      Number.isFinite(mana) && mana < cost
+        ? `<span class="muted small">благословить · ${cost} маны (не хватает, есть ${mana})</span>`
+        : `<button type="button" class="bless-btn" data-bless="${esc(p.id)}">благословить · ${cost} маны</button>`;
+  }
   return (
     `<article class="ins-card${active ? '' : ' dim'}"><h4>${esc(p.summary || p.title || p.id)}</h4>` +
     `<div class="muted small">${esc(meta)}</div>` +
@@ -652,10 +669,10 @@ function renderProcessesTab(d) {
   const done = list.filter((p) => p.status && p.status !== 'active' && p.status !== 'paused');
   const activeBlock = block(
     `Дела (${active.length})`,
-    active.length ? active.map((p) => processCard(p, { viewerId: d.id })).join('') : '<p class="muted">активных дел нет</p>',
+    active.length ? active.map((p) => processCard(p, { viewerId: d.id, mana: d.mana })).join('') : '<p class="muted">активных дел нет</p>',
   );
   const doneBlock = done.length
-    ? block(`Закрытые дела (${done.length})`, done.map((p) => processCard(p, { viewerId: d.id })).join(''))
+    ? block(`Закрытые дела (${done.length})`, done.map((p) => processCard(p, { viewerId: d.id, mana: d.mana })).join(''))
     : '';
   return note + activeBlock + doneBlock + renderOrdersBlocks(d);
 }

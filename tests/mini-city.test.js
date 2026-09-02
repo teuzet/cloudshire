@@ -10,6 +10,10 @@ const statsCfg = {
     name: 'Вера',
     about: 'Насколько город ещё верит, что ты — его бог.',
   },
+  mana: {
+    name: 'Мана',
+    about: 'Сила, которой ты благословляешь дела.',
+  },
   stats: [
     { id: 'prosperity', name: 'Благосостояние', about: 'Сыты ли дворы и полны ли склады.' },
     { id: 'security', name: 'Безопасность', about: 'Спит ли улица спокойно.' },
@@ -79,7 +83,7 @@ test('мини-аппка: свои истории и участие в сопр
     stats: { prosperity: 55, security: 40, knowledge: 62, influence: 50 },
     officers: [
       { id: 'off_t', office: 'treasurer', statId: 'prosperity', title: 'Казначей', name: 'Элара', processId: null },
-      { id: 'off_m', office: 'marshal', statId: 'security', title: 'Воевода', name: 'Кален', processId: 'act_cf' },
+      { id: 'off_m', office: 'marshal', statId: 'security', title: 'Маршал', name: 'Кален', processId: 'act_cf' },
       { id: 'off_k', office: 'keeper', statId: 'knowledge', title: 'Хранитель', name: 'Мира', processId: 'act_1' },
       { id: 'off_c', office: 'chancellor', statId: 'influence', title: 'Канцлер', name: 'Орен', processId: null },
     ],
@@ -102,12 +106,15 @@ test('мини-аппка: свои истории и участие в сопр
           summary: 'Осмотреть колодец',
           detail: 'Спуститься ночью.',
           monthsLeft: 2,
+          expectedMonths: 3,
+          objectiveMonths: 3,
           status: 'active',
           linkedStats: ['knowledge'],
         },
       ],
       modifiers: [],
       faith: 52,
+      mana: 40,
     },
   };
   const conflux = {
@@ -144,6 +151,8 @@ test('мини-аппка: свои истории и участие в сопр
         summary: 'Сторожить проход',
         detail: 'Дозор на мосту.',
         monthsLeft: 1,
+        expectedMonths: 2,
+        objectiveMonths: 2,
         status: 'active',
         ownerDomainId: 'd1',
         linkedStats: ['security'],
@@ -168,6 +177,14 @@ test('мини-аппка: свои истории и участие в сопр
   assert.equal(view.faith.value, 52);
   assert.equal(view.faith.name, 'Вера');
   assert.match(view.faith.about, /верит/);
+  assert.equal(view.mana.name, 'Мана');
+  assert.equal(view.mana.value, 40);
+  assert.equal(view.mana.max, 100);
+  const well = view.processes.find((p) => p.process?.summary === 'Осмотреть колодец');
+  assert.equal(well.process.blessCost, 30);
+  assert.equal(well.process.canBless, true);
+  assert.equal(fight.processes[0].blessCost, 20);
+  assert.equal(fight.processes[0].canBless, true);
   assert.equal(knowledge.about, 'Помнит ли город, как лечить и читать.');
   assert.equal(view.orders[0].indefinite, false);
   assert.equal(view.orders[0].remainingMonths, 2);

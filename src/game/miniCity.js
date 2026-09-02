@@ -1,6 +1,7 @@
 import { statEpithet } from './stats.js';
 import { plotConcerns } from './confluxBoard.js';
 import { activeProcesses, pausedProcesses, processOwnedBy } from './processes.js';
+import { blessManaCost, currentMana } from './mana.js';
 import { listStandingOrders } from './orders.js';
 import { gameDateFromTickIndex, worldDateLabel } from './tickClock.js';
 import { domainHasIslandImage, officerHasPortrait } from '../storage/r2.js';
@@ -42,21 +43,27 @@ function ownProcesses(domain, conflux) {
   return out;
 }
 
-function slimProcess(process, config) {
+function slimProcess(process, config, { mana = 0 } = {}) {
   const names = (process.linkedStats || [])
     .map((id) => statName(config, id))
     .filter(Boolean);
   const left = Number(process.monthsLeft);
+  const cost = blessManaCost(process);
+  const active = !process.status || process.status === 'active';
   return {
+    id: process.id,
     summary: clip(process.summary || 'Дело', 120),
     detail: clip(process.detail || '', 600),
     monthsLeft: Number.isFinite(left) ? Math.max(0, left) : null,
     paused: process.status === 'paused',
     linkedStats: names,
+    blessed: Boolean(process.blessed),
+    blessCost: cost,
+    canBless: active && process.status !== 'paused' && !process.blessed && mana >= cost,
   };
 }
 
-function collectEvents(domain, conflux, config) {
+function collectEvents(domain, conflux, config, mana = 0) {
   const id = String(domain.id);
   const byId = new Map();
   for (const p of domain.plotlines || []) {
@@ -74,7 +81,7 @@ function collectEvents(domain, conflux, config) {
     return {
       title: clip(plot.title || 'История', 80),
       synopsis: clip(plot.synopsis || '', 600),
-      processes: procs.filter((pr) => related.has(String(pr.id))).map((pr) => slimProcess(pr, config)),
+      processes: procs.filter((pr) => related.has(String(pr.id))).map((pr) => slimProcess(pr, config, { mana })),
     };
   });
 }
@@ -96,6 +103,7 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
   }
 
   const tick = world?.tickIndex ?? world?.gameDate?.tick ?? null;
+  const mana = currentMana(domain);
   const stats = (config?.stats || []).map((def) => {
     const value = Number(domain.stats?.[def.id]);
     const v = Number.isFinite(value) ? Math.max(0, Math.min(100, Math.round(value))) : 50;
@@ -119,7 +127,7 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
             hasPortrait: officerHasPortrait(officer),
             portraitUrl: officer.portraitUrl || null,
             busy: Boolean(officer.processId),
-            process: proc ? slimProcess(proc, config) : null,
+            process: proc ? slimProcess(proc, config, { mana }) : null,
           }
         : null,
     };
@@ -159,8 +167,17 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
               280,
             ),
           },
+    mana: {
+      name: config.mana?.name || 'Мана',
+      value: mana,
+      max: 100,
+      about: clip(
+        config.mana?.about || 'Сила, которой ты благословляешь дела города.',
+        280,
+      ),
+    },
     stats,
-    events: collectEvents(domain, conflux, config),
+    events: collectEvents(domain, conflux, config, mana),
     processes: (domain.officers || []).map((o) => {
       const proc = o.processId
         ? ownProcesses(domain, conflux).find((p) => p.id === o.processId)
@@ -172,7 +189,7 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
         officerId: o.id,
         hasPortrait: officerHasPortrait(o),
         portraitUrl: o.portraitUrl || null,
-        process: proc ? slimProcess(proc, config) : null,
+        process: proc ? slimProcess(proc, config, { mana }) : null,
       };
     }),
     orders,

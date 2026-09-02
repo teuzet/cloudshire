@@ -1,4 +1,5 @@
 import { newId } from './ids.js';
+import { parseSeedConfig } from './seedTemp.js';
 import { textsLookSame } from './processes.js';
 import { normalizeTruthGraph, judgeTruthGraph, parseMysteryShapes, normalizeFactList, RESOLUTION_FACT_MAX } from './mysteryGraph.js';
 import { normalizeDiscoveryLadder, normalizeHiddenPremises, judgeSuspenseCore } from './suspenseGraph.js';
@@ -427,6 +428,7 @@ export function plotConfig(config) {
       seedCooldownMonths: Math.max(0, Math.min(12, Number(board.seedCooldownMonths) ?? 2)),
       sequelChance: Math.max(0, Math.min(1, Number(board.sequelChance ?? 0.55))),
     },
+    seed: parseSeedConfig(p.seed),
     beats: {
       maxPerTick: Math.max(1, Math.min(6, Number(beats.maxPerTick) || 3)),
       baseChance: Number(beats.baseChance ?? 0.15),

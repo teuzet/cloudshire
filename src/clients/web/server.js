@@ -356,6 +356,32 @@ export function createWebServer({ config, app, runtime, storage }) {
     }
   });
 
+  server.post('/api/mini/bless', async (req, res) => {
+    try {
+      const who = resolveMiniUser(req);
+      if (!who.ok) return res.status(who.status).json({ error: who.error, message: who.message || null });
+      const processId = String(req.body?.processId || '').trim();
+      const result = await app.blessOwnProcess(who.userId, processId);
+      if (!result.ok) {
+        const status =
+          result.error === 'ticking'
+            ? 409
+            : result.error === 'not_found' || result.error === 'no_domain'
+              ? 404
+              : 400;
+        return res.status(status).json({
+          ...result,
+          error: result.error,
+          message: result.message || result.error,
+        });
+      }
+      res.json({ ok: true, mana: result.mana, cost: result.cost });
+    } catch (err) {
+      req.log?.error('http.error', { error: err.message });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   server.get('/api/mini/officer-portrait/:officerId', async (req, res) => {
     try {
       const who = resolveMiniUser(req);
@@ -526,6 +552,8 @@ export function createWebServer({ config, app, runtime, storage }) {
               ageYears: ch.ageYears ?? null,
             })),
             stats: statsWithEpithets(domain.stats, config),
+            faith: domain.state?.faith ?? null,
+            mana: domain.state?.mana ?? 0,
             tags: (domain.tags || []).map((t) => t.tagName || t.tagId),
             processes: domain.state?.pendingActions || [],
             standingOrders: (domain.state?.modifiers || []).map((m) => ({

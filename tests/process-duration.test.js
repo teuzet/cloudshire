@@ -11,7 +11,7 @@ import {
   blessProcess,
   processOwnedBy,
 } from '../src/game/processes.js';
-import { rollProcessFinish, finishFailChance, formatFinishForPrompt, FINISH_SHORT } from '../src/game/rolls.js';
+import { rollProcessFinish, finishFailChance, formatFinishForPrompt, FINISH_SHORT, applyBlessShift } from '../src/game/rolls.js';
 
 function action(extra = {}) {
   return normalizeProcess({
@@ -127,7 +127,7 @@ test('объективный срок живёт отдельно от назн�
   assert.equal(processIsFresh(a), true);
 });
 
-test('благословение своего дела даёт критический успех без броска', () => {
+test('благословение своего дела сдвигает исход на ступень вверх', () => {
   const process = action({
     monthsLeft: 1,
     monthsDone: 2,
@@ -138,6 +138,7 @@ test('благословение своего дела даёт критичес
   assert.equal(blessed.ok, true);
   assert.equal(process.blessed, true);
   assert.equal(process.blessedTick, 4);
+  assert.equal(process.blessCost, 30);
   const again = blessProcess(process);
   assert.equal(again.ok, false);
   assert.equal(again.error, 'already_blessed');
@@ -152,12 +153,30 @@ test('благословение своего дела даёт критичес
     { tick: 9, rng: () => 0 },
   );
   assert.equal(outcomes[0].finished, true);
-  assert.equal(outcomes[0].finish, 'crit');
+  assert.equal(outcomes[0].finish, 'ok');
+  assert.equal(process.finishRolled, 'fail');
   assert.equal(outcomes[0].blessed, true);
   assert.match(outcomes[0].finishLabel, /благослов/i);
-  assert.match(outcomes[0].finishLabel, /\[КРИТИЧЕСКИЙ УСПЕХ\]/);
-  assert.equal(process.finishKind, 'crit');
+  assert.match(outcomes[0].finishLabel, /\[УСПЕХ\]/);
+  assert.equal(process.finishKind, 'ok');
   assert.equal(process.finishBlessed, true);
+});
+
+test('благословение без маны не ставится', () => {
+  const process = action({ objectiveMonths: 3, expectedMonths: 3 });
+  const domain = { state: { mana: 20, pendingActions: [process] } };
+  const denied = blessProcess(process, { tick: 1, domain });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error, 'no_mana');
+  assert.equal(process.blessed, false);
+  assert.equal(domain.state.mana, 20);
+
+  domain.state.mana = 30;
+  const paid = blessProcess(process, { tick: 1, domain });
+  assert.equal(paid.ok, true);
+  assert.equal(paid.cost, 30);
+  assert.equal(domain.state.mana, 0);
+  assert.equal(process.blessed, true);
 });
 
 test('закрытое дело благословить нельзя, чужое — не своё', () => {
@@ -172,8 +191,13 @@ test('токен исхода в промпте совпадает со слов
   assert.equal(FINISH_SHORT.fail, '[ПРОВАЛ]');
   assert.equal(FINISH_SHORT.ok, '[УСПЕХ]');
   assert.equal(FINISH_SHORT.crit, '[КРИТИЧЕСКИЙ УСПЕХ]');
+  assert.equal(applyBlessShift('fail'), 'ok');
+  assert.equal(applyBlessShift('ok'), 'crit');
+  assert.equal(applyBlessShift('crit'), 'crit');
   assert.match(formatFinishForPrompt('fail'), /^\[ПРОВАЛ\]\. \[ПРОВАЛ\]:/);
   assert.match(formatFinishForPrompt('ok'), /^\[УСПЕХ\]\. \[УСПЕХ\]:/);
   assert.match(formatFinishForPrompt('crit'), /^\[КРИТИЧЕСКИЙ УСПЕХ\]\. \[КРИТИЧЕСКИЙ УСПЕХ\]:/);
-  assert.match(formatFinishForPrompt('crit', { blessed: true }), /^\[КРИТИЧЕСКИЙ УСПЕХ\]\. \[КРИТИЧЕСКИЙ УСПЕХ\] по благословению/);
+  assert.match(formatFinishForPrompt('ok', { blessed: true }), /^\[УСПЕХ\]\./);
+  assert.match(formatFinishForPrompt('crit', { blessed: true }), /сдвинул/);
+  assert.doesNotMatch(formatFinishForPrompt('ok', { blessed: true }), /гарант/i);
 });

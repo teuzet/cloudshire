@@ -341,7 +341,7 @@ export class GameApp {
             let step = 2;
             if (/ядро/i.test(label)) step = 1;
             else if (/описание|аспект/i.test(label)) step = 2;
-            else if (/сил|столп/i.test(label)) step = 3;
+            else if (/сил|сановн|столп/i.test(label)) step = 3;
             else if (/истори/i.test(label)) step = 3;
             else if (/собран|готов/i.test(label)) step = 3;
             await pushProgress(step, label);
@@ -1083,13 +1083,13 @@ export class GameApp {
     const stewardActs = (opts.stewardActs || []).filter((a) => a && a.kind && a.kind !== 'none');
     const stewardHint = stewardActs.length
       ? [
-          'В этом месяце, пока покровитель молчал, действовал столп — не ты сам. Назови его должность и имя.',
+          'В этом месяце, пока покровитель молчал, действовал сановник — не ты сам. Назови его должность и имя.',
           ...stewardActs.map((a) =>
             a.kind === 'process'
               ? `- ${a.office ? `${a.office} ` : ''}${a.officerName || ''} взялся за дело: ${a.summary}`
               : `- ${a.kind}: ${a.summary || a.text || ''}`,
           ),
-          'Не приписывай решение себе. Жрец только передаёт, что столп распорядился.',
+          'Не приписывай решение себе. Жрец только передаёт, что сановник распорядился.',
         ].join('\n')
       : '';
     const silenceAngles = [
@@ -1451,7 +1451,7 @@ export class GameApp {
   }
 
   /**
-   * Покровитель благословляет своё ещё идущее дело: при завершении исход будет критическим.
+   * Покровитель благословляет своё ещё идущее дело: +1 к исходу за ману.
    */
   async blessOwnProcess(userId, processId) {
     const uid = String(userId || '').trim();
@@ -1472,14 +1472,16 @@ export class GameApp {
     if (!processOwnedBy(process, domain.id)) {
       return { ok: false, error: 'not_own', message: 'благословить можно только своё дело' };
     }
-    const result = blessProcess(process, { tick: world.tickIndex });
+    const result = blessProcess(process, { tick: world.tickIndex, domain });
     if (!result.ok) {
       const message =
         result.error === 'already_blessed'
           ? 'это дело уже благословлено'
           : result.error === 'not_active'
             ? 'дело уже закрыто'
-            : 'не удалось благословить';
+            : result.error === 'no_mana'
+              ? `не хватает маны: нужно ${result.cost}, есть ${result.mana}`
+              : 'не удалось благословить';
       return { ok: false, error: result.error, message };
     }
 
@@ -1487,7 +1489,7 @@ export class GameApp {
     domain.state.monthLog.push({
       tick: world.tickIndex ?? null,
       at: new Date().toISOString(),
-      text: `Покровитель благословил дело «${process.summary}».`,
+      text: `Покровитель благословил дело «${process.summary}» (${result.cost} маны).`,
       plotIds: process.plotlineId ? [process.plotlineId] : [],
     });
     if (domain.state.monthLog.length > 12) {
@@ -1504,8 +1506,10 @@ export class GameApp {
       domainId: domain.id,
       processId: process.id,
       summary: process.summary,
+      cost: result.cost,
+      mana: result.mana,
     });
-    return { ok: true, process };
+    return { ok: true, process, cost: result.cost, mana: result.mana };
   }
 
   async getChronicle(domainId) {

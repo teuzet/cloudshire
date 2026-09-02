@@ -33,7 +33,7 @@ test('портрет мужчины явно просит мужчину', () =>
     officer: {
       name: 'Делмир',
       gender: 'male',
-      title: 'Воевода',
+      title: 'Маршал',
       office: 'marshal',
       look: { ageYears: 54, build: 'высокий' },
     },
@@ -54,7 +54,7 @@ test('вид согласуется с полом; неполный look доб�
   assert.ok(officer.look.clothing);
 });
 
-test('восстановленный столп из lore получает полный look', () => {
+test('восстановленный сановник из lore получает полный look', () => {
   const domain = {
     id: 'd1',
     officers: [

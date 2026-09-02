@@ -7,7 +7,7 @@ import {
   normalizeCityModifiers,
 } from '../src/game/cityContext.js';
 
-test('агентам бриф, сразу после него — постоянные дописки с датой', () => {
+test('агентам только бриф; старые дописки в промпт не идут', () => {
   const domain = {
     cityBrief: 'Город стоит у цистерн и держит ночной дозор.',
     description: 'Длинный генезис, который агентам тика не нужен.',
@@ -19,12 +19,9 @@ test('агентам бриф, сразу после него — постоян
     sinceTick: 4,
     sinceLabel: 'Год 1, месяц 4',
   });
-  const text = formatCityForAgents(domain);
-  assert.match(text, /Город стоит у цистерн/);
-  assert.match(text, /Постоянные изменения города/);
-  assert.match(text, /Год 1, месяц 4/);
-  assert.match(text, /Нижний ярус/);
-  assert.equal(text.indexOf('Город стоит') < text.indexOf('Постоянные изменения'), true);
+  assert.equal(formatCityForAgents(domain), 'Город стоит у цистерн и держит ночной дозор.');
+  const leftover = formatCityModifiersForPrompt(domain);
+  assert.match(leftover, /Нижний ярус/);
 });
 
 test('без брифа — запасной description; указы в state.modifiers не попадают в дописки', () => {

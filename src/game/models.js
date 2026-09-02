@@ -5,6 +5,7 @@ import { stampPersonAge } from './ages.js';
 import { normalizeCityEntities } from './cityEntities.js';
 import { applyClockAlignedCalendar } from './tickClock.js';
 import { normalizeCityModifiers } from './cityContext.js';
+import { emptySeedTemp, normalizeSeedTemp } from './seedTemp.js';
 import {
   ensureDomainClimates,
   loadStarterMysteryPool,
@@ -16,7 +17,7 @@ export function emptyState() {
   return {
     // Временные процессы месяца/сезона (бунт, фестиваль, осада…)
     events: [],
-    // Указы больше не живут здесь. Постоянные дописки к городу — domain.modifiers.
+    // Указы живут на plotline. Постоянный след города — в cityBrief (генезис), не здесь.
     modifiers: [],
     // Заявки правителя на создать/править/снять порядок. Карточку пишет агент в начале месяца.
     pendingOrderRequests: [],
@@ -30,6 +31,9 @@ export function emptyState() {
     patronName: null,
     // Вера — среднее четырёх статов, не ключ в domain.stats
     faith: null,
+    mana: 0,
+    manaAccrue: 0,
+    seedTemp: emptySeedTemp(),
   };
 }
 
@@ -47,6 +51,9 @@ export function normalizeDomain(domain) {
     if (!Array.isArray(domain.state.quietPicks)) domain.state.quietPicks = [];
     if (!('patronName' in domain.state)) domain.state.patronName = null;
     if (!Number.isFinite(Number(domain.state.faith))) domain.state.faith = null;
+    if (!Number.isFinite(Number(domain.state.mana))) domain.state.mana = 0;
+    if (!Number.isFinite(Number(domain.state.manaAccrue))) domain.state.manaAccrue = 0;
+    domain.state.seedTemp = normalizeSeedTemp(domain.state.seedTemp);
   }
   if (!Array.isArray(domain.officers)) domain.officers = [];
   for (const o of domain.officers) {

@@ -421,11 +421,11 @@ export function buildRulerTools(domain, storage, character, ctx) {
           'fresh=true — дело ещё не сдвинулось: update_process может переписать его целиком. ' +
           'fresh=false — только дополни поручение и при нужде поменяй оставшийся срок (не меньше 1 мес.). ' +
           'goal — одной фразой, что считается достигнутой целью; можно не заполнять. ' +
-          'blessed=true — покровитель уже благословил это дело; исход будет [КРИТИЧЕСКИЙ УСПЕХ], так и помни. ' +
+          'blessed=true — покровитель благословил это дело: исход сдвинется на ступень вверх (провал→успех, успех→крит). ' +
           'pausedProcesses — на паузе: прогресс жив, слот свободен, тик не идёт. Снять паузу — resume_process, если есть слот. ' +
           'recentlyClosed[].outcome — итог [ПРОВАЛ] / [УСПЕХ] / [КРИТИЧЕСКИЙ УСПЕХ]; про них не говори «не знаю». ' +
-          'Недавно закрытое дело столпа не занимает: он свободен для нового поручения. ' +
-          'Если покровитель хочет столпа, у которого в officers/processes уже есть ИДУЩЕЕ дело — назови это дело и предложи pause_process или revoke_process, затем declare_process. ' +
+          'Недавно закрытое дело сановника не занимает: он свободен для нового поручения. ' +
+          'Если покровитель хочет сановника, у которого в officers/processes уже есть ИДУЩЕЕ дело — назови это дело и предложи pause_process или revoke_process, затем declare_process. ' +
           'Для update_process / revoke_process бери id из processes[].id. ' +
           'Если id не помнишь — передай краткий смысл дела в processId (например «университет»), система найдёт. ' +
           'Покровитель уточняет уже идущую ту же работу (новый вопрос к тому же дознанию, другой темп) — update_process, commitment=process. Не отказывай и не заводи второе. ' +
@@ -640,7 +640,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
         'Длительное дело: стройка, суд, поход, снабжение. Не для мгновенных постоянных приказов — declare_standing_order. ' +
         'Если воля ещё неясна — не вызывай, спроси покровителя (commitment=clarify). ' +
         'Срок сам не оценивай: его посчитает отдельный оценщик. ' +
-        'Отказы: too_many_processes (все столпы заняты), officer_busy (названный столп уже ведёт другое). ' +
+        'Отказы: too_many_processes (все сановники заняты), officer_busy (названный сановник уже ведёт другое). ' +
         'В речи — человеческая причина; предложи паузу или отмену текущего, не «доска» и не «слот».',
       parameters: {
         type: 'object',
@@ -679,17 +679,17 @@ export function buildRulerTools(domain, storage, character, ctx) {
           office: {
             type: 'string',
             description:
-              'Должность столпа, если покровитель назвал конкретного (treasurer/marshal/keeper/chancellor). ' +
+              'Должность сановника, если покровитель назвал конкретного (treasurer/marshal/keeper/chancellor). ' +
               'Пусто + randomOfficer — движок выберет случайного свободного.',
           },
           randomOfficer: {
             type: 'boolean',
-            description: 'true, если покровитель сказал «разберитесь сами» / не назвал столпа.',
+            description: 'true, если покровитель сказал «разберитесь сами» / не назвал сановника.',
           },
           insistOffPortfolio: {
             type: 'boolean',
             description:
-              'true только после спора: покровитель настаивает отправить не того столпа.',
+              'true только после спора: покровитель настаивает отправить не того сановника.',
           },
           onBehalfOf: { type: 'string', default: 'patron' },
           characterNote: { type: 'string' },
@@ -750,7 +750,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
             max: slots.max,
             busyWith: slots.busy,
             agentMessage:
-              'ОТКАЗ: все столпы заняты (' +
+              'ОТКАЗ: все сановники заняты (' +
               `${slots.active}/${slots.max}` +
               '). Это НЕ «похожее дело». ' +
               'В речи: назови, кто чем занят; предложи приостановить (pause_process) или свернуть (revoke_process) одно, ' +
@@ -783,7 +783,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
           return toolFail(
             'linked_stats_required',
             `linkedStats обязательны — ровно один id из: ${(ctx.config.stats || []).map((s) => s.id).join(', ')}. ` +
-              'Это стат характера задачи, не должности столпа.',
+              'Это стат характера задачи, не должности сановника.',
           );
         }
         const linkedStat = linked[0];
@@ -796,7 +796,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
             'officer_required',
             named
               ? officerBusyAgentMessage(named, officerActiveProcess(domain, named) || { summary: 'другое поручение' })
-              : 'Нет свободного столпа. Предложи паузу или отмену одного из идущих дел.',
+              : 'Нет свободного сановника. Предложи паузу или отмену одного из идущих дел.',
           );
         }
         const stillBusy = officerActiveProcess(domain, officer);

@@ -45,6 +45,8 @@ import { resolveSuspenseLegacy } from './legacyResolver.js';
 import { scoreMonthStats, factsForStatJudge } from './statJudge.js';
 import { runSteward } from './steward.js';
 import { getLogger } from '../log.js';
+import { grantManaForTick } from './mana.js';
+import { maybeRewriteCityGenesis } from './genesisRewrite.js';
 import { realignFinishedOutcomes } from './plotAlign.js';
 import {
   hydrateDomainFromConflux,
@@ -82,6 +84,7 @@ export async function resolveDomainMonth({
   normalizePlotlines(working, config);
   normalizeDomainProcesses(working, config);
   if (typeof working.population !== 'number') working.population = config.genesis.population.min;
+  grantManaForTick(working);
 
   const cfg = plotConfig(config);
   const chronicleAdds = [];
@@ -436,6 +439,14 @@ export async function resolveDomainMonth({
   // 9. Хранитель: синопсисы по свежей хронике; «история всплыла» → жар считает движок.
   const kept = await keepStories({
     config,
+    runtime,
+    domain: working,
+    world,
+    chronicleAdds,
+    log,
+  });
+
+  await maybeRewriteCityGenesis({
     runtime,
     domain: working,
     world,

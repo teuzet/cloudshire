@@ -182,3 +182,15 @@ h1 {
 }
 
 .tab.on { color: var(--accent); background: rgba(228, 201, 138, 0.12); }
+
+.bless-btn {
+  font: inherit;
+  font-size: 0.85rem;
+  margin-top: 0.55rem;
+  padding: 0.4rem 0.7rem;
+  color: #12100e;
+  background: var(--accent);
+  border: 0;
+  border-radius: 10px;
+}
+.bless-btn:disabled { opacity: 0.55; }

@@ -184,8 +184,15 @@ export const FINISH_LABELS = {
   ok: '[УСПЕХ]: цель достигнута без побочных эффектов или с небольшими негативными',
   crit: '[КРИТИЧЕСКИЙ УСПЕХ]: цель достигнута триумфально',
   blessed:
-    '[КРИТИЧЕСКИЙ УСПЕХ] по благословению покровителя: цель достигнута триумфально, явно сверх смертных сил',
+    'Благословение покровителя сдвинуло исход на ступень вверх (провал→успех, успех→крит).',
 };
+
+/** Провал→успех, успех→крит. Крит остаётся критом. */
+export function applyBlessShift(finish) {
+  if (finish === 'fail') return 'ok';
+  if (finish === 'ok') return 'crit';
+  return finish === 'crit' ? 'crit' : finish;
+}
 
 /** Токен исхода — тот же, что в инструкциях агентов. */
 export function finishTag(finish) {
@@ -194,9 +201,9 @@ export function finishTag(finish) {
 
 /** Строка для промпта: сначала токен [ПРОВАЛ]/[УСПЕХ]/[КРИТИЧЕСКИЙ УСПЕХ], затем толкование. */
 export function formatFinishForPrompt(finish, { blessed = false } = {}) {
-  if (blessed) return `${FINISH_SHORT.crit}. ${FINISH_LABELS.blessed}`;
   const tag = FINISH_SHORT[finish] || FINISH_SHORT.ok;
   const gloss = FINISH_LABELS[finish] || FINISH_LABELS.ok;
+  if (blessed) return `${tag}. ${gloss} ${FINISH_LABELS.blessed}`;
   return `${tag}. ${gloss}`;
 }
 
