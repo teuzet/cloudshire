@@ -14,13 +14,21 @@ import {
   PLOT_SUMMARY_MAX,
   plotConfig,
   parseFreeformGravity,
+  parseFreeformUrgency,
+  maxFailsForGravity,
+  normalizeFreeformEndings,
+  formatFreeformEndings,
   FREEFORM_GRAVITY,
+  FREEFORM_URGENCY,
+  FREEFORM_URGENCY_MONTHS,
+  clampFreeformDepth,
+  defaultFreeformMaxDepth,
 } from './plotlines.js';
 import { createLoreFact, chronicleEntries } from './models.js';
 import { gameDateFromTickIndex, worldDateLabel } from './tickClock.js';
 import { formatCityForAgents } from './cityContext.js';
 import { formatOfficersCastHint } from './officers.js';
-import { normalizeHiddenPremises } from './suspenseGraph.js';
+import { normalizeBeatDynamics } from './freeformDynamics.js';
 
 export const FREEFORM_FINISH = ['fail', 'ok', 'crit'];
 
@@ -30,7 +38,144 @@ const FINISH_LABEL = {
   crit: 'КРИТИЧЕСКИЙ УСПЕХ',
 };
 
-export { parseFreeformGravity, FREEFORM_GRAVITY };
+export {
+  parseFreeformGravity,
+  parseFreeformUrgency,
+  maxFailsForGravity,
+  formatFreeformEndings,
+  FREEFORM_GRAVITY,
+  FREEFORM_URGENCY,
+  clampFreeformDepth,
+  defaultFreeformMaxDepth,
+};
+
+const FREEFORM_MAX_DEPTH_TABLE = {
+  SITUATION: [
+    { depth: 1, weight: 6 },
+    { depth: 2, weight: 4 },
+  ],
+  EPISODE: [
+    { depth: 2, weight: 5 },
+    { depth: 3, weight: 5 },
+  ],
+  CRISIS: [
+    { depth: 3, weight: 7 },
+    { depth: 4, weight: 3 },
+  ],
+  RUPTURE: [
+    { depth: 3, weight: 4 },
+    { depth: 4, weight: 6 },
+  ],
+};
+
+function freeformDepthPair(plot) {
+  if (!plot || plot.storyType !== 'freeform') return null;
+  const max = clampFreeformDepth(plot.maxDepth, defaultFreeformMaxDepth(plot.gravity));
+  const cur = Math.max(0, Math.round(Number(plot.depth) || 0));
+  return { cur, max };
+}
+
+export function sampleFreeformMaxDepth(gravity, rng = Math.random) {
+  const rows = FREEFORM_MAX_DEPTH_TABLE[parseFreeformGravity(gravity)] || FREEFORM_MAX_DEPTH_TABLE.EPISODE;
+  const total = rows.reduce((sum, row) => sum + row.weight, 0);
+  let r = rng() * total;
+  for (const row of rows) {
+    r -= row.weight;
+    if (r <= 0) return row.depth;
+  }
+  return rows[rows.length - 1].depth;
+}
+
+export function advanceFreeformDepth(plot) {
+  if (!plot || plot.storyType !== 'freeform') return plot;
+  plot.depth = Math.max(0, Math.round(Number(plot.depth) || 0)) + 1;
+  return plot;
+}
+
+export function formatFreeformDepth(plot) {
+  const pair = freeformDepthPair(plot);
+  return pair ? `глубина ${pair.cur}/${pair.max}` : '';
+}
+
+export function formatFreeformProgress(plot) {
+  if (!plot || !isFreeformPlot(plot)) return '';
+  const urgency = parseFreeformUrgency(plot.urgency);
+  const maxFails = Number.isFinite(Number(plot.maxFails))
+    ? Math.max(0, Math.floor(Number(plot.maxFails)))
+    : maxFailsForGravity(plot.gravity);
+  const failCount = Number.isFinite(Number(plot.failCount)) ? Math.floor(Number(plot.failCount)) : 0;
+  const countdown = plot.countdown != null ? `${plot.countdown} мес.` : '—';
+  return [
+    formatFreeformDepth(plot),
+    `провалы ${failCount}/${maxFails}`,
+    `urgency ${urgency}, автотик через ${countdown}`,
+  ].join('; ');
+}
+
+export function applyFreeformProgress(plot, { finish = 'ok', autotick = false } = {}) {
+  if (!plot || plot.storyType !== 'freeform') return plot;
+  plot.depth = Math.max(0, Math.round(Number(plot.depth) || 0)) + 1;
+  if (autotick || finish === 'fail') {
+    plot.failCount = Math.round(Number(plot.failCount) || 0) + 1;
+  } else if (finish === 'crit') {
+    plot.failCount = Math.round(Number(plot.failCount) || 0) - 1;
+  }
+  return plot;
+}
+
+export function freeformTickDecision(plot, { relation = 'RELATED', finish = 'ok', autotick = false, endingId = null } = {}) {
+  const maxFails = plot?.maxFails ?? maxFailsForGravity(plot?.gravity);
+  const maxDepth = plot?.maxDepth ?? defaultFreeformMaxDepth(plot?.gravity);
+  if (autotick || finish === 'fail') {
+    if ((Number(plot?.failCount) || 0) > maxFails) return { kind: 'closeBad' };
+    return { kind: 'continue', polarity: 'bad' };
+  }
+  if (relation === 'DIRECT' && (finish === 'ok' || finish === 'crit')) {
+    if ((Number(plot?.depth) || 0) >= maxDepth) {
+      return { kind: 'closeDirect', endingId: endingId || null };
+    }
+    return { kind: 'continue', polarity: 'good' };
+  }
+  return { kind: 'continue', polarity: 'good' };
+}
+
+export function rollFreeformCountdown(urgency, rng = Math.random) {
+  const band = FREEFORM_URGENCY_MONTHS[parseFreeformUrgency(urgency)] || FREEFORM_URGENCY_MONTHS.MEDIUM;
+  const lo = band[0];
+  const hi = band[1];
+  return lo + Math.floor(rng() * (hi - lo + 1));
+}
+
+export function endingsOfKind(plot, kind) {
+  const want = String(kind || '').toUpperCase();
+  return (plot?.endings || []).filter((e) => e.kind === want);
+}
+
+export function pickEndingsForPack(plot, kind, n = 3) {
+  const want = String(kind || '').toUpperCase();
+  let pool = endingsOfKind(plot, kind);
+  if (!pool.length) {
+    pool = [
+      {
+        id: `end_${want.toLowerCase()}`,
+        kind: want || 'BAD_ENDING',
+        text:
+          want === 'GOOD_ENDING'
+            ? 'Ставки истории сыграли.'
+            : want === 'NEUTRAL_ENDING'
+              ? 'Дело сошлось без победы и крушения.'
+              : 'Ставки истории проиграны.',
+      },
+    ];
+  }
+  return Array.from({ length: n }, (_, i) => pool[i % pool.length]);
+}
+
+export function findPlotEnding(plot, endingId) {
+  const id = String(endingId || '').trim();
+  if (!id) return null;
+  return (plot?.endings || []).find((e) => e.id === id) || null;
+}
 
 const DEFAULT_CONTINUATION_AUTHORS = [
   { id: 'poe', name: 'Эдгар Аллан По' },
@@ -182,6 +327,7 @@ export function freeformConfig(config) {
       .map((id) => String(id || '').trim())
       .filter(Boolean),
     continuationAuthors: normalizeContinuationAuthors(raw.continuationAuthors),
+    beatDynamics: normalizeBeatDynamics(raw.beatDynamics),
     gravity: normalizeGravityCatalog(raw.gravity),
   };
 }
@@ -200,7 +346,7 @@ export function clampUrgency(n, fallback = 40) {
 export function clampFreeformCountdown(n, fallback = null) {
   const v = Math.round(Number(n));
   if (!Number.isFinite(v)) return fallback;
-  return Math.max(1, Math.min(5, v));
+  return Math.max(1, Math.min(8, v));
 }
 
 /** Только названия живых нитей — для судьи, не бриф города. */
@@ -270,8 +416,11 @@ export function appendChronicle(domain, world, { text, plotId = null, author, im
   return fact;
 }
 
-export function createFreeformPlot({ domain, world, variant, config, seedChronicleId = null }) {
+export function createFreeformPlot({ domain, world, variant, config, seedChronicleId = null, rng = Math.random }) {
   const countdown = clampFreeformCountdown(variant.countdown);
+  const gravity = parseFreeformGravity(variant.gravity);
+  const maxDepth = clampFreeformDepth(variant.maxDepth, sampleFreeformMaxDepth(gravity, rng));
+  const urgency = parseFreeformUrgency(variant.urgency);
   const plot = createPlotline({
     title: variant.title,
     synopsis: variant.synopsis || variant.chronicle,
@@ -279,8 +428,13 @@ export function createFreeformPlot({ domain, world, variant, config, seedChronic
     kind: 'story',
     storyType: 'freeform',
     hiddenPremises: variant.hiddenPremises,
-    urgency: Number.isFinite(Number(variant.urgency)) ? variant.urgency : 0,
-    gravity: parseFreeformGravity(variant.gravity),
+    urgency,
+    gravity,
+    depth: Math.max(0, Math.round(Number(variant.depth) || 0)),
+    maxDepth,
+    failCount: Math.round(Number(variant.failCount) || 0),
+    maxFails: maxFailsForGravity(gravity),
+    endings: variant.endings,
     tick: world.tickIndex,
     config,
   });
@@ -305,11 +459,13 @@ export function applyFreeformState(plot, patch = {}) {
   if (!plot || !patch) return plot;
   if (patch.synopsis) plot.synopsis = clipPlotText(patch.synopsis, PLOT_SUMMARY_MAX);
   if (patch.closeWhen) plot.closeWhen = normalizeCloseWhenList(patch.closeWhen);
-  if (patch.hiddenPremises) plot.hiddenPremises = normalizeHiddenPremises(patch.hiddenPremises);
-  if (patch.whyMoves) plot.whyMoves = clipPlotText(patch.whyMoves, PLOT_SUMMARY_MAX);
-  if (Number.isFinite(Number(patch.urgency))) {
-    plot.urgency = Math.max(0, Math.min(100, Math.round(Number(patch.urgency))));
+  if (patch.endings) {
+    plot.endings = normalizeFreeformEndings(patch.endings);
+    plot.closeWhen = plot.endings.map((e) => e.text);
   }
+  if (patch.whyMoves) plot.whyMoves = clipPlotText(patch.whyMoves, PLOT_SUMMARY_MAX);
+  if (patch.urgency) plot.urgency = parseFreeformUrgency(patch.urgency);
+  if (Number.isFinite(Number(patch.failCount))) plot.failCount = Math.round(Number(patch.failCount));
   if (Number.isFinite(Number(patch.countdown))) {
     plot.countdown = clampFreeformCountdown(patch.countdown);
   }
@@ -345,13 +501,11 @@ export function plotCardForPrompt(plot, { revealHidden = true } = {}) {
   const lines = [
     `История «${plot.title}».`,
     `Синопсис: ${plot.synopsis || '—'}`,
-    `Исходы, которыми история может закрыться:\n${formatCloseWhen(plot)}`,
+    `Исходы:\n${formatFreeformEndings(plot) || formatCloseWhen(plot)}`,
     plot.whyMoves
       ? `whyMoves: ${plot.whyMoves}`
       : 'whyMoves: не задан.',
-    plot.countdown != null
-      ? `через ${plot.countdown} мес. без дела ситуация сама сделает ход.`
-      : `urgency: ${plot.urgency ?? '—'} (0 — сама не тикает, 100 — каждый месяц без RELATED-дела).`,
+    formatFreeformProgress(plot),
     `gravity: ${plot.gravity || '—'}`,
   ];
   if (revealHidden) {
@@ -363,6 +517,21 @@ export function plotCardForPrompt(plot, { revealHidden = true } = {}) {
     );
   }
   return lines.join('\n');
+}
+
+export function formatStoryForBeatArchitect(domain, plot) {
+  if (!plot) return '';
+  const hidden = plot.hiddenPremises || [];
+  return [
+    plot.title ? `История «${plot.title}».` : 'История.',
+    plot.synopsis || '',
+    plotChronicleForPrompt(domain, plot),
+    hidden.length
+      ? `На самом деле (в текст не пиши):\n${hidden.map((h) => `- ${h}`).join('\n')}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 export function plotChronicleForPrompt(domain, plot) {

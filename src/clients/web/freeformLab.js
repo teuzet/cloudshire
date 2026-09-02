@@ -23,7 +23,9 @@ import {
 import { brainstormFreeformPack } from '../../game/freeformBrainstorm.js';
 import { assembleFreeformLabStory } from '../../game/freeformAssemble.js';
 import { tellFreeformBeat } from '../../game/freeformTeller.js';
-import { judgeFreeformRelated } from '../../game/freeformAlign.js';
+import { judgeFreeformRelated, parseFreeformRelation } from '../../game/freeformAlign.js';
+import { refreshFreeformEndings } from '../../game/freeformEndings.js';
+import { setFreeformUrgency } from '../../game/freeformUrgency.js';
 import { worldDateLabel } from '../../game/tickClock.js';
 
 const SNAPSHOT = path.join(projectRoot(), 'fixtures', 'freeform', 'snapshot.json');
@@ -46,12 +48,19 @@ function emptySession(snapshot) {
     lastRepairPrompt: '',
     lastFinalJudgePrompt: '',
     lastAssemblePrompt: '',
-    lastCountdownPrompt: '',
+    lastEndingsPrompt: '',
+    lastUrgencyPrompt: '',
     lastAlignPrompt: '',
+    lastAlignRelation: null,
+    lastAlignEndingId: null,
     lastBeatArchitectPrompt: '',
     lastBeatJudgePrompt: '',
     lastBeatRepairPrompt: '',
+    lastBeatFinalJudgePrompt: '',
     lastBeatTellPrompt: '',
+    lastBeatVariants: [],
+    lastBeatPickedIndex: null,
+    lastMoveKind: null,
     lastChronicle: '',
     lastGravity: null,
     lastDrafts: [],
@@ -60,9 +69,51 @@ function emptySession(snapshot) {
     lastFinalReviews: [],
     lastPickedIndex: null,
     lastWarning: null,
+    undoStack: [],
     frozenAt: snapshot.frozenAt || null,
     cityName: snapshot.cityName || domain.name,
   };
+}
+
+const UNDO_LIMIT = 8;
+
+export function snapshotForUndo(session) {
+  const { undoStack: _stack, ...rest } = session;
+  return structuredClone(rest);
+}
+
+export function pushUndo(session, previous) {
+  const stack = Array.isArray(session.undoStack) ? session.undoStack : [];
+  session.undoStack = [...stack, previous].slice(-UNDO_LIMIT);
+  return session;
+}
+
+export function popUndo(session) {
+  const stack = Array.isArray(session.undoStack) ? [...session.undoStack] : [];
+  if (!stack.length) return null;
+  const prev = stack.pop();
+  prev.undoStack = stack;
+  return prev;
+}
+
+function beatVariantsPayload(told) {
+  return (told?.variants || []).map((v, i) => {
+    const index = i + 1;
+    const picked = index === Number(told.pickedIndex);
+    return {
+      index,
+      title: v.title || v.dynamicName || '',
+      text: v.text || v.whatHappens || '',
+      dynamicId: v.dynamicId || '',
+      dynamicName: v.dynamicName || v.dynamics || '',
+      dynamicHint: v.dynamicHint || '',
+      endingId: v.endingId || '',
+      endingText: v.endingText || '',
+      endingKind: v.endingKind || '',
+      picked,
+      chronicle: picked ? told.winner?.chronicle || '' : '',
+    };
+  });
 }
 
 async function readJson(file) {
@@ -113,6 +164,13 @@ function labPlot(plot) {
     ...publicPlot,
     hiddenPremises: plot.hiddenPremises || [],
     closeWhen: Array.isArray(plot.closeWhen) ? plot.closeWhen : plot.closeWhen ? [plot.closeWhen] : [],
+    endings: Array.isArray(plot.endings) ? plot.endings : [],
+    urgency: plot.urgency || null,
+    countdown: plot.countdown ?? null,
+    depth: plot.depth ?? 0,
+    maxDepth: plot.maxDepth ?? null,
+    failCount: plot.failCount ?? 0,
+    maxFails: plot.maxFails ?? null,
   };
 }
 
@@ -142,12 +200,19 @@ export function sessionPayload(session) {
     lastRepairPrompt: session.lastRepairPrompt || '',
     lastFinalJudgePrompt: session.lastFinalJudgePrompt || '',
     lastAssemblePrompt: session.lastAssemblePrompt || '',
-    lastCountdownPrompt: session.lastCountdownPrompt || '',
+    lastEndingsPrompt: session.lastEndingsPrompt || '',
+    lastUrgencyPrompt: session.lastUrgencyPrompt || '',
     lastAlignPrompt: session.lastAlignPrompt || '',
+    lastAlignRelation: session.lastAlignRelation || null,
+    lastAlignEndingId: session.lastAlignEndingId || null,
     lastBeatArchitectPrompt: session.lastBeatArchitectPrompt || '',
     lastBeatJudgePrompt: session.lastBeatJudgePrompt || '',
     lastBeatRepairPrompt: session.lastBeatRepairPrompt || '',
+    lastBeatFinalJudgePrompt: session.lastBeatFinalJudgePrompt || '',
     lastBeatTellPrompt: session.lastBeatTellPrompt || '',
+    lastBeatVariants: session.lastBeatVariants || [],
+    lastBeatPickedIndex: session.lastBeatPickedIndex ?? null,
+    lastMoveKind: session.lastMoveKind || null,
     lastChronicle: session.lastChronicle || '',
     lastGravity: session.lastGravity || null,
     lastDrafts: session.lastDrafts || [],
@@ -156,6 +221,7 @@ export function sessionPayload(session) {
     lastFinalReviews: session.lastFinalReviews || [],
     lastPickedIndex: session.lastPickedIndex ?? null,
     lastWarning: session.lastWarning,
+    canUndo: Array.isArray(session.undoStack) && session.undoStack.length > 0,
   };
 }
 
@@ -182,6 +248,7 @@ export async function seedFreeformLab({ config, runtime, text, gravity, fromCity
   return serialize(async () => {
     const log = (parentLog || getLogger()).child({ scope: 'freeform.lab.seed' });
     const session = await loadSession();
+    const previous = snapshotForUndo(session);
     let seedText;
     if (fromCity) {
       seedText = formatFreeformChronicleSeed(chronicleEntries(session.domain?.lore || []).slice(-80));
@@ -221,16 +288,24 @@ export async function seedFreeformLab({ config, runtime, text, gravity, fromCity
     session.lastRejected = [];
     session.lastJudge = null;
     session.lastAssemblePrompt = '';
-    session.lastCountdownPrompt = '';
+    session.lastEndingsPrompt = '';
+    session.lastUrgencyPrompt = '';
     session.lastAlignPrompt = '';
+    session.lastAlignRelation = null;
+    session.lastAlignEndingId = null;
     session.lastBeatArchitectPrompt = '';
     session.lastBeatJudgePrompt = '';
     session.lastBeatRepairPrompt = '';
+    session.lastBeatFinalJudgePrompt = '';
     session.lastBeatTellPrompt = '';
+    session.lastBeatVariants = [];
+    session.lastBeatPickedIndex = null;
+    session.lastMoveKind = null;
 
     if (!drafted.candidates?.length) {
       session.lastWarning = 'Не получилось породить затравки. Попробуй другую хронику или ещё раз.';
       if (session.mode === 'idle') session.mode = 'seeds';
+      pushUndo(session, previous);
       await writeSession(session);
       const err = new Error(session.lastWarning);
       err.status = 502;
@@ -241,6 +316,7 @@ export async function seedFreeformLab({ config, runtime, text, gravity, fromCity
     if (!drafted.winner) {
       session.mode = 'seeds';
       session.lastWarning = 'Судья не пропустил ни одну хронику. Попробуй другую затравку или ещё раз.';
+      pushUndo(session, previous);
       await writeSession(session);
       log.info('freeform.lab.brainstormed.no_pass', { gravity: g, count: drafted.candidates.length });
       return sessionPayload(session);
@@ -259,7 +335,8 @@ export async function seedFreeformLab({ config, runtime, text, gravity, fromCity
       log,
     });
     session.lastAssemblePrompt = assembled.assemblePrompt || '';
-    session.lastCountdownPrompt = assembled.countdownPrompt || '';
+    session.lastEndingsPrompt = '';
+    session.lastUrgencyPrompt = '';
 
     const plot = createFreeformPlot({
       domain: session.domain,
@@ -272,9 +349,24 @@ export async function seedFreeformLab({ config, runtime, text, gravity, fromCity
       plotId: plot.id,
       author: 'freeform:seed',
     });
+    const ended = await refreshFreeformEndings({
+      runtime,
+      domain: session.domain,
+      plot,
+      log,
+    });
+    const urgent = await setFreeformUrgency({
+      runtime,
+      domain: session.domain,
+      plot,
+      log,
+    });
+    session.lastEndingsPrompt = ended.prompt || '';
+    session.lastUrgencyPrompt = urgent.prompt || '';
     session.plotId = plot.id;
     session.mode = 'story';
     session.lastWarning = null;
+    pushUndo(session, previous);
     await writeSession(session);
     log.info('freeform.lab.assembled', {
       gravity: g,
@@ -286,7 +378,17 @@ export async function seedFreeformLab({ config, runtime, text, gravity, fromCity
   });
 }
 
-export async function playFreeformDeed({ config, runtime, summary, detail, durationMonths, finish, log: parentLog }) {
+export async function playFreeformDeed({
+  config,
+  runtime,
+  summary,
+  detail,
+  durationMonths,
+  finish,
+  relation: relationRaw = '',
+  endingId: endingIdRaw = '',
+  log: parentLog,
+}) {
   return serialize(async () => {
     const log = (parentLog || getLogger()).child({ scope: 'freeform.lab.deed' });
     const text = String(summary || '').trim();
@@ -312,21 +414,41 @@ export async function playFreeformDeed({ config, runtime, summary, detail, durat
 
     const months = Math.max(1, Math.round(Number(durationMonths) || 1));
     const outcome = normalizeFinish(finish);
+    const previous = snapshotForUndo(session);
     advanceWorldMonths(session.world, months);
 
-    const related = await judgeFreeformRelated({
-      runtime,
-      domain: session.domain,
-      plot,
-      summary: text,
-      detail,
-      log,
-    });
+    const overrideRelation = parseFreeformRelation(relationRaw);
+    let related;
+    if (overrideRelation) {
+      related = {
+        related: overrideRelation !== 'UNRELATED',
+        relation: overrideRelation,
+        endingId: overrideRelation === 'DIRECT' ? String(endingIdRaw || '').trim() : '',
+        why: 'лаборатория: связь задана вручную',
+        prompt: '',
+      };
+    } else {
+      related = await judgeFreeformRelated({
+        runtime,
+        domain: session.domain,
+        plot,
+        summary: text,
+        detail,
+        log,
+      });
+    }
     session.lastAlignPrompt = related.prompt || '';
+    session.lastAlignRelation = related.relation || null;
+    session.lastAlignEndingId = related.endingId || null;
     session.lastBeatArchitectPrompt = '';
     session.lastBeatJudgePrompt = '';
     session.lastBeatRepairPrompt = '';
+    session.lastBeatFinalJudgePrompt = '';
     session.lastBeatTellPrompt = '';
+    session.lastEndingsPrompt = '';
+    session.lastUrgencyPrompt = '';
+    session.lastBeatVariants = [];
+    session.lastBeatPickedIndex = null;
     if (!related.related) {
       appendChronicle(session.domain, session.world, {
         text: `Поручение в сторону: ${text}. К истории «${plot.title}» это не относится.`,
@@ -337,6 +459,8 @@ export async function playFreeformDeed({ config, runtime, summary, detail, durat
         'Дело UNRELATED — история не сдвинулась. В живой игре жрец предупредил бы и завёл отдельное поручение.';
       session.lastRejected = [];
       session.lastJudge = { why: related.why || 'UNRELATED', repair: '', issues: [] };
+      session.lastMoveKind = 'unrelated';
+      pushUndo(session, previous);
       await writeSession(session);
       return sessionPayload(session);
     }
@@ -349,14 +473,20 @@ export async function playFreeformDeed({ config, runtime, summary, detail, durat
       world: session.world,
       plot,
       deed: { summary: text, detail: detail || '', durationMonths: months, finish: outcome },
+      trigger: 'deed',
+      relation: related.relation,
+      endingId: related.endingId,
       log,
     });
     if (!told.ok) {
       session.lastBeatArchitectPrompt = told.architectPrompt || '';
       session.lastBeatJudgePrompt = told.judgePrompt || '';
       session.lastBeatRepairPrompt = told.repairPrompt || '';
+      session.lastBeatFinalJudgePrompt = told.finalJudgePrompt || '';
       session.lastBeatTellPrompt = told.tellPrompt || '';
       session.lastWarning = 'Не получилось продолжить историю. Попробуй другую формулировку дела.';
+      session.lastMoveKind = 'deed';
+      pushUndo(session, previous);
       await writeSession(session);
       const err = new Error(session.lastWarning);
       err.status = 502;
@@ -375,7 +505,13 @@ export async function playFreeformDeed({ config, runtime, summary, detail, durat
     session.lastBeatArchitectPrompt = told.architectPrompt || '';
     session.lastBeatJudgePrompt = told.judgePrompt || '';
     session.lastBeatRepairPrompt = told.repairPrompt || '';
+    session.lastBeatFinalJudgePrompt = told.finalJudgePrompt || '';
     session.lastBeatTellPrompt = told.tellPrompt || '';
+    session.lastEndingsPrompt = told.endingsPrompt || '';
+    session.lastUrgencyPrompt = told.urgencyPrompt || '';
+    session.lastBeatVariants = beatVariantsPayload(told);
+    session.lastBeatPickedIndex = told.pickedIndex ?? null;
+    session.lastMoveKind = 'deed';
 
     if (told.winner.closed) {
       closePlotline(session.domain, plot.id, {
@@ -385,9 +521,117 @@ export async function playFreeformDeed({ config, runtime, summary, detail, durat
       session.mode = 'closed';
     }
 
+    pushUndo(session, previous);
     await writeSession(session);
-    log.info('freeform.lab.beat', { plotId: plot.id, closed: Boolean(told.winner.closed) });
+    log.info('freeform.lab.beat', {
+      plotId: plot.id,
+      closed: Boolean(told.winner.closed),
+      relation: related.relation,
+      decision: told.decision?.kind,
+    });
     return sessionPayload(session);
+  });
+}
+
+export async function playFreeformAutotick({ config, runtime, log: parentLog }) {
+  return serialize(async () => {
+    const log = (parentLog || getLogger()).child({ scope: 'freeform.lab.autotick' });
+    const session = await loadSession();
+    if (session.mode !== 'story') {
+      const err = new Error(
+        session.mode === 'closed' ? 'История уже закончена.' : 'Сначала породите историю затравкой.',
+      );
+      err.status = 409;
+      throw err;
+    }
+    const plot = plotOf(session);
+    if (!plot || !isFreeformPlot(plot)) {
+      const err = new Error('Нет живой freeform-истории.');
+      err.status = 409;
+      throw err;
+    }
+
+    const previous = snapshotForUndo(session);
+    advanceWorldMonths(session.world, 1);
+    session.lastAlignPrompt = '';
+    session.lastAlignRelation = 'RELATED';
+    session.lastAlignEndingId = null;
+    session.lastWarning = null;
+
+    const told = await tellFreeformBeat({
+      config,
+      runtime,
+      domain: session.domain,
+      world: session.world,
+      plot,
+      deed: null,
+      trigger: 'auto',
+      relation: 'RELATED',
+      log,
+    });
+    if (!told.ok) {
+      session.lastBeatArchitectPrompt = told.architectPrompt || '';
+      session.lastBeatJudgePrompt = told.judgePrompt || '';
+      session.lastBeatRepairPrompt = told.repairPrompt || '';
+      session.lastBeatFinalJudgePrompt = told.finalJudgePrompt || '';
+      session.lastBeatTellPrompt = told.tellPrompt || '';
+      session.lastBeatVariants = [];
+      session.lastBeatPickedIndex = null;
+      session.lastMoveKind = 'auto';
+      session.lastWarning = 'Не получилось сделать автотик. Попробуй ещё раз.';
+      pushUndo(session, previous);
+      await writeSession(session);
+      const err = new Error(session.lastWarning);
+      err.status = 502;
+      err.payload = sessionPayload(session);
+      throw err;
+    }
+
+    applyFreeformState(plot, told.winner);
+    appendChronicle(session.domain, session.world, {
+      text: told.winner.chronicle,
+      plotId: plot.id,
+      author: 'freeform:auto',
+    });
+    session.lastRejected = told.rejected;
+    session.lastJudge = told.judge;
+    session.lastBeatArchitectPrompt = told.architectPrompt || '';
+    session.lastBeatJudgePrompt = told.judgePrompt || '';
+    session.lastBeatRepairPrompt = told.repairPrompt || '';
+    session.lastBeatFinalJudgePrompt = told.finalJudgePrompt || '';
+    session.lastBeatTellPrompt = told.tellPrompt || '';
+    session.lastEndingsPrompt = told.endingsPrompt || '';
+    session.lastUrgencyPrompt = told.urgencyPrompt || '';
+    session.lastBeatVariants = beatVariantsPayload(told);
+    session.lastBeatPickedIndex = told.pickedIndex ?? null;
+    session.lastMoveKind = 'auto';
+
+    if (told.winner.closed) {
+      closePlotline(session.domain, plot.id, {
+        tick: session.world.tickIndex,
+        reason: told.winner.closedBy || 'resolved',
+      });
+      session.mode = 'closed';
+    }
+
+    pushUndo(session, previous);
+    await writeSession(session);
+    log.info('freeform.lab.autotick', { plotId: plot.id, closed: Boolean(told.winner.closed) });
+    return sessionPayload(session);
+  });
+}
+
+export async function undoFreeformLab() {
+  return serialize(async () => {
+    const session = await loadSession();
+    const prev = popUndo(session);
+    if (!prev) {
+      const err = new Error('Нечего откатывать.');
+      err.status = 409;
+      throw err;
+    }
+    await writeSession(prev);
+    return sessionPayload(prev);
   });
 }
 
@@ -452,11 +696,31 @@ export function mountFreeformLab(server, { config, runtime }) {
           detail: req.body?.detail,
           durationMonths: req.body?.durationMonths,
           finish: req.body?.finish,
+          relation: req.body?.relation,
+          endingId: req.body?.endingId,
           log: req.log,
         }),
       );
     } catch (err) {
       req.log?.error('freeform.deed', { error: err.message });
+      sendLabError(res, err);
+    }
+  });
+
+  server.post('/api/freeform/autotick', async (req, res) => {
+    try {
+      res.json(await playFreeformAutotick({ config, runtime, log: req.log }));
+    } catch (err) {
+      req.log?.error('freeform.autotick', { error: err.message });
+      sendLabError(res, err);
+    }
+  });
+
+  server.post('/api/freeform/undo', async (req, res) => {
+    try {
+      res.json(await undoFreeformLab());
+    } catch (err) {
+      req.log?.error('freeform.undo', { error: err.message });
       sendLabError(res, err);
     }
   });

@@ -1,20 +1,22 @@
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { clipPlotText, PLOT_TITLE_MAX, PLOT_SUMMARY_MAX } from './plotlines.js';
-import { normalizeHiddenPremises } from './suspenseGraph.js';
 import {
   freeformConfig,
-  clampUrgency,
   formatFreeformGravityForPrompt,
   formatFreeformSeedBlank,
-  normalizeCloseWhenList,
-  plotCardForPrompt,
-  plotChronicleForPrompt,
+  formatStoryForBeatArchitect,
   finishLabel,
 } from './freeform.js';
 import { repairFreeformVariant } from './freeformJudge.js';
 import { plotConfig, pickSuspenseAnnotationSeed } from './plotlines.js';
 import { captureAgentPrompt } from './agentPrompt.js';
+import {
+  attachBeatDynamics,
+  formatBeatDynamicsForPrompt,
+  pickFreeformBeatDynamics,
+  endingDynamicByKind,
+} from './freeformDynamics.js';
 
 export { formatAgentPrompt, captureAgentPrompt } from './agentPrompt.js';
 
@@ -130,6 +132,7 @@ export function freeformArchitectAgentId(kind) {
 }
 
 export function architectShortText(blank) {
+  if (blank?.text && !blank?.hook && !blank?.conflict) return String(blank.text).trim();
   if (blank?.whatHappens) return String(blank.whatHappens).trim();
   return formatFreeformSeedBlank(blank) || String(blank?.text || blank?.premise || '').trim();
 }
@@ -143,6 +146,9 @@ export function packRejectedBlanks(variants, chosenIndex) {
       hook: v.hook || '',
       conflict: v.conflict || '',
       dynamics: v.dynamics || '',
+      dynamicId: v.dynamicId || '',
+      dynamicName: v.dynamicName || '',
+      dynamicHint: v.dynamicHint || '',
       consequences: v.consequences || '',
       arena: v.arena || '',
       worldRelation: v.worldRelation || '',
@@ -171,20 +177,21 @@ export function normalizeSeedBlank(raw, pair = []) {
 }
 
 export function normalizeBeatBlank(raw) {
-  const title = clipPlotText(raw?.title, PLOT_TITLE_MAX);
-  const whatHappens = clipPlotText(raw?.whatHappens, PLOT_SUMMARY_MAX);
-  const situationNow = clipPlotText(raw?.situationNow, PLOT_SUMMARY_MAX);
-  if (!whatHappens || !situationNow) return null;
-  const closed = Boolean(raw?.closed);
+  const text = clipPlotText(raw?.text || raw?.whatHappens || raw?.chronicle, PLOT_SUMMARY_MAX);
+  if (!text) return null;
+  const dynamicId = String(raw?.dynamicId || '').trim();
+  const dynamicName = clipPlotText(raw?.dynamicName || raw?.dynamics, 80);
+  const index = Number.isInteger(Number(raw?.index)) ? Number(raw.index) : undefined;
   return {
-    title: title || '',
-    whatHappens,
-    situationNow,
-    closeWhen: raw?.closeWhen ? normalizeCloseWhenList(raw.closeWhen) : null,
-    hiddenPremises: raw?.hiddenPremises ? normalizeHiddenPremises(raw.hiddenPremises) : null,
-    urgency: Number.isFinite(Number(raw?.urgency)) ? clampUrgency(raw.urgency, null) : null,
-    closed,
-    closedBy: closed ? clipPlotText(raw?.closedBy, 200) : '',
+    text,
+    index,
+    dynamicId,
+    dynamicName: dynamicName || '',
+    dynamicHint: clipPlotText(raw?.dynamicHint, 200),
+    dynamics: dynamicName || '',
+    endingId: String(raw?.endingId || '').trim(),
+    endingText: clipPlotText(raw?.endingText, PLOT_SUMMARY_MAX),
+    endingKind: String(raw?.endingKind || '').trim(),
   };
 }
 
@@ -278,16 +285,15 @@ async function askSeedParagraphs({ runtime, seedText, pairs, gravity, config, lo
   return { variants: draft.variants || [], prompt };
 }
 
-async function askBeatBlanks({ runtime, cfg, log, userContent }) {
+async function askBeatBlanks({ runtime, cfg, dynamics, log, userContent }) {
   const draft = { variants: null };
-  const min = cfg.variantsMin;
-  const max = cfg.variantsMax;
+  const n = dynamics?.length ? dynamics.length : cfg.variantsMax;
   const runOpts = {
     agentId: 'freeformArchitectTell',
     tools: [
       {
         name: 'submit_freeform_beat_blanks',
-        description: `От ${min} до ${max} разных продолжений.`,
+        description: `Ровно ${n} абзацев продолжения, по одному на каждый способ сдвига, в том же порядке.`,
         parameters: {
           type: 'object',
           additionalProperties: false,
@@ -295,20 +301,16 @@ async function askBeatBlanks({ runtime, cfg, log, userContent }) {
           properties: {
             variants: {
               type: 'array',
-              minItems: min,
-              maxItems: max,
+              minItems: n,
+              maxItems: n,
               items: {
                 type: 'object',
-                required: ['whatHappens', 'situationNow', 'closed'],
+                required: ['text'],
                 properties: {
-                  title: { type: 'string' },
-                  whatHappens: { type: 'string' },
-                  situationNow: { type: 'string' },
-                  closeWhen: { type: 'array', items: { type: 'string' } },
-                  hiddenPremises: { type: 'array', items: { type: 'string' } },
-                  urgency: { type: 'integer' },
-                  closed: { type: 'boolean' },
-                  closedBy: { type: 'string' },
+                  text: {
+                    type: 'string',
+                    description: 'Один абзац: что произошло дальше при этом способе сдвига.',
+                  },
                 },
               },
             },
@@ -316,11 +318,18 @@ async function askBeatBlanks({ runtime, cfg, log, userContent }) {
         },
         handler: async (args) => {
           const list = Array.isArray(args?.variants) ? args.variants : [];
-          const variants = list.map((v) => normalizeBeatBlank(v)).filter(Boolean);
-          if (variants.length < min) {
-            return toolFail('thin', `Нужно ${min}–${max} разных продолжений с whatHappens и situationNow.`);
+          const variants = list
+            .map((v, i) => {
+              const blank = attachBeatDynamics(normalizeBeatBlank(v), dynamics?.[i]);
+              if (!blank) return null;
+              blank.index = Number(dynamics?.[i]?.index) || i + 1;
+              return blank;
+            })
+            .filter(Boolean);
+          if (variants.length < n) {
+            return toolFail('thin', `Нужно ровно ${n} абзацев: по одному на каждый способ сдвига, в том же порядке.`);
           }
-          draft.variants = variants.slice(0, max);
+          draft.variants = variants.slice(0, n);
           return { ok: true, count: draft.variants.length };
         },
       },
@@ -352,28 +361,106 @@ export async function inventSeedBlanks({ runtime, seedText, cfg, config, gravity
   return askSeedParagraphs({ runtime, seedText, pairs, gravity, config, log });
 }
 
-export async function inventBeatBlanks({ runtime, domain, plot, deed, cfg, log }) {
-  const min = cfg.variantsMin;
-  const max = cfg.variantsMax;
+export async function inventBeatBlanks({
+  runtime,
+  domain,
+  plot,
+  deed,
+  trigger = 'deed',
+  cfg,
+  config,
+  log,
+  polarity = null,
+  endingSlots = null,
+  rng = Math.random,
+}) {
+  const slots = Array.isArray(endingSlots) && endingSlots.length ? endingSlots : null;
+  const n = slots ? slots.length : cfg.variantsMax;
+  const dynamics = slots
+    ? slots.map((ending, i) => ({
+        ...endingDynamicByKind(ending.kind),
+        endingId: ending.id,
+        endingText: ending.text,
+        endingKind: ending.kind,
+        index: i + 1,
+      }))
+    : pickFreeformBeatDynamics(config, n, rng, plot, { polarity }).map((d, i) => ({
+        ...d,
+        index: i + 1,
+      }));
+  const auto = trigger === 'auto';
   return askBeatBlanks({
     runtime,
-    cfg,
+    cfg: { ...cfg, variantsMax: dynamics.length },
+    dynamics,
     log,
     userContent: [
-      plotChronicleForPrompt(domain, plot),
+      formatStoryForBeatArchitect(domain, plot),
       '',
-      plotCardForPrompt(plot, { revealHidden: true }),
+      auto
+        ? [
+            'Городом эту историю не занимались. Ситуация сама сдвинулась.',
+            plot?.whyMoves ? `Она клонилась к тому, что: ${plot.whyMoves}` : '',
+          ]
+            .filter(Boolean)
+            .join('\n')
+        : [
+            `Поступок: ${deed?.summary || ''}`,
+            deed?.detail ? `Подробности: ${deed.detail}` : '',
+            `Длительность: ${deed?.durationMonths || 1} мес.`,
+            `Исход (уже случился): ${finishLabel(deed?.finish)}.`,
+          ]
+            .filter(Boolean)
+            .join('\n'),
       '',
-      `Дело: ${deed.summary}`,
-      deed.detail ? `Подробности: ${deed.detail}` : '',
-      `Длительность: ${deed.durationMonths} мес.`,
-      `Исход дела (уже брошен системой, не перерешай): ${finishLabel(deed.finish)}.`,
+      formatBeatDynamicsForPrompt(dynamics),
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  });
+}
+
+export async function repairBeatBlanks({ runtime, drafts, reviews, log, extra = '' }) {
+  const n = drafts.length;
+  if (!n) return { variants: [], prompt: '' };
+  const notes = (reviews || []).slice(0, n);
+  const dynamics = drafts.map((blank, i) => ({
+    id: blank.dynamicId,
+    name: blank.dynamicName,
+    hint: blank.dynamicHint,
+    endingId: blank.endingId,
+    endingText: blank.endingText,
+    endingKind: blank.endingKind,
+    index: Number(blank.index) || i + 1,
+  }));
+  const pack = drafts
+    .map((blank, i) => {
+      const review = notes[i] || { index: Number(blank.index) || i + 1, verdict: 'PASS', repair: '', summary: '' };
+      return [
+        `=== Кандидат ${review.index} ===`,
+        blank.dynamicName ? `способ сдвига: ${blank.dynamicName}` : null,
+        blank.endingText ? `концовка: ${blank.endingText}` : null,
+        blank.text,
+        `вердикт: ${review.verdict}`,
+        review.summary ? `кратко: ${review.summary}` : null,
+        review.repair ? `правка:\n${review.repair}` : 'правка: без изменений',
+      ]
+        .filter(Boolean)
+        .join('\n');
+    })
+    .join('\n\n');
+  return askBeatBlanks({
+    runtime,
+    cfg: { variantsMax: n },
+    dynamics,
+    log,
+    userContent: [
+      extra,
       '',
-      `Придумай ${min}–${max} РАЗНЫХ продолжений через submit_freeform_beat_blanks.`,
-      'Главная задача — разнообразие: разное ЧТО случилось после этого исхода, не разные процедуры вокруг одного хода.',
-      'Города у тебя нет. Не выдумывай службы и ремёсла. Люди — из хроники и карточки, иначе роли.',
-      'closeWhen/hiddenPremises/urgency — только если ход их реально сдвинул, иначе опусти.',
-      'closed=true только если один из closeWhen уже произошёл в whatHappens. Не закрывай рано.',
+      'Доработка уже написанных абзацев по замечаниям судьи. Способ сдвига и концовку не меняй.',
+      'Кандидат без правки верни тем же текстом.',
+      '',
+      pack,
     ]
       .filter(Boolean)
       .join('\n'),
@@ -388,9 +475,14 @@ export async function repairFreeformBlank({ runtime, blank, repair, kind, log })
     variant: blank,
     repair,
     extraSystem: '',
+    kind,
     log,
   });
-  return { blank: normalize(patched) || blank, prompt: prompt || '' };
+  const next = normalize(patched) || blank;
+  return {
+    blank: kind === 'beat' ? attachBeatDynamics(next, blank) : next,
+    prompt: prompt || '',
+  };
 }
 
 export async function architectFreeformBlanks({
@@ -399,9 +491,13 @@ export async function architectFreeformBlanks({
   plot,
   seedText,
   deed,
+  trigger = 'deed',
   kind,
   config,
   gravity,
+  polarity = null,
+  endingSlots = null,
+  rng = Math.random,
   log: parentLog,
 }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.architect', kind });
@@ -410,7 +506,19 @@ export async function architectFreeformBlanks({
   let prompt = '';
   try {
     if (kind === 'beat') {
-      const beaten = await inventBeatBlanks({ runtime, domain, plot, deed, cfg, log });
+      const beaten = await inventBeatBlanks({
+        runtime,
+        domain,
+        plot,
+        deed,
+        trigger,
+        cfg,
+        config,
+        log,
+        polarity,
+        endingSlots,
+        rng,
+      });
       variants = beaten?.variants || [];
       prompt = beaten?.prompt || '';
     } else {

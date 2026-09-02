@@ -9,46 +9,76 @@ import {
   plotCardForPrompt,
   plotChronicleForPrompt,
   finishLabel,
-  normalizeCloseWhenList,
   openStoryTitlesLine,
-  clampUrgency,
+  applyFreeformProgress,
+  freeformTickDecision,
+  pickEndingsForPack,
+  findPlotEnding,
+  normalizeFinish,
 } from './freeform.js';
-import { pickFreeformVariant } from './freeformJudge.js';
-import { architectFreeformBlanks, repairFreeformBlank, packRejectedBlanks } from './freeformArchitect.js';
+import {
+  reviewFreeformPack,
+  reviewNeedsRewrite,
+  isPackPass,
+  scatterPackReviews,
+} from './freeformJudge.js';
+import { collectBrainstormPool } from './freeformBrainstorm.js';
+import { architectFreeformBlanks, repairBeatBlanks, packRejectedBlanks } from './freeformArchitect.js';
+import { refreshFreeformEndings } from './freeformEndings.js';
+import { setFreeformUrgency } from './freeformUrgency.js';
+
+const MIN_PASS_SKIP_SECOND = 2;
 
 export function normalizeBeatVariant(raw, cfg) {
   const chronicle = clipPlotText(raw?.chronicle || raw?.entry, cfg.chronicleMaxChars);
   const synopsis = clipPlotText(raw?.synopsis, PLOT_SUMMARY_MAX);
   if (!chronicle || !synopsis) return null;
-  const closed = Boolean(raw?.closed);
   return {
     chronicle,
     synopsis,
-    closeWhen: raw?.closeWhen ? normalizeCloseWhenList(raw.closeWhen) : null,
     hiddenPremises: raw?.hiddenPremises ? normalizeHiddenPremises(raw.hiddenPremises) : null,
-    urgency: Number.isFinite(Number(raw?.urgency)) ? clampUrgency(raw.urgency, null) : null,
-    closed,
-    closedBy: closed ? clipPlotText(raw?.closedBy, 200) : '',
+    closed: Boolean(raw?.closed),
+    closedBy: raw?.closed ? clipPlotText(raw?.closedBy, 200) : '',
   };
 }
 
 export function beatCardFromBlank(blank, cfg) {
   if (!blank) return null;
+  const paragraph = blank.text || blank.whatHappens || '';
   return normalizeBeatVariant(
     {
-      chronicle: blank.whatHappens,
-      synopsis: blank.situationNow,
-      closeWhen: blank.closeWhen,
+      chronicle: paragraph,
+      synopsis: blank.situationNow || paragraph,
       hiddenPremises: blank.hiddenPremises,
-      urgency: blank.urgency,
-      closed: blank.closed,
-      closedBy: blank.closedBy,
     },
     cfg,
   );
 }
 
-async function constructBeat({ runtime, domain, world, plot, deed, blank, cfg, log }) {
+function formatBeatPackForJudge(variants) {
+  return variants
+    .map((v, i) => {
+      const n = Number(v.index) || i + 1;
+      const dyn = v.dynamicName ? `способ сдвига: ${v.dynamicName}` : '';
+      const ending = v.endingText ? `концовка: ${v.endingText}` : '';
+      return [`=== Кандидат ${n} ===`, dyn, ending, v.text || '']
+        .filter(Boolean)
+        .join('\n');
+    })
+    .join('\n\n');
+}
+
+function pickFromPool(pool, rng = Math.random) {
+  if (!pool.length) return null;
+  const idx = Math.min(pool.length - 1, Math.max(0, Math.floor(rng() * pool.length)));
+  return pool[idx];
+}
+
+function stampIndices(variants) {
+  return (variants || []).map((v, i) => ({ ...v, index: Number(v.index) || i + 1 }));
+}
+
+async function constructBeat({ runtime, domain, world, plot, deed, blank, cfg, log, closing = false }) {
   const draft = { card: null };
   const runOpts = {
     agentId: 'freeformTell',
@@ -59,18 +89,15 @@ async function constructBeat({ runtime, domain, world, plot, deed, blank, cfg, l
         parameters: {
           type: 'object',
           additionalProperties: false,
-          required: ['chronicle', 'synopsis', 'closed'],
+          required: ['chronicle', 'synopsis'],
           properties: {
             chronicle: { type: 'string' },
-            synopsis: { type: 'string' },
-            closeWhen: { type: 'array', items: { type: 'string' } },
-            hiddenPremises: { type: 'array', items: { type: 'string' } },
-            urgency: { type: 'integer' },
-            closed: { type: 'boolean' },
-            closedBy: {
+            synopsis: {
               type: 'string',
-              description: 'Какой исход closeWhen сработал, если closed=true.',
+              description:
+                'Пересказ сюжета: что случилось и как сейчас. Без «Год N, месяц M», «в месяц 5» и прочих нумерованных дат.',
             },
+            hiddenPremises: { type: 'array', items: { type: 'string' } },
           },
         },
         handler: async (args) => {
@@ -97,19 +124,28 @@ async function constructBeat({ runtime, domain, world, plot, deed, blank, cfg, l
         content: [
           plotChronicleForPrompt(domain, plot),
           '',
-          `Дело: ${deed.summary}`,
-          deed.detail ? `Подробности: ${deed.detail}` : '',
-          `Длительность: ${deed.durationMonths} мес.`,
-          `Исход дела (уже брошен системой, не перерешай): ${finishLabel(deed.finish)}.`,
+          deed
+            ? [
+                `Поступок: ${deed.summary}`,
+                deed.detail ? `Подробности: ${deed.detail}` : '',
+                `Длительность: ${deed.durationMonths} мес.`,
+                `Исход (уже случился): ${finishLabel(deed.finish)}.`,
+              ]
+                .filter(Boolean)
+                .join('\n')
+            : 'Городом эту историю не занимались. Ситуация сама сдвинулась. Поступка нет.',
           '',
-          'Болванка хода (сохрани её событие; город даёт где и кто):',
-          JSON.stringify(blank, null, 2),
+          closing
+            ? 'Это финальная хроника: яви концовку полностью. История после этого закрывается.'
+            : 'Продолжение (сохрани событие; город даёт где и кто):',
+          blank?.text || blank?.whatHappens || '',
+          blank?.endingText ? `Концовка, которую надо явить: ${blank.endingText}` : '',
           '',
-          'Посади ЭТОТ ход в город через submit_freeform_beat.',
-          'Город даёт где и кто. Что случилось — уже в whatHappens.',
-          'Хроника — сухой факт месяца. Синопсис — сжатие всей истории so far, без прогноза.',
-          'closeWhen/hiddenPremises/urgency — только если болванка их сдвинула, иначе опусти.',
-          'closed=true только если один из closeWhen уже произошёл в этой хронике. Не закрывай рано.',
+          'Посади это в город через submit_freeform_beat.',
+          'Город даёт где и кто. Что случилось — уже в абзаце.',
+          'Хроника — сухой факт месяца. Синопсис — пересказ сюжета so far, без прогноза.',
+          'В синопсисе не пиши «Год N, месяц M», «в месяц 5» и нумерованные даты. Порядок — сюжетом.',
+          'Концовку и срочность не ставь — это не твоя ставка.',
           'hiddenPremises в хронику не пиши.',
         ]
           .filter(Boolean)
@@ -126,73 +162,239 @@ async function constructBeat({ runtime, domain, world, plot, deed, blank, cfg, l
   return { card: draft.card, prompt };
 }
 
-export async function tellFreeformBeat({ config, runtime, domain, world, plot, deed, log: parentLog }) {
+async function pickBeatBlank({
+  runtime,
+  domain,
+  plot,
+  drafts,
+  caseText,
+  rng,
+  log,
+}) {
+  const variants = stampIndices(drafts);
+  if (variants.length <= 1) {
+    return {
+      blank: variants[0] || null,
+      variants,
+      reviews: [],
+      finalReviews: [],
+      judgePrompt: '',
+      repairPrompt: '',
+      finalJudgePrompt: '',
+      pickedIndex: variants[0] ? Number(variants[0].index) || 1 : null,
+    };
+  }
+
+  const judged = await reviewFreeformPack({
+    runtime,
+    agentId: 'freeformBeatJudge',
+    candidates: variants,
+    caseText: [caseText, '', formatBeatPackForJudge(variants)].filter(Boolean).join('\n'),
+    extraSystem: '',
+    log,
+    scene: 'freeform_beat_judge',
+  });
+  const firstPassCount = (judged.reviews || []).filter(isPackPass).length;
+  if (firstPassCount >= MIN_PASS_SKIP_SECOND) {
+    const pool = collectBrainstormPool(variants, judged.reviews);
+    const blank = pickFromPool(pool, rng) || variants[0];
+    return {
+      blank,
+      variants,
+      reviews: judged.reviews,
+      finalReviews: [],
+      judgePrompt: judged.prompt || '',
+      repairPrompt: '',
+      finalJudgePrompt: '',
+      pickedIndex: Number(blank?.index) || variants.indexOf(blank) + 1,
+    };
+  }
+
+  const rewriteIdx = judged.reviews
+    .map((review, i) => (reviewNeedsRewrite(review) ? i : -1))
+    .filter((i) => i >= 0);
+  let repaired = variants;
+  let repairPrompt = '';
+  if (rewriteIdx.length) {
+    const retryDrafts = rewriteIdx.map((i) => variants[i]);
+    const retryReviews = rewriteIdx.map((i) => judged.reviews[i]);
+    const fixed = await repairBeatBlanks({
+      runtime,
+      drafts: retryDrafts,
+      reviews: retryReviews,
+      log,
+      extra: [plotCardForPrompt(plot, { revealHidden: true }), plotChronicleForPrompt(domain, plot)]
+        .filter(Boolean)
+        .join('\n\n'),
+    });
+    repairPrompt = fixed.prompt || '';
+    repaired = variants.map((v, i) => {
+      if (!reviewNeedsRewrite(judged.reviews[i])) return v;
+      const slot = rewriteIdx.indexOf(i);
+      const next = fixed.variants?.[slot];
+      return next ? { ...v, ...next, index: v.index } : v;
+    });
+  }
+
+  const retry = repaired.filter((_, i) => !isPackPass(judged.reviews[i]));
+  const gated = retry.length
+    ? await reviewFreeformPack({
+        runtime,
+        agentId: 'freeformBeatJudge',
+        candidates: retry,
+        caseText: [caseText, '', formatBeatPackForJudge(retry)].filter(Boolean).join('\n'),
+        extraSystem: '',
+        log,
+        scene: 'freeform_beat_judge_retry',
+      })
+    : { reviews: [], prompt: '' };
+  const finalReviews = scatterPackReviews(repaired.length, gated.reviews);
+  const pool = collectBrainstormPool(variants, judged.reviews, repaired, finalReviews);
+  const blank = pickFromPool(pool, rng) || repaired[0];
+  return {
+    blank,
+    variants: repaired,
+    reviews: judged.reviews,
+    finalReviews,
+    judgePrompt: judged.prompt || '',
+    repairPrompt,
+    finalJudgePrompt: gated.prompt || '',
+    pickedIndex: Number(blank?.index) || repaired.indexOf(blank) + 1,
+  };
+}
+
+function emptyTell({ architectPrompt = '', error = 'architect_empty' } = {}) {
+  return {
+    ok: false,
+    error,
+    variants: [],
+    pickedIndex: null,
+    rejected: [],
+    architectPrompt,
+    judgePrompt: '',
+    repairPrompt: '',
+    finalJudgePrompt: '',
+    tellPrompt: '',
+    endingsPrompt: '',
+    urgencyPrompt: '',
+    decision: null,
+  };
+}
+
+export async function tellFreeformBeat({
+  config,
+  runtime,
+  domain,
+  world,
+  plot,
+  deed = null,
+  trigger = 'deed',
+  relation = 'RELATED',
+  endingId = null,
+  log: parentLog,
+  rng = Math.random,
+}) {
   const log = (parentLog || getLogger()).child({
     scope: 'freeform.tell',
     domainId: domain?.id,
     plotId: plot?.id,
+    trigger,
   });
-  const { cfg, variants, prompt: architectPrompt = '' } = await architectFreeformBlanks({
+  const auto = trigger === 'auto';
+  const finish = auto ? 'fail' : normalizeFinish(deed?.finish);
+  const rel = auto ? 'RELATED' : String(relation || 'RELATED').toUpperCase();
+  const snap = {
+    depth: plot.depth,
+    failCount: plot.failCount,
+  };
+  applyFreeformProgress(plot, { finish, autotick: auto });
+  const decision = freeformTickDecision(plot, {
+    relation: rel,
+    finish,
+    autotick: auto,
+    endingId,
+  });
+
+  const closing = decision.kind === 'closeDirect' || decision.kind === 'closeBad';
+  const endingSlots =
+    decision.kind === 'closeDirect'
+      ? [
+          findPlotEnding(plot, decision.endingId) ||
+            plot.endings?.[0] || {
+              id: 'end_direct',
+              kind: 'NEUTRAL_ENDING',
+              text: 'История закрылась тем, к чему шло дело.',
+            },
+        ]
+      : decision.kind === 'closeBad'
+        ? pickEndingsForPack(plot, 'BAD_ENDING', 3)
+        : null;
+
+  const { cfg, variants: drafted, prompt: architectPrompt = '' } = await architectFreeformBlanks({
     runtime,
     domain,
     plot,
     deed,
+    trigger,
     kind: 'beat',
     config,
+    polarity: decision.kind === 'continue' ? decision.polarity : null,
+    endingSlots,
+    rng,
     log,
   });
-  if (!variants.length) {
-    return {
-      ok: false,
-      error: 'architect_empty',
-      variants: [],
-      rejected: [],
-      architectPrompt,
-      judgePrompt: '',
-      repairPrompt: '',
-      tellPrompt: '',
-    };
+  if (!drafted.length) {
+    plot.depth = snap.depth;
+    plot.failCount = snap.failCount;
+    return emptyTell({ architectPrompt });
   }
 
-  const verdict = await pickFreeformVariant({
+  const caseText = [
+    plotCardForPrompt(plot, { revealHidden: true }),
+    plotChronicleForPrompt(domain, plot),
+    openStoryTitlesLine(domain, plot?.id),
+    '',
+    auto
+      ? 'Городом эту историю не занимались. Ситуация сама сдвинулась.'
+      : `Поступок: ${deed?.summary || ''}. Исход: ${finishLabel(finish)}.`,
+    closing
+      ? 'Абзац должен явить данную концовку полностью. Это закрытие истории.'
+      : 'У каждого варианта свой способ сдвига — это жребий, не критерий качества.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const picked = await pickBeatBlank({
     runtime,
-    domainId: domain?.id,
-    kind: 'beat',
-    variants,
-    caseText: [
-      plotCardForPrompt(plot, { revealHidden: true }),
-      plotChronicleForPrompt(domain, plot),
-      openStoryTitlesLine(domain, plot?.id),
-      '',
-      `Дело: ${deed.summary}. Исход: ${finishLabel(deed.finish)}.`,
-      'Отсей то, чего вообще не бывает: ломает космологию, хронику этой истории или палит hiddenPremises.',
-      'Дальше бери самое любопытное. Не предпочитай ход за то, что он «про этот город» — города у болванок нет.',
-      'Не закрывай историю без основания в closeWhen.',
-    ]
-      .filter(Boolean)
-      .join('\n'),
+    domain,
+    plot,
+    drafts: drafted,
+    caseText,
+    rng,
     log,
   });
-
-  let blank = variants[verdict.index];
-  let repairPrompt = '';
-  if (verdict.repair) {
-    const repaired = await repairFreeformBlank({
-      runtime,
-      blank,
-      repair: verdict.repair,
-      kind: 'beat',
-      log,
-    });
-    blank = repaired.blank;
-    repairPrompt = repaired.prompt || '';
+  const blank = picked.blank;
+  if (!blank) {
+    plot.depth = snap.depth;
+    plot.failCount = snap.failCount;
+    return emptyTell({ architectPrompt, error: 'judge_empty' });
   }
 
   const builtCfg = cfg || freeformConfig(config);
   let winner = null;
   let tellPrompt = '';
   try {
-    const built = await constructBeat({ runtime, domain, world, plot, deed, blank, cfg: builtCfg, log });
+    const built = await constructBeat({
+      runtime,
+      domain,
+      world,
+      plot,
+      deed,
+      blank,
+      cfg: builtCfg,
+      log,
+      closing,
+    });
     winner = built.card;
     tellPrompt = built.prompt || '';
   } catch (err) {
@@ -200,29 +402,53 @@ export async function tellFreeformBeat({ config, runtime, domain, world, plot, d
   }
   winner = winner || beatCardFromBlank(blank, builtCfg);
   if (!winner) {
+    plot.depth = snap.depth;
+    plot.failCount = snap.failCount;
     return {
-      ok: false,
-      error: 'constructor_empty',
-      variants,
-      rejected: [],
-      architectPrompt,
-      judgePrompt: verdict.prompt || '',
-      repairPrompt,
+      ...emptyTell({ architectPrompt, error: 'constructor_empty' }),
+      variants: picked.variants,
+      judgePrompt: picked.judgePrompt,
+      repairPrompt: picked.repairPrompt,
+      finalJudgePrompt: picked.finalJudgePrompt,
       tellPrompt,
     };
   }
 
-  const rejected = packRejectedBlanks(variants, verdict.index);
+  if (closing) {
+    const ending = blank.endingText || findPlotEnding(plot, blank.endingId)?.text || '';
+    winner.closed = true;
+    winner.closedBy = ending || 'resolved';
+  } else {
+    winner.closed = false;
+    winner.closedBy = '';
+  }
+
+  let endingsPrompt = '';
+  let urgencyPrompt = '';
+  if (!winner.closed) {
+    const ended = await refreshFreeformEndings({ runtime, domain, plot, log });
+    endingsPrompt = ended.prompt || '';
+    const urgent = await setFreeformUrgency({ runtime, domain, plot, log, rng });
+    urgencyPrompt = urgent.prompt || '';
+  }
+
+  const pickedIndex = Number(picked.pickedIndex);
+  const rejected = packRejectedBlanks(picked.variants, Math.max(0, pickedIndex - 1));
 
   return {
     ok: true,
     winner,
     rejected,
-    judge: { why: verdict.why, repair: verdict.repair, issues: verdict.issues },
-    variants,
+    judge: { why: '', repair: '', issues: [], reviews: picked.reviews, finalReviews: picked.finalReviews },
+    variants: picked.variants,
+    pickedIndex,
     architectPrompt,
-    judgePrompt: verdict.prompt || '',
-    repairPrompt,
+    judgePrompt: picked.judgePrompt,
+    repairPrompt: picked.repairPrompt,
+    finalJudgePrompt: picked.finalJudgePrompt,
     tellPrompt,
+    endingsPrompt,
+    urgencyPrompt,
+    decision,
   };
 }

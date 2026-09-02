@@ -27,11 +27,45 @@
     </section>
 
     <section class="col">
+      <form id="deedForm" class="card hidden">
+        <h2>Ход</h2>
+        <p class="muted">Дело сдвигает историю, если оно RELATED или DIRECT. DIRECT при успехе на maxDepth являет связанную концовку. Автотик — ситуация сама делает ход (это провал).</p>
+        <div id="deedFields">
+          <textarea id="deedText" rows="4" placeholder="Что делал город / столп…"></textarea>
+          <label>Длительность, мес.
+            <input id="deedMonths" type="number" min="1" max="24" value="1" />
+          </label>
+          <label>Исход
+            <select id="deedFinish">
+              <option value="fail">провал</option>
+              <option value="ok" selected>успех</option>
+              <option value="crit">критический успех</option>
+            </select>
+          </label>
+          <label>Связь (лаборатория)
+            <select id="deedRelation">
+              <option value="">агент сам</option>
+              <option value="DIRECT">DIRECT</option>
+              <option value="RELATED">RELATED</option>
+              <option value="UNRELATED">UNRELATED</option>
+            </select>
+          </label>
+          <label>endingId для DIRECT
+            <input id="deedEndingId" type="text" placeholder="из карточки" />
+          </label>
+        </div>
+        <div class="row seed-actions">
+          <button type="submit" id="btnDeed">Выполнить дело</button>
+          <button type="button" id="btnAutotick">Автотик</button>
+          <button type="button" id="btnUndo">Назад</button>
+        </div>
+      </form>
+
       <article id="plotCard" class="card hidden"></article>
 
       <form id="seedForm" class="card">
         <h2>Стартовая хроника</h2>
-        <p class="muted">Напиши свершившееся событие. Три хроники одной gravity, судья. PASS сразу в пул. Если их меньше двух — правка не-PASS и второй судья. Из пула случайно выбирается одна, конструктор собирает карточку, отдельный агент ставит срок автотика.</p>
+        <p class="muted">Напиши свершившееся событие. Три хроники одной gravity, судья. PASS сразу в пул. Если их меньше двух — правка не-PASS и второй судья. Из пула случайно выбирается одна, конструктор собирает карточку, отдельный агент ставит концовки, другой — темп FAST/MEDIUM/SLOW (код бросает месяцы).</p>
         <textarea id="seedText" rows="5" placeholder="Что случилось…"></textarea>
         <label>Gravity
           <select id="seedGravity">
@@ -55,23 +89,13 @@
         <div id="candidatesList"></div>
       </section>
 
-      <form id="deedForm" class="card hidden">
-        <h2>Дело</h2>
-        <textarea id="deedText" rows="4" placeholder="Что делал город / столп…"></textarea>
-        <label>Длительность, мес.
-          <input id="deedMonths" type="number" min="1" max="24" value="1" />
-        </label>
-        <label>Исход
-          <select id="deedFinish">
-            <option value="fail">провал</option>
-            <option value="ok" selected>успех</option>
-            <option value="crit">критический успех</option>
-          </select>
-        </label>
-        <button type="submit" id="btnDeed">ОК</button>
-      </form>
+      <section id="beatVariants" class="card hidden">
+        <h2>Три хода</h2>
+        <p id="beatVariantsMeta" class="muted"></p>
+        <div id="beatVariantsList"></div>
+      </section>
 
-      <p id="closedNote" class="card hidden">История закончена. Можно прочитать последний шаг. Чтобы начать другую — «заново».</p>
+      <p id="closedNote" class="card hidden">История закончена. Можно прочитать последний шаг или откатиться. Чтобы начать другую — «заново».</p>
 
       <aside id="rejected" class="card hidden">
         <h2>Забракованные варианты</h2>
@@ -110,33 +134,43 @@
       <pre id="assemblePromptText"></pre>
     </aside>
 
-    <aside id="countdownPrompt" class="card prompt-card hidden">
-      <h3>6. Срок автотика</h3>
-      <pre id="countdownPromptText"></pre>
+    <aside id="endingsPrompt" class="card prompt-card hidden">
+      <h3>6. Концовки</h3>
+      <pre id="endingsPromptText"></pre>
+    </aside>
+
+    <aside id="urgencyPrompt" class="card prompt-card hidden">
+      <h3>7. Urgency</h3>
+      <pre id="urgencyPromptText"></pre>
     </aside>
 
     <aside id="alignPrompt" class="card prompt-card hidden">
-      <h3>7. RELATED / UNRELATED</h3>
+      <h3>8. DIRECT / RELATED / UNRELATED</h3>
       <pre id="alignPromptText"></pre>
     </aside>
 
     <aside id="beatArchitectPrompt" class="card prompt-card hidden">
-      <h3>8. Архитектор хода</h3>
+      <h3>9. Архитектор хода</h3>
       <pre id="beatArchitectPromptText"></pre>
     </aside>
 
     <aside id="beatJudgePrompt" class="card prompt-card hidden">
-      <h3>9. Судья хода</h3>
+      <h3>10. Судья пачки хода</h3>
       <pre id="beatJudgePromptText"></pre>
     </aside>
 
     <aside id="beatRepairPrompt" class="card prompt-card hidden">
-      <h3>10. Правка хода</h3>
+      <h3>11. Правка хода</h3>
       <pre id="beatRepairPromptText"></pre>
     </aside>
 
+    <aside id="beatFinalJudgePrompt" class="card prompt-card hidden">
+      <h3>12. Второй судья хода</h3>
+      <pre id="beatFinalJudgePromptText"></pre>
+    </aside>
+
     <aside id="beatTellPrompt" class="card prompt-card hidden">
-      <h3>11. Конструктор хода</h3>
+      <h3>13. Конструктор хода</h3>
       <pre id="beatTellPromptText"></pre>
     </aside>
   </section>

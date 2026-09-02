@@ -61,6 +61,7 @@ function clipText(s, max) {
 
 export const PLOT_SUMMARY_MAX = 1800;
 export const PLOT_HOOK_MAX = 160;
+export const PLOT_ENDING_MAX = 600;
 export const PLOT_TITLE_MAX = 120;
 export { clipText as clipPlotText };
 
@@ -123,6 +124,9 @@ export function normalizeCloseWhenList(raw) {
 }
 
 export function formatCloseWhen(plot) {
+  if (Array.isArray(plot?.endings) && plot.endings.length) {
+    return formatFreeformEndings(plot) || '—';
+  }
   if (Array.isArray(plot?.closeWhen)) {
     if (!plot.closeWhen.length) return '—';
     return plot.closeWhen.map((x, i) => `${i + 1}. ${x}`).join('\n');
@@ -151,6 +155,91 @@ function clampStakes(n, fallback = 40) {
 }
 
 export const FREEFORM_GRAVITY = ['SITUATION', 'EPISODE', 'CRISIS', 'RUPTURE'];
+export const FREEFORM_URGENCY = ['SLOW', 'MEDIUM', 'FAST'];
+export const FREEFORM_ENDING_KINDS = ['GOOD_ENDING', 'NEUTRAL_ENDING', 'BAD_ENDING'];
+export const FREEFORM_URGENCY_MONTHS = {
+  FAST: [1, 2],
+  MEDIUM: [2, 4],
+  SLOW: [4, 8],
+};
+
+export function parseFreeformUrgency(raw, fallback = 'MEDIUM') {
+  const key = String(raw ?? '')
+    .trim()
+    .toUpperCase();
+  if (FREEFORM_URGENCY.includes(key)) return key;
+  if (raw == null || String(raw).trim() === '') return fallback;
+  const n = Number(raw);
+  if (Number.isFinite(n)) {
+    if (n >= 70) return 'FAST';
+    if (n <= 30) return 'SLOW';
+    return 'MEDIUM';
+  }
+  return fallback;
+}
+
+export function maxFailsForGravity(gravity) {
+  const g = parseFreeformGravity(gravity);
+  if (g === 'SITUATION') return 0;
+  if (g === 'EPISODE') return 1;
+  if (g === 'CRISIS') return 2;
+  return 3;
+}
+
+export function parseFreeformEndingKind(raw, fallback = 'NEUTRAL_ENDING') {
+  const key = String(raw || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, '_');
+  if (key === 'GOOD' || key === 'GOOD_ENDING') return 'GOOD_ENDING';
+  if (key === 'BAD' || key === 'BAD_ENDING') return 'BAD_ENDING';
+  if (key === 'NEUTRAL' || key === 'NEUTRAL_ENDING') return 'NEUTRAL_ENDING';
+  return fallback;
+}
+
+export function normalizeFreeformEndings(raw) {
+  const list = Array.isArray(raw) ? raw : [];
+  const out = [];
+  const seen = new Set();
+  for (const item of list) {
+    const text = clipText(typeof item === 'string' ? item : item?.text || item?.title, PLOT_ENDING_MAX);
+    if (!text) continue;
+    const id = String(item?.id || '').trim() || newId('end');
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({
+      id,
+      text,
+      kind: parseFreeformEndingKind(item?.kind || item?.type),
+    });
+  }
+  return out;
+}
+
+export function formatFreeformEndings(plotOrList) {
+  const list = Array.isArray(plotOrList)
+    ? plotOrList
+    : Array.isArray(plotOrList?.endings)
+      ? plotOrList.endings
+      : [];
+  if (!list.length) return '';
+  return list.map((e, i) => `${i + 1}. ${e.id} [${e.kind}] ${e.text}`).join('\n');
+}
+
+export function clampFreeformDepth(raw, fallback = 1) {
+  if (raw == null || raw === '') return fallback;
+  const v = Math.round(Number(raw));
+  if (!Number.isFinite(v)) return fallback;
+  return Math.max(1, Math.min(4, v));
+}
+
+export function defaultFreeformMaxDepth(gravity) {
+  const g = parseFreeformGravity(gravity);
+  if (g === 'SITUATION') return 2;
+  if (g === 'CRISIS') return 3;
+  if (g === 'RUPTURE') return 4;
+  return 3;
+}
 
 /** Freeform gravity — качественный уровень, не шкала 0–100. Старые числа мапятся. */
 export function parseFreeformGravity(raw, fallback = 'EPISODE') {
@@ -170,14 +259,19 @@ function storyActState(p = {}) {
   const type = storyTypeOf(p);
   if (type === 'freeform') {
     const countdown = Math.round(Number(p.countdown));
+    const gravity = parseFreeformGravity(p.gravity);
+    const maxDepth = clampFreeformDepth(p.maxDepth, defaultFreeformMaxDepth(gravity));
+    const depth = Math.max(0, Math.round(Number(p.depth) || 0));
+    const failRaw = Math.round(Number(p.failCount));
+    const endings = normalizeFreeformEndings(p.endings);
     return {
       storyType: 'freeform',
       act: null,
-      urgency: clampStakes(p.urgency, 0),
-      gravity: parseFreeformGravity(p.gravity),
-      urgency0: clampStakes(p.urgency0 ?? p.urgency, 0),
+      urgency: parseFreeformUrgency(p.urgency),
+      gravity,
+      urgency0: parseFreeformUrgency(p.urgency0 ?? p.urgency),
       gravity0: parseFreeformGravity(p.gravity0 ?? p.gravity),
-      countdown: Number.isFinite(countdown) ? Math.max(1, Math.min(5, countdown)) : null,
+      countdown: Number.isFinite(countdown) ? Math.max(1, Math.min(8, countdown)) : null,
       whyMoves: clipText(p.whyMoves, PLOT_SUMMARY_MAX),
       escalationLevel: null,
       maxEscalations: null,
@@ -192,7 +286,14 @@ function storyActState(p = {}) {
       ifUnsolved: '',
       ifPrevented: '',
       ifNotPrevented: '',
-      depth: null,
+      depth,
+      maxDepth,
+      failCount: Number.isFinite(failRaw) ? failRaw : 0,
+      maxFails:
+        p.maxFails == null || p.maxFails === ''
+          ? maxFailsForGravity(gravity)
+          : Math.max(0, Math.round(Number(p.maxFails))),
+      endings,
       hiddenPremises: normalizeHiddenPremises(p.hiddenPremises),
       discoveryLadder: null,
       closureGate: '',
@@ -591,6 +692,9 @@ function applyPlotShape(p, config = null) {
   p.lastBeatTick = p.lastBeatTick == null ? null : Number(p.lastBeatTick);
   p.beatCount = Math.max(0, Math.round(Number(p.beatCount) || 0));
   Object.assign(p, storyActState(p));
+  if (p.storyType === 'freeform' && Array.isArray(p.endings) && p.endings.length) {
+    p.closeWhen = p.endings.map((e) => e.text);
+  }
   if (p.kind === 'order') Object.assign(p, orderCadence(p, config));
   return p;
 }
@@ -649,6 +753,9 @@ export function createPlotline({
   gravity = null,
   urgency0 = null,
   gravity0 = null,
+  failCount = 0,
+  maxFails = null,
+  endings = [],
   escalationLevel = 0,
   maxEscalations = 3,
   truth = '',
@@ -663,6 +770,7 @@ export function createPlotline({
   ifPrevented = '',
   ifNotPrevented = '',
   depth = null,
+  maxDepth = null,
   hiddenPremises = [],
   discoveryLadder = null,
   closureGate = '',
@@ -739,6 +847,10 @@ export function createPlotline({
       ifPrevented,
       ifNotPrevented,
       depth,
+      maxDepth,
+      failCount,
+      maxFails,
+      endings,
       hiddenPremises,
       discoveryLadder,
       closureGate,
@@ -756,6 +868,9 @@ export function createPlotline({
       confluxId,
     }),
   };
+  if (plot.storyType === 'freeform' && Array.isArray(plot.endings) && plot.endings.length) {
+    plot.closeWhen = plot.endings.map((e) => e.text);
+  }
   return refreshPlotAwareness(plot);
 }
 

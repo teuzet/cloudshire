@@ -21,8 +21,10 @@ const finalJudgePrompt = document.getElementById('finalJudgePrompt');
 const finalJudgePromptText = document.getElementById('finalJudgePromptText');
 const assemblePrompt = document.getElementById('assemblePrompt');
 const assemblePromptText = document.getElementById('assemblePromptText');
-const countdownPrompt = document.getElementById('countdownPrompt');
-const countdownPromptText = document.getElementById('countdownPromptText');
+const endingsPrompt = document.getElementById('endingsPrompt');
+const endingsPromptText = document.getElementById('endingsPromptText');
+const urgencyPrompt = document.getElementById('urgencyPrompt');
+const urgencyPromptText = document.getElementById('urgencyPromptText');
 const alignPrompt = document.getElementById('alignPrompt');
 const alignPromptText = document.getElementById('alignPromptText');
 const beatArchitectPrompt = document.getElementById('beatArchitectPrompt');
@@ -31,12 +33,21 @@ const beatJudgePrompt = document.getElementById('beatJudgePrompt');
 const beatJudgePromptText = document.getElementById('beatJudgePromptText');
 const beatRepairPrompt = document.getElementById('beatRepairPrompt');
 const beatRepairPromptText = document.getElementById('beatRepairPromptText');
+const beatFinalJudgePrompt = document.getElementById('beatFinalJudgePrompt');
+const beatFinalJudgePromptText = document.getElementById('beatFinalJudgePromptText');
 const beatTellPrompt = document.getElementById('beatTellPrompt');
 const beatTellPromptText = document.getElementById('beatTellPromptText');
 const promptTrail = document.getElementById('promptTrail');
 const candidates = document.getElementById('candidates');
 const candidatesMeta = document.getElementById('candidatesMeta');
 const candidatesList = document.getElementById('candidatesList');
+const beatVariants = document.getElementById('beatVariants');
+const beatVariantsMeta = document.getElementById('beatVariantsMeta');
+const beatVariantsList = document.getElementById('beatVariantsList');
+const deedFields = document.getElementById('deedFields');
+const btnDeed = document.getElementById('btnDeed');
+const btnAutotick = document.getElementById('btnAutotick');
+const btnUndo = document.getElementById('btnUndo');
 
 let state = null;
 let pending = false;
@@ -151,28 +162,67 @@ function renderCandidates(drafts, repaired, reviews, gravity, finalReviews, pick
     .join('');
 }
 
-function renderPlot(plot) {
+function renderPlot(plot, align = {}) {
   if (!plot) {
     plotCard.classList.add('hidden');
     plotCard.innerHTML = '';
     return;
   }
-  const closes = (plot.closeWhen || []).map((x) => `<li>${esc(x)}</li>`).join('');
+  const endings = (plot.endings || []).map((e) => `<li><code>${esc(e.id)}</code> [${esc(e.kind)}] ${esc(e.text)}</li>`).join('');
+  const closes = !endings && (plot.closeWhen || []).map((x) => `<li>${esc(x)}</li>`).join('');
   const hidden = (plot.hiddenPremises || []).map((x) => `<li>${esc(x)}</li>`).join('') || '<li class="muted">нет тайны</li>';
   const axes = axesLine(plot);
+  const urgency = plot.urgency != null ? `urgency ${esc(plot.urgency)}` : '';
   const countdown = plot.countdown != null ? `автотик через ${esc(plot.countdown)} мес.` : '';
   const gravity = plot.gravity != null ? `gravity ${esc(plot.gravity)}` : '';
+  const depth = `глубина ${esc(plot.depth ?? 0)}/${esc(plot.maxDepth ?? '—')}`;
+  const fails = `провалы ${esc(plot.failCount ?? 0)}/${esc(plot.maxFails ?? '—')}`;
+  const alignLine = align.relation
+    ? `связь ${esc(align.relation)}${align.endingId ? ` → ${esc(align.endingId)}` : ''}`
+    : '';
   plotCard.classList.remove('hidden');
   plotCard.innerHTML = `
     <h2 class="plot-title">${esc(plot.title)}</h2>
     ${axes ? `<p class="axes">${esc(axes)}</p>` : ''}
     <p class="meta">${esc(plot.synopsis || '')}</p>
     ${plot.whyMoves ? `<p class="muted"><strong>whyMoves.</strong> ${esc(plot.whyMoves)}</p>` : ''}
-    <p class="muted">${[countdown, gravity].filter(Boolean).join(' · ')}</p>
+    <p class="muted">${[urgency, countdown, gravity, depth, fails, alignLine].filter(Boolean).join(' · ')}</p>
+    ${endings ? `<h2>endings</h2><ul>${endings}</ul>` : ''}
     ${closes ? `<h2>closeWhen</h2><ul>${closes}</ul>` : ''}
     <h2>hiddenPremises (лаборатория)</h2>
     <ul>${hidden}</ul>
   `;
+}
+
+function renderBeatVariants(list, judge, moveKind) {
+  if (!list?.length) {
+    beatVariants.classList.add('hidden');
+    beatVariantsMeta.textContent = '';
+    beatVariantsList.innerHTML = '';
+    return;
+  }
+  beatVariants.classList.remove('hidden');
+  const kind = moveKind === 'auto' ? 'автотик' : 'дело';
+  const why = judge?.why ? `Судья: ${judge.why}` : '';
+  const repair = judge?.repair ? `правка: ${judge.repair}` : '';
+  beatVariantsMeta.textContent = [`Реакция на ${kind}.`, why, repair].filter(Boolean).join(' ');
+  beatVariantsList.innerHTML = list
+    .map((v) => {
+      const n = v.index;
+      const dyn = [v.dynamicName, v.dynamicHint].filter(Boolean).join(' — ');
+      const ending = v.endingText ? `<p class="axes">концовка: ${esc(v.endingText)}</p>` : '';
+      const picked = v.picked ? '<p class="picked-mark">выбрано</p>' : '';
+      const planted =
+        v.picked && v.chronicle
+          ? `<h3>Посажено в город</h3><p class="rejected-text">${esc(v.chronicle)}</p>`
+          : '';
+      return `<article class="candidate${v.picked ? ' picked' : ''}"><strong>${esc(n)}. ${esc(
+        v.dynamicName || v.title || 'продолжение',
+      )}</strong>${picked}${
+        dyn ? `<p class="axes">${esc(dyn)}</p>` : '<p class="muted">динамика не размечена</p>'
+      }<p class="rejected-text">${esc(v.text || '')}</p>${ending}${planted}</article>`;
+    })
+    .join('');
 }
 
 function renderRejected(list, judge) {
@@ -226,53 +276,58 @@ function renderPromptTrail(state) {
     state.lastRepairPrompt,
     state.lastFinalJudgePrompt,
     state.lastAssemblePrompt,
-    state.lastCountdownPrompt,
+    state.lastEndingsPrompt,
+    state.lastUrgencyPrompt,
   ];
-  const deed = [
-    state.lastAlignPrompt,
-    state.lastBeatArchitectPrompt,
-    state.lastBeatJudgePrompt,
-    state.lastBeatRepairPrompt,
-    state.lastBeatTellPrompt,
-  ];
-  const hasSeed = seed.some(Boolean);
-  const hasDeed = deed.some(Boolean);
-  promptTrail.classList.toggle('hidden', !hasSeed && !hasDeed);
+  const showDeed = Boolean(state.lastBeatVariants?.length || state.lastAlignPrompt || state.lastMoveKind);
+  const showSeed = !showDeed && seed.some(Boolean);
+  promptTrail.classList.toggle('hidden', !showSeed && !showDeed);
 
-  renderPromptDump(architectPrompt, architectPromptText, state.lastArchitectPrompt, { showEmpty: hasSeed });
-  renderPromptDump(judgePrompt, judgePromptText, state.lastJudgePrompt, { showEmpty: hasSeed });
+  renderPromptDump(architectPrompt, architectPromptText, state.lastArchitectPrompt, { showEmpty: showSeed });
+  renderPromptDump(judgePrompt, judgePromptText, state.lastJudgePrompt, { showEmpty: showSeed });
   renderPromptDump(repairPrompt, repairPromptText, state.lastRepairPrompt, {
-    showEmpty: hasSeed,
+    showEmpty: showSeed,
     emptyNote: 'не вызывался — PASS уже хватило или правки не было',
   });
   renderPromptDump(finalJudgePrompt, finalJudgePromptText, state.lastFinalJudgePrompt, {
-    showEmpty: hasSeed,
+    showEmpty: showSeed,
     emptyNote: 'не вызывался — PASS уже хватило',
   });
   renderPromptDump(assemblePrompt, assemblePromptText, state.lastAssemblePrompt, {
-    showEmpty: hasSeed,
+    showEmpty: showSeed,
     emptyNote: 'не вызывался — нет PASS',
   });
-  renderPromptDump(countdownPrompt, countdownPromptText, state.lastCountdownPrompt, {
-    showEmpty: hasSeed,
-    emptyNote: 'не вызывался — нет PASS',
+  renderPromptDump(endingsPrompt, endingsPromptText, state.lastEndingsPrompt, {
+    showEmpty: showSeed || showDeed,
+    emptyNote: 'не вызывался',
+  });
+  renderPromptDump(urgencyPrompt, urgencyPromptText, state.lastUrgencyPrompt, {
+    showEmpty: showSeed || showDeed,
+    emptyNote: 'не вызывался',
   });
 
-  renderPromptDump(alignPrompt, alignPromptText, state.lastAlignPrompt, { showEmpty: hasDeed });
+  renderPromptDump(alignPrompt, alignPromptText, state.lastAlignPrompt, {
+    showEmpty: showDeed && state.lastMoveKind !== 'auto',
+    emptyNote: 'не вызывался — автотик, ручной override или ход не дошёл',
+  });
   renderPromptDump(beatArchitectPrompt, beatArchitectPromptText, state.lastBeatArchitectPrompt, {
-    showEmpty: hasDeed,
+    showEmpty: showDeed,
     emptyNote: 'не вызывался — дело UNRELATED или ход не дошёл',
   });
   renderPromptDump(beatJudgePrompt, beatJudgePromptText, state.lastBeatJudgePrompt, {
-    showEmpty: hasDeed,
-    emptyNote: 'не вызывался — дело UNRELATED или ход не дошёл',
+    showEmpty: showDeed,
+    emptyNote: 'не вызывался — один кандидат, UNRELATED или ход не дошёл',
   });
   renderPromptDump(beatRepairPrompt, beatRepairPromptText, state.lastBeatRepairPrompt, {
-    showEmpty: hasDeed,
-    emptyNote: 'не вызывался — правки не было',
+    showEmpty: showDeed,
+    emptyNote: 'не вызывался — PASS уже хватило или правки не было',
+  });
+  renderPromptDump(beatFinalJudgePrompt, beatFinalJudgePromptText, state.lastBeatFinalJudgePrompt, {
+    showEmpty: showDeed,
+    emptyNote: 'не вызывался — PASS уже хватило',
   });
   renderPromptDump(beatTellPrompt, beatTellPromptText, state.lastBeatTellPrompt, {
-    showEmpty: hasDeed,
+    showEmpty: showDeed,
     emptyNote: 'не вызывался — дело UNRELATED или ход не дошёл',
   });
 }
@@ -298,24 +353,40 @@ function render() {
     })
     .join('');
 
-  renderPlot(state.plot);
-  seedForm.classList.remove('hidden');
-  deedForm.classList.toggle('hidden', state.mode !== 'story');
+  renderPlot(state.plot, {
+    relation: state.lastAlignRelation,
+    endingId: state.lastAlignEndingId,
+  });
+  const seeded = state.mode === 'story' || state.mode === 'closed';
+  const playing = state.mode === 'story';
+  seedForm.classList.toggle('hidden', seeded);
+  deedForm.classList.toggle('hidden', !seeded);
+  deedFields.classList.toggle('hidden', !playing);
+  btnDeed.classList.toggle('hidden', !playing);
+  btnAutotick.classList.toggle('hidden', !playing);
+  btnUndo.classList.toggle('hidden', !state.canUndo);
   closedNote.classList.toggle('hidden', state.mode !== 'closed');
   const seedText = document.getElementById('seedText');
   const seedGravity = document.getElementById('seedGravity');
   seedText.value = state.lastChronicle || '';
   seedGravity.value = state.lastGravity || 'EPISODE';
-  renderCandidates(
-    state.lastDrafts,
-    state.lastCandidates,
-    state.lastJudgeReviews,
-    state.lastGravity,
-    state.lastFinalReviews,
-    state.lastPickedIndex,
-    Boolean(state.lastRepairPrompt),
-  );
-  renderRejected(state.lastRejected, state.lastJudge);
+  if (seeded) {
+    candidates.classList.add('hidden');
+    candidatesMeta.textContent = '';
+    candidatesList.innerHTML = '';
+  } else {
+    renderCandidates(
+      state.lastDrafts,
+      state.lastCandidates,
+      state.lastJudgeReviews,
+      state.lastGravity,
+      state.lastFinalReviews,
+      state.lastPickedIndex,
+      Boolean(state.lastRepairPrompt),
+    );
+  }
+  renderBeatVariants(state.lastBeatVariants, state.lastJudge, state.lastMoveKind);
+  renderRejected(seeded ? [] : state.lastRejected, seeded ? null : state.lastJudge);
   renderPromptTrail(state);
 }
 
@@ -370,7 +441,19 @@ deedForm.addEventListener('submit', (e) => {
     summary: document.getElementById('deedText').value,
     durationMonths: document.getElementById('deedMonths').value,
     finish: document.getElementById('deedFinish').value,
+    relation: document.getElementById('deedRelation').value,
+    endingId: document.getElementById('deedEndingId').value,
   });
+});
+
+document.getElementById('btnAutotick').addEventListener('click', () => {
+  if (pending) return;
+  void post('/api/freeform/autotick', {});
+});
+
+document.getElementById('btnUndo').addEventListener('click', () => {
+  if (pending) return;
+  void post('/api/freeform/undo', {});
 });
 
 document.getElementById('btnReset').addEventListener('click', () => {

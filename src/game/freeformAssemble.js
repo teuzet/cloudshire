@@ -1,5 +1,6 @@
 /**
- * Сборка freeform-карточки из прошедшей хронике: конструктор в городе, затем срок автотика.
+ * Сборка freeform-карточки из прошедшей хроники: конструктор в городе.
+ * Концовки и urgency ставит лаборатория после посадки плота.
  */
 
 import { getLogger } from '../log.js';
@@ -12,7 +13,6 @@ import {
   parseFreeformGravity,
   formatFreeformGravityForPrompt,
   formatBrainstormCandidateForPrompt,
-  clampFreeformCountdown,
 } from './freeform.js';
 
 const HIDDEN_SPLIT = /\n*[ \t]*На самом деле:\s*/i;
@@ -152,68 +152,6 @@ export async function constructFreeformStory({
   return { card: draft.card, prompt };
 }
 
-export async function estimateFreeformCountdown({
-  runtime,
-  story,
-  gravity,
-  config,
-  log: parentLog,
-}) {
-  const log = (parentLog || getLogger()).child({ scope: 'freeform.countdown' });
-  const g = parseFreeformGravity(gravity);
-  const draft = { months: null };
-  const runOpts = {
-    agentId: 'freeformCountdown',
-    tools: [
-      {
-        name: 'set_freeform_countdown',
-        description: 'Срок в месяцах до следующего хода ситуации, если город ею не занимается.',
-        parameters: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['months'],
-          properties: {
-            months: { type: 'integer', minimum: 1, maximum: 5 },
-          },
-        },
-        handler: async (args) => {
-          const months = clampFreeformCountdown(args?.months);
-          if (months == null) return toolFail('thin', 'Нужно целое число месяцев от 1 до 5.');
-          draft.months = months;
-          return { ok: true };
-        },
-      },
-    ],
-    maxTurns: 2,
-    toolChoice: { type: 'function', function: { name: 'set_freeform_countdown' } },
-    log,
-    scene: 'freeform_countdown',
-    extraSystem: '',
-    userMessages: [
-      {
-        role: 'user',
-        content: [
-          formatFreeformGravityForPrompt(g, config),
-          '',
-          story?.chronicle ? `хроника:\n${story.chronicle}` : '',
-          story?.whyMoves ? `whyMoves: ${story.whyMoves}` : '',
-          '',
-          'Поставь срок через set_freeform_countdown.',
-        ]
-          .filter(Boolean)
-          .join('\n'),
-      },
-    ],
-  };
-  const prompt = captureAgentPrompt(runtime, runOpts);
-  try {
-    await runtime.run(runOpts);
-  } catch (err) {
-    log.warn('freeform.countdown_failed', { error: err.message });
-  }
-  return { months: clampFreeformCountdown(draft.months, 3), prompt };
-}
-
 export async function assembleFreeformLabStory({
   runtime,
   domain,
@@ -234,22 +172,13 @@ export async function assembleFreeformLabStory({
     log,
   });
   const story = constructed.card || fallbackAssembledStory(candidate);
-  const counted = await estimateFreeformCountdown({
-    runtime,
-    story,
-    gravity,
-    config,
-    log,
-  });
   return {
     ...story,
-    countdown: counted.months,
     gravity: parseFreeformGravity(gravity ?? candidate?.gravity),
     arena: candidate?.arena || '',
     worldRelation: candidate?.worldRelation || '',
     conflictSource: candidate?.conflictSource || '',
     temporalShape: candidate?.temporalShape || '',
     assemblePrompt: constructed.prompt || '',
-    countdownPrompt: counted.prompt || '',
   };
 }

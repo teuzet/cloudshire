@@ -1,33 +1,56 @@
 import { getLogger } from '../log.js';
-import { formatCloseWhen } from './plotlines.js';
+import { formatFreeformEndings } from './plotlines.js';
 import { captureAgentPrompt } from './agentPrompt.js';
+import { findPlotEnding } from './freeform.js';
+
+export const FREEFORM_RELATIONS = ['DIRECT', 'RELATED', 'UNRELATED'];
+
+export function parseFreeformRelation(raw, fallback = null) {
+  const key = String(raw || '')
+    .trim()
+    .toUpperCase();
+  if (FREEFORM_RELATIONS.includes(key)) return key;
+  return fallback;
+}
+
+function endingIdFromPlot(plot, rawId) {
+  const found = findPlotEnding(plot, rawId);
+  if (found) return found.id;
+  return plot?.endings?.[0]?.id || '';
+}
 
 /**
- * Бинарно: связано ли дело с freeform-сюжетом.
- * RELATED — может интересно развить историю при любом исходе или коррелирует с closeWhen.
+ * DIRECT — дело целится в конкретную концовку.
+ * RELATED — связано с сюжетом, но не закрывает его успехом.
+ * UNRELATED — даже полный успех сюжет не двигает.
  */
 export async function judgeFreeformRelated({ runtime, domain, plot, summary, detail = '', log: parentLog }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.align', plotId: plot?.id });
-  const draft = { related: true };
+  const draft = { relation: 'RELATED', endingId: '', why: '' };
   const runOpts = {
     agentId: 'freeformAlign',
     tools: [
       {
         name: 'submit_freeform_related',
-        description: 'RELATED или UNRELATED.',
+        description: 'DIRECT, RELATED или UNRELATED. Для DIRECT укажи endingId.',
         parameters: {
           type: 'object',
           additionalProperties: false,
           required: ['relation'],
           properties: {
-            relation: { type: 'string', enum: ['RELATED', 'UNRELATED'] },
+            relation: { type: 'string', enum: [...FREEFORM_RELATIONS] },
+            endingId: {
+              type: 'string',
+              description: 'id концовки из карточки, если relation=DIRECT.',
+            },
             why: { type: 'string' },
           },
         },
         handler: async (args) => {
-          const rel = String(args?.relation || '').toUpperCase();
-          draft.related = rel !== 'UNRELATED';
+          const relation = parseFreeformRelation(args?.relation, 'RELATED');
+          draft.relation = relation;
           draft.why = String(args?.why || '').trim();
+          draft.endingId = relation === 'DIRECT' ? String(args?.endingId || '').trim() : '';
           return { ok: true };
         },
       },
@@ -44,11 +67,12 @@ export async function judgeFreeformRelated({ runtime, domain, plot, summary, det
         content: [
           `История: ${plot?.title || ''}`,
           `Синопсис: ${plot?.synopsis || '—'}`,
-          `closeWhen:\n${formatCloseWhen(plot)}`,
+          `endings:\n${formatFreeformEndings(plot) || '—'}`,
           `Дело: ${summary}`,
           detail ? `Подробности: ${detail}` : '',
-          'RELATED, если дело связано с сюжетом: может интересно развить его и при провале, и при успехе, либо явно бьёт в один из closeWhen.',
-          'UNRELATED — даже полный успех сюжет не двигает. Не ставь RELATED за случайную улику, которую рассказчик мог бы придумать.',
+          'DIRECT — цель дела, чтобы случилось одно из endings. Укажи endingId этой концовки.',
+          'RELATED — дело связано с сюжетом, но не целится в конкретную концовку.',
+          'UNRELATED — даже полный успех сюжет не двигает. Не ставь RELATED/DIRECT за случайную улику.',
         ]
           .filter(Boolean)
           .join('\n'),
@@ -61,9 +85,17 @@ export async function judgeFreeformRelated({ runtime, domain, plot, summary, det
     await runtime.run(runOpts);
   } catch (err) {
     log.warn('freeform.align_failed', { error: err.message });
-    draft.related = true;
+    draft.relation = 'RELATED';
   }
 
-  log.info('freeform.align', { related: draft.related, summary });
-  return { related: Boolean(draft.related), why: draft.why || '', prompt };
+  const relation = parseFreeformRelation(draft.relation, 'RELATED');
+  const endingId = relation === 'DIRECT' ? endingIdFromPlot(plot, draft.endingId) : '';
+  log.info('freeform.align', { relation, endingId, summary });
+  return {
+    related: relation !== 'UNRELATED',
+    relation,
+    endingId,
+    why: draft.why || '',
+    prompt,
+  };
 }

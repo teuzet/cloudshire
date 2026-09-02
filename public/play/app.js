@@ -379,6 +379,7 @@ function plotCard(p, names = {}) {
     p.escalationLevel != null ? `кризис ${p.escalationLevel}/${p.maxEscalations ?? 3}` : null,
     p.urgency != null ? `срочность ${p.urgency}` : null,
     p.gravity != null ? `масштаб ${p.gravity}` : null,
+    p.maxDepth != null ? `глубина ${p.depth ?? 1}/${p.maxDepth}` : p.storyType === 'suspense' && p.depth != null ? `глубина ${p.depth}` : null,
     p.isMainConflux ? 'главная нить сопряжения' : null,
     p.shared ? 'общая' : concerns.length ? 'локальная' : null,
     p.sharedReason ? `стала общей: ${p.sharedReason}` : null,

@@ -7,11 +7,16 @@ import {
   storyTypeOf,
   formatCloseWhen,
   normalizeCloseWhenList,
+  normalizeFreeformEndings,
   plotBeatAgentId,
+  PLOT_ENDING_MAX,
+  PLOT_HOOK_MAX,
 } from '../src/game/plotlines.js';
-import { advanceWorldMonths, normalizeFinish, freeformConfig, openStoryTitlesLine, formatFreeformGravityForPrompt, formatFreeformChronicleSeed, formatBrainstormCandidateForPrompt, parseFreeformGravity, FREEFORM_GRAVITY, clampFreeformCountdown, createFreeformPlot } from '../src/game/freeform.js';
+import { advanceWorldMonths, normalizeFinish, freeformConfig, openStoryTitlesLine, formatFreeformGravityForPrompt, formatFreeformChronicleSeed, formatBrainstormCandidateForPrompt, parseFreeformGravity, parseFreeformUrgency, FREEFORM_GRAVITY, clampFreeformCountdown, createFreeformPlot, sampleFreeformMaxDepth, advanceFreeformDepth, formatFreeformDepth, plotCardForPrompt, applyFreeformProgress, freeformTickDecision, rollFreeformCountdown, maxFailsForGravity } from '../src/game/freeform.js';
 import { parseFreeformPick, formatFreeformVariants, formatFreeformCardJudgeCase, formatFreeformCardJudgeRepair, parseFreeformPackReview } from '../src/game/freeformJudge.js';
 import { normalizeSeedBlank, pickFreeformSeedAxes, pickFreeformSeedAxisPairs, formatFreeformSeedAxesForPrompt, formatFreeformSeedAxisPairsForPrompt } from '../src/game/freeformArchitect.js';
+import { listLegalBeatDynamics, pickFreeformBeatDynamics, formatBeatDynamicsForPrompt } from '../src/game/freeformDynamics.js';
+import { sessionPayload, snapshotForUndo, pushUndo, popUndo } from '../src/clients/web/freeformLab.js';
 import {
   pickFreeformBrainstormRolls,
   formatFreeformBrainstormRollsForPrompt,
@@ -30,8 +35,24 @@ import { startFreeformStory, normalizeSeedVariant } from '../src/game/freeformSt
 import { tellFreeformBeat } from '../src/game/freeformTeller.js';
 import { loadConfig } from '../src/config.js';
 import { createWebServer } from '../src/clients/web/server.js';
-import { sessionPayload } from '../src/clients/web/freeformLab.js';
 import { AgentRuntime } from '../src/agents/runtime.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import yaml from 'js-yaml';
+
+const LEGACY_FREEFORM_AGENTS = ['freeformArchitectStart', 'freeformStart', 'freeformJudge', 'freeformCardJudge'];
+
+function loadLegacyFreeformAgents() {
+  const file = path.join(path.dirname(fileURLToPath(import.meta.url)), '../config/freeform-legacy-agents.yaml');
+  return yaml.load(fs.readFileSync(file, 'utf8')).agents;
+}
+
+function configWithLegacyFreeform() {
+  const cfg = loadConfig();
+  cfg.agents = { ...cfg.agents, ...loadLegacyFreeformAgents() };
+  return cfg;
+}
 
 function seedArchitectBlank(i, hook = `Затравка сапога ${i}`) {
   return {
@@ -42,6 +63,38 @@ function seedArchitectBlank(i, hook = `Затравка сапога ${i}`) {
   };
 }
 
+function passPackReviews(n = 3) {
+  return Array.from({ length: n }, (_, i) => ({
+    index: i + 1,
+    verdict: 'PASS',
+    summary: 'ок',
+    repair: '',
+  }));
+}
+
+const LAB_ENDINGS = [
+  { id: 'g', text: 'Хозяин найден.', kind: 'GOOD_ENDING' },
+  { id: 'n', text: 'Сапог забыт.', kind: 'NEUTRAL_ENDING' },
+  { id: 'b', text: 'Сапог проклял двор.', kind: 'BAD_ENDING' },
+];
+
+async function handleBeatPipeline(opts, { blanks, construct, n = 3 } = {}) {
+  const tool = opts.tools?.[0];
+  if (!tool) return;
+  if (opts.agentId === 'freeformArchitectTell') {
+    await tool.handler({ variants: blanks });
+  } else if (opts.agentId === 'freeformBeatJudge') {
+    const count = Number(tool.parameters?.properties?.reviews?.maxItems) || n;
+    await tool.handler({ reviews: passPackReviews(count) });
+  } else if (opts.agentId === 'freeformTell' && construct) {
+    await tool.handler(construct);
+  } else if (opts.agentId === 'freeformEndings') {
+    await tool.handler({ keep: false, endings: LAB_ENDINGS });
+  } else if (opts.agentId === 'freeformUrgency') {
+    await tool.handler({ urgency: 'MEDIUM' });
+  }
+}
+
 test('freeform — отдельный тип, не трёхтакт', () => {
   const plot = createPlotline({
     title: 'Соль на ветру',
@@ -50,6 +103,7 @@ test('freeform — отдельный тип, не трёхтакт', () => {
     closeWhen: ['Найти источник соли', 'Признать, что соли нет'],
     hiddenPremises: ['Соль сыплется из разлома края, не из склада.'],
     urgency: 70,
+    gravity: 'EPISODE',
   });
   assert.equal(plot.storyType, 'freeform');
   assert.equal(isFreeformPlot(plot), true);
@@ -58,14 +112,73 @@ test('freeform — отдельный тип, не трёхтакт', () => {
   assert.equal(plotBeatAgentId(plot), 'freeformTell');
   assert.deepEqual(plot.closeWhen, ['Найти источник соли', 'Признать, что соли нет']);
   assert.match(formatCloseWhen(plot), /1\. Найти источник соли/);
-  assert.equal(plot.urgency, 70);
+  assert.equal(plot.urgency, 'FAST');
   assert.ok(plot.hiddenPremises.length);
   assert.equal(plot.act, null);
+  assert.equal(plot.depth, 0);
+  assert.equal(plot.maxDepth, 3);
+  assert.equal(plot.failCount, 0);
+  assert.equal(plot.maxFails, 1);
 });
 
 test('closeWhen список нормализуется', () => {
   assert.deepEqual(normalizeCloseWhenList('Один\nОдин\nДва'), ['Один', 'Два']);
   assert.deepEqual(normalizeCloseWhenList(['А', '', 'А']), ['А']);
+  const long = 'слово '.repeat(80).trim();
+  const [item] = normalizeCloseWhenList([long]);
+  assert.ok(item.endsWith('…'));
+  assert.ok(item.length <= PLOT_HOOK_MAX + 1);
+});
+
+test('текст эндинга не режется лимитом closeWhen', () => {
+  const long =
+    'Площадь и Обелиск частично проваливаются, но город успевает огородить опасную зону и перенести колодцы и торг в другое место. Город выживает, потеряв важный ориентир и часть воды.';
+  assert.ok(long.length > PLOT_HOOK_MAX);
+  assert.ok(long.length < PLOT_ENDING_MAX);
+  const [ending] = normalizeFreeformEndings([{ id: 'n', kind: 'NEUTRAL_ENDING', text: long }]);
+  assert.equal(ending.text, long);
+  const plot = createPlotline({
+    title: 'Провал',
+    kind: 'story',
+    storyType: 'freeform',
+    gravity: 'CRISIS',
+    endings: [
+      { id: 'g', kind: 'GOOD_ENDING', text: long },
+      { id: 'n', kind: 'NEUTRAL_ENDING', text: 'Нейтраль.' },
+      { id: 'b', kind: 'BAD_ENDING', text: 'Плохо.' },
+    ],
+  });
+  assert.equal(plot.endings[0].text, long);
+  assert.equal(plot.closeWhen[0], long);
+  const tooLong = 'слово '.repeat(200).trim();
+  const [clipped] = normalizeFreeformEndings([{ id: 'g', kind: 'GOOD_ENDING', text: tooLong }]);
+  assert.ok(clipped.text.endsWith('…'));
+  assert.ok(clipped.text.length <= PLOT_ENDING_MAX + 1);
+});
+
+test('freeform глубина — с нуля и без потолка текущей', () => {
+  assert.equal(sampleFreeformMaxDepth('EPISODE', () => 0), 2);
+  assert.equal(sampleFreeformMaxDepth('RUPTURE', () => 0), 3);
+  const plot = createPlotline({
+    title: 'Сапог',
+    kind: 'story',
+    storyType: 'freeform',
+    gravity: 'EPISODE',
+    depth: 0,
+    maxDepth: 3,
+  });
+  assert.equal(plot.depth, 0);
+  assert.equal(plot.maxDepth, 3);
+  assert.equal(formatFreeformDepth(plot), 'глубина 0/3');
+  assert.match(plotCardForPrompt(plot), /глубина 0\/3/);
+  advanceFreeformDepth(plot);
+  assert.equal(plot.depth, 1);
+  assert.equal(plot.maxDepth, 3);
+  advanceFreeformDepth(plot);
+  advanceFreeformDepth(plot);
+  assert.equal(plot.depth, 3);
+  advanceFreeformDepth(plot);
+  assert.equal(plot.depth, 4);
 });
 
 test('исход дела и сдвиг календаря', () => {
@@ -89,11 +202,13 @@ test('конфиг freeform читается из YAML', () => {
   assert.equal(cfg.variantsMax, 3);
   assert.deepEqual(cfg.seedAxes, ['truthArena', 'worldRelation']);
   const agents = loadConfig().agents;
-  assert.equal(agents.freeformArchitectStart.provider, 'anthropic');
-  assert.equal(agents.freeformArchitectStart.model, 'claude-sonnet-5');
-  assert.equal(agents.freeformArchitectStart.reasoningEffort, 'high');
-  assert.equal(agents.freeformArchitectStart.maxTokens, 16000);
-  assert.deepEqual(agents.freeformArchitectStart.canon, ['world', 'time']);
+  for (const id of LEGACY_FREEFORM_AGENTS) {
+    assert.equal(Boolean(agents[id]), false, `${id} должен быть только в архиве, не в default.yaml`);
+  }
+  const archived = loadLegacyFreeformAgents();
+  for (const id of LEGACY_FREEFORM_AGENTS) {
+    assert.ok(archived[id]?.instructions, `${id} должен быть в config/freeform-legacy-agents.yaml`);
+  }
   assert.equal(agents.freeformBrainstorm.provider, 'anthropic');
   assert.equal(agents.freeformBrainstorm.model, 'claude-sonnet-5');
   assert.equal(agents.freeformBrainstorm.maxTokens, 8000);
@@ -124,6 +239,14 @@ test('конфиг freeform читается из YAML', () => {
   assert.equal(gravity.levels.CRISIS.examples.length, 10);
   assert.match(gravity.levels.RUPTURE.about, /до.*после/);
   assert.match(gravity.levels.RUPTURE.examples[0], /Война/);
+  const beatDyn = freeformConfig(loadConfig()).beatDynamics;
+  assert.equal(beatDyn.some((d) => d.id === 'SETTLEMENT'), false);
+  assert.ok(beatDyn.some((d) => d.id === 'PLOT_TWIST'));
+  assert.ok(beatDyn.some((d) => d.id === 'POLARIZATION'));
+  assert.ok(beatDyn.some((d) => d.id === 'DEADLOCK'));
+  assert.deepEqual(beatDyn.find((d) => d.id === 'DEADLOCK').polarities, ['bad']);
+  assert.deepEqual(beatDyn.find((d) => d.id === 'PLOT_TWIST').polarities, ['good', 'bad']);
+  assert.equal(beatDyn.some((d) => d.id === 'DEPLETION' || d.id === 'cascade'), false);
   assert.equal(agents.freeformBrainstormJudge.provider, 'openai');
   assert.equal(agents.freeformBrainstormJudge.model, 'gpt-5.6-luna');
   assert.deepEqual(agents.freeformBrainstormJudge.canon, ['world']);
@@ -153,47 +276,36 @@ test('конфиг freeform читается из YAML', () => {
   assert.ok(authors.length >= 12);
   assert.equal(new Set(authors.map((a) => a.id)).size, authors.length);
   assert.ok(authors.some((a) => a.name.includes('По')));
-  assert.equal(agents.freeformArchitectTell.model, 'gpt-5.6-luna');
+  assert.equal(agents.freeformArchitectTell.model, 'claude-haiku-4-5');
   assert.deepEqual(agents.freeformArchitectTell.canon, ['world', 'time']);
-  assert.match(agents.freeformArchitectStart.instructions, /придумываешь завязки/);
-  assert.match(agents.freeformArchitectTell.instructions, /ХОДА/);
+  assert.match(agents.freeformArchitectTell.instructions, /один абзац/);
+  assert.doesNotMatch(agents.freeformArchitectTell.instructions, /ХОДА|whatHappens|closeWhen|situationNow|архитектор/);
   assert.equal(Boolean(agents.freeformArchitect), false);
-  assert.equal(agents.freeformStart.model, 'gpt-5.6-luna');
   assert.equal(agents.freeformTell.provider, 'anthropic');
   assert.equal(agents.freeformTell.model, 'claude-haiku-4-5');
-  assert.equal(agents.freeformJudge.model, 'gpt-5.6-luna');
-  assert.equal(agents.freeformCardJudge.model, 'gpt-5.6-luna');
-  assert.match(agents.freeformCardJudge.instructions, /HINGE/);
-  assert.match(agents.freeformCardJudge.instructions, /не требуй угрозу/);
-  assert.match(agents.freeformCardJudge.instructions, /PLAUSIBLE_ENOUGH/);
-  assert.match(agents.freeformCardJudge.instructions, /RUPTURE/);
-  assert.doesNotMatch(agents.freeformCardJudge.instructions, /CLEAR_THREAT/);
-  assert.doesNotMatch(agents.freeformCardJudge.instructions, /MEANINGFUL_AGENCY/);
-  assert.doesNotMatch(agents.freeformArchitectStart.instructions, /ANTI-ATTRACTOR|плесень|грибок/);
-  assert.doesNotMatch(agents.freeformJudge.instructions, /ANTI-ATTRACTOR|плесень/);
-  assert.match(agents.freeformArchitectStart.instructions, /не обязательно прямое и мгновенное/);
-  assert.match(agents.freeformArchitectStart.instructions, /четыре поля/);
-  assert.match(agents.freeformArchitectStart.instructions, /Gravity относится только к этому полю/);
-  assert.match(agents.freeformArchitectStart.instructions, /фитиль/);
-  assert.match(agents.freeformStart.instructions, /Не ужимай посадку/);
-  assert.match(agents.freeformCardJudge.instructions, /Синопсис может быть меньше/);
-  assert.match(agents.freeformArchitectStart.instructions, /по А судят о Б/);
-  assert.match(agents.freeformJudge.instructions, /ШАРНИР/);
-  assert.match(agents.freeformStart.instructions, /whyMoves/);
-  assert.match(agents.freeformStart.instructions, /Urgency не ставь/);
-  assert.match(agents.freeformJudge.instructions, /прибыть с чужого острова нельзя/);
+  assert.match(agents.freeformTell.instructions, /пересказ сюжета/);
+  assert.match(agents.freeformTell.instructions, /Год 3, месяц 6/);
+  assert.match(agents.freeformTell.instructions, /нумерованн/);
   assert.equal(agents.freeformAssemble.model, 'gpt-5.6-luna');
   assert.deepEqual(agents.freeformAssemble.canon, ['world', 'patron', 'ruler', 'time', 'foreign']);
   assert.match(agents.freeformAssemble.instructions, /submit_freeform_story/);
   assert.match(agents.freeformAssemble.instructions, /whyMoves/);
   assert.match(agents.freeformAssemble.instructions, /На самом деле/);
   assert.doesNotMatch(agents.freeformAssemble.instructions, /depth|countdown|urgency|не ставь/i);
-  assert.equal(agents.freeformCountdown.model, 'gpt-5.6-luna');
-  assert.equal(agents.freeformCountdown.maxTokens, 400);
-  assert.deepEqual(agents.freeformCountdown.canon, ['world']);
-  assert.match(agents.freeformCountdown.instructions, /set_freeform_countdown/);
-  assert.match(agents.freeformCountdown.instructions, /от 1 месяца до 5 месяцев/);
-  assert.doesNotMatch(agents.freeformCountdown.instructions, /depth|не ставь/i);
+  assert.equal(agents.freeformUrgency.model, 'gpt-5.6-luna');
+  assert.equal(agents.freeformUrgency.maxTokens, 400);
+  assert.deepEqual(agents.freeformUrgency.canon, ['world']);
+  assert.match(agents.freeformUrgency.instructions, /set_freeform_urgency/);
+  assert.match(agents.freeformUrgency.instructions, /FAST/);
+  assert.doesNotMatch(agents.freeformUrgency.instructions, /\bdepth\b/i);
+  assert.equal(agents.freeformEndings.model, 'gpt-5.6-luna');
+  assert.deepEqual(agents.freeformEndings.canon, ['world', 'time']);
+  assert.match(agents.freeformEndings.instructions, /submit_freeform_endings/);
+  assert.match(agents.freeformEndings.instructions, /GOOD_ENDING/);
+  assert.equal(agents.freeformBeatJudge.model, 'gpt-5.6-luna');
+  assert.match(agents.freeformBeatJudge.instructions, /submit_freeform_pack_review/);
+  assert.match(agents.freeformAlign.instructions, /DIRECT/);
+  assert.match(agents.freeformAlign.instructions, /endingId/);
 });
 
 test('gravity для архитектора — enum и расшифровка уровней', () => {
@@ -531,13 +643,10 @@ test('UNCERTAIN судьи карточки не гоняет конструкт
   assert.equal(started.judge.card.repaired, false);
 });
 
-test('ход: архитектор без города, конструктор с городом', async () => {
+test('продолжение: архитектор без города, конструктор с городом', async () => {
   const CITY_MARK = 'ЦИСТЕРНЫ_МАРКЕР';
   const blanks = [1, 2, 3].map((i) => ({
-    title: `Ход ${i}`,
-    whatHappens: `Гость показал второй сапог ${i}`,
-    situationNow: `Хозяин двора держит гостя ${i}`,
-    closed: false,
+    text: `Гость показал второй сапог ${i}`,
   }));
   const calls = [];
   const runtime = {
@@ -546,20 +655,18 @@ test('ход: архитектор без города, конструктор �
         agentId: opts.agentId,
         extraSystem: String(opts.extraSystem || ''),
         user: String(opts.userMessages?.[0]?.content || ''),
+        tool: opts.tools?.[0]?.name,
+        toolProps: Object.keys(opts.tools?.[0]?.parameters?.properties?.variants?.items?.properties || {}),
       });
       const tool = opts.tools?.[0];
       if (!tool) return;
-      if (opts.agentId === 'freeformArchitectTell') {
-        await tool.handler({ variants: blanks });
-      } else if (opts.agentId === 'freeformJudge') {
-        await tool.handler({ pick: 1, why: 'острее' });
-      } else if (opts.agentId === 'freeformTell') {
-        await tool.handler({
+      await handleBeatPipeline(opts, {
+        blanks,
+        construct: {
           chronicle: 'Гость показал второй сапог у створа.',
           synopsis: 'Хозяин двора держит гостя у створа.',
-          closed: false,
-        });
-      }
+        },
+      });
     },
   };
   const plot = createPlotline({
@@ -569,6 +676,7 @@ test('ход: архитектор без города, конструктор �
     closeWhen: ['Найти хозяина', 'Выбросить сапог'],
     synopsis: 'На площади нашли сапог.',
     urgency: 40,
+    gravity: 'EPISODE',
   });
   const domain = {
     id: 'd1',
@@ -584,16 +692,251 @@ test('ход: архитектор без города, конструктор �
     world: { tickIndex: 4, gameDate: { year: 1, month: 4 } },
     plot,
     deed: { summary: 'Искали хозяина сапога', detail: '', durationMonths: 1, finish: 'ok' },
+    rng: () => 0,
   });
   assert.equal(told.ok, true);
   assert.match(told.winner.chronicle, /створа/);
   assert.equal(told.rejected[0].text, 'Гость показал второй сапог 2');
+  assert.equal(told.pickedIndex, 1);
+  assert.ok(told.variants[0].dynamicName);
+  assert.match(told.variants[0].dynamicId, /PLOT_TWIST|POLARIZATION|DEADLOCK|COMPLICATION|REVERSAL|REVELATION|BREAKTHROUGH/);
   const architect = calls.find((c) => c.agentId === 'freeformArchitectTell');
   const ctor = calls.find((c) => c.agentId === 'freeformTell');
   assert.equal(architect.extraSystem, '');
+  assert.equal(architect.tool, 'submit_freeform_beat_blanks');
+  assert.deepEqual(architect.toolProps, ['text']);
   assert.doesNotMatch(architect.user, new RegExp(CITY_MARK));
   assert.doesNotMatch(architect.user, /threatArena/);
+  assert.match(architect.user, /История «Чужой сапог»/);
+  assert.match(architect.user, /Способы сдвига/);
+  assert.match(architect.user, /Поворот|Поляризация|Тупик|Осложнение|Разворот|Прояснение|Прорыв/);
+  assert.match(architect.user, /Поступок: Искали хозяина сапога/);
+  assert.doesNotMatch(architect.user, /История кончится/);
+  assert.doesNotMatch(architect.user, /closeWhen|whatHappens|situationNow|whyMoves:|hiddenPremises|urgency|countdown|ДИНАМИКИ|ХОДА|архитектор|глубина|maxDepth|\bdepth\b/);
+  assert.doesNotMatch(architect.user, /Истощение|Накопление|Каскад|depletion|cascade/i);
   assert.match(ctor.extraSystem, new RegExp(CITY_MARK));
+  assert.match(ctor.extraSystem, /глубина 1\/3/);
+  assert.match(ctor.user, /пересказ сюжета/);
+  assert.match(ctor.user, /нумерованн/);
+  assert.deepEqual(
+    calls.map((c) => c.agentId),
+    ['freeformArchitectTell', 'freeformBeatJudge', 'freeformTell', 'freeformEndings', 'freeformUrgency'],
+  );
+});
+
+test('жребий динамики хода — полярность good/bad, без SETTLEMENT', () => {
+  const cfg = loadConfig();
+  const legal = listLegalBeatDynamics(cfg);
+  const ids = legal.map((d) => d.id);
+  assert.equal(ids.includes('SETTLEMENT'), false);
+  assert.ok(ids.includes('PLOT_TWIST'));
+  assert.ok(ids.includes('POLARIZATION'));
+  assert.ok(ids.includes('DEADLOCK'));
+  assert.equal(ids.includes('DEPLETION'), false);
+  assert.equal(ids.includes('CASCADE'), false);
+  const good = listLegalBeatDynamics(cfg, null, { polarity: 'good' }).map((d) => d.id);
+  assert.equal(good.includes('DEADLOCK'), false);
+  assert.equal(good.includes('COMPLICATION'), false);
+  assert.ok(good.includes('PLOT_TWIST'));
+  const bad = listLegalBeatDynamics(cfg, null, { polarity: 'bad' }).map((d) => d.id);
+  assert.ok(bad.includes('DEADLOCK'));
+  assert.ok(bad.includes('COMPLICATION'));
+  const picked = pickFreeformBeatDynamics(cfg, 3, () => 0, null, { polarity: 'good' });
+  assert.equal(picked.length, 3);
+  assert.equal(new Set(picked.map((d) => d.id)).size, 3);
+  assert.equal(picked[0].id, 'PLOT_TWIST');
+  const formatted = formatBeatDynamicsForPrompt(picked);
+  assert.match(formatted, /Способы сдвига/);
+  assert.match(formatted, /Поворот/);
+  assert.doesNotMatch(formatted, /SETTLEMENT|PLOT_TWIST|ДИНАМИКИ/);
+});
+
+test('лабораторный undo снимает последний снимок', () => {
+  const base = { mode: 'idle', lastChronicle: '', undoStack: [] };
+  const afterSeed = { mode: 'story', lastChronicle: 'сапог', plotId: 'p1' };
+  pushUndo(afterSeed, snapshotForUndo(base));
+  assert.equal(afterSeed.undoStack.length, 1);
+  const restored = popUndo(afterSeed);
+  assert.equal(restored.mode, 'idle');
+  assert.equal(restored.undoStack.length, 0);
+  assert.equal(popUndo(restored), null);
+});
+
+test('автотик: архитектор без дела, с динамиками', async () => {
+  const blanks = [1, 2, 3].map((i) => ({
+    text: `Сапог сам сдвинулся ${i}`,
+  }));
+  const calls = [];
+  const runtime = {
+    async run(opts) {
+      calls.push({
+        agentId: opts.agentId,
+        user: String(opts.userMessages?.[0]?.content || ''),
+      });
+      const tool = opts.tools?.[0];
+      if (!tool) return;
+      await handleBeatPipeline(opts, {
+        blanks,
+        construct: {
+          chronicle: 'Сапог сам сдвинулся у створа.',
+          synopsis: 'Площадь держит тишину у створа.',
+        },
+      });
+    },
+  };
+  const plot = createPlotline({
+    title: 'Чужой сапог',
+    kind: 'story',
+    storyType: 'freeform',
+    closeWhen: ['Найти хозяина'],
+    synopsis: 'На площади нашли сапог.',
+  });
+  plot.whyMoves = 'Пока сапог лежит, хозяин ищет его дворами.';
+  const told = await tellFreeformBeat({
+    config: loadConfig(),
+    runtime,
+    domain: { id: 'd1', name: 'Грасток', plotlines: [plot], lore: [] },
+    world: { tickIndex: 4, gameDate: { year: 1, month: 4 } },
+    plot,
+    trigger: 'auto',
+    rng: () => 0.5,
+  });
+  assert.equal(told.ok, true);
+  assert.equal(told.pickedIndex, 2);
+  const architect = calls.find((c) => c.agentId === 'freeformArchitectTell');
+  assert.match(architect.user, /не занимались/);
+  assert.match(architect.user, /клонилась к тому/);
+  assert.match(architect.user, /Пока сапог лежит, хозяин ищет его дворами/);
+  assert.doesNotMatch(architect.user, /whyMoves|Дело:|Поступок:/);
+  assert.match(architect.user, /Способы сдвига/);
+});
+
+test('urgency enum, провалы и решение хода', () => {
+  assert.equal(parseFreeformUrgency(70), 'FAST');
+  assert.equal(parseFreeformUrgency(30), 'SLOW');
+  assert.equal(parseFreeformUrgency('medium'), 'MEDIUM');
+  assert.equal(rollFreeformCountdown('FAST', () => 0), 1);
+  assert.equal(rollFreeformCountdown('FAST', () => 0.99), 2);
+  assert.equal(rollFreeformCountdown('MEDIUM', () => 0), 2);
+  assert.equal(rollFreeformCountdown('SLOW', () => 0.99), 8);
+  assert.equal(maxFailsForGravity('SITUATION'), 0);
+  assert.equal(maxFailsForGravity('EPISODE'), 1);
+  assert.equal(maxFailsForGravity('CRISIS'), 2);
+  assert.equal(maxFailsForGravity('RUPTURE'), 3);
+
+  const plot = createPlotline({
+    title: 'Сапог',
+    kind: 'story',
+    storyType: 'freeform',
+    gravity: 'EPISODE',
+    maxDepth: 3,
+    endings: LAB_ENDINGS,
+  });
+  assert.equal(plot.depth, 0);
+  applyFreeformProgress(plot, { finish: 'ok' });
+  assert.equal(plot.depth, 1);
+  assert.equal(plot.failCount, 0);
+  assert.equal(freeformTickDecision(plot, { relation: 'RELATED', finish: 'ok' }).kind, 'continue');
+  assert.equal(freeformTickDecision(plot, { relation: 'DIRECT', finish: 'ok', endingId: 'g' }).kind, 'continue');
+
+  plot.depth = 3;
+  assert.equal(
+    freeformTickDecision(plot, { relation: 'DIRECT', finish: 'ok', endingId: 'g' }).kind,
+    'closeDirect',
+  );
+  assert.equal(freeformTickDecision(plot, { relation: 'RELATED', finish: 'ok' }).kind, 'continue');
+
+  applyFreeformProgress(plot, { finish: 'fail' });
+  assert.equal(plot.failCount, 1);
+  assert.equal(freeformTickDecision(plot, { finish: 'fail' }).kind, 'continue');
+  applyFreeformProgress(plot, { finish: 'fail' });
+  assert.equal(plot.failCount, 2);
+  assert.equal(freeformTickDecision(plot, { finish: 'fail' }).kind, 'closeBad');
+  applyFreeformProgress(plot, { finish: 'crit' });
+  assert.equal(plot.failCount, 1);
+
+  const sit = createPlotline({
+    title: 'Мелочь',
+    kind: 'story',
+    storyType: 'freeform',
+    gravity: 'SITUATION',
+  });
+  applyFreeformProgress(sit, { autotick: true });
+  assert.equal(sit.failCount, 1);
+  assert.equal(freeformTickDecision(sit, { autotick: true }).kind, 'closeBad');
+});
+
+test('DIRECT успех на maxDepth являет связанную концовку и закрывает', async () => {
+  const calls = [];
+  const runtime = {
+    async run(opts) {
+      calls.push(opts.agentId);
+      await handleBeatPipeline(opts, {
+        blanks: [{ text: 'Хозяин взял сапог и двор выдохнул.' }],
+        construct: {
+          chronicle: 'Хозяин взял сапог у створа.',
+          synopsis: 'Сапог вернулся, двор спокоен.',
+        },
+        n: 1,
+      });
+    },
+  };
+  const plot = createPlotline({
+    title: 'Чужой сапог',
+    kind: 'story',
+    storyType: 'freeform',
+    gravity: 'EPISODE',
+    maxDepth: 2,
+    depth: 1,
+    endings: LAB_ENDINGS,
+    synopsis: 'На площади нашли сапог.',
+  });
+  const told = await tellFreeformBeat({
+    config: loadConfig(),
+    runtime,
+    domain: { id: 'd1', name: 'Грасток', plotlines: [plot], lore: [] },
+    world: { tickIndex: 4, gameDate: { year: 1, month: 4 } },
+    plot,
+    deed: { summary: 'Вернули сапог хозяину', durationMonths: 1, finish: 'ok' },
+    relation: 'DIRECT',
+    endingId: 'g',
+    rng: () => 0,
+  });
+  assert.equal(told.ok, true);
+  assert.equal(told.decision.kind, 'closeDirect');
+  assert.equal(told.winner.closed, true);
+  assert.match(told.winner.closedBy, /Хозяин найден/);
+  assert.equal(plot.depth, 2);
+  assert.equal(calls.includes('freeformBeatJudge'), false);
+  assert.equal(calls.includes('freeformEndings'), false);
+  assert.equal(calls.includes('freeformUrgency'), false);
+  assert.match(calls.join(','), /freeformArchitectTell/);
+  assert.match(calls.join(','), /freeformTell/);
+});
+
+test('RELATED на maxDepth не закрывает, провал DIRECT даёт closeBad при переполнении', () => {
+  const plot = createPlotline({
+    title: 'Сапог',
+    kind: 'story',
+    storyType: 'freeform',
+    gravity: 'SITUATION',
+    maxDepth: 1,
+    endings: LAB_ENDINGS,
+  });
+  applyFreeformProgress(plot, { finish: 'ok' });
+  assert.equal(
+    freeformTickDecision(plot, { relation: 'RELATED', finish: 'ok' }).kind,
+    'continue',
+  );
+  assert.equal(
+    freeformTickDecision(plot, { relation: 'DIRECT', finish: 'ok', endingId: 'g' }).kind,
+    'closeDirect',
+  );
+  applyFreeformProgress(plot, { finish: 'fail' });
+  assert.equal(
+    freeformTickDecision(plot, { relation: 'DIRECT', finish: 'fail', endingId: 'g' }).kind,
+    'closeBad',
+  );
 });
 
 test('жребий завязки — арена и worldRelation из саспенс-аннотаций', () => {
@@ -1068,7 +1411,8 @@ test('лабораторный payload отдаёт затравки без сю
     lastRepairPrompt: 'ДОРАБОТКА',
     lastFinalJudgePrompt: 'второй судья',
     lastAssemblePrompt: 'конструктор',
-    lastCountdownPrompt: 'срок',
+    lastEndingsPrompt: 'концовки',
+    lastUrgencyPrompt: 'срок',
     lastAlignPrompt: '',
     lastBeatArchitectPrompt: '',
     lastBeatJudgePrompt: '',
@@ -1094,8 +1438,11 @@ test('лабораторный payload отдаёт затравки без сю
   assert.equal(payload.lastPickedIndex, 1);
   assert.match(payload.lastFinalJudgePrompt, /второй судья/);
   assert.match(payload.lastAssemblePrompt, /конструктор/);
-  assert.match(payload.lastCountdownPrompt, /срок/);
+  assert.match(payload.lastEndingsPrompt, /концовки/);
+  assert.match(payload.lastUrgencyPrompt, /срок/);
   assert.equal(payload.lastAlignPrompt, '');
+  assert.equal(payload.canUndo, false);
+  assert.deepEqual(payload.lastBeatVariants, []);
 });
 
 test('из PASS берётся случайный, без PASS победителя нет', () => {
@@ -1133,12 +1480,12 @@ test('скрытый слой отрезается от наблюдаемой �
   assert.doesNotMatch(fallback.chronicle, /На самом деле/i);
   assert.match(fallback.whyMoves, /зовёт/);
   assert.equal(clampFreeformCountdown(0), 1);
-  assert.equal(clampFreeformCountdown(9), 5);
+  assert.equal(clampFreeformCountdown(9), 8);
   assert.equal(clampFreeformCountdown('3'), 3);
   assert.equal(clampFreeformCountdown('x', 2), 2);
 });
 
-test('конструктор собирает хронику, hidden и whyMoves, countdown 1–5', async () => {
+test('конструктор собирает хронику, hidden и whyMoves — без countdown-агента', async () => {
   const real = new AgentRuntime(loadConfig());
   const calls = [];
   const runtime = {
@@ -1154,8 +1501,6 @@ test('конструктор собирает хронику, hidden и whyMoves
           whyMoves: 'Пока сапог лежит, хозяин ищет его дворами.',
           hiddenPremises: ['Соль сыплется из разлома края, не из склада.'],
         });
-      } else if (opts.agentId === 'freeformCountdown') {
-        await tool.handler({ months: 2 });
       }
     },
   };
@@ -1172,52 +1517,47 @@ test('конструктор собирает хронику, hidden и whyMoves
     },
     gravity: 'EPISODE',
   });
-  assert.deepEqual(calls, ['freeformAssemble', 'freeformCountdown']);
+  assert.deepEqual(calls, ['freeformAssemble']);
   assert.equal(out.title, 'Чужой сапог');
   assert.match(out.chronicle, /площади/);
   assert.doesNotMatch(out.chronicle, /На самом деле/i);
   assert.match(out.whyMoves, /хозяин/);
   assert.match(out.hiddenPremises[0], /Соль/);
-  assert.equal(out.countdown, 2);
+  assert.equal(out.countdown, undefined);
   assert.match(out.assemblePrompt, /submit_freeform_story/);
   assert.doesNotMatch(out.assemblePrompt, /\bdepth\b|countdown|urgency/i);
-  assert.match(out.countdownPrompt, /set_freeform_countdown/);
-  assert.doesNotMatch(out.countdownPrompt, /\bdepth\b/);
   const plot = createFreeformPlot({
     domain: { plotlines: [] },
     world: { tickIndex: 1 },
     variant: out,
     config: loadConfig(),
+    rng: () => 0,
   });
   assert.equal(plot.storyType, 'freeform');
-  assert.equal(plot.urgency, 0);
-  assert.equal(plot.countdown, 2);
+  assert.equal(plot.urgency, 'MEDIUM');
+  assert.equal(plot.countdown, null);
   assert.equal(plot.whyMoves, out.whyMoves);
   assert.equal(plot.arena, 'HUMAN');
+  assert.equal(plot.depth, 0);
+  assert.equal(plot.maxDepth, 2);
+  assert.equal(plot.maxFails, 1);
+  assert.equal(formatFreeformDepth(plot), 'глубина 0/2');
 });
 
 test('системный пакет архитекторов без cityBrief', () => {
   const runtime = new AgentRuntime(loadConfig());
-  for (const agentId of ['freeformArchitectStart', 'freeformArchitectTell']) {
-    const packed = runtime.assembleChat({
-      agentId,
-      extraSystem: '',
-      userMessages: [{ role: 'user', content: 'хроника' }],
-    });
-    assert.doesNotMatch(packed.systemContent, /cityBrief/i);
-    if (agentId === 'freeformArchitectStart') {
-      assert.match(packed.systemContent, /придумываешь завязки/);
-      assert.match(packed.systemContent, /не обязательно прямое и мгновенное/);
-      assert.match(packed.systemContent, /вайлдкард/);
-      assert.doesNotMatch(packed.systemContent, /плесень|ANTI-ATTRACTOR/);
-    } else {
-      assert.match(packed.systemContent, /архитектор/);
-    }
-  }
+  const packed = runtime.assembleChat({
+    agentId: 'freeformArchitectTell',
+    extraSystem: '',
+    userMessages: [{ role: 'user', content: 'хроника' }],
+  });
+  assert.doesNotMatch(packed.systemContent, /cityBrief/i);
+  assert.match(packed.systemContent, /один абзац/);
+  assert.doesNotMatch(packed.systemContent, /ХОДА|whatHappens|closeWhen|архитектор/);
 });
 
 test('завязка возвращает полный промпт архитектора (system + user + tools)', async () => {
-  const real = new AgentRuntime(loadConfig());
+  const real = new AgentRuntime(configWithLegacyFreeform());
   const blanks = [1, 2, 3].map((i) => seedArchitectBlank(i, `Сапог зовёт ${i}`));
   const runtime = {
     assembleChat: (opts) => real.assembleChat(opts),
@@ -1281,11 +1621,16 @@ test('GET /freeform отдаёт лабораторию', async () => {
     assert.match(html, /Генератор хроник/);
     assert.match(html, /Судья пачки/);
     assert.match(html, /Конструктор истории/);
-    assert.match(html, /Срок автотика/);
-    assert.match(html, /RELATED \/ UNRELATED/);
+    assert.match(html, /Urgency/);
+    assert.match(html, /Концовки/);
+    assert.match(html, /DIRECT \/ RELATED \/ UNRELATED/);
     assert.match(html, /Конструктор хода/);
     assert.match(html, /Три хроники/);
     assert.match(html, /Из хроники города/);
+    assert.match(html, /Выполнить дело/);
+    assert.match(html, /Автотик/);
+    assert.match(html, /Назад/);
+    assert.match(html, /Три хода/);
   } finally {
     await new Promise((resolve, reject) => http.close((err) => (err ? reject(err) : resolve())));
   }

@@ -91,7 +91,7 @@ button {
   cursor: pointer;
 }
 button:disabled { opacity: 0.5; cursor: wait; }
-#btnReset, #btnSeedCity {
+#btnReset, #btnSeedCity, #btnAutotick, #btnUndo {
   background: transparent;
   color: var(--ink);
   border: 1px solid var(--line);

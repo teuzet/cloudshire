@@ -47,14 +47,16 @@ export function formatFreeformVariants(variants) {
         `=== Вариант ${i + 1}: ${v.title || '(без названия)'} ===`,
         v.arena ? `arena: ${v.arena}` : null,
         v.worldRelation ? `worldRelation: ${v.worldRelation}` : null,
-        v.hook || v.text ? `затравка: ${v.hook || v.text}` : null,
+        v.hook ? `затравка: ${v.hook}` : null,
+        !v.hook && v.text ? v.text : null,
         v.conflict ? `конфликт: ${v.conflict}` : null,
-        v.dynamics ? `динамика: ${v.dynamics}` : null,
+        v.dynamicName
+          ? `динамика сюжета: ${v.dynamicName}${v.dynamicHint ? ` — ${v.dynamicHint}` : ''}`
+          : v.dynamics
+            ? `динамика: ${v.dynamics}`
+            : null,
         v.consequences ? `последствия: ${v.consequences}` : null,
         v.premise && v.premise !== v.text && v.premise !== v.hook ? `premise: ${v.premise}` : null,
-        v.stakes ? `stakes: ${v.stakes}` : null,
-        v.whatHappens ? `whatHappens: ${v.whatHappens}` : null,
-        v.situationNow ? `situationNow: ${v.situationNow}` : null,
         v.synopsis ? `synopsis: ${v.synopsis}` : null,
         Array.isArray(v.closeWhen) && v.closeWhen.length
           ? `closeWhen:\n${v.closeWhen.map((x) => `- ${x}`).join('\n')}`
@@ -182,6 +184,9 @@ export const FREEFORM_PACK_JUDGE_CODES = [
   'AXIS',
   'PATRON',
   'CONFLUX',
+  'SAME_STORY',
+  'HIDDEN',
+  'ENDING',
   'OTHER',
 ];
 
@@ -255,6 +260,109 @@ export function isPackPass(review) {
 /** PASS не переписываем, даже если судья приложил совет. */
 export function reviewNeedsRewrite(review) {
   return !isPackPass(review) && reviewNeedsRepair(review);
+}
+
+export function scatterPackReviews(slotCount, reviews) {
+  const out = Array.from({ length: slotCount }, () => null);
+  for (const review of reviews || []) {
+    const i = Number(review?.index) - 1;
+    if (i >= 0 && i < slotCount) out[i] = review;
+  }
+  return out;
+}
+
+export async function reviewFreeformPack({
+  runtime,
+  agentId = 'freeformBeatJudge',
+  candidates,
+  caseText,
+  extraSystem = '',
+  log: parentLog,
+  scene = 'freeform_pack_judge',
+} = {}) {
+  const log = (parentLog || getLogger()).child({ scope: 'freeform.pack_judge', agentId });
+  const n = candidates?.length || 0;
+  const indices = (candidates || []).map((c, i) => Number(c.index) || i + 1);
+  if (!n) return { reviews: [], prompt: '' };
+  const draft = { reviews: null };
+  const indexHint = indices.join(', ');
+  const runOpts = {
+    agentId,
+    tools: [
+      {
+        name: 'submit_freeform_pack_review',
+        description: `Вердикт и правка по каждому из ${n} кандидатов (${indexHint}). Победителя не выбирай.`,
+        parameters: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['reviews'],
+          properties: {
+            reviews: {
+              type: 'array',
+              minItems: n,
+              maxItems: n,
+              items: {
+                type: 'object',
+                required: ['index', 'verdict'],
+                properties: {
+                  index: { type: 'integer', description: `Номер кандидата: ${indexHint}.` },
+                  verdict: { type: 'string', enum: ['PASS', 'FAIL', 'UNCERTAIN'] },
+                  summary: { type: 'string', description: 'Одно предложение: что с этим кандидатом.' },
+                  repair: {
+                    type: 'string',
+                    description: 'Минимальная инструкция автору. Пусто, если чинить нечего.',
+                  },
+                  issues: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      required: ['code', 'reason'],
+                      properties: {
+                        code: { type: 'string', enum: FREEFORM_PACK_JUDGE_CODES },
+                        reason: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        handler: async (args) => {
+          const reviews = parseFreeformPackReview(args, n, indices);
+          if (reviews.length !== n) {
+            return toolFail('thin', `Нужен отзыв ровно по ${n} кандидатам.`);
+          }
+          draft.reviews = reviews;
+          return { ok: true, count: n };
+        },
+      },
+    ],
+    maxTurns: 2,
+    toolChoice: { type: 'function', function: { name: 'submit_freeform_pack_review' } },
+    log,
+    scene,
+    extraSystem,
+    userMessages: [
+      {
+        role: 'user',
+        content: String(caseText || ''),
+      },
+    ],
+  };
+  const prompt = captureAgentPrompt(runtime, runOpts);
+  try {
+    await runtime.run(runOpts);
+  } catch (err) {
+    log.warn('freeform.pack_judge_failed', { error: err.message });
+  }
+  const reviews = draft.reviews || parseFreeformPackReview({}, n, indices);
+  log.info('freeform.pack_judge', {
+    agentId,
+    verdicts: reviews.map((r) => r.verdict),
+    repairs: reviews.filter(reviewNeedsRewrite).length,
+  });
+  return { reviews, prompt };
 }
 
 export const FREEFORM_CARD_JUDGE_CODES = [
@@ -359,55 +467,73 @@ export async function judgeFreeformCard({
   return { accepted, judge: verdict };
 }
 
+function beatRepairTool(draft) {
+  return {
+    name: 'submit_freeform_repair',
+    description: 'Исправленный абзац продолжения.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['text'],
+      properties: {
+        text: { type: 'string', description: 'Один абзац: что произошло дальше.' },
+      },
+    },
+    handler: async (args) => {
+      const text = String(args?.text || '').trim();
+      if (!text) return toolFail('empty', 'Верни исправленный абзац.');
+      draft.data = { text };
+      return { ok: true };
+    },
+  };
+}
+
+function seedRepairTool(draft) {
+  return {
+    name: 'submit_freeform_repair',
+    description: 'Исправленный победивший вариант. Поля те же, что у исходного варианта.',
+    parameters: {
+      type: 'object',
+      additionalProperties: true,
+      required: [],
+      properties: {
+        title: { type: 'string' },
+        hook: { type: 'string' },
+        conflict: { type: 'string' },
+        dynamics: { type: 'string' },
+        consequences: { type: 'string' },
+        text: { type: 'string' },
+        premise: { type: 'string' },
+        stakes: { type: 'string' },
+        synopsis: { type: 'string' },
+        entry: { type: 'string' },
+        chronicle: { type: 'string' },
+      },
+    },
+    handler: async (args) => {
+      if (!args || typeof args !== 'object') return toolFail('empty', 'Верни исправленный вариант.');
+      draft.data = args;
+      return { ok: true };
+    },
+  };
+}
+
 export async function repairFreeformVariant({
   runtime,
   agentId,
   variant,
   repair,
   extraSystem,
+  kind,
   log: parentLog,
 }) {
   if (!repair) return { variant, prompt: '' };
   const log = (parentLog || getLogger()).child({ scope: 'freeform.repair' });
   const draft = { data: null };
+  const beat = kind === 'beat';
   const runOpts = {
     agentId,
-    tools: [
-      {
-        name: 'submit_freeform_repair',
-        description: 'Исправленный победивший вариант. Поля те же, что у исходного варианта.',
-        parameters: {
-          type: 'object',
-          additionalProperties: true,
-          required: [],
-          properties: {
-            title: { type: 'string' },
-            hook: { type: 'string' },
-            conflict: { type: 'string' },
-            dynamics: { type: 'string' },
-            consequences: { type: 'string' },
-            text: { type: 'string' },
-            premise: { type: 'string' },
-            stakes: { type: 'string' },
-            whatHappens: { type: 'string' },
-            situationNow: { type: 'string' },
-            synopsis: { type: 'string' },
-            entry: { type: 'string' },
-            chronicle: { type: 'string' },
-            closeWhen: { type: 'array', items: { type: 'string' } },
-            hiddenPremises: { type: 'array', items: { type: 'string' } },
-            urgency: { type: 'integer' },
-            closed: { type: 'boolean' },
-            closedBy: { type: 'string' },
-          },
-        },
-        handler: async (args) => {
-          if (!args || typeof args !== 'object') return toolFail('empty', 'Верни исправленный вариант.');
-          draft.data = args;
-          return { ok: true };
-        },
-      },
-    ],
+    tools: [beat ? beatRepairTool(draft) : seedRepairTool(draft)],
     maxTurns: 2,
     toolChoice: { type: 'function', function: { name: 'submit_freeform_repair' } },
     log,
@@ -416,15 +542,25 @@ export async function repairFreeformVariant({
     userMessages: [
       {
         role: 'user',
-        content: [
-          'ДОРАБОТКА выбранного варианта. Не меняй скрытый лор без нужды. Не пиши hiddenPremises в хронику.',
-          `Замечания судьи:\n${repair}`,
-          '',
-          'Исходный вариант:',
-          JSON.stringify(variant, null, 2),
-          '',
-          'Вызови submit_freeform_repair с полным исправленным вариантом.',
-        ].join('\n'),
+        content: beat
+          ? [
+              'Доработка выбранного продолжения. Скрытое в абзац не пиши.',
+              `Замечания:\n${repair}`,
+              '',
+              'Исходный абзац:',
+              String(variant?.text || variant?.whatHappens || '').trim(),
+              '',
+              'Верни один исправленный абзац.',
+            ].join('\n')
+          : [
+              'ДОРАБОТКА выбранного варианта. Не меняй скрытый лор без нужды. Не пиши hiddenPremises в хронику.',
+              `Замечания судьи:\n${repair}`,
+              '',
+              'Исходный вариант:',
+              JSON.stringify(variant, null, 2),
+              '',
+              'Вызови submit_freeform_repair с полным исправленным вариантом.',
+            ].join('\n'),
       },
     ],
   };
