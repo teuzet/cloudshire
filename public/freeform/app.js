@@ -368,8 +368,10 @@ function render() {
   closedNote.classList.toggle('hidden', state.mode !== 'closed');
   const seedText = document.getElementById('seedText');
   const seedGravity = document.getElementById('seedGravity');
+  const seedMystery = document.getElementById('seedMystery');
   seedText.value = state.lastChronicle || '';
   seedGravity.value = state.lastGravity || 'EPISODE';
+  seedMystery.checked = Boolean(state.lastRequireMystery);
   if (seeded) {
     candidates.classList.add('hidden');
     candidatesMeta.textContent = '';
@@ -423,6 +425,7 @@ seedForm.addEventListener('submit', (e) => {
   void post('/api/freeform/seed', {
     text: document.getElementById('seedText').value,
     gravity: document.getElementById('seedGravity').value,
+    mystery: document.getElementById('seedMystery').checked,
   });
 });
 
@@ -431,6 +434,16 @@ document.getElementById('btnSeedCity').addEventListener('click', () => {
   void post('/api/freeform/seed', {
     fromCity: true,
     gravity: document.getElementById('seedGravity').value,
+    mystery: document.getElementById('seedMystery').checked,
+  });
+});
+
+document.getElementById('btnSeedVoid').addEventListener('click', () => {
+  if (pending) return;
+  void post('/api/freeform/seed', {
+    fromVoid: true,
+    gravity: document.getElementById('seedGravity').value,
+    mystery: document.getElementById('seedMystery').checked,
   });
 });
 

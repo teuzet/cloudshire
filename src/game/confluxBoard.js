@@ -613,7 +613,6 @@ export function createMainConfluxPlot({ a, b, conflux, world, config }) {
     kind: 'story',
     storyType: 'freeform',
     isMainConflux: true,
-    importance: 85,
     maxAgeMonths: eta + dur + 1,
     temperature: 70,
     tick: world?.tickIndex ?? null,

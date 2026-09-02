@@ -8,10 +8,11 @@ import { normalizeDiscoveryLadder, normalizeHiddenPremises, judgeSuspenseCore } 
  * Здесь только модель и формат; отбор битов, окраска и часы — в движке тика.
  *
  * Механика (см. docs/PLOTS.md):
- *   gravity     — масштаб последствий; у саспенса сеет движок, у тайны ставит plotStakes
+ *   gravity     — enum масштаба (SITUATION / EPISODE / CRISIS / RUPTURE);
+ *                 бюджет статов с него: 5 / 10 / 15 / 20; вес доски = бюджет × 5
+
  *   urgency     — шанс, что история сама сдвинется в месяц без дела
  *   temperature — интерес (старые нити, указы, сопряжение; греет внимание игрока)
- *   importance  — внутренний масштаб дельт; у трёхтактных зеркало gravity, агенты не ставят
  *   maxAgeMonths / ageMonths — сколько месяцев история живёт без внимания;
  *     срок сам по себе не развязка: выдохшаяся нить гаснет, только если нет дел и упоминаний
  *   closeWhen — успешный исход; mootWhen — когда задача потеряла смысл
@@ -26,9 +27,7 @@ function clamp100(n, fallback = 0) {
 
 export function ensurePlotStatBudget(plot, config = null) {
   if (!plot || plot.kind === 'order' || plot.kind === 'errand') return plot;
-  const gravityVal = gravityScore(plot.gravity, Number(plot.importance) || 0);
-  const div = Number(config?.tick?.plot?.stats?.gravityDivisor ?? 5);
-  const budget = Math.max(0, Math.round(gravityVal / div));
+  const budget = gravityStatBudget(plot.gravity);
   if (!plot.stats || typeof plot.stats !== 'object') plot.stats = {};
   if (!Number.isFinite(Number(plot.stats.budget))) plot.stats.budget = budget;
   if (!Number.isFinite(Number(plot.stats.remaining))) plot.stats.remaining = plot.stats.budget;
@@ -139,39 +138,28 @@ export function formatCloseWhen(plot) {
   return String(plot?.closeWhen || '').trim() || '—';
 }
 
-export const GRAVITY_SCORE = {
-  SITUATION: 20,
-  EPISODE: 40,
-  CRISIS: 65,
-  RUPTURE: 85,
+export const GRAVITY_STAT_BUDGET = {
+  SITUATION: 5,
+  EPISODE: 10,
+  CRISIS: 15,
+  RUPTURE: 20,
 };
 
-export function gravityScore(raw, fallback = 40) {
-  const key = String(raw || '')
-    .trim()
-    .toUpperCase();
-  if (GRAVITY_SCORE[key] != null) return GRAVITY_SCORE[key];
-  const n = Number(raw);
-  if (Number.isFinite(n)) return clamp100(n, fallback);
-  return fallback;
+export function gravityStatBudget(gravity) {
+  return GRAVITY_STAT_BUDGET[parseFreeformGravity(gravity)];
 }
 
-/** Масштаб истории для механики: у story — gravity, иначе importance. */
+/** Масштаб истории для доски и утечек: у story — от gravity, у сопряжения — якорь, иначе 0. */
 export function plotScale(plot) {
-  if (isStakedStory(plot)) return gravityScore(plot.gravity, 40);
-  return clamp100(plot?.importance, 40);
+  if (isStakedStory(plot)) return gravityStatBudget(plot.gravity) * 5;
+  if (isFreeformPlot(plot)) return 85;
+  return 0;
 }
 
 export function plotBeatAgentId(plot) {
   const t = storyTypeOf(plot);
   if (t === 'story') return 'freeformTell';
   return 'storyBeat';
-}
-
-function clampStakes(n, fallback = 40) {
-  const v = Math.round(Number(n));
-  if (!Number.isFinite(v)) return fallback;
-  return Math.max(0, Math.min(100, v));
 }
 
 export const FREEFORM_GRAVITY = ['SITUATION', 'EPISODE', 'CRISIS', 'RUPTURE'];
@@ -261,17 +249,12 @@ export function defaultFreeformMaxDepth(gravity) {
   return 3;
 }
 
-/** Freeform gravity — качественный уровень, не шкала 0–100. Старые числа мапятся. */
+/** Gravity — только enum. Число или мусор → fallback. */
 export function parseFreeformGravity(raw, fallback = 'EPISODE') {
-  const key = String(raw || '').trim().toUpperCase();
+  const key = String(raw || '')
+    .trim()
+    .toUpperCase();
   if (FREEFORM_GRAVITY.includes(key)) return key;
-  const n = Number(raw);
-  if (Number.isFinite(n)) {
-    if (n <= 20) return 'SITUATION';
-    if (n <= 45) return 'EPISODE';
-    if (n <= 75) return 'CRISIS';
-    return 'RUPTURE';
-  }
   return fallback;
 }
 
@@ -482,12 +465,10 @@ export function plotConfig(config) {
       finishFailCurve: Array.isArray(roll.finishFailCurve) ? roll.finishFailCurve : [],
     },
     stats: {
-      gravityDivisor: Math.max(1, Number(stats.gravityDivisor ?? 5)),
       openingShare: Number(stats.openingShare ?? 0.25),
       beatShare: Number(stats.beatShare ?? 0.25),
       playerBudget: Math.max(1, Number(stats.playerBudget ?? 6)),
       worldBudget: Math.max(1, Number(stats.worldBudget ?? 8)),
-      importanceScale: Number(stats.importanceScale ?? 0.08),
       finaleFactor: Number(stats.finaleFactor ?? 2),
       catastropheCooldown: Math.max(0, Number(stats.catastropheCooldown ?? 6)),
     },
@@ -646,7 +627,7 @@ function applyPlotShape(p, config = null) {
   p.factIds = Array.isArray(p.factIds) ? p.factIds.map(String) : [];
   p.relatedProcessIds = Array.isArray(p.relatedProcessIds) ? p.relatedProcessIds.map(String) : [];
   p.relatedPlotlineIds = Array.isArray(p.relatedPlotlineIds) ? p.relatedPlotlineIds.map(String) : [];
-  p.importance = clamp100(p.importance, 40);
+  delete p.importance;
   p.maxAgeMonths = Math.max(1, Math.min(36, Math.round(Number(p.maxAgeMonths) || 6)));
   p.ageMonths = Math.max(0, Math.round(Number(p.ageMonths) || 0));
   p.temperature = clamp100(p.temperature, 30);
@@ -704,7 +685,6 @@ export function createPlotline({
   kind = 'story',
   tags = [],
   relatedStats = [],
-  importance = 40,
   maxAgeMonths = 6,
   temperature = 30,
   tick = null,
@@ -786,7 +766,6 @@ export function createPlotline({
     factIds: [],
     relatedProcessIds: (relatedProcessIds || []).map(String),
     relatedPlotlineIds: (relatedPlotlineIds || []).map(String),
-    importance: clamp100(importance, resolvedKind === 'order' ? 20 : 40),
     maxAgeMonths: Math.max(1, Math.min(36, Math.round(Number(maxAgeMonths) || 6))),
     ageMonths: 0,
     temperature: clamp100(temperature, 30),
@@ -868,7 +847,6 @@ export function createErrandPlotline(process, { tick = null, config = null } = {
     closeWhen: 'Дело доведено до конца или свёрнуто.',
     kind: 'errand',
     relatedStats: process?.linkedStats || [],
-    importance: 25,
     maxAgeMonths: months + 2,
     temperature: 25,
     tick,
@@ -982,7 +960,6 @@ function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } =
     factIds: Array.isArray(plot.factIds) ? [...plot.factIds] : [],
     relatedProcessIds: Array.isArray(plot.relatedProcessIds) ? [...plot.relatedProcessIds] : [],
     relatedPlotlineIds: Array.isArray(plot.relatedPlotlineIds) ? [...plot.relatedPlotlineIds] : [],
-    importance: plot.importance,
     maxAgeMonths: plot.maxAgeMonths,
     ageMonths: plot.ageMonths,
     temperature: plot.temperature,
@@ -1049,7 +1026,6 @@ export function reopenClosedPlotline(domain, closedOrId) {
     relatedPlotlineIds: Array.isArray(closed.relatedPlotlineIds)
       ? closed.relatedPlotlineIds.map(String)
       : [],
-    importance: clamp100(closed.importance, 40),
     maxAgeMonths: Math.max(1, Math.min(36, Math.round(Number(closed.maxAgeMonths) || 6))),
     ageMonths: Math.max(0, Math.round(Number(closed.ageMonths) || 0)),
     temperature: clamp100(closed.temperature, 30),

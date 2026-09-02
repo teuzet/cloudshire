@@ -102,7 +102,7 @@ test('не-intel вмешательство шарит нить и даёт awar
 });
 
 test('утечка — голая хроника, без карточки и без share', () => {
-  const plot = createPlotline({ title: 'Тайна колодца', kind: 'story', importance: 100 });
+  const plot = createPlotline({ title: 'Тайна колодца', kind: 'story', storyType: 'story', gravity: 'RUPTURE' });
   plot.concernsDomainIds = ['a'];
   plot.hostDomainId = 'a';
   plot.plotAwareness = { a: true };
@@ -137,7 +137,7 @@ test('утечка — голая хроника, без карточки и б�
 });
 
 test('все хроники нити известны → plotAwareness', () => {
-  const plot = createPlotline({ title: 'Тайна', kind: 'story', importance: 100 });
+  const plot = createPlotline({ title: 'Тайна', kind: 'story', storyType: 'story', gravity: 'RUPTURE' });
   plot.hostDomainId = 'a';
   plot.concernsDomainIds = ['a'];
   plot.plotAwareness = { a: true };

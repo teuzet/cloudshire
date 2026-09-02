@@ -4,7 +4,7 @@
  * чтобы крутить его числами, а не формулировками в промптах.
  */
 
-import { isThreeActPlot } from './plotlines.js';
+import { isThreeActPlot, plotScale } from './plotlines.js';
 
 function clampStat(n) {
   const v = Number(n);
@@ -219,7 +219,7 @@ export const TINT_LABELS = {
   bad: 'против города',
 };
 
-/** Вероятность добровольного бита: у трёхтактных — urgency, иначе жар и важность. */
+/** Вероятность добровольного бита: жар, масштаб истории и возраст. */
 export function beatChance(plot, cfg) {
   const b = cfg?.beats || {};
   if (isThreeActPlot(plot)) {
@@ -227,13 +227,13 @@ export function beatChance(plot, cfg) {
     return Math.max(b.minChance ?? 0.05, Math.min(b.maxChance ?? 0.8, Number.isFinite(raw) ? raw : 0));
   }
   const temp = clampStat(plot?.temperature) / 100;
-  const imp = clampStat(plot?.importance) / 100;
+  const scale = Math.max(0, Math.min(100, plotScale(plot))) / 100;
   const maxAge = Math.max(1, Number(plot?.maxAgeMonths) || 6);
   const agePressure = Math.min(1, (Number(plot?.ageMonths) || 0) / maxAge);
   const raw =
     (b.baseChance ?? 0.15) +
     temp * (b.temperatureWeight ?? 0.5) +
-    imp * (b.importanceWeight ?? 0.2) +
+    scale * (b.importanceWeight ?? 0.2) +
     agePressure * (b.agePressure ?? 0.15);
   return Math.max(b.minChance ?? 0.05, Math.min(b.maxChance ?? 0.8, raw));
 }

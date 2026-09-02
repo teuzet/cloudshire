@@ -38,7 +38,6 @@ function plot(id, extra = {}) {
     chronicleIds: ['lore_found'],
     relatedProcessIds: ['act_search'],
     relatedPlotlineIds: [],
-    importance: 40,
     maxAgeMonths: 6,
     ageMonths: 2,
     temperature: 40,
@@ -242,14 +241,23 @@ test('три мелкие истории не глушат посев, полн�
     tick: { plot: { board: { targetImportance: 100, seedCooldownMonths: 2, seedMaxChance: 0.5 } } },
   });
   const small = [
-    { kind: 'story', importance: 25, createdTick: 10 },
-    { kind: 'story', importance: 20, createdTick: 9 },
-    { kind: 'story', importance: 22, createdTick: 8 },
+    { kind: 'story', storyType: 'story', gravity: 'SITUATION', createdTick: 10 },
+    { kind: 'story', storyType: 'story', gravity: 'SITUATION', createdTick: 9 },
+    { kind: 'story', storyType: 'story', gravity: 'SITUATION', createdTick: 8 },
   ];
-  assert.equal(liveStoryImportance({ plotlines: small }), 67);
+  assert.equal(liveStoryImportance({ plotlines: small }), 75);
   assert.ok(plotSeedChance({ plotlines: small }, cfg, 10) > 0);
   assert.equal(
-    plotSeedChance({ plotlines: [{ kind: 'story', importance: 70 }, { kind: 'story', importance: 40 }] }, cfg, 10),
+    plotSeedChance(
+      {
+        plotlines: [
+          { kind: 'story', storyType: 'story', gravity: 'CRISIS' },
+          { kind: 'story', storyType: 'story', gravity: 'EPISODE' },
+        ],
+      },
+      cfg,
+      10,
+    ),
     0,
   );
 });
@@ -467,14 +475,14 @@ test('продолжение сеется с крючком в освободи�
 test('нити указов не заполняют доску и не глушат посев', () => {
   const cfg = plotConfig({ tick: { plot: { board: { seedCooldownMonths: 2 } } } });
   assert.equal(plotSeedChance({ plotlines: [{ kind: 'order', createdTick: 10 }] }, cfg, 10), 1);
-  assert.equal(liveStoryImportance({ plotlines: [{ kind: 'order', importance: 80 }] }), 0);
+  assert.equal(liveStoryImportance({ plotlines: [{ kind: 'order' }] }), 0);
 });
 
 test('процессы занимают лимит тика, случайная история в остаток не проходит', () => {
   const domain = {
     plotlines: [
       plot('p_proc', { kind: 'errand', relatedProcessIds: ['act_1'] }),
-      plot('p_story', { kind: 'story', relatedProcessIds: [], temperature: 90, importance: 80 }),
+      plot('p_story', { kind: 'story', relatedProcessIds: [], temperature: 90 }),
     ],
     state: { pendingActions: [{ id: 'act_1', status: 'active' }] },
   };
@@ -491,16 +499,18 @@ test('процессы занимают лимит тика, случайная 
 });
 
 test('масштаб story берётся из gravity, не из importance', () => {
-  assert.equal(plotScale({ kind: 'story', storyType: 'story', gravity: 'RUPTURE', importance: 10 }), 85);
-  assert.equal(plotScale({ kind: 'story', importance: 55 }), 55);
+  assert.equal(plotScale({ kind: 'story', storyType: 'story', gravity: 'RUPTURE' }), 100);
+  assert.equal(plotScale({ kind: 'story', storyType: 'story', gravity: 'EPISODE' }), 50);
+  assert.equal(plotScale({ kind: 'story' }), 0);
+  assert.equal(plotScale({ kind: 'story', isMainConflux: true, storyType: 'freeform' }), 85);
   assert.equal(
     liveStoryImportance({
       plotlines: [
-        { kind: 'story', storyType: 'mystery', gravity: 70, importance: 10 },
-        { kind: 'story', importance: 20 },
-        { kind: 'errand', importance: 90 },
+        { kind: 'story', storyType: 'story', gravity: 'CRISIS' },
+        { kind: 'story' },
+        { kind: 'errand' },
       ],
     }),
-    90,
+    75,
   );
 });

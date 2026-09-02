@@ -55,7 +55,6 @@ function three(extra = {}) {
     tags: [],
     chronicleIds: [],
     relatedPlotlineIds: [],
-    importance: 40,
     maxAgeMonths: 6,
     ageMonths: 0,
     temperature: 30,

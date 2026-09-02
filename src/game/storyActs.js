@@ -97,7 +97,6 @@ function applyStakes(plot, kind, rng, cfg) {
       after: { urgency: plot.urgency, gravity: plot.gravity },
     };
   }
-  plot.importance = Math.min(100, Number(plot.gravity) || 0);
   return result;
 }
 

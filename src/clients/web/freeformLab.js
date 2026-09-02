@@ -20,7 +20,7 @@ import {
   normalizeFinish,
   parseFreeformGravity,
 } from '../../game/freeform.js';
-import { brainstormFreeformPack } from '../../game/freeformBrainstorm.js';
+import { brainstormFreeformPack, parseRequireMystery } from '../../game/freeformBrainstorm.js';
 import { assembleFreeformLabStory } from '../../game/freeformAssemble.js';
 import { tellFreeformBeat } from '../../game/freeformTeller.js';
 import { judgeFreeformRelated, parseFreeformRelation } from '../../game/freeformAlign.js';
@@ -63,6 +63,7 @@ function emptySession(snapshot) {
     lastMoveKind: null,
     lastChronicle: '',
     lastGravity: null,
+    lastRequireMystery: false,
     lastDrafts: [],
     lastCandidates: [],
     lastJudgeReviews: [],
@@ -215,6 +216,7 @@ export function sessionPayload(session) {
     lastMoveKind: session.lastMoveKind || null,
     lastChronicle: session.lastChronicle || '',
     lastGravity: session.lastGravity || null,
+    lastRequireMystery: Boolean(session.lastRequireMystery),
     lastDrafts: session.lastDrafts || [],
     lastCandidates: session.lastCandidates || [],
     lastJudgeReviews: session.lastJudgeReviews || [],
@@ -244,13 +246,15 @@ export async function resetFreeformLab() {
   });
 }
 
-export async function seedFreeformLab({ config, runtime, text, gravity, fromCity, log: parentLog }) {
+export async function seedFreeformLab({ config, runtime, text, gravity, fromCity, fromVoid, mystery, log: parentLog }) {
   return serialize(async () => {
     const log = (parentLog || getLogger()).child({ scope: 'freeform.lab.seed' });
     const session = await loadSession();
     const previous = snapshotForUndo(session);
     let seedText;
-    if (fromCity) {
+    if (fromVoid) {
+      seedText = '';
+    } else if (fromCity) {
       seedText = formatFreeformChronicleSeed(chronicleEntries(session.domain?.lore || []).slice(-80));
       if (!seedText) {
         const err = new Error('В хронике города нет записей.');
@@ -267,13 +271,17 @@ export async function seedFreeformLab({ config, runtime, text, gravity, fromCity
       session.lastChronicle = seedText;
     }
     const g = parseFreeformGravity(gravity);
+    const requireMystery = parseRequireMystery(mystery);
     session.lastGravity = g;
+    session.lastRequireMystery = requireMystery;
 
     const drafted = await brainstormFreeformPack({
       config,
       runtime,
       seedText,
       gravity: g,
+      requireMystery,
+      fromVoid: Boolean(fromVoid),
       log,
     });
     session.lastArchitectPrompt = drafted.prompt || '';
@@ -677,6 +685,8 @@ export function mountFreeformLab(server, { config, runtime }) {
           text: req.body?.text,
           gravity: req.body?.gravity,
           fromCity: Boolean(req.body?.fromCity),
+          fromVoid: Boolean(req.body?.fromVoid),
+          mystery: req.body?.mystery,
           log: req.log,
         }),
       );

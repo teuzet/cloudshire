@@ -22,7 +22,7 @@ import {
   parseFreeformPackReview,
   reviewNeedsRewrite,
   isPackPass,
-  FREEFORM_PACK_JUDGE_CODES,
+  freeformPackJudgeCodes,
 } from './freeformJudge.js';
 
 export const CONFLICT_SOURCES = [
@@ -55,6 +55,71 @@ export const CONFLICT_SOURCES = [
     hint: 'столкновение двух правд о том, как жить вместе. Не ссора характеров',
   },
 ];
+
+export function parseRequireMystery(raw) {
+  if (raw === true || raw === 1) return true;
+  const s = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  return s === '1' || s === 'true' || s === 'yes' || s === 'on';
+}
+
+export const MYSTERY_ARCHITECT_EXTRA = [
+  '==== ОБЯЗАТЕЛЬНАЯ ТАЙНА ====',
+  'Этот посев — эксперимент: в каждом кандидате ОБЯЗАТЕЛЬНО есть тайна с разгадкой.',
+  'Это переопределяет правило «тайну ради тайны не выдумывай».',
+  '',
+  '- В наблюдаемом слое игрок видит странность, нестыковку или сокрытие, которую нельзя сразу объяснить. Не обязательно преступление: ложь, пропажа, подмена, необъяснимый поступок, секрет, который кто-то бережёт.',
+  '- В конце каждого кандидата блок «На самом деле:» с полной разгадкой: что произошло, кто знает, кто врёт, какая улика это подтвердит. Разгадка конкретна и проверяема в мире — не магия, не сон, не «все сошли с ума».',
+  '- Разгадка не разочаровывает: она следует из уже названных фактов и характеров. Читатель, узнав её, говорит «так вот оно что», а не «и это всё?».',
+  '- Тайна не декоративна: без неё история теряет смысл. Концы (GOOD/NEUTRAL/BAD) зависят от того, вскроется ли тайна и чем это обернётся.',
+  '- Не пропускай «На самом деле:» ни у одного из трёх кандидатов.',
+].join('\n');
+
+export const MYSTERY_JUDGE_EXTRA = [
+  '==== ДОПОЛНИТЕЛЬНЫЕ КРИТЕРИИ (тайна обязательна) ====',
+  '13. MYSTERY — в пакете есть настоящая тайна: странность, которую персонажи и игрок не могут сразу объяснить. Если завязка прозрачна и нечего разгадывать — FAIL.',
+  '14. MYSTERY_PLAUSIBLE — разгадка в «На самом деле:» логична, конкретна и не разочаровывает. FAIL если разгадки нет, она противоречит фактам, сваливается на чудо/случай/«ну так вышло», или финал обесценивает всю странность.',
+  '',
+  'CHEKHOV при этом посеве не опционален: блок «На самом деле:» обязателен у каждого кандидата.',
+].join('\n');
+
+export const VOID_ARCHITECT_EXTRA = [
+  '==== НЕТ ЗАТРАВКИ ====',
+  'Затравки нет: ни события игрока, ни хроники конкретного города.',
+  'Пиши про абстрактный город-государство на летающем острове — типичный полис этого мира, не продолжение чьей-то уже данной истории.',
+  'Это переопределяет правило «данная затравка — причина конфликта»: причину придумай сам. В запросе нет конкретной хроники — не выдумывай, что она была.',
+  'Не привязывайся к именам, институтам и прошлому какого-то существующего города. Конфликт должен быть понятен без предыстории.',
+  'Три кандидата — три независимых истории с нуля, не три продолжения одной затравки.',
+].join('\n');
+
+export const VOID_JUDGE_EXTRA = [
+  '==== НЕТ ЗАТРАВКИ ====',
+  'Исходной хроники нет. Критерий CHRONICLE не применяй: не требуй вытекания из затравки и не ставь FAIL за отсутствие связи с ней.',
+  'Истории должны быть самодостаточны: абстрактный город-государство на летающем острове, без опоры на конкретную хронику.',
+].join('\n');
+
+function architectExtraSystem({ requireMystery = false, fromVoid = false } = {}) {
+  return [fromVoid ? VOID_ARCHITECT_EXTRA : '', requireMystery ? MYSTERY_ARCHITECT_EXTRA : '']
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function judgeExtraSystem({ requireMystery = false, fromVoid = false } = {}) {
+  return [fromVoid ? VOID_JUDGE_EXTRA : '', requireMystery ? MYSTERY_JUDGE_EXTRA : '']
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function formatSeedUserBlock(seedText, fromVoid) {
+  if (fromVoid) {
+    return [
+      'ЗАТРАВКА',
+      'нет. Придумай историю с нуля про абстрактный город-государство на летающем острове.',
+    ].join('\n');
+  }
+  return ['ЗАТРАВКА', seedText].join('\n');
+}
 
 export const TEMPORAL_SHAPES = [
   {
@@ -234,7 +299,15 @@ function emitCandidatesTool({ n, rolls, draft, log }) {
   };
 }
 
-export async function brainstormFreeformSeeds({ runtime, seedText, gravity, config, log: parentLog }) {
+export async function brainstormFreeformSeeds({
+  runtime,
+  seedText,
+  gravity,
+  config,
+  log: parentLog,
+  requireMystery = false,
+  fromVoid = false,
+}) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm' });
   const cfg = freeformConfig(config);
   const n = cfg.variantsMax;
@@ -261,7 +334,7 @@ export async function brainstormFreeformSeeds({ runtime, seedText, gravity, conf
     toolChoice: { type: 'function', function: { name: 'emit_freeform_candidates' } },
     log,
     scene: 'freeform_brainstorm_seed',
-    extraSystem: '',
+    extraSystem: architectExtraSystem({ requireMystery, fromVoid }),
     userMessages: [
       {
         role: 'user',
@@ -269,8 +342,7 @@ export async function brainstormFreeformSeeds({ runtime, seedText, gravity, conf
           'GRAVITY',
           formatFreeformGravityForPrompt(g, config),
           '',
-          'ЗАТРАВКА',
-          seedText,
+          formatSeedUserBlock(seedText, fromVoid),
           '',
           'ОСИ',
           formatFreeformBrainstormRollsForPrompt(rolls),
@@ -303,7 +375,16 @@ function formatPackForJudge(candidates) {
     .join('\n\n');
 }
 
-export async function reviewBrainstormPack({ runtime, seedText, gravity, candidates, config, log: parentLog }) {
+export async function reviewBrainstormPack({
+  runtime,
+  seedText,
+  gravity,
+  candidates,
+  config,
+  log: parentLog,
+  requireMystery = false,
+  fromVoid = false,
+}) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.judge' });
   const n = candidates.length;
   const indices = candidates.map((c, i) => Number(c.index) || i + 1);
@@ -343,7 +424,7 @@ export async function reviewBrainstormPack({ runtime, seedText, gravity, candida
                       type: 'object',
                       required: ['code', 'reason'],
                       properties: {
-                        code: { type: 'string', enum: FREEFORM_PACK_JUDGE_CODES },
+                        code: { type: 'string', enum: freeformPackJudgeCodes({ requireMystery }) },
                         reason: { type: 'string' },
                       },
                     },
@@ -367,7 +448,7 @@ export async function reviewBrainstormPack({ runtime, seedText, gravity, candida
     toolChoice: { type: 'function', function: { name: 'submit_freeform_pack_review' } },
     log,
     scene: 'freeform_brainstorm_judge',
-    extraSystem: '',
+    extraSystem: judgeExtraSystem({ requireMystery, fromVoid }),
     userMessages: [
       {
         role: 'user',
@@ -375,8 +456,7 @@ export async function reviewBrainstormPack({ runtime, seedText, gravity, candida
           'GRAVITY',
           formatFreeformGravityForPrompt(g, config),
           '',
-          'ЗАТРАВКА',
-          seedText,
+          formatSeedUserBlock(seedText, fromVoid),
           '',
           formatPackForJudge(candidates),
         ].join('\n'),
@@ -406,6 +486,8 @@ export async function repairBrainstormPack({
   reviews,
   config,
   log: parentLog,
+  requireMystery = false,
+  fromVoid = false,
 }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.repair' });
   const n = drafts.length;
@@ -447,7 +529,10 @@ export async function repairBrainstormPack({
       'Не поднимай и не опускай Gravity риторикой. Правь угрозу или возможность в хронике и динамику, которая её зарабатывает.',
       'Если просят обострить — конкретный конфликт и явную динамику в том же тексте, не новая посадка. Если просят ужать — вырежи орнамент, механизм оставь.',
       'Кандидат без замечания верни без изменений. Не делай кандидатов близнецами.',
-    ].join('\n'),
+      architectExtraSystem({ requireMystery, fromVoid }),
+    ]
+      .filter(Boolean)
+      .join('\n'),
     userMessages: [
       {
         role: 'user',
@@ -455,8 +540,7 @@ export async function repairBrainstormPack({
           'GRAVITY',
           formatFreeformGravityForPrompt(g, config),
           '',
-          'ЗАТРАВКА',
-          seedText,
+          formatSeedUserBlock(seedText, fromVoid),
           '',
           'ДОРАБОТКА',
           pack,
@@ -508,9 +592,26 @@ function scatterPackReviews(slotCount, reviews) {
 
 const MIN_PASS_SKIP_SECOND = 2;
 
-export async function brainstormFreeformPack({ runtime, seedText, gravity, config, log: parentLog, rng = Math.random }) {
+export async function brainstormFreeformPack({
+  runtime,
+  seedText,
+  gravity,
+  config,
+  log: parentLog,
+  rng = Math.random,
+  requireMystery = false,
+  fromVoid = false,
+}) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.pack' });
-  const drafted = await brainstormFreeformSeeds({ runtime, seedText, gravity, config, log });
+  const drafted = await brainstormFreeformSeeds({
+    runtime,
+    seedText,
+    gravity,
+    config,
+    log,
+    requireMystery,
+    fromVoid,
+  });
   if (!drafted.ok) {
     return {
       ok: false,
@@ -534,6 +635,8 @@ export async function brainstormFreeformPack({ runtime, seedText, gravity, confi
     candidates: drafted.candidates,
     config,
     log,
+    requireMystery,
+    fromVoid,
   });
   const firstPassCount = (judged.reviews || []).filter(isPackPass).length;
   if (firstPassCount >= MIN_PASS_SKIP_SECOND) {
@@ -564,6 +667,8 @@ export async function brainstormFreeformPack({ runtime, seedText, gravity, confi
     reviews: judged.reviews,
     config,
     log,
+    requireMystery,
+    fromVoid,
   });
   const candidates = (repaired.candidates || []).map((c, i) =>
     isPackPass(judged.reviews[i]) ? drafted.candidates[i] : c,
@@ -577,6 +682,8 @@ export async function brainstormFreeformPack({ runtime, seedText, gravity, confi
         candidates: retry,
         config,
         log,
+        requireMystery,
+        fromVoid,
       })
     : { reviews: [], prompt: '' };
   const finalReviews = scatterPackReviews(candidates.length, gated.reviews);

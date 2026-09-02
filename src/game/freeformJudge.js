@@ -187,8 +187,17 @@ export const FREEFORM_PACK_JUDGE_CODES = [
   'SAME_STORY',
   'HIDDEN',
   'ENDING',
+  'MYSTERY',
+  'MYSTERY_PLAUSIBLE',
   'OTHER',
 ];
+
+export const FREEFORM_MYSTERY_PACK_CODES = ['MYSTERY', 'MYSTERY_PLAUSIBLE'];
+
+export function freeformPackJudgeCodes({ requireMystery = false } = {}) {
+  if (requireMystery) return [...FREEFORM_PACK_JUDGE_CODES];
+  return FREEFORM_PACK_JUDGE_CODES.filter((c) => !FREEFORM_MYSTERY_PACK_CODES.includes(c));
+}
 
 function asPackCode(raw) {
   const c = String(raw || '')
@@ -318,7 +327,7 @@ export async function reviewFreeformPack({
                       type: 'object',
                       required: ['code', 'reason'],
                       properties: {
-                        code: { type: 'string', enum: FREEFORM_PACK_JUDGE_CODES },
+                        code: { type: 'string', enum: freeformPackJudgeCodes() },
                         reason: { type: 'string' },
                       },
                     },

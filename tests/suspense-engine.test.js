@@ -21,7 +21,7 @@ test('gravity посева: пустая доска 20–100, полная до�
 
   const busy = {
     plotlines: [
-      { kind: 'story', storyType: 'suspense', gravity: 80, importance: 80 },
+      { kind: 'story', storyType: 'suspense', gravity: 80 },
     ],
   };
   const lo = sampleSuspenseGravity(busy, { rng: () => 0 });

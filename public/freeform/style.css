@@ -91,12 +91,22 @@ button {
   cursor: pointer;
 }
 button:disabled { opacity: 0.5; cursor: wait; }
-#btnReset, #btnSeedCity, #btnAutotick, #btnUndo {
+#btnReset, #btnSeedCity, #btnSeedVoid, #btnAutotick, #btnUndo {
   background: transparent;
   color: var(--ink);
   border: 1px solid var(--line);
 }
 .seed-actions { margin-top: 0.4rem; flex-wrap: wrap; }
+.seed-mystery {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.seed-mystery input { margin: 0; accent-color: var(--accent); }
 
 .banner {
   margin: 0.8rem 1.2rem 0;

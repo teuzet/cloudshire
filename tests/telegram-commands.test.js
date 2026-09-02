@@ -82,7 +82,6 @@ test('сводка статов и нитей читается без механ
         kind: 'story',
         synopsis: 'Иару ищут в лестницах.',
         closeWhen: 'Найдут или похоронят.',
-        importance: 40,
         ageMonths: 2,
         maxAgeMonths: 6,
       },

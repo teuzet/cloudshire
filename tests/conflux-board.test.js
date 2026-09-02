@@ -80,7 +80,7 @@ test('шанс просачивания: 30≈0, 100≈60% при полной �
 });
 
 test('просачивание не работает до стыковки и при нулевой информированности', () => {
-  const plot = createPlotline({ title: 'Тайна', kind: 'story', importance: 100 });
+  const plot = createPlotline({ title: 'Тайна', kind: 'story' });
   plot.concernsDomainIds = ['a'];
   const approaching = conflux({ status: 'approaching', awA: 80, awB: 80 });
   assert.equal(maybeLeakPlot(plot, approaching, 'b', () => 0), false);

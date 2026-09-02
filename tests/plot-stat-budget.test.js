@@ -4,20 +4,38 @@ import { createPlotline, ensurePlotStatBudget, plotStatForce, boardHasRoom, coun
 import { scaleAffectsToBudget } from '../src/game/plotEngine.js';
 import { enforceFinishPolarity } from '../src/game/statJudge.js';
 
-const cfg = { tick: { plot: { stats: { gravityDivisor: 5, openingShare: 0.25, beatShare: 0.25 } }, officerStatPerMonth: 1 } };
+const cfg = { tick: { plot: { stats: { openingShare: 0.25, beatShare: 0.25 } }, officerStatPerMonth: 1 } };
 
-test('gravity 100 → бюджет 20; старт силой 5 remaining не ест', () => {
-  const plot = createPlotline({ title: 'Гул', kind: 'story', gravity: 100, importance: 100 });
+test('RUPTURE → бюджет 20; старт силой 5 remaining не ест', () => {
+  const plot = createPlotline({ title: 'Гул', kind: 'story', storyType: 'story', gravity: 'RUPTURE' });
   ensurePlotStatBudget(plot, cfg);
   assert.equal(plot.stats.budget, 20);
   assert.equal(plot.stats.remaining, 20);
+  assert.equal(plot.importance, undefined);
   const opening = plotStatForce(plot, { opening: true, config: cfg });
   assert.equal(opening, 5);
   assert.equal(plot.stats.remaining, 20);
 });
 
+test('бюджет по enum: 5 / 10 / 15 / 20', () => {
+  const levels = [
+    ['SITUATION', 5],
+    ['EPISODE', 10],
+    ['CRISIS', 15],
+    ['RUPTURE', 20],
+  ];
+  for (const [gravity, budget] of levels) {
+    const plot = createPlotline({ title: gravity, kind: 'story', storyType: 'story', gravity });
+    ensurePlotStatBudget(plot, cfg);
+    assert.equal(plot.stats.budget, budget, gravity);
+  }
+  const garbage = createPlotline({ title: 'Мусор', kind: 'story', storyType: 'story', gravity: 80 });
+  ensurePlotStatBudget(garbage, cfg);
+  assert.equal(garbage.stats.budget, 10);
+});
+
 test('три эскалации по 25% списывают 15, remaining остаётся 5', () => {
-  const plot = createPlotline({ title: 'Гул', kind: 'story', gravity: 100, importance: 100 });
+  const plot = createPlotline({ title: 'Гул', kind: 'story', storyType: 'story', gravity: 'RUPTURE' });
   ensurePlotStatBudget(plot, cfg);
   for (let i = 0; i < 3; i += 1) {
     const force = plotStatForce(plot, { opening: false, config: cfg });

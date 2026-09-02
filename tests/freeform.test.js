@@ -14,7 +14,7 @@ import {
   PLOT_HOOK_MAX,
 } from '../src/game/plotlines.js';
 import { advanceWorldMonths, normalizeFinish, freeformConfig, openStoryTitlesLine, formatFreeformGravityForPrompt, formatFreeformChronicleSeed, formatBrainstormCandidateForPrompt, parseFreeformGravity, parseFreeformUrgency, FREEFORM_GRAVITY, clampFreeformCountdown, createFreeformPlot, sampleFreeformMaxDepth, advanceFreeformDepth, formatFreeformDepth, plotCardForPrompt, applyFreeformProgress, freeformTickDecision, rollFreeformCountdown, maxFailsForGravity } from '../src/game/freeform.js';
-import { parseFreeformPick, formatFreeformVariants, formatFreeformCardJudgeCase, formatFreeformCardJudgeRepair, parseFreeformPackReview } from '../src/game/freeformJudge.js';
+import { parseFreeformPick, formatFreeformVariants, formatFreeformCardJudgeCase, formatFreeformCardJudgeRepair, parseFreeformPackReview, FREEFORM_PACK_JUDGE_CODES } from '../src/game/freeformJudge.js';
 import { normalizeSeedBlank, pickFreeformSeedAxes, pickFreeformSeedAxisPairs, formatFreeformSeedAxesForPrompt, formatFreeformSeedAxisPairsForPrompt } from '../src/game/freeformArchitect.js';
 import { listLegalBeatDynamics, pickFreeformBeatDynamics, formatBeatDynamicsForPrompt } from '../src/game/freeformDynamics.js';
 import { sessionPayload, snapshotForUndo, pushUndo, popUndo } from '../src/clients/web/freeformLab.js';
@@ -26,6 +26,7 @@ import {
   repairBrainstormPack,
   normalizeBrainstormCandidate,
   pickPassedBrainstormCandidate,
+  parseRequireMystery,
 } from '../src/game/freeformBrainstorm.js';
 import {
   splitChronicleHiddenLayer,
@@ -234,6 +235,8 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformBrainstorm.instructions, /emit_freeform_candidates/);
   assert.doesNotMatch(agents.freeformBrainstorm.instructions, /судья|конструктор|cityBrief|recent_themes|actor_scope/);
   assert.doesNotMatch(agents.freeformBrainstorm.instructions, /позже подставит/);
+  assert.doesNotMatch(agents.freeformBrainstorm.instructions, /ОБЯЗАТЕЛЬНАЯ ТАЙНА|MYSTERY_PLAUSIBLE/);
+  assert.doesNotMatch(agents.freeformBrainstorm.instructions, /НЕТ ЗАТРАВКИ|абстрактный город-государство/);
   const gravity = freeformConfig(loadConfig()).gravity;
   assert.match(gravity.intro, /Судьбоносность/);
   assert.equal(gravity.levels.SITUATION.examples.length, 7);
@@ -274,6 +277,8 @@ test('конфиг freeform читается из YAML', () => {
   assert.doesNotMatch(agents.freeformBrainstormJudge.instructions, /поле «последствия»/);
   assert.doesNotMatch(agents.freeformBrainstormJudge.instructions, /хранител|инея|плато|звер(ь|я|ю)|договор.{0,40}остров/);
   assert.doesNotMatch(agents.freeformBrainstormJudge.instructions, /конструктор|cityBrief/);
+  assert.doesNotMatch(agents.freeformBrainstormJudge.instructions, /MYSTERY_PLAUSIBLE|тайна обязательна/);
+  assert.doesNotMatch(agents.freeformBrainstormJudge.instructions, /НЕТ ЗАТРАВКИ|абстрактный город-государство/);
   const authors = freeformConfig(loadConfig()).continuationAuthors;
   assert.ok(authors.length >= 12);
   assert.equal(new Set(authors.map((a) => a.id)).size, authors.length);
@@ -318,10 +323,9 @@ test('gravity для архитектора — enum и расшифровка �
   const cfg = loadConfig();
   assert.deepEqual(FREEFORM_GRAVITY, ['SITUATION', 'EPISODE', 'CRISIS', 'RUPTURE']);
   assert.equal(parseFreeformGravity('crisis'), 'CRISIS');
-  assert.equal(parseFreeformGravity(8), 'SITUATION');
+  assert.equal(parseFreeformGravity(8), 'EPISODE');
   assert.equal(parseFreeformGravity(40), 'EPISODE');
-  assert.equal(parseFreeformGravity(60), 'CRISIS');
-  assert.equal(parseFreeformGravity(80), 'RUPTURE');
+  assert.equal(parseFreeformGravity(80), 'EPISODE');
   assert.equal(parseFreeformGravity('нет'), 'EPISODE');
   const rupture = formatFreeformGravityForPrompt('RUPTURE', cfg);
   assert.match(rupture, /GRAVITY: RUPTURE/);
@@ -1103,6 +1107,8 @@ test('брейншторм не видит город, не зовёт судь�
   assert.doesNotMatch(drafted.prompt, /ХРОНИКА/);
   assert.doesNotMatch(drafted.prompt, /агент брейншторма/);
   assert.doesNotMatch(drafted.prompt, /судья|конструктор|позже подставит/);
+  assert.doesNotMatch(drafted.prompt, /ОБЯЗАТЕЛЬНАЯ ТАЙНА|MYSTERY_PLAUSIBLE/);
+  assert.doesNotMatch(drafted.prompt, /НЕТ ЗАТРАВКИ|абстрактный город-государство/);
   const packed = real.assembleChat({
     agentId: 'freeformBrainstorm',
     extraSystem: '',
@@ -1128,6 +1134,20 @@ test('судья пачки разбирает отзыв по всем трём
   assert.equal(reviews[1].verdict, 'FAIL');
   assert.equal(reviews[1].issues[0].code, 'GRAVITY');
   assert.equal(reviews[2].verdict, 'PASS');
+  assert.ok(FREEFORM_PACK_JUDGE_CODES.includes('MYSTERY'));
+  assert.ok(FREEFORM_PACK_JUDGE_CODES.includes('MYSTERY_PLAUSIBLE'));
+  const mysteryReview = parseFreeformPackReview(
+    {
+      reviews: [
+        { index: 1, verdict: 'FAIL', issues: [{ code: 'mystery', reason: 'нет странности' }] },
+        { index: 2, verdict: 'FAIL', issues: [{ code: 'MYSTERY_PLAUSIBLE', reason: 'разгадка скучная' }] },
+        { index: 3, verdict: 'PASS' },
+      ],
+    },
+    3,
+  );
+  assert.equal(mysteryReview[0].issues[0].code, 'MYSTERY');
+  assert.equal(mysteryReview[1].issues[0].code, 'MYSTERY_PLAUSIBLE');
 });
 
 test('судья пачки сохраняет исходные номера при частичном наборе', () => {
@@ -1202,6 +1222,10 @@ test('пачка: два PASS после первого судьи — без п
   assert.doesNotMatch(packed.judgePrompt, /хранител|инея/);
   assert.doesNotMatch(packed.judgePrompt, /автор:/);
   assert.doesNotMatch(packed.judgePrompt, /cityBrief/i);
+  assert.doesNotMatch(packed.prompt, /ОБЯЗАТЕЛЬНАЯ ТАЙНА/);
+  assert.doesNotMatch(packed.judgePrompt, /MYSTERY_PLAUSIBLE|тайна обязательна/);
+  assert.doesNotMatch(packed.prompt, /НЕТ ЗАТРАВКИ|абстрактный город-государство/);
+  assert.doesNotMatch(packed.judgePrompt, /НЕТ ЗАТРАВКИ|CHRONICLE не применяй/);
 });
 
 test('пачка: один PASS — чинятся только FAIL, второй судья видит только их', async () => {
@@ -1330,6 +1354,139 @@ test('пачка: второй судья не видит средний PASS и
   assert.equal(packed.winner.chronicle, 'Починка 1');
 });
 
+test('посев с тайной добавляет блоки архитектору и судье', async () => {
+  assert.equal(parseRequireMystery(true), true);
+  assert.equal(parseRequireMystery('on'), true);
+  assert.equal(parseRequireMystery(false), false);
+  assert.equal(parseRequireMystery(undefined), false);
+  const real = new AgentRuntime(loadConfig());
+  const extras = [];
+  const runtime = {
+    assembleChat: (opts) => real.assembleChat(opts),
+    async run(opts) {
+      extras.push({ agentId: opts.agentId, extraSystem: String(opts.extraSystem || '') });
+      const tool = opts.tools?.[0];
+      if (!tool) return;
+      if (opts.agentId === 'freeformBrainstorm') {
+        await tool.handler({
+          candidates: [1, 2, 3].map((i) => ({ chronicle: `Хроника сапога ${i}` })),
+        });
+      } else if (opts.agentId === 'freeformBrainstormJudge') {
+        await tool.handler({
+          reviews: [
+            { index: 1, verdict: 'FAIL', repair: 'добавь разгадку', issues: [{ code: 'MYSTERY_PLAUSIBLE', reason: 'нет разгадки' }] },
+            { index: 2, verdict: 'PASS', summary: 'держит тайну' },
+            { index: 3, verdict: 'PASS', summary: 'держит тайну' },
+          ],
+        });
+      }
+    },
+  };
+  const packed = await brainstormFreeformPack({
+    config: loadConfig(),
+    runtime,
+    seedText: 'На площади нашли чужой сапог и двор его держит.',
+    gravity: 'RUPTURE',
+    requireMystery: true,
+    rng: () => 0,
+  });
+  assert.equal(packed.ok, true);
+  const architect = extras.find((e) => e.agentId === 'freeformBrainstorm');
+  const judge = extras.find((e) => e.agentId === 'freeformBrainstormJudge');
+  assert.match(architect.extraSystem, /ОБЯЗАТЕЛЬНАЯ ТАЙНА/);
+  assert.match(architect.extraSystem, /переопределяет правило/);
+  assert.match(packed.prompt, /ОБЯЗАТЕЛЬНАЯ ТАЙНА/);
+  assert.match(judge.extraSystem, /MYSTERY —/);
+  assert.match(judge.extraSystem, /MYSTERY_PLAUSIBLE/);
+  assert.match(packed.judgePrompt, /MYSTERY_PLAUSIBLE/);
+  assert.match(packed.judgePrompt, /CHEKHOV при этом посеве не опционален/);
+  assert.equal(packed.reviews[0].issues[0].code, 'MYSTERY_PLAUSIBLE');
+  const drafts = [1, 2, 3].map((i) => ({
+    index: i,
+    chronicle: `Хроника ${i}`,
+    hook: `Хроника ${i}`,
+    arena: 'HUMAN',
+    worldRelation: 'NATIVE',
+    conflictSource: 'EXTERNAL_THREAT',
+    temporalShape: 'FRESH_INCIDENT',
+  }));
+  let repairExtra = '';
+  await repairBrainstormPack({
+    runtime: {
+      assembleChat: (opts) => real.assembleChat(opts),
+      async run(opts) {
+        repairExtra = String(opts.extraSystem || '');
+        const tool = opts.tools?.[0];
+        if (!tool) return;
+        await tool.handler({
+          candidates: drafts.map((c) => ({ chronicle: c.chronicle })),
+        });
+      },
+    },
+    seedText: 'На площади нашли чужой сапог и двор его держит.',
+    gravity: 'EPISODE',
+    drafts,
+    reviews: [
+      { index: 1, verdict: 'FAIL', repair: 'добавь разгадку' },
+      { index: 2, verdict: 'PASS', repair: '' },
+      { index: 3, verdict: 'PASS', repair: '' },
+    ],
+    requireMystery: true,
+  });
+  assert.match(repairExtra, /ОБЯЗАТЕЛЬНАЯ ТАЙНА/);
+  assert.match(repairExtra, /правишь уже написанные/);
+});
+
+test('посев из пустоты: архитектор и судья пишут про абстрактный город', async () => {
+  const real = new AgentRuntime(loadConfig());
+  const extras = [];
+  const runtime = {
+    assembleChat: (opts) => real.assembleChat(opts),
+    async run(opts) {
+      extras.push({
+        agentId: opts.agentId,
+        extraSystem: String(opts.extraSystem || ''),
+        user: String(opts.userMessages?.[0]?.content || ''),
+      });
+      const tool = opts.tools?.[0];
+      if (!tool) return;
+      if (opts.agentId === 'freeformBrainstorm') {
+        await tool.handler({
+          candidates: [1, 2, 3].map((i) => ({ chronicle: `Хроника сапога ${i}` })),
+        });
+      } else if (opts.agentId === 'freeformBrainstormJudge') {
+        await tool.handler({
+          reviews: [
+            { index: 1, verdict: 'FAIL', repair: 'обостри' },
+            { index: 2, verdict: 'PASS', summary: 'держит' },
+            { index: 3, verdict: 'PASS', summary: 'держит' },
+          ],
+        });
+      }
+    },
+  };
+  const packed = await brainstormFreeformPack({
+    config: loadConfig(),
+    runtime,
+    seedText: '',
+    gravity: 'EPISODE',
+    fromVoid: true,
+    rng: () => 0,
+  });
+  assert.equal(packed.ok, true);
+  const architect = extras.find((e) => e.agentId === 'freeformBrainstorm');
+  const judge = extras.find((e) => e.agentId === 'freeformBrainstormJudge');
+  assert.match(architect.extraSystem, /НЕТ ЗАТРАВКИ/);
+  assert.match(architect.extraSystem, /абстрактный город-государство на летающем острове/);
+  assert.match(architect.user, /ЗАТРАВКА/);
+  assert.match(architect.user, /нет\. Придумай историю с нуля/);
+  assert.doesNotMatch(architect.user, /На площади нашли/);
+  assert.match(packed.prompt, /абстрактный город-государство/);
+  assert.match(judge.extraSystem, /CHRONICLE не применяй/);
+  assert.match(packed.judgePrompt, /абстрактный город-государство/);
+  assert.doesNotMatch(architect.extraSystem, /ОБЯЗАТЕЛЬНАЯ ТАЙНА/);
+});
+
 test('правка пропускается, если судья ничего не просит', async () => {
   const calls = [];
   const drafts = [1, 2, 3].map((i) => ({
@@ -1399,6 +1556,7 @@ test('лабораторный payload отдаёт затравки без сю
     domain: { name: 'Грасток', lore: [], plotlines: [] },
     lastChronicle: 'На площади нашли чужой сапог и двор его держит.',
     lastGravity: 'RUPTURE',
+    lastRequireMystery: true,
     lastCandidates: [
       {
         index: 1,
@@ -1437,6 +1595,7 @@ test('лабораторный payload отдаёт затравки без сю
   assert.equal(payload.lastDrafts.length, 1);
   assert.equal(payload.lastJudgeReviews[0].verdict, 'FAIL');
   assert.equal(payload.lastGravity, 'RUPTURE');
+  assert.equal(payload.lastRequireMystery, true);
   assert.equal(payload.lastChronicle, 'На площади нашли чужой сапог и двор его держит.');
   assert.match(payload.lastArchitectPrompt, /freeformBrainstorm/);
   assert.match(payload.lastJudgePrompt, /freeformBrainstormJudge/);
@@ -1633,6 +1792,8 @@ test('GET /freeform отдаёт лабораторию', async () => {
     assert.match(html, /Конструктор хода/);
     assert.match(html, /Три хроники/);
     assert.match(html, /Из хроники города/);
+    assert.match(html, /Из пустоты/);
+    assert.match(html, /id="seedMystery"/);
     assert.match(html, /Выполнить дело/);
     assert.match(html, /Автотик/);
     assert.match(html, /Назад/);

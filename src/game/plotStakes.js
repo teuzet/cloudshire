@@ -89,7 +89,6 @@ export async function assignPlotStakes({ runtime, domain, plot, world, log: pare
   }
   plot.urgency0 = plot.urgency;
   plot.gravity0 = plot.gravity;
-  plot.importance = Math.min(100, plot.gravity);
   log.info('plot.stakes', { title: plot.title, urgency: plot.urgency, gravity: plot.gravity, seeded: gravitySeeded });
   return plot;
 }

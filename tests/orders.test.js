@@ -120,13 +120,13 @@ test('пустая доска рождает историю, полная — х
   const c = cfg();
   assert.equal(pickOrderOutcome({ plotlines: [] }, c, () => 0), 'story');
   assert.equal(
-    pickOrderOutcome({ plotlines: [{ kind: 'order', importance: 90 }] }, c, () => 0),
+    pickOrderOutcome({ plotlines: [{ kind: 'order' }] }, c, () => 0),
     'story',
   );
   const full = {
     plotlines: [
-      { kind: 'story', importance: 70 },
-      { kind: 'story', importance: 40 },
+      { kind: 'story', storyType: 'story', gravity: 'CRISIS' },
+      { kind: 'story', storyType: 'story', gravity: 'EPISODE' },
     ],
   };
   assert.equal(pickOrderOutcome(full, c, () => 0), 'chronicle');
