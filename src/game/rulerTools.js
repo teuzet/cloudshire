@@ -535,7 +535,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
         'Справка о фактах мира: имена, места, устройство города, прошлое, уже установленный канон. ' +
         'Если вопрос про идущую историю — передай plotId этой нити: лормастер увидит её канон и сможет дописать детали, не ломая повествование. ' +
         'Закрытую или сыгранную нить не передавай — тогда он читает только хронику. ' +
-        'Не расследование: то, что уже является тайной или предметом текущего выбора, он может оставить неизвестным.',
+        'Канонические неизвестности из брифа и скрытое открытой нити он не раскрывает; соседние бытовые пробелы может установить.',
       parameters: {
         type: 'object',
         required: ['questions'],
@@ -562,7 +562,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
           asker: `ruler:${character.name}`,
           plotId: plotId || null,
           conflux: ctx.conflux || null,
-          maxTurns: 4,
+          maxTurns: 8,
         });
         const wanted = String(plotId || '').trim();
         const focused = Boolean(result.focusPlotId);

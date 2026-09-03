@@ -16,7 +16,13 @@ import {
 import { formatPlayerBrief } from './onboarding.js';
 import { seedOpeningPlots } from './storyteller.js';
 import { ensureCityEntities } from './cityEntities.js';
-import { clipCityText, CITY_BRIEF_MAX } from './cityContext.js';
+import {
+  clipCityText,
+  CITY_BRIEF_MAX,
+  parseCityBrief,
+  formatCityBrief,
+  normalizeCanonicalUnknowns,
+} from './cityContext.js';
 import { takeName } from './names.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
@@ -512,22 +518,35 @@ async function generateCityBrief({ runtime, domain, log }) {
   const tools = [
     {
       name: 'submit_city_brief',
-      description: 'Компактный фактический бриф города для агентов тика. Не литература.',
+      description:
+        'Компактный фактический бриф города. Тело — устойчивые факты. unknowns — канонические неизвестности, не сюжет.',
       parameters: {
         type: 'object',
         required: ['brief'],
         properties: {
           brief: {
             type: 'string',
-            description: `Сухие постоянные факты города, до ${CITY_BRIEF_MAX} символов: места, институты, ресурсы, уклады, напряжения. Без сиюминутного и без сюжета.`,
+            description: `Сухие постоянные факты города, до ${CITY_BRIEF_MAX} символов: места, институты, ресурсы, уклады, напряжения. Без сиюминутного, без сюжета и без пересказа неизвестностей.`,
+          },
+          unknowns: {
+            type: 'array',
+            items: { type: 'string' },
+            description:
+              'Узкие канонические неизвестности из описания (что в мире официально не установлено). Не слухи, не календарь, не бытовые дыры. Пустой массив, если таких нет.',
           },
         },
       },
       handler: async (args) => {
-        const brief = clipCityText(args.brief, CITY_BRIEF_MAX);
-        if (brief.length < 80) return toolFail('thin', 'Слишком коротко: нужны конкретные факты города.');
-        draft.text = brief;
-        return { ok: true };
+        const parsed = parseCityBrief(args.brief);
+        const unknowns = normalizeCanonicalUnknowns(
+          Array.isArray(args.unknowns) && args.unknowns.length ? args.unknowns : parsed.unknowns,
+        );
+        const assembled = formatCityBrief({ body: parsed.body, unknowns });
+        if (clipCityText(parsed.body, CITY_BRIEF_MAX).length < 80) {
+          return toolFail('thin', 'Слишком коротко: нужны конкретные факты города.');
+        }
+        draft.text = assembled;
+        return { ok: true, unknowns: unknowns.length };
       },
     },
   ];
@@ -550,6 +569,7 @@ async function generateCityBrief({ runtime, domain, log }) {
             'Не пересказывай генезис литературно. Не пиши хронику месяца и не выдумывай тайну.',
             'Оставь: рельеф и хозяйство, институты, ключевые места, устойчивые напряжения, необычные постоянные черты.',
             'Только извлекай, ничего не добавляй. Не выдумывай офицеров, сановников и статы.',
+            'Канонические неизвестности (в тексте прямо сказано, что X официально не установлено / никто не видел / не доказано) — в unknowns, узкими пунктами. Не дублируй их в brief. Слух и догадку в unknowns не клади. Бытовые дыры (даты, имена постов, сколько раз) — не unknowns.',
             'Бриф — живой документ: позже в нём могут поправить кусок, если город как место изменится навсегда.',
             'Вызови submit_city_brief.',
           ].join('\n'),

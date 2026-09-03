@@ -6,7 +6,7 @@ import { attachFactToPlotlines, isOrderPlot } from './plotlines.js';
 import { dehydrateDomainToConflux, hydrateDomainFromConflux, plotVisibleToRuler } from './confluxBoard.js';
 import { formatTruthGraphForPrompt } from './mysteryGraph.js';
 import { formatLadderForPrompt } from './suspenseGraph.js';
-import { formatCityForAgents } from './cityContext.js';
+import { formatCityForAgents, parseCityBrief, formatCanonicalUnknownsForPrompt } from './cityContext.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 
@@ -213,6 +213,11 @@ export async function askLoremaster({
   const focusPlot = resolveLoremasterStory(working, plotId, conflux);
 
   const description = cityTextForLoremaster(working);
+  const canonicalUnknowns = parseCityBrief(working.cityBrief).unknowns;
+  const unknownsPrompt = formatCanonicalUnknownsForPrompt(canonicalUnknowns);
+  const unknownsLock = canonicalUnknowns.length
+    ? ' canonicalUnknowns — установленный пробел мира: на эти вопросы «неизвестно» в submit_answers, без add_fact. Соседние бытовые детали не из списка устанавливай. Висящему пункту не противоречь.'
+    : '';
 
   const tools = [
     {
@@ -248,19 +253,23 @@ export async function askLoremaster({
               expectedMonths: a.expectedMonths,
             })),
           openStories: formatOpenStoriesBrief(openStories),
+          canonicalUnknowns: unknownsPrompt,
           reminder: focusPlot
             ? 'Хроника — главный источник произошедшего; ты её только читаешь. Инструмент — факты. ' +
               'focusStory — идущая нить, о которой спросили: канон дан, чтобы не противоречить и не разрушить повествование. ' +
               'Дописывай только мелкие детали фона. Не заводи новое направление сюжета. Скрытое не раскрывай и не пиши в fact. ' +
-              'Новый fact по этой нити система сама привяжет к истории.'
+              'Новый fact по этой нити система сама привяжет к истории.' +
+              unknownsLock
             : 'Хроника приложена целиком — это твой главный источник, рядом с ним knownPeople. Ты хронику только читаешь: ' +
               'писать её нельзя, инструмент — факты. ' +
               'openStories — краткие карточки идущих историй без канона истины. Не решай их и не выдумывай скрытое. ' +
               'Сыгранную историю читай только по хронике. ' +
               'Если у записи есть пометка [ЭТА ЗАПИСЬ ЗАКРЫЛА ПРОБЛЕМУ] — история закрыта этой записью; не описывай её как текущую беду. ' +
-              'Если хроника упоминает явление без деталей и это не защищённый вопрос — add_fact. ' +
-              '«Неизвестно» — редко: только когда ответ защищён или противоречил бы канону. ' +
-              'Факт, противоречащий хронике или состоянию, — устарел: update_fact или retire_fact.',
+              'Если хроника упоминает явление без деталей и это не пункт canonicalUnknowns и не скрытое живой нити — add_fact. ' +
+              '«Неизвестно» — только для пункта canonicalUnknowns, скрытого открытой нити или если факт противоречил бы канону. ' +
+              'Не защищай всю тему вокруг пункта: дату, место обычного набега, имя поста — можно установить. ' +
+              'Факт, противоречащий хронике или состоянию, — устарел: update_fact или retire_fact.' +
+              unknownsLock,
         };
         if (focusPlot) {
           const linked = loreLinkedToPlot(visible, focusPlot);
@@ -333,9 +342,9 @@ export async function askLoremaster({
         if (/не установлен|сведений нет|неизвестн|или исчезновени|возможно,|предположительно/i.test(body)) {
           return toolFail(
             'not_a_fact',
-            'Это не факт, а запись незнания. Факт — утверждение о том, что есть. ' +
-              'Если знаешь по хронике или knownPeople — сформулируй утвердительно; если не знаешь — ' +
-              'просто ответь в submit_answers, без add_fact.',
+            'Это не факт, а запись незнания. Незнание в факт не пишется. ' +
+              'Если вопрос не из canonicalUnknowns и не скрытое живой нити — add_fact с конкретным утверждением. ' +
+              '«Неизвестно» только в submit_answers и только для пункта списка или защищённого вопроса открытой нити.',
           );
         }
         const fact = createLoreFact({
@@ -508,7 +517,8 @@ export async function askLoremaster({
           '',
           focusPlot
             ? `Фокус — идущая история ${focusPlot.id}. Канон и инструкция — в read_lore.focusStory. Детали фона можно дописать; новое направление сюжета — нельзя. Скрытое не раскрывай.`
-            : 'Фокуса на идущей истории нет: канон тайн не дан. Сыгранное читай только по хронике. Не решай открытые истории.',
+            : 'Фокуса на идущей истории нет: канон тайн нити не дан. Сыгранное читай только по хронике. Не решай открытые истории.',
+          'Канонические неизвестности — в read_lore.canonicalUnknowns. Их не раскрывай. Остальное, чего нет в списке, можно установить.',
           'Порядок: read_lore → при пробелах add_fact (СУХО, без пафоса), при противоречиях update_fact / retire_fact → submit_answers.',
           'Перед ответом сверь факты с хроникой, openStories и состоянием: устаревшие обнови или сними, не пересказывай их как правду.',
           'Факты как справочник, не проза. Пример: «Местный продукт — виноград; сладкий, тонкая кожица.»',

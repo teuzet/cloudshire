@@ -5,6 +5,9 @@ import {
   formatCityForAgents,
   formatCityModifiersForPrompt,
   normalizeCityModifiers,
+  parseCityBrief,
+  formatCityBrief,
+  CANONICAL_UNKNOWNS_HEADING,
 } from '../src/game/cityContext.js';
 
 test('агентам только бриф; старые дописки в промпт не идут', () => {
@@ -34,4 +37,16 @@ test('без брифа — запасной description; указы в state.mo
   assert.equal(domain.modifiers.length, 0);
   assert.equal(formatCityForAgents(domain), 'Старое описание.');
   assert.equal(formatCityModifiersForPrompt(domain), '');
+});
+
+test('канонические неизвестности живут в брифе отдельным блоком и не отрезаются с хвоста', () => {
+  const assembled = formatCityBrief({
+    body: `${'ярус '.repeat(400)}конец тела`,
+    unknowns: ['источник набегов чудовищ официально не установлен', 'что на северном плато, люди не видели'],
+  });
+  assert.match(assembled, new RegExp(CANONICAL_UNKNOWNS_HEADING.replace(/[()]/g, '\\$&')));
+  assert.match(assembled, /источник набегов чудовищ официально не установлен/);
+  const parsed = parseCityBrief(assembled);
+  assert.equal(parsed.unknowns.length, 2);
+  assert.match(formatCityForAgents({ cityBrief: assembled }), /Неизвестно \(канон\)/);
 });

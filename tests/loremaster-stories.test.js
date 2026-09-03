@@ -113,6 +113,18 @@ test('лормастер читает бриф города, а не обрез�
   assert.equal(text.includes('Этого абзаца'), false);
 });
 
+test('лормастер видит блок канонических неизвестностей в брифе', () => {
+  const domain = {
+    cityBrief:
+      'Город у Праотца.\n\nНеизвестно (канон):\n- источник набегов чудовищ официально не установлен',
+    description: 'Длинный генезис про плато и догадки.',
+  };
+  const text = cityTextForLoremaster(domain);
+  assert.match(text, /Неизвестно \(канон\)/);
+  assert.match(text, /источник набегов чудовищ официально не установлен/);
+  assert.equal(text.includes('Длинный генезис'), false);
+});
+
 function findOpen(domain, id) {
   return (domain.plotlines || []).find((p) => p.id === id);
 }

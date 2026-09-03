@@ -5,7 +5,11 @@
 
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
-import { clipCityText, CITY_BRIEF_MAX, formatCityForAgents } from './cityContext.js';
+import {
+  formatCityForAgents,
+  parseCityBrief,
+  formatCityBrief,
+} from './cityContext.js';
 import { isStakedStory, parseFreeformGravity } from './plotlines.js';
 
 const BIG_GRAVITY = new Set(['CRISIS', 'RUPTURE']);
@@ -34,9 +38,10 @@ function collapse(s) {
   return String(s || '').trim().replace(/\s+/g, ' ');
 }
 
-/** Подмена одного куска брифа. Весь текст целиком подменять нельзя. */
+/** Подмена одного куска тела брифа. Блок канонических неизвестностей не трогаем. */
 export function applyCityBriefEdit(brief, { find, replace } = {}) {
-  const current = clipCityText(brief, CITY_BRIEF_MAX);
+  const parsed = parseCityBrief(brief);
+  const current = parsed.body;
   const needle = collapse(find);
   const nextChunk = collapse(replace);
   if (!current) return { ok: false, error: 'no_brief' };
@@ -46,12 +51,12 @@ export function applyCityBriefEdit(brief, { find, replace } = {}) {
   const idx = current.indexOf(needle);
   if (idx < 0) return { ok: false, error: 'not_found' };
   if (current.indexOf(needle, idx + needle.length) >= 0) return { ok: false, error: 'ambiguous' };
-  const next = clipCityText(
+  const nextBody = collapse(
     `${current.slice(0, idx)}${nextChunk}${current.slice(idx + needle.length)}`,
-    CITY_BRIEF_MAX,
   );
-  if (!next) return { ok: false, error: 'empty' };
-  if (next === current) return { ok: false, error: 'unchanged' };
+  if (!nextBody) return { ok: false, error: 'empty' };
+  if (nextBody === current) return { ok: false, error: 'unchanged' };
+  const next = formatCityBrief({ body: nextBody, unknowns: parsed.unknowns });
   return { ok: true, brief: next };
 }
 
@@ -73,7 +78,7 @@ export async function maybeRewriteCityGenesis({
 
   if (!runtime) return null;
 
-  const current = clipCityText(domain.cityBrief, CITY_BRIEF_MAX);
+  const current = formatCityBrief(parseCityBrief(domain.cityBrief));
   const draft = { skip: true, edit: null };
   await runtime.run({
     agentId: 'cityGenesisRewrite',
@@ -147,7 +152,8 @@ export async function maybeRewriteCityGenesis({
           'ТЕКУЩИЙ БРИФ — правится один кусок, не весь текст:',
           current || '(бриф пуст)',
           'Править, только если в город вошло перманентное значимое глобальное изменение: институты, рельеф, хозяйство, власть, постоянный уклад.',
-          'find — дословная цитата из брифа. replace — новый текст этого куска. Остальное не трогай и не переписывай бриф с нуля.',
+          'find — дословная цитата из тела брифа, не из блока «Неизвестно (канон)». replace — новый текст этого куска. Остальное не трогай и не переписывай бриф с нуля.',
+          'Блок канонических неизвестностей не правь и не раскрывай — это другой ход.',
           'Не пиши сюжет, не дублируй хронику месяца, не добавляй тайну. Не выдумывай сановников и статы.',
           'Если изменения нет или оно уже в брифе — skip=true.',
           'Вызови submit_city_brief_rewrite.',
