@@ -274,7 +274,8 @@ test('конфиг freeform читается из YAML', () => {
   assert.doesNotMatch(agents.freeformBrainstorm.instructions, /четыре поля|четырьмя полями/);
   assert.doesNotMatch(agents.freeformBrainstorm.instructions, /только к полю «последствия»/);
   assert.doesNotMatch(agents.freeformBrainstorm.instructions, /агент брейншторма/);
-  assert.match(agents.freeformBrainstorm.instructions, /бюрократическую путаницу/);
+  assert.match(agents.freeformBrainstorm.instructions, /Анти-аттракт: бюрократия/);
+  assert.match(agents.freeformBrainstorm.instructions, /не в протоколах/);
   assert.match(agents.freeformBrainstorm.instructions, /бога-покровителя и верховного жреца/);
   assert.match(agents.freeformBrainstorm.instructions, /наблюдаемый слой/);
   assert.match(agents.freeformBrainstorm.instructions, /записей хроники/);
@@ -313,6 +314,7 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformBrainstormJudge.instructions, /ECONOMY/);
   assert.match(agents.freeformBrainstormJudge.instructions, /PATRON/);
   assert.match(agents.freeformBrainstormJudge.instructions, /CONFLUX/);
+  assert.match(agents.freeformBrainstormJudge.instructions, /BUREAUCRACY/);
   assert.match(agents.freeformBrainstormJudge.instructions, /Угроза или возможность/);
   assert.match(agents.freeformBrainstormJudge.instructions, /Главный персонаж — сам город/);
   assert.match(agents.freeformBrainstormJudge.instructions, /На самом деле/);
@@ -1184,6 +1186,7 @@ test('судья пачки разбирает отзыв по всем трём
   assert.equal(reviews[1].verdict, 'FAIL');
   assert.equal(reviews[1].issues[0].code, 'GRAVITY');
   assert.equal(reviews[2].verdict, 'PASS');
+  assert.ok(FREEFORM_PACK_JUDGE_CODES.includes('BUREAUCRACY'));
   assert.ok(FREEFORM_PACK_JUDGE_CODES.includes('MYSTERY'));
   assert.ok(FREEFORM_PACK_JUDGE_CODES.includes('MYSTERY_PLAUSIBLE'));
   const mysteryReview = parseFreeformPackReview(
@@ -1535,6 +1538,52 @@ test('посев из пустоты: архитектор и судья пиш�
   assert.match(judge.extraSystem, /CHRONICLE не применяй/);
   assert.match(packed.judgePrompt, /абстрактный город-государство/);
   assert.doesNotMatch(architect.extraSystem, /ОБЯЗАТЕЛЬНАЯ ТАЙНА/);
+});
+
+test('посев из генезиса: архитектор видит описание города, не пустоту', async () => {
+  const real = new AgentRuntime(loadConfig());
+  const extras = [];
+  const runtime = {
+    assembleChat: (opts) => real.assembleChat(opts),
+    async run(opts) {
+      extras.push({
+        agentId: opts.agentId,
+        extraSystem: String(opts.extraSystem || ''),
+        user: String(opts.userMessages?.[0]?.content || ''),
+      });
+      const tool = opts.tools?.[0];
+      if (!tool) return;
+      if (opts.agentId === 'freeformBrainstorm') {
+        await tool.handler({
+          candidates: [1, 2, 3].map((i) => ({ chronicle: `Хроника сапога ${i}` })),
+        });
+      } else if (opts.agentId === 'freeformBrainstormJudge') {
+        await tool.handler({
+          reviews: [
+            { index: 1, verdict: 'FAIL', repair: 'обостри' },
+            { index: 2, verdict: 'PASS', summary: 'держит' },
+            { index: 3, verdict: 'PASS', summary: 'держит' },
+          ],
+        });
+      }
+    },
+  };
+  const packed = await brainstormFreeformPack({
+    config: loadConfig(),
+    runtime,
+    seedText: 'Вертикальный город вокруг Праотца, джунгли давят на край.',
+    gravity: 'SITUATION',
+    fromGenesis: true,
+    rng: () => 0,
+  });
+  assert.equal(packed.ok, true);
+  const architect = extras.find((e) => e.agentId === 'freeformBrainstorm');
+  const judge = extras.find((e) => e.agentId === 'freeformBrainstormJudge');
+  assert.match(architect.extraSystem, /ОПИСАНИЕ ГОРОДА/);
+  assert.match(architect.user, /Вертикальный город вокруг Праотца/);
+  assert.doesNotMatch(architect.extraSystem, /НЕТ ЗАТРАВКИ/);
+  assert.match(judge.extraSystem, /ОПИСАНИЕ ГОРОДА/);
+  assert.doesNotMatch(judge.extraSystem, /CHRONICLE не применяй/);
 });
 
 test('правка пропускается, если судья ничего не просит', async () => {

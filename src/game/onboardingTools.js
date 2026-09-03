@@ -31,6 +31,8 @@ import {
   nextAxisOffer,
   sampleOneAxis,
   axesReadyForConcept,
+  openAxisTarget,
+  resolveAxisChoice,
   emptyAxisInterview,
   normalizeAxisInterview,
 } from './genesisAxes.js';
@@ -260,7 +262,7 @@ export function buildOnboardingTools({
           hint:
             resolved === 'questions'
               ? offer
-                ? `Задай вопрос оси «${offer.axisId}»: ${offer.prompt}. Варианты + random + agent. После ответа — resolve_axis.`
+                ? `Задай вопрос оси «${offer.axisId}»: ${offer.prompt}. Каталог — подсказки и пул random. Свой ответ игрока запиши в resolve_axis как есть.`
                 : 'Оси заполнены. Спроси уникальную фичу (set_unique_feature) или skip, затем request_city_concept.'
               : resolved === 'brief'
                 ? 'Вытяни оси из описания через set_axis. Для пробелов — resolve_axis (вопрос / random / agent). Потом request_city_concept.'
@@ -316,7 +318,7 @@ export function buildOnboardingTools({
     },
     {
       name: 'set_axis',
-      description: 'Точечно задать ось (id значения из каталога) — из описания игрока.',
+      description: 'Точечно задать ось — id из каталога или любая формулировка из описания игрока.',
       parameters: {
         type: 'object',
         required: ['axisId', 'value'],
@@ -328,7 +330,9 @@ export function buildOnboardingTools({
       handler: async ({ axisId, value }) => {
         const group = genesisAxisById(app.config, axisId);
         if (!group) return toolFail('unknown_axis', `Нет оси «${axisId}».`);
-        draft.axes = setAxisValue(draft.axes, axisId, value, 'player');
+        const resolved = resolveAxisChoice(group, value);
+        if (!resolved) return toolFail('empty_value', 'Нужно значение оси.');
+        draft.axes = setAxisValue(draft.axes, axisId, resolved.value, 'player');
         await saveDraft();
         const offer = nextAxisOffer(app.config, draft.axes);
         return {
@@ -342,25 +346,44 @@ export function buildOnboardingTools({
     {
       name: 'resolve_axis',
       description:
-        'Закрыть одну недостающую ось: choice = id из каталога, random (система), или agent (агент выбирает; передай value).',
+        'Закрыть текущую открытую ось. choice: формулировка игрока, id/имя из каталога, random (пул каталога) или agent. Свободный ответ допустим. axisId не нужен.',
       parameters: {
         type: 'object',
-        required: ['axisId', 'choice'],
+        required: ['choice'],
         properties: {
-          axisId: { type: 'string' },
+          axisId: {
+            type: 'string',
+            description: 'игнорируется; закрывается текущая открытая ось',
+          },
           choice: {
             type: 'string',
-            description: 'id значения каталога, либо random, либо agent',
+            description: 'любая формулировка, id каталога, random или agent',
           },
           value: {
             type: 'string',
-            description: 'id значения, если choice=agent',
+            description: 'если choice=agent — своя формулировка или id; без value берётся random из каталога',
           },
         },
       },
-      handler: async ({ axisId, choice, value }) => {
-        const group = genesisAxisById(app.config, axisId);
-        if (!group) return toolFail('unknown_axis', `Нет оси «${axisId}».`);
+      handler: async ({ choice, value }) => {
+        const target = openAxisTarget(app.config, draft.axes);
+        if (!target) {
+          ensureInterview(draft);
+          const uniqueNeeded =
+            draft.mode === 'questions' && !draft.axisInterview.uniqueFeatureAsked;
+          return {
+            ok: true,
+            alreadyComplete: true,
+            axes: draft.axes,
+            missingAxes: [],
+            nextAxis: null,
+            uniqueFeatureNeeded: uniqueNeeded,
+            hint: uniqueNeeded
+              ? 'Оси уже закрыты. Не вызывай resolve_axis — set_unique_feature или skip, затем request_city_concept.'
+              : 'Оси уже закрыты. Не вызывай resolve_axis — request_city_concept, если концепта ещё нет.',
+          };
+        }
+        const { axisId, group } = target;
         const token = String(choice || '').trim();
         const lower = token.toLowerCase();
         if (lower === 'random') {
@@ -368,20 +391,16 @@ export function buildOnboardingTools({
             return toolFail('sample_failed', `Не удалось семплировать ось «${axisId}».`);
           }
         } else if (lower === 'agent') {
-          const pick = String(value || '').trim();
-          if (pick && (group.values || []).some((v) => v.id === pick)) {
-            draft.axes = setAxisValue(draft.axes, axisId, pick, 'agent');
+          const invented = resolveAxisChoice(group, value);
+          if (invented) {
+            draft.axes = setAxisValue(draft.axes, axisId, invented.value, 'agent');
           } else if (!applySampledAxis(draft, app.config, axisId, 'agent')) {
             return toolFail('sample_failed', `Не удалось выбрать ось «${axisId}».`);
           }
         } else {
-          if (!(group.values || []).some((v) => v.id === token)) {
-            return toolFail(
-              'unknown_value',
-              `Нет значения «${token}» у оси ${axisId}. Каталог: ${(group.values || []).map((v) => v.id).join(', ')}. Или random / agent.`,
-            );
-          }
-          draft.axes = setAxisValue(draft.axes, axisId, token, 'player');
+          const resolved = resolveAxisChoice(group, token);
+          if (!resolved) return toolFail('empty_value', 'Нужен ответ по оси, random или agent.');
+          draft.axes = setAxisValue(draft.axes, axisId, resolved.value, 'player');
         }
         ensureInterview(draft);
         await saveDraft();

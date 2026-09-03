@@ -12,6 +12,7 @@ export const DEFAULT_SEED = {
   start: 5,
   worldLiveBelow: 3,
   errandDurationDiv: 3,
+  voidGenesisChance: 0.5,
   chronicle: { ...DEFAULT_DELTAS },
   void: { ...DEFAULT_DELTAS },
   errand: { ...DEFAULT_DELTAS },
@@ -43,6 +44,7 @@ export function parseSeedConfig(raw = {}) {
     start,
     worldLiveBelow: Math.max(0, num(raw.worldLiveBelow, DEFAULT_SEED.worldLiveBelow)),
     errandDurationDiv: Math.max(0.001, num(raw.errandDurationDiv, DEFAULT_SEED.errandDurationDiv)),
+    voidGenesisChance: clamp(num(raw.voidGenesisChance, DEFAULT_SEED.voidGenesisChance), 0, 1),
     chronicle: parseDeltas(raw.chronicle, DEFAULT_SEED.chronicle),
     void: parseDeltas(raw.void, DEFAULT_SEED.void),
     errand: parseDeltas(raw.errand, DEFAULT_SEED.errand),
@@ -109,4 +111,10 @@ export function errandSeedChance(temp, durationMonths, cfg = DEFAULT_SEED) {
   const months = Math.max(0, num(durationMonths, 0));
   const p = worldSeedChance(temp, parsed) * (months / parsed.errandDurationDiv);
   return clamp(p, 0, 1);
+}
+
+/** Пустой канал: 'genesis' — описание города, 'void' — без зерна. */
+export function pickVoidGrain(cfg = DEFAULT_SEED, rng = Math.random) {
+  const parsed = seedConfig(cfg);
+  return rng() < parsed.voidGenesisChance ? 'genesis' : 'void';
 }

@@ -144,6 +144,37 @@ h1 {
   background: rgba(0, 0, 0, 0.25);
 }
 
+.portrait-btn {
+  grid-row: 1 / span 4;
+  width: 4.6rem;
+  height: 4.6rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.portrait-btn:active {
+  transform: scale(0.97);
+}
+
+.card.officer > .bless-btn {
+  grid-column: 2;
+}
+
+.portrait-btn .portrait {
+  grid-row: auto;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.portrait-btn.blank {
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.25);
+}
+
 .card.officer .stat-head,
 .card.officer .gauge,
 .card.officer > h2,
@@ -155,6 +186,8 @@ h1 {
   grid-column: 2;
 }
 
+.card.lore p { white-space: pre-wrap; }
+
 .empty { text-align: center; padding: 2.2rem 1rem; }
 
 .tabs {
@@ -163,7 +196,7 @@ h1 {
   right: 0;
   bottom: 0;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 0.2rem;
   padding: 0.4rem 0.4rem calc(0.45rem + env(safe-area-inset-bottom));
   background: rgba(12, 10, 9, 0.88);
@@ -173,7 +206,7 @@ h1 {
 
 .tab {
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   color: var(--muted);
   background: transparent;
   border: 0;
@@ -194,3 +227,101 @@ h1 {
   border-radius: 10px;
 }
 .bless-btn:disabled { opacity: 0.55; }
+
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-items: end center;
+}
+
+.sheet[hidden] { display: none; }
+
+.sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: rgba(6, 5, 4, 0.72);
+}
+
+.sheet-card {
+  position: relative;
+  z-index: 1;
+  width: min(34rem, 100%);
+  max-height: min(88vh, 44rem);
+  overflow: auto;
+  margin: 0;
+  padding: 1.1rem 1.1rem calc(1.2rem + env(safe-area-inset-bottom));
+  border-radius: 18px 18px 0 0;
+  border: 1px solid var(--line);
+  background: rgba(18, 16, 14, 0.94);
+  backdrop-filter: blur(16px);
+}
+
+.sheet-close {
+  position: absolute;
+  top: 0.7rem;
+  right: 0.8rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  padding: 0.35rem 0.4rem;
+}
+
+.sheet-portrait {
+  display: block;
+  width: min(14rem, 72vw);
+  height: min(14rem, 72vw);
+  margin: 0.2rem auto 0.85rem;
+  object-fit: cover;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.sheet-portrait.blank {
+  width: min(14rem, 72vw);
+  height: min(14rem, 72vw);
+}
+
+.sheet-kicker {
+  margin: 0;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: center;
+}
+
+.sheet-section {
+  margin-top: 1rem;
+}
+
+.sheet-card .bless-btn {
+  display: block;
+  width: 100%;
+}
+
+.sheet-card h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: var(--accent);
+  text-align: center;
+}
+
+.sheet-card h3 {
+  margin: 1rem 0 0.25rem;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.sheet-card p { margin: 0.35rem 0 0; line-height: 1.45; font-size: 0.95rem; }
+.sheet-card .meta { font-size: 0.82rem; color: var(--muted); }
+.sheet-card .muted { color: var(--muted); }

@@ -36,6 +36,59 @@ export function genesisAxisById(config, axisId) {
   return genesisAxisGroups(config).find((g) => g.id === axisId) || null;
 }
 
+function normalizeAxisToken(s) {
+  return String(s || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+/** Сопоставить ответ с id или русским именем значения оси. */
+export function matchAxisValue(group, token) {
+  const values = group?.values || group?.tags || [];
+  const raw = String(token || '').trim();
+  if (!raw || !values.length) return null;
+  const n = normalizeAxisToken(raw);
+  const byId = values.find((v) => v.id === raw || normalizeAxisToken(v.id) === n);
+  if (byId) return byId.id;
+  const exactName = values.filter((v) => normalizeAxisToken(v.name) === n);
+  if (exactName.length === 1) return exactName[0].id;
+  const fuzzy = values.filter((v) => {
+    const name = normalizeAxisToken(v.name);
+    if (!name) return false;
+    if (n.includes(name)) return true;
+    if (n.length >= 4 && name.includes(n)) return true;
+    const words = name.split(' ').filter((w) => w.length > 2);
+    return words.length > 0 && words.every((w) => n.includes(w));
+  });
+  if (fuzzy.length === 1) return fuzzy[0].id;
+  return null;
+}
+
+const AXIS_VALUE_MAX = 400;
+
+/** Каталог только при точном id или имени; иначе свободная формулировка. */
+export function resolveAxisChoice(group, token) {
+  const raw = String(token || '').trim();
+  if (!raw) return null;
+  const values = group?.values || group?.tags || [];
+  const n = normalizeAxisToken(raw);
+  const byId = values.find((v) => v.id === raw || normalizeAxisToken(v.id) === n);
+  if (byId) return { value: byId.id, catalog: true };
+  const byName = values.filter((v) => normalizeAxisToken(v.name) === n);
+  if (byName.length === 1) return { value: byName[0].id, catalog: true };
+  return { value: raw.slice(0, AXIS_VALUE_MAX), catalog: false };
+}
+
+/** Текущая незакрытая ось анкеты. Выдуманный axisId модели не используется. */
+export function openAxisTarget(config, axes) {
+  const offer = nextAxisOffer(config, axes);
+  if (!offer) return null;
+  const group = genesisAxisById(config, offer.axisId);
+  if (!group) return null;
+  return { axisId: offer.axisId, group, offer };
+}
+
 export function emptyAxesState() {
   return {};
 }
@@ -119,8 +172,9 @@ export function formatGenesisAxesForPrompt(config, axes) {
     const row = state[group.id];
     if (!row) continue;
     const val = (group.values || group.tags || []).find((v) => v.id === row.value);
+    const custom = !val;
     const name = val?.name || row.value;
-    const about = val?.about ? ` — ${val.about}` : '';
+    const about = val?.about ? ` — ${val.about}` : custom ? ' — свободная формулировка, держись её' : '';
     const src = row.source ? ` [${row.source}]` : '';
     const adapted = row.adaptedFrom ? ` (сдвинуто с ${row.adaptedFrom}: ${row.adaptedReason || ''})` : '';
     lines.push(`- ${group.id}: ${name}${about}${src}${adapted}`);
@@ -152,7 +206,7 @@ const AXIS_QUESTIONS = {
   settlementPattern: 'Как сидит город на острове?',
   productiveBase: 'Чем в основном живут?',
   socialOrder: 'Кто держит порядок в городе?',
-  signatureDomain: 'Какая местная особенность узнаваема с первого взгляда?',
+  signatureDomain: 'Что на острове узнаваемо с первого взгляда? Назови конкретную вещь, не тип вроде «ландшафт».',
   settlementExtent: 'Насколько остров освоен?',
   historicalCondition: 'Какое сейчас время города?',
   civicTemper: 'Какой нрав горожан?',
@@ -186,18 +240,22 @@ export function sampleOneAxis(config, axisId, rng = Math.random) {
 export function formatAxisOffer(config, axisId) {
   const group = genesisAxisById(config, axisId);
   if (!group) return null;
+  const open = Boolean(group.open);
   return {
     axisId,
     name: group.name || axisId,
+    open,
     prompt: AXIS_QUESTIONS[axisId] || `Как быть с «${group.name || axisId}»?`,
-    options: (group.values || []).map((v) => ({
-      id: v.id,
-      label: v.name,
-      about: v.about || '',
-    })),
+    options: open
+      ? []
+      : (group.values || []).map((v) => ({
+          id: v.id,
+          label: v.name,
+          about: v.about || '',
+        })),
     extras: [
-      { id: 'random', label: 'случайное — пусть система выберет' },
-      { id: 'agent', label: 'на усмотрение ведущего' },
+      { id: 'random', label: 'случайное — тип из каталога' },
+      { id: 'agent', label: 'на усмотрение ведущего — можно придумать конкретное' },
     ],
   };
 }

@@ -16,6 +16,7 @@ import {
   emptyAxisInterview,
   setAxisValue,
   GENESIS_AXIS_ORDER,
+  formatAxisOffer,
 } from '../src/game/genesisAxes.js';
 import { normalizeConcept, openingLoreFromConcept } from '../src/game/genesisConcept.js';
 import {
@@ -88,6 +89,15 @@ test('опрос по осям: missing → resolve random/agent → unique feat
   assert.equal(axesReadyForConcept(cfg, axes, interview, { uniqueFeatureRequired: false }), true);
 });
 
+test('ось особенности в анкете открытая: без однословных типов', () => {
+  const cfg = loadConfig();
+  const offer = formatAxisOffer(cfg, 'signatureDomain');
+  assert.equal(offer.open, true);
+  assert.equal(offer.options.length, 0);
+  assert.match(offer.prompt, /конкретн/i);
+  assert.doesNotMatch(offer.prompt, /живой ресурс|ландшафт, материал/i);
+});
+
 test('директивы: конфликт блокирует, адаптация становится required', () => {
   let d = recordCosmologyConflicts({}, [
     { requested: 'город эльфов', reason: 'все жители — люди', adaptations: ['древняя человеческая культура'] },
@@ -123,4 +133,24 @@ test('concept schema: READY требует имя и длинный preview, fea
   const lore = openingLoreFromConcept(ok.concept, { min: 8, max: 12 });
   assert.ok(lore.length >= 8);
   assert.match(lore[0], /Верхолесье/);
+});
+
+test('openingLoreFromConcept не зависает на тонком концепте (только имя и preview)', () => {
+  const lore = openingLoreFromConcept(
+    {
+      status: 'READY',
+      name: 'Варшела',
+      identity: { oneLine: 'Город на дереве, дома и оборона от джунглей.' },
+      definingFeatures: [],
+      landscape: '',
+      settlement: '',
+      livelihood: '',
+      preview:
+        'Варшела стоит в котловине. В центре растёт огромное дерево. Вокруг ствола — мостки. Под корнями — храм.',
+    },
+    { min: 8, max: 12 },
+  );
+  assert.ok(lore.length >= 4);
+  assert.ok(lore.length <= 12);
+  assert.match(lore.join('\n'), /Варшела/);
 });

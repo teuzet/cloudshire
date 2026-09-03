@@ -836,7 +836,7 @@ export function createWebServer({ config, app, runtime, storage }) {
       const domainIdA = String(req.body.domainIdA || '').trim();
       const domainIdB = String(req.body.domainIdB || '').trim();
       const etaMonths = Number(req.body.etaMonths ?? 3);
-      const durationMonths = Number(req.body.durationMonths ?? 3);
+      const durationMonths = Number(req.body.durationMonths ?? 8);
       if (!domainIdA || !domainIdB) {
         return res.status(400).json({ error: 'domainIdA and domainIdB required' });
       }

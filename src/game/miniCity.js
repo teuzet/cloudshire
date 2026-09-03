@@ -5,11 +5,47 @@ import { blessManaCost, currentMana } from './mana.js';
 import { listStandingOrders } from './orders.js';
 import { gameDateFromTickIndex, worldDateLabel } from './tickClock.js';
 import { domainHasIslandImage, officerHasPortrait } from '../storage/r2.js';
+import { formatAxesForSpeech, formatLookForSpeech } from './officers.js';
 
 function clip(text, max = 800) {
   const t = String(text || '').trim();
   if (t.length <= max) return t;
   return `${t.slice(0, max).replace(/\s+\S*$/, '')}…`;
+}
+
+const DESC_SECTION_MAX = 8000;
+
+function sectionsFromMarkdown(description) {
+  const raw = String(description || '').trim();
+  if (!raw) return [];
+  if (!/^##\s+/m.test(raw)) {
+    return [{ id: 'city', title: 'Город', text: clip(raw, DESC_SECTION_MAX) }];
+  }
+  return raw
+    .split(/^##\s+/m)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean)
+    .map((chunk, i) => {
+      const nl = chunk.indexOf('\n');
+      const title = (nl < 0 ? chunk : chunk.slice(0, nl)).trim() || `Раздел ${i + 1}`;
+      const text = nl < 0 ? '' : chunk.slice(nl).trim();
+      return { id: `s${i}`, title, text: clip(text, DESC_SECTION_MAX) };
+    })
+    .filter((s) => s.text);
+}
+
+export function cityDescriptionSections(domain, config) {
+  const defs = Array.isArray(config?.genesis?.aspects) ? config.genesis.aspects : [];
+  const aspects = domain?.aspects && typeof domain.aspects === 'object' ? domain.aspects : {};
+  const fromAspects = defs
+    .map((def) => {
+      const text = String(aspects[def.id] || '').trim();
+      if (!text) return null;
+      return { id: def.id, title: def.title || def.id, text: clip(text, DESC_SECTION_MAX) };
+    })
+    .filter(Boolean);
+  if (fromAspects.length) return fromAspects;
+  return sectionsFromMarkdown(domain?.description);
 }
 
 export function gameDateLabelAtTick(world, tick) {
@@ -48,18 +84,48 @@ function slimProcess(process, config, { mana = 0 } = {}) {
     .map((id) => statName(config, id))
     .filter(Boolean);
   const left = Number(process.monthsLeft);
+  const expected = Number(process.expectedMonths);
+  const objective = Number(process.objectiveMonths || process.expectedMonths);
+  const done = Number(process.monthsDone);
   const cost = blessManaCost(process);
   const active = !process.status || process.status === 'active';
   return {
     id: process.id,
-    summary: clip(process.summary || 'Дело', 120),
-    detail: clip(process.detail || '', 600),
+    summary: clip(process.summary || 'Дело', 180),
+    detail: clip(process.detail || '', 1200),
     monthsLeft: Number.isFinite(left) ? Math.max(0, left) : null,
+    expectedMonths: Number.isFinite(expected) ? Math.max(1, Math.round(expected)) : null,
+    objectiveMonths: Number.isFinite(objective) ? Math.max(1, Math.round(objective)) : null,
+    monthsDone: Number.isFinite(done) ? Math.max(0, Math.round(done)) : null,
     paused: process.status === 'paused',
     linkedStats: names,
     blessed: Boolean(process.blessed),
     blessCost: cost,
     canBless: active && process.status !== 'paused' && !process.blessed && mana >= cost,
+  };
+}
+
+function officerAgeYears(officer) {
+  const n = Number(officer?.look?.ageYears || officer?.ageYears);
+  return Number.isFinite(n) ? Math.max(0, Math.round(n)) : null;
+}
+
+function slimOfficerSlot(officer, process, config, mana) {
+  const ageYears = officerAgeYears(officer);
+  const gender = officer?.gender === 'female' || officer?.gender === 'male' ? officer.gender : null;
+  return {
+    title: officer.title,
+    name: officer.name,
+    office: officer.office,
+    officerId: officer.id,
+    hasPortrait: officerHasPortrait(officer),
+    portraitUrl: officer.portraitUrl || null,
+    nature: clip(officer.nature || '', 800),
+    look: clip(formatLookForSpeech(officer.look, gender), 280),
+    temper: officer?.axes ? clip(formatAxesForSpeech(officer.axes, config), 120) : '',
+    ageYears,
+    gender,
+    process: process ? slimProcess(process, config, { mana }) : null,
   };
 }
 
@@ -151,6 +217,7 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
       name: domain.name || 'Город',
       hasImage: domainHasIslandImage(domain),
       imageUrl: domain.imageUrl || null,
+      sections: cityDescriptionSections(domain, config),
     },
     generating: Boolean(generating),
     gameDate: worldDateLabel(world),
@@ -182,15 +249,7 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
       const proc = o.processId
         ? ownProcesses(domain, conflux).find((p) => p.id === o.processId)
         : null;
-      return {
-        title: o.title,
-        name: o.name,
-        office: o.office,
-        officerId: o.id,
-        hasPortrait: officerHasPortrait(o),
-        portraitUrl: o.portraitUrl || null,
-        process: proc ? slimProcess(proc, config, { mana }) : null,
-      };
+      return slimOfficerSlot(o, proc, config, mana);
     }),
     orders,
   };

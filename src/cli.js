@@ -171,7 +171,7 @@ program
   .requiredOption('--a <domainId>', 'Domain A')
   .requiredOption('--b <domainId>', 'Domain B')
   .option('--eta <n>', 'Месяцев до стыковки', '3')
-  .option('--duration <n>', 'Длительность фазы docked', '3')
+  .option('--duration <n>', 'Длительность фазы docked', '8')
   .action(async (opts) => {
     const { forceCreateConflux, confluxSummary } = await import('./game/conflux.js');
     await withApp(async ({ storage }) => {

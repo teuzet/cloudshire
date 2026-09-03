@@ -82,3 +82,11 @@ export function formatCityForAgents(domain) {
     '(описание пусто)'
   );
 }
+
+/** Зерно посева из генезиса: бриф, иначе сжатое описание. Пустая строка, если города ещё нет. */
+export function cityGenesisSeedText(domain) {
+  const brief = clipCityText(domain?.cityBrief, CITY_BRIEF_MAX);
+  if (brief) return brief;
+  const desc = String(domain?.description || '').trim();
+  return desc ? clipCityText(desc, CITY_BRIEF_MAX) : '';
+}

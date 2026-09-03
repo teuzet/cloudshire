@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { miniCityPayload, gameDateLabelAtTick } from '../src/game/miniCity.js';
+import { miniCityPayload, gameDateLabelAtTick, cityDescriptionSections } from '../src/game/miniCity.js';
 import { validateTelegramInitData, miniAppUrl } from '../src/clients/telegram/initData.js';
 import { createWebServer } from '../src/clients/web/server.js';
 
@@ -84,7 +84,27 @@ test('мини-аппка: свои истории и участие в сопр
     officers: [
       { id: 'off_t', office: 'treasurer', statId: 'prosperity', title: 'Казначей', name: 'Элара', processId: null },
       { id: 'off_m', office: 'marshal', statId: 'security', title: 'Маршал', name: 'Кален', processId: 'act_cf' },
-      { id: 'off_k', office: 'keeper', statId: 'knowledge', title: 'Хранитель', name: 'Мира', processId: 'act_1' },
+      {
+        id: 'off_k',
+        office: 'keeper',
+        statId: 'knowledge',
+        title: 'Хранитель',
+        name: 'Мира',
+        processId: 'act_1',
+        nature: 'осторожна и памятлива',
+        gender: 'female',
+        ageYears: 40,
+        look: {
+          ageYears: 40,
+          build: 'сухощавый',
+          skin: 'смуглая',
+          hairColor: 'тёмные',
+          hairStyle: 'пучок',
+          clothing: 'мантия архива',
+          mark: 'шрам у виска',
+        },
+        axes: { will: 3, wits: 4, mercy: 2 },
+      },
       { id: 'off_c', office: 'chancellor', statId: 'influence', title: 'Канцлер', name: 'Орен', processId: null },
     ],
     plotlines: [
@@ -108,6 +128,7 @@ test('мини-аппка: свои истории и участие в сопр
           monthsLeft: 2,
           expectedMonths: 3,
           objectiveMonths: 3,
+          monthsDone: 1,
           status: 'active',
           linkedStats: ['knowledge'],
         },
@@ -183,6 +204,15 @@ test('мини-аппка: свои истории и участие в сопр
   const well = view.processes.find((p) => p.process?.summary === 'Осмотреть колодец');
   assert.equal(well.process.blessCost, 30);
   assert.equal(well.process.canBless, true);
+  assert.equal(well.process.detail, 'Спуститься ночью.');
+  assert.equal(well.process.expectedMonths, 3);
+  assert.equal(well.process.monthsDone, 1);
+  assert.equal(well.nature, 'осторожна и памятлива');
+  assert.equal(well.ageYears, 40);
+  assert.equal(well.gender, 'female');
+  assert.match(well.look, /сухощавая/);
+  assert.match(well.look, /шрам у виска/);
+  assert.equal(well.temper, 'ровный, блестящий, суровый');
   assert.equal(fight.processes[0].blessCost, 20);
   assert.equal(fight.processes[0].canBless, true);
   assert.equal(knowledge.about, 'Помнит ли город, как лечить и читать.');
@@ -193,7 +223,40 @@ test('мини-аппка: свои истории и участие в сопр
   assert.equal('loyalty' in (view.city || {}), false);
   assert.equal(view.city.hasImage, false);
   assert.equal(view.city.imageUrl, null);
+  assert.deepEqual(view.city.sections, []);
   assert.equal(knowledge.officer.portraitUrl, null);
+});
+
+test('мини-аппка отдаёт разделы описания города', () => {
+  const sections = cityDescriptionSections(
+    {
+      aspects: {
+        overview: 'Ствол шире башни, мостки вокруг Праотца.',
+        history: 'Первый мосток протянул Ваш.',
+      },
+      description: '## Чужое\nЭто не должно попасть в выдачу, если есть аспекты.',
+    },
+    {
+      genesis: {
+        aspects: [
+          { id: 'overview', title: 'Общий облик' },
+          { id: 'history', title: 'История и основание' },
+          { id: 'geography', title: 'География и климат' },
+        ],
+      },
+    },
+  );
+  assert.deepEqual(
+    sections.map((s) => s.title),
+    ['Общий облик', 'История и основание'],
+  );
+  assert.match(sections[0].text, /Праотца/);
+  const fromMd = cityDescriptionSections({
+    description: '## Облик\n\nГород на дереве.\n\n## Край\n\nОбрыв в облака.',
+  });
+  assert.equal(fromMd.length, 2);
+  assert.equal(fromMd[0].title, 'Облик');
+  assert.match(fromMd[1].text, /Обрыв/);
 });
 
 test('GET /mini и /mini/ отдают страницу без редиректа', async () => {
@@ -212,10 +275,18 @@ test('GET /mini и /mini/ отдают страницу без редирект�
       const res = await fetch(`http://127.0.0.1:${port}${path}`, { redirect: 'manual' });
       assert.equal(res.status, 200, path);
       assert.equal(res.headers.get('location'), null);
-      assert.match(await res.text(), /<title>Город<\/title>/);
+      const html = await res.text();
+      assert.match(html, /<title>Город<\/title>/);
+      assert.match(html, /data-tab="city"/);
+      assert.match(html, /id="sheet"/);
     }
     const css = await fetch(`http://127.0.0.1:${port}/mini/style.css`, { redirect: 'manual' });
     assert.equal(css.status, 200);
+    const js = await fetch(`http://127.0.0.1:${port}/mini/app.js`, { redirect: 'manual' });
+    assert.equal(js.status, 200);
+    const script = await js.text();
+    assert.match(script, /data-open-officer/);
+    assert.match(script, /function openOfficerSheet/);
   } finally {
     await new Promise((resolve, reject) => http.close((err) => (err ? reject(err) : resolve())));
   }

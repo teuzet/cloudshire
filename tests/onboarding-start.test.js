@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadConfig } from '../src/config.js';
 import {
+  appendOnboardingToolErrors,
   extractPitchedCityName,
   extractUserCityName,
   lastPitchedCityName,
@@ -25,7 +26,7 @@ import {
   canStartOnboarding,
   ONBOARDING_NEED_NAME_NOTE,
 } from '../src/game/onboarding.js';
-import { sampleGenesisAxes } from '../src/game/genesisAxes.js';
+import { sampleGenesisAxes, formatGenesisAxesForPrompt } from '../src/game/genesisAxes.js';
 import { buildOnboardingTools } from '../src/game/onboardingTools.js';
 
 const varkenPitch = `Твой город — **Варкен**.
@@ -203,8 +204,29 @@ test('карточка questions держит агента на следующе
   const cfg = loadConfig();
   const card = formatOnboardingStatusCard(draft, cfg);
   assert.match(card, /АНКЕТА/);
+  assert.match(card, /landscapeForm/);
   assert.match(card, /Задай ОДИН вопрос/);
+  assert.match(card, /не подгоняй под каталог/);
   assert.match(card, /Не sample_genesis_axes/);
+});
+
+test('карточка questions для особенности не предлагает типы', () => {
+  const cfg = loadConfig();
+  const draft = emptyOnboardingDraft();
+  draft.mode = 'questions';
+  draft.axes = {
+    landscapeForm: { value: 'IRREGULAR_MIXED', source: 'player' },
+    climateBand: { value: 'WARM', source: 'player' },
+    settlementPattern: { value: 'VERTICAL_CORE', source: 'player' },
+    productiveBase: { value: 'FIELD_HEAVY', source: 'sampled' },
+    socialOrder: { value: 'EXTENDED_HOUSES', source: 'player' },
+  };
+  const card = formatOnboardingStatusCard(draft, cfg);
+  assert.match(card, /signatureDomain/);
+  assert.match(card, /открытый вопрос/);
+  assert.match(card, /конкретн/);
+  assert.doesNotMatch(card, /LANDSCAPE «Ландшафт»/);
+  assert.doesNotMatch(card, /BIOLOGICAL_RESOURCE/);
 });
 
 test('карточка questions после осей просит изюминку', () => {
@@ -392,4 +414,149 @@ test('онбординг-tools: оси через resolve_axis, концепт �
   assert.match(mode.description, /quick/);
   assert.match(mode.description, /brief/);
   assert.match(mode.description, /questions/);
+});
+
+test('resolve_axis закрывает открытую ось даже с выдуманным axisId', async () => {
+  const cfg = loadConfig();
+  const draft = emptyOnboardingDraft();
+  draft.mode = 'questions';
+  const tools = buildOnboardingTools({
+    app: { config: cfg, isGenerating: () => false, occupiedCityNames: async () => [] },
+    draft,
+    userId: '1',
+    channel: 'cli',
+    text: 'Смешанный разнообразный рельеф',
+    saveDraft: async () => {},
+    startFlag: { started: false },
+  });
+  const resolve = tools.find((t) => t.name === 'resolve_axis');
+  const invented = await resolve.handler({
+    axisId: 'macroform',
+    choice: 'IRREGULAR_MIXED',
+  });
+  assert.equal(invented.ok, true);
+  assert.equal(draft.axes.landscapeForm.value, 'IRREGULAR_MIXED');
+  assert.equal(draft.axes.landscapeForm.source, 'player');
+
+  const draft2 = emptyOnboardingDraft();
+  draft2.mode = 'questions';
+  const tools2 = buildOnboardingTools({
+    app: { config: cfg, isGenerating: () => false, occupiedCityNames: async () => [] },
+    draft: draft2,
+    userId: '1',
+    channel: 'cli',
+    text: 'Смешанный разнообразный рельеф',
+    saveDraft: async () => {},
+    startFlag: { started: false },
+  });
+  const byLabel = await tools2.find((t) => t.name === 'resolve_axis').handler({
+    choice: 'Смешанный рельеф',
+  });
+  assert.equal(byLabel.ok, true);
+  assert.equal(draft2.axes.landscapeForm.value, 'IRREGULAR_MIXED');
+});
+
+test('resolve_axis принимает свободную формулировку, не только каталог', async () => {
+  const cfg = loadConfig();
+  const draft = emptyOnboardingDraft();
+  draft.mode = 'questions';
+  const tools = buildOnboardingTools({
+    app: { config: cfg, isGenerating: () => false, occupiedCityNames: async () => [] },
+    draft,
+    userId: '1',
+    channel: 'cli',
+    text: 'Кальдера с тремя озёрами',
+    saveDraft: async () => {},
+    startFlag: { started: false },
+  });
+  const resolve = tools.find((t) => t.name === 'resolve_axis');
+  const custom = await resolve.handler({ choice: 'кальдера с тремя озёрами' });
+  assert.equal(custom.ok, true);
+  assert.equal(draft.axes.landscapeForm.value, 'кальдера с тремя озёрами');
+  assert.equal(draft.axes.landscapeForm.source, 'player');
+  assert.match(
+    formatGenesisAxesForPrompt(cfg, draft.axes),
+    /кальдера с тремя озёрами — свободная формулировка/,
+  );
+
+  const draftPhrase = emptyOnboardingDraft();
+  draftPhrase.mode = 'questions';
+  draftPhrase.axes = {
+    landscapeForm: { value: 'IRREGULAR_MIXED', source: 'player' },
+    climateBand: { value: 'WARM', source: 'player' },
+  };
+  const extra = await buildOnboardingTools({
+    app: { config: cfg, isGenerating: () => false, occupiedCityNames: async () => [] },
+    draft: draftPhrase,
+    userId: '1',
+    channel: 'cli',
+    text: '',
+    saveDraft: async () => {},
+    startFlag: { started: false },
+  })
+    .find((t) => t.name === 'resolve_axis')
+    .handler({ choice: 'Вертикальный город построенный вокруг ствола огромного дерева' });
+  assert.equal(extra.ok, true);
+  assert.equal(
+    draftPhrase.axes.settlementPattern.value,
+    'Вертикальный город построенный вокруг ствола огромного дерева',
+  );
+  assert.notEqual(draftPhrase.axes.settlementPattern.value, 'VERTICAL_CORE');
+
+  const draft2 = emptyOnboardingDraft();
+  draft2.mode = 'questions';
+  draft2.axes = { landscapeForm: { value: 'кальдера с тремя озёрами', source: 'player' } };
+  const invented = await buildOnboardingTools({
+    app: { config: cfg, isGenerating: () => false, occupiedCityNames: async () => [] },
+    draft: draft2,
+    userId: '1',
+    channel: 'cli',
+    text: '',
+    saveDraft: async () => {},
+    startFlag: { started: false },
+  })
+    .find((t) => t.name === 'resolve_axis')
+    .handler({ choice: 'agent', value: 'ветер режет террасы по всему краю' });
+  assert.equal(invented.ok, true);
+  assert.equal(draft2.axes.climateBand.value, 'ветер режет террасы по всему краю');
+  assert.equal(draft2.axes.climateBand.source, 'agent');
+});
+
+test('resolve_axis после закрытых осей — не ошибка', async () => {
+  const cfg = loadConfig();
+  const draft = emptyOnboardingDraft();
+  draft.mode = 'questions';
+  draft.axes = sampleGenesisAxes(cfg);
+  const result = await buildOnboardingTools({
+    app: { config: cfg, isGenerating: () => false, occupiedCityNames: async () => [] },
+    draft,
+    userId: '1',
+    channel: 'cli',
+    text: '',
+    saveDraft: async () => {},
+    startFlag: { started: false },
+  })
+    .find((t) => t.name === 'resolve_axis')
+    .handler({ choice: 'ещё подробность про мостки' });
+  assert.equal(result.ok, true);
+  assert.equal(result.alreadyComplete, true);
+  assert.equal(result.uniqueFeatureNeeded, true);
+});
+
+test('отказ инструмента дописывается в речь игроку', () => {
+  const withRetry = appendOnboardingToolErrors('Ось записана.', [
+    { name: 'resolve_axis', result: { ok: false, error: 'unknown_axis', agentMessage: 'Нет оси «macroform».' } },
+    { name: 'resolve_axis', result: { ok: true } },
+  ]);
+  assert.equal(withRetry, 'Ось записана.');
+  const shown = appendOnboardingToolErrors('Речь твоя понятна.', [
+    { name: 'resolve_axis', result: { ok: false, error: 'unknown_value', agentMessage: 'Нет значения «foo» у оси landscapeForm.' } },
+  ]);
+  assert.match(shown, /Речь твоя понятна/);
+  assert.match(shown, /\[ошибка resolve_axis\] Нет значения «foo» у оси landscapeForm\./);
+});
+
+test('онбординг без канона жреца и foreign', () => {
+  const cfg = loadConfig();
+  assert.deepEqual(cfg.agents.onboarding.canon, ['world']);
 });

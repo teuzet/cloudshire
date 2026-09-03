@@ -6,8 +6,14 @@ import { attachFactToPlotlines, isOrderPlot } from './plotlines.js';
 import { dehydrateDomainToConflux, hydrateDomainFromConflux, plotVisibleToRuler } from './confluxBoard.js';
 import { formatTruthGraphForPrompt } from './mysteryGraph.js';
 import { formatLadderForPrompt } from './suspenseGraph.js';
+import { formatCityForAgents } from './cityContext.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
+
+/** Компактный канон города для лормастера: бриф, не обрезка генезиса с головы. */
+export function cityTextForLoremaster(domain) {
+  return formatCityForAgents(domain);
+}
 
 function visibleLoreForDomain(lore, domainId) {
   return (lore || []).filter((f) => {
@@ -206,12 +212,7 @@ export async function askLoremaster({
   const openStories = storiesForLoremaster(working, conflux);
   const focusPlot = resolveLoremasterStory(working, plotId, conflux);
 
-  const description =
-    String(working.description || '').slice(0, 3000) ||
-    Object.entries(working.aspects || {})
-      .map(([k, v]) => `${k}: ${String(v).slice(0, 180)}`)
-      .join('\n')
-      .slice(0, 3000);
+  const description = cityTextForLoremaster(working);
 
   const tools = [
     {

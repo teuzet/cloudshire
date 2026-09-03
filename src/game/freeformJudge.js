@@ -184,6 +184,7 @@ export const FREEFORM_PACK_JUDGE_CODES = [
   'AXIS',
   'PATRON',
   'CONFLUX',
+  'BUREAUCRACY',
   'SAME_STORY',
   'HIDDEN',
   'ENDING',

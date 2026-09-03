@@ -62,10 +62,19 @@ export function openingLoreFromConcept(concept, { min = 8, max = 12 } = {}) {
   if (v.water) push(v.water);
   if (v.food) push(v.food);
   if (v.fuel) push(v.fuel);
-  while (lines.length < min) {
-    push(`Жители «${name}» чтят покровителя и местные обряды.`);
-    if (lines.length >= min) break;
-    push('За обрывом — облака и ветер.');
+  if (concept.preview) {
+    for (const part of String(concept.preview).split(/(?<=[.!?])\s+/)) push(part);
+  }
+  const fillers = [
+    `Жители «${name}» чтят покровителя и местные обряды.`,
+    'За обрывом — облака и ветер.',
+    `Город «${name}» живёт со своим островом и никуда с него не ходит.`,
+    'Дальше края — бездна облаков, не соседние земли.',
+  ];
+  let guard = 0;
+  while (lines.length < min && guard < fillers.length) {
+    push(fillers[guard]);
+    guard += 1;
   }
   return lines.slice(0, max);
 }

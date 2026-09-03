@@ -40,6 +40,7 @@ import {
   planOnboardingAutoStart,
   formatOnboardingStartReply,
   formatOnboardingStatusCard,
+  appendOnboardingToolErrors,
   deriveOnboardingPhase,
   hasPitchedCity,
   hasReadyConcept,
@@ -648,6 +649,8 @@ export class GameApp {
         reply = formatOnboardingStartReply(draft.cityName);
       }
     }
+
+    reply = appendOnboardingToolErrors(reply, result.toolTrace);
 
     draft.messages = draft.messages || [];
     if (!bootstrap || String(text || '').trim()) {

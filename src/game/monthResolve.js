@@ -40,7 +40,7 @@ import {
 import { planOrderTicks, pickOrderOutcome, expireTimedOrders } from './orders.js';
 import { resolvePendingOrders } from './orderSmith.js';
 import { fireConfluxDockOrder } from './orderDock.js';
-import { seedPlot, beatPlot, tickOrder, quietMonth, keepStories, fadeQuietPlot } from './storyteller.js';
+import { seedPlot, beatPlot, tickOrder, quietMonth, keepStories, fadeQuietPlot, plantStakedStory, voidSeedPackArgs, pickLiveVoidGravity } from './storyteller.js';
 import { resolveSuspenseLegacy } from './legacyResolver.js';
 import { scoreMonthStats, factsForStatJudge } from './statJudge.js';
 import { runSteward } from './steward.js';
@@ -378,22 +378,46 @@ export async function resolveDomainMonth({
     (Boolean(sequel) || Math.random() < seedChance);
   let sequelledId = null;
   if (wantSeed) {
-    const seeded = await seedPlot({
-      config,
-      runtime,
-      domain: working,
-      world,
-      storage,
-      fromClosed: sequel,
-      storyType:
-        sequel?.storyType === 'mystery' || sequel?.storyType === 'suspense' ? sequel.storyType : null,
-      log,
-    });
-    if (seeded?.fact) {
-      chronicleAdds.push(seeded.fact);
-      used += 1;
+    if (sequel) {
+      const seeded = await seedPlot({
+        config,
+        runtime,
+        domain: working,
+        world,
+        storage,
+        fromClosed: sequel,
+        storyType:
+          sequel?.storyType === 'mystery' || sequel?.storyType === 'suspense' ? sequel.storyType : null,
+        log,
+      });
+      if (seeded?.fact) {
+        chronicleAdds.push(seeded.fact);
+        used += 1;
+      }
+      if (seeded?.plot && sequel?.id) sequelledId = sequel.id;
+    } else {
+      const grain = voidSeedPackArgs(working, { config });
+      const planted = await plantStakedStory({
+        config,
+        runtime,
+        domain: working,
+        world,
+        seedText: grain.seedText,
+        gravity: pickLiveVoidGravity(),
+        fromVoid: grain.fromVoid,
+        fromGenesis: grain.fromGenesis,
+        log,
+      });
+      if (planted?.fact) {
+        chronicleAdds.push(planted.fact);
+        used += 1;
+      }
+      log.info('month.void_seed', {
+        grain: grain.grain,
+        gravity: planted?.plot?.gravity || null,
+        title: planted?.plot?.title || null,
+      });
     }
-    if (seeded?.plot && sequel?.id) sequelledId = sequel.id;
   }
 
   for (const closed of suspenseClosures) {

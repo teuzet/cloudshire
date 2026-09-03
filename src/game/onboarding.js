@@ -80,6 +80,27 @@ export const DOSSIER_SWITCH_MIN = 800;
 export const ONBOARDING_HISTORY_MESSAGES = 12;
 export const FALSE_START_STRIP_MAX = 400;
 
+/** Последний вызов каждого tool: если он упал — это отказ, который надо показать игроку. */
+export function unresolvedToolFails(toolTrace = []) {
+  const lastByName = new Map();
+  for (const t of toolTrace || []) {
+    if (!t?.name) continue;
+    lastByName.set(t.name, t);
+  }
+  return [...lastByName.values()].filter((t) => t.result && t.result.ok === false);
+}
+
+export function appendOnboardingToolErrors(reply, toolTrace) {
+  const fails = unresolvedToolFails(toolTrace);
+  if (!fails.length) return String(reply || '');
+  const lines = fails.map((t) => {
+    const msg = t.result.agentMessage || t.result.message || t.result.error || 'ошибка';
+    return `[ошибка ${t.name}] ${msg}`;
+  });
+  const body = String(reply || '').trim();
+  return body ? `${body}\n\n${lines.join('\n')}` : lines.join('\n');
+}
+
 export function emptyOnboardingDraft() {
   return {
     messages: [],
@@ -240,10 +261,13 @@ export function formatOnboardingStatusCard(draft, config, { generating = false, 
       'Режим brief: описание любой длины. Сохрани текст в set_player_brief. Выведи из него set_axis, что можешь.',
     );
     if (missing.length && offer) {
+      const variants = offer.open
+        ? 'Открытый вопрос: конкретная вещь, не тип каталога. random — тип из каталога.'
+        : `Варианты: ${offer.options.map((o) => `${o.id} «${o.label}»`).join('; ')}.`;
       lines.push(
         `Не хватает осей (${missing.length}). Следующая: «${offer.prompt}».`,
-        `Варианты: ${offer.options.map((o) => `${o.id} «${o.label}»`).join('; ')}.`,
-        'Плюс random (система) или agent (ты выбираешь value из каталога). Один вопрос за ход — resolve_axis.',
+        variants,
+        'Плюс random (пул каталога) или agent. Свой ответ — тоже choice. Один вопрос за ход.',
         'Не request_city_concept, пока все оси не закрыты.',
       );
     } else {
@@ -254,12 +278,21 @@ export function formatOnboardingStatusCard(draft, config, { generating = false, 
     const interview = normalizeAxisInterview(d.axisInterview);
     const offer = nextAxisOffer(config, d.axes);
     if (offer) {
-      lines.push(
-        `АНКЕТА. Задай ОДИН вопрос: «${offer.prompt}».`,
-        `Варианты: ${offer.options.map((o) => `${o.id} «${o.label}»`).join('; ')}.`,
-        'Ещё: random — система; agent — ты сам выбираешь value. resolve_axis. Не выдумывай дерево.',
-        'Не sample_genesis_axes и не request_city_concept, пока оси не закрыты.',
-      );
+      if (offer.open) {
+        lines.push(
+          `АНКЕТА. Текущая ось ${offer.axisId}. Задай ОДИН открытый вопрос: «${offer.prompt}».`,
+          'Не предлагай однословные типы каталога (ландшафт, материал, обычай…). Нужна конкретная вещь. random — тип из каталога. agent — можно придумать.',
+          'Свой ответ игрока запиши в resolve_axis choice как есть.',
+          'Не sample_genesis_axes и не request_city_concept, пока оси не закрыты.',
+        );
+      } else {
+        lines.push(
+          `АНКЕТА. Текущая ось ${offer.axisId}. Задай ОДИН вопрос: «${offer.prompt}».`,
+          `Подсказки (и пул random): ${offer.options.map((o) => `${o.id} «${o.label}»`).join('; ')}.`,
+          'Свой ответ игрока запиши в resolve_axis choice как есть, не подгоняй под каталог. random — только из каталога. agent — можно придумать.',
+          'Не sample_genesis_axes и не request_city_concept, пока оси не закрыты.',
+        );
+      }
     } else if (!interview.uniqueFeatureAsked) {
       lines.push(
         'Оси закрыты. Спроси, хочет ли игрок добавить уникальную изюминку (set_unique_feature с text или skip=true). Потом request_city_concept.',

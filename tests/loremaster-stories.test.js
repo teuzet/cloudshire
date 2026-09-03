@@ -6,6 +6,7 @@ import {
   formatStoriesForLoremaster,
   storiesForLoremaster,
   resolveLoremasterStory,
+  cityTextForLoremaster,
 } from '../src/game/loremaster.js';
 import { attachFactToPlotlines, closePlotline, createPlotline, normalizePlotlines } from '../src/game/plotlines.js';
 
@@ -100,6 +101,16 @@ test('факт копится на нити так же, как хроника',
   closePlotline(domain, plot.id, { tick: 3, reason: 'Нашли ил.' });
   const closed = (domain.closedPlotlines || []).find((p) => p.id === plot.id);
   assert.deepEqual(closed.factIds, ['lore_fact_1']);
+});
+
+test('лормастер читает бриф города, а не обрезку генезиса с головы', () => {
+  const domain = {
+    cityBrief: 'Налог зерном, углём или трудом; учёт ведут писцы на глиняных табличках.',
+    description: `## Общий облик\n${'хребет '.repeat(400)}\n## Власть и закон\nЭтого абзаца в обрезке с головы не было бы.`,
+  };
+  const text = cityTextForLoremaster(domain);
+  assert.match(text, /глиняных табличках/);
+  assert.equal(text.includes('Этого абзаца'), false);
 });
 
 function findOpen(domain, id) {

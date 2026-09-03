@@ -78,8 +78,9 @@ export const MYSTERY_ARCHITECT_EXTRA = [
 
 export const MYSTERY_JUDGE_EXTRA = [
   '==== ДОПОЛНИТЕЛЬНЫЕ КРИТЕРИИ (тайна обязательна) ====',
-  '13. MYSTERY — в пакете есть настоящая тайна: странность, которую персонажи и игрок не могут сразу объяснить. Если завязка прозрачна и нечего разгадывать — FAIL.',
-  '14. MYSTERY_PLAUSIBLE — разгадка в «На самом деле:» логична, конкретна и не разочаровывает. FAIL если разгадки нет, она противоречит фактам, сваливается на чудо/случай/«ну так вышло», или финал обесценивает всю странность.',
+  '13. BUREAUCRACY — двигатель не канцелярия. FAIL, если сюжет держится на тяжбе, сверке записей, комиссии, отложенном заседании или потерянной бумаге.',
+  '14. MYSTERY — в пакете есть настоящая тайна: странность, которую персонажи и игрок не могут сразу объяснить. Если завязка прозрачна и нечего разгадывать — FAIL.',
+  '15. MYSTERY_PLAUSIBLE — разгадка в «На самом деле:» логична, конкретна и не разочаровывает. FAIL если разгадки нет, она противоречит фактам, сваливается на чудо/случай/«ну так вышло», или финал обесценивает всю странность.',
   '',
   'CHEKHOV при этом посеве не опционален: блок «На самом деле:» обязателен у каждого кандидата.',
 ].join('\n');
@@ -99,24 +100,47 @@ export const VOID_JUDGE_EXTRA = [
   'Истории должны быть самодостаточны: абстрактный город-государство на летающем острове, без опоры на конкретную хронику.',
 ].join('\n');
 
-function architectExtraSystem({ requireMystery = false, fromVoid = false } = {}) {
-  return [fromVoid ? VOID_ARCHITECT_EXTRA : '', requireMystery ? MYSTERY_ARCHITECT_EXTRA : '']
+export const GENESIS_ARCHITECT_EXTRA = [
+  '==== ЗАТРАВКА — ОПИСАНИЕ ГОРОДА ====',
+  'Дан не случай месяца и не хроника, а устойчивое описание города: как он устроен и чем живёт.',
+  'Это переопределяет правило «данная затравка — причина конфликта»: конфликт не обязан следовать из одной фразы.',
+  'Возьми из описания место, уклад, напряжение или обычай и вырасти из него новую историю, которой ещё нет.',
+  'Не пересказывай генезис. Три кандидата — три разных завязки из разных сторон этого города.',
+].join('\n');
+
+export const GENESIS_JUDGE_EXTRA = [
+  '==== ЗАТРАВКА — ОПИСАНИЕ ГОРОДА ====',
+  'Критерий CHRONICLE не требуй как вытекание из одной строки описания.',
+  'FAIL, если история не вырастает из этого города (чужой остров, выдуманный крупный институт вместо данного) или если это пересказ описания без новой завязки.',
+].join('\n');
+
+function extraWithNote(base, note) {
+  return [base, String(note || '').trim()].filter(Boolean).join('\n\n');
+}
+
+function architectExtraSystem({ requireMystery = false, fromVoid = false, fromGenesis = false } = {}) {
+  const grain = fromVoid ? VOID_ARCHITECT_EXTRA : fromGenesis ? GENESIS_ARCHITECT_EXTRA : '';
+  return [grain, requireMystery ? MYSTERY_ARCHITECT_EXTRA : '']
     .filter(Boolean)
     .join('\n\n');
 }
 
-function judgeExtraSystem({ requireMystery = false, fromVoid = false } = {}) {
-  return [fromVoid ? VOID_JUDGE_EXTRA : '', requireMystery ? MYSTERY_JUDGE_EXTRA : '']
+function judgeExtraSystem({ requireMystery = false, fromVoid = false, fromGenesis = false } = {}) {
+  const grain = fromVoid ? VOID_JUDGE_EXTRA : fromGenesis ? GENESIS_JUDGE_EXTRA : '';
+  return [grain, requireMystery ? MYSTERY_JUDGE_EXTRA : '']
     .filter(Boolean)
     .join('\n\n');
 }
 
-function formatSeedUserBlock(seedText, fromVoid) {
+function formatSeedUserBlock(seedText, fromVoid, fromGenesis = false) {
   if (fromVoid) {
     return [
       'ЗАТРАВКА',
       'нет. Придумай историю с нуля про абстрактный город-государство на летающем острове.',
     ].join('\n');
+  }
+  if (fromGenesis) {
+    return ['ОПИСАНИЕ ГОРОДА (не хроника месяца)', String(seedText || '').trim() || '(пусто)'].join('\n');
   }
   return ['ЗАТРАВКА', seedText].join('\n');
 }
@@ -307,6 +331,8 @@ export async function brainstormFreeformSeeds({
   log: parentLog,
   requireMystery = false,
   fromVoid = false,
+  fromGenesis = false,
+  note = '',
 }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm' });
   const cfg = freeformConfig(config);
@@ -334,7 +360,7 @@ export async function brainstormFreeformSeeds({
     toolChoice: { type: 'function', function: { name: 'emit_freeform_candidates' } },
     log,
     scene: 'freeform_brainstorm_seed',
-    extraSystem: architectExtraSystem({ requireMystery, fromVoid }),
+    extraSystem: extraWithNote(architectExtraSystem({ requireMystery, fromVoid, fromGenesis }), note),
     userMessages: [
       {
         role: 'user',
@@ -342,7 +368,7 @@ export async function brainstormFreeformSeeds({
           'GRAVITY',
           formatFreeformGravityForPrompt(g, config),
           '',
-          formatSeedUserBlock(seedText, fromVoid),
+          formatSeedUserBlock(seedText, fromVoid, fromGenesis),
           '',
           'ОСИ',
           formatFreeformBrainstormRollsForPrompt(rolls),
@@ -384,6 +410,8 @@ export async function reviewBrainstormPack({
   log: parentLog,
   requireMystery = false,
   fromVoid = false,
+  fromGenesis = false,
+  note = '',
 }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.judge' });
   const n = candidates.length;
@@ -448,7 +476,7 @@ export async function reviewBrainstormPack({
     toolChoice: { type: 'function', function: { name: 'submit_freeform_pack_review' } },
     log,
     scene: 'freeform_brainstorm_judge',
-    extraSystem: judgeExtraSystem({ requireMystery, fromVoid }),
+    extraSystem: extraWithNote(judgeExtraSystem({ requireMystery, fromVoid, fromGenesis }), note),
     userMessages: [
       {
         role: 'user',
@@ -456,7 +484,7 @@ export async function reviewBrainstormPack({
           'GRAVITY',
           formatFreeformGravityForPrompt(g, config),
           '',
-          formatSeedUserBlock(seedText, fromVoid),
+          formatSeedUserBlock(seedText, fromVoid, fromGenesis),
           '',
           formatPackForJudge(candidates),
         ].join('\n'),
@@ -488,6 +516,8 @@ export async function repairBrainstormPack({
   log: parentLog,
   requireMystery = false,
   fromVoid = false,
+  fromGenesis = false,
+  note = '',
 }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.repair' });
   const n = drafts.length;
@@ -529,7 +559,8 @@ export async function repairBrainstormPack({
       'Не поднимай и не опускай Gravity риторикой. Правь угрозу или возможность в хронике и динамику, которая её зарабатывает.',
       'Если просят обострить — конкретный конфликт и явную динамику в том же тексте, не новая посадка. Если просят ужать — вырежи орнамент, механизм оставь.',
       'Кандидат без замечания верни без изменений. Не делай кандидатов близнецами.',
-      architectExtraSystem({ requireMystery, fromVoid }),
+      architectExtraSystem({ requireMystery, fromVoid, fromGenesis }),
+      String(note || '').trim(),
     ]
       .filter(Boolean)
       .join('\n'),
@@ -540,7 +571,7 @@ export async function repairBrainstormPack({
           'GRAVITY',
           formatFreeformGravityForPrompt(g, config),
           '',
-          formatSeedUserBlock(seedText, fromVoid),
+          formatSeedUserBlock(seedText, fromVoid, fromGenesis),
           '',
           'ДОРАБОТКА',
           pack,
@@ -601,6 +632,8 @@ export async function brainstormFreeformPack({
   rng = Math.random,
   requireMystery = false,
   fromVoid = false,
+  fromGenesis = false,
+  note = '',
 }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.pack' });
   const drafted = await brainstormFreeformSeeds({
@@ -611,6 +644,8 @@ export async function brainstormFreeformPack({
     log,
     requireMystery,
     fromVoid,
+    fromGenesis,
+    note,
   });
   if (!drafted.ok) {
     return {
@@ -637,6 +672,8 @@ export async function brainstormFreeformPack({
     log,
     requireMystery,
     fromVoid,
+    fromGenesis,
+    note,
   });
   const firstPassCount = (judged.reviews || []).filter(isPackPass).length;
   if (firstPassCount >= MIN_PASS_SKIP_SECOND) {
@@ -669,6 +706,8 @@ export async function brainstormFreeformPack({
     log,
     requireMystery,
     fromVoid,
+    fromGenesis,
+    note,
   });
   const candidates = (repaired.candidates || []).map((c, i) =>
     isPackPass(judged.reviews[i]) ? drafted.candidates[i] : c,
@@ -684,6 +723,8 @@ export async function brainstormFreeformPack({
         log,
         requireMystery,
         fromVoid,
+        fromGenesis,
+        note,
       })
     : { reviews: [], prompt: '' };
   const finalReviews = scatterPackReviews(candidates.length, gated.reviews);

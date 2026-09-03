@@ -12,6 +12,7 @@ import {
   errandSeedChance,
   worldSeedChance,
   normalizeSeedTemp,
+  pickVoidGrain,
 } from '../src/game/seedTemp.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -48,6 +49,16 @@ test('default.yaml совпадает с калибровкой: 6 месяце�
   assert.equal(errandSeedChance(seed.start, 6, seed), 1);
   assert.equal(errandSeedChance(seed.start, 3, seed), 0.5);
   assert.equal(worldSeedChance(seed.start, seed), 0.5);
+  assert.equal(seed.voidGenesisChance, 0.5);
+});
+
+test('пустой канал: половина — генезис города, половина — пустота', () => {
+  const half = parseSeedConfig({ voidGenesisChance: 0.5 });
+  assert.equal(pickVoidGrain(half, () => 0.49), 'genesis');
+  assert.equal(pickVoidGrain(half, () => 0.5), 'void');
+  assert.equal(pickVoidGrain(parseSeedConfig({ voidGenesisChance: 1 }), () => 0.99), 'genesis');
+  assert.equal(pickVoidGrain(parseSeedConfig({ voidGenesisChance: 0 }), () => 0), 'void');
+  assert.equal(pickVoidGrain(fileCfg, () => 0.49), 'genesis');
 });
 
 test('домен нормализует дробную температуру в общий потолок', () => {

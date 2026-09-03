@@ -242,11 +242,11 @@ export function createConfluxRecord({
   etaMonths,
   world,
   type = 'docking',
-  durationMonths = 3,
+  durationMonths = 8,
   rematch = false,
 }) {
   const eta = Math.max(1, Math.min(24, Math.round(Number(etaMonths) || 3)));
-  const dur = Math.max(1, Math.min(12, Math.round(Number(durationMonths) || 3)));
+  const dur = Math.max(1, Math.min(12, Math.round(Number(durationMonths) || 8)));
   const tick = world.tickIndex || 0;
   return {
     id: newId('conflux'),
@@ -354,7 +354,7 @@ export async function forceCreateConflux({
   domainIdA,
   domainIdB,
   etaMonths = 3,
-  durationMonths = 3,
+  durationMonths = 8,
   config = null,
 }) {
   const log = getLogger().child({ scope: 'conflux' });
@@ -492,10 +492,10 @@ export async function maybeMatchmakeConfluxes({ config, storage, world, rng = Ma
   const pool = needy.length >= 2 ? needy : eligible;
   if (pool.length < 2) return { notes, created: [] };
 
-  const etaMin = Number(cfg.etaMonths?.min ?? 2);
-  const etaMax = Number(cfg.etaMonths?.max ?? 4);
-  const durMin = Number(cfg.durationMonths?.min ?? 2);
-  const durMax = Number(cfg.durationMonths?.max ?? 4);
+  const etaMin = Number(cfg.etaMonths?.min ?? 3);
+  const etaMax = Number(cfg.etaMonths?.max ?? 3);
+  const durMin = Number(cfg.durationMonths?.min ?? 6);
+  const durMax = Number(cfg.durationMonths?.max ?? 12);
 
   const created = [];
   const used = new Set();
@@ -777,7 +777,7 @@ export async function advanceDockedConfluxes({ storage, runtime, world }, docked
     if (conflux.status !== 'docked') continue;
 
     conflux.monthsDocked = Number(conflux.monthsDocked || 0) + 1;
-    if (conflux.monthsDocked >= Number(conflux.durationMonths || 3)) {
+    if (conflux.monthsDocked >= Number(conflux.durationMonths || 8)) {
       conflux.status = 'ended';
       conflux.endedTick = world.tickIndex;
 

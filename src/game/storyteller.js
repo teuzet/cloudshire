@@ -39,7 +39,6 @@ import {
   clipPlotText,
   mysteryTypeTag,
   formatMysteryAxesForPrompt,
-  openingPlotCount,
   judgePlotSeed,
   pickStoryType,
   isThreeActPlot,
@@ -62,6 +61,11 @@ import { TINT_LABELS, pickRollStat, rollTint, formatFinishForPrompt } from './ro
 import { offerNames, formatOfferedNamesForPrompt, bindCharacterNames, takeNameAtRandom, seedWorldNamePool } from './names.js';
 import { assignPlotStakes } from './plotStakes.js';
 import { formatActMoveForPrompt } from './storyActs.js';
+import { brainstormFreeformPack } from './freeformBrainstorm.js';
+import { assembleFreeformLabStory } from './freeformAssemble.js';
+import { createFreeformPlot, appendChronicle, openStoryTitlesLine } from './freeform.js';
+import { refreshFreeformEndings } from './freeformEndings.js';
+import { setFreeformUrgency } from './freeformUrgency.js';
 import {
   normalizeTruthGraph,
   judgeTruthGraph,
@@ -88,7 +92,8 @@ import {
 import { formatMysteryJudgeCase, judgeMysteryCascade, summarizeJudgeAttempt, judgeMysteryPresentation, formatMysteryPresentationJudgeCase, formatJudgeRevisionForPrompt, literaryJudgeAccepts } from './mysteryJudge.js';
 import { formatSuspenseJudgeCase, judgeSuspenseSeed } from './suspenseJudge.js';
 import { ensureCityEntities, pickMysteryAnchors, formatMysteryAnchorsForPrompt } from './cityEntities.js';
-import { formatCityForAgents } from './cityContext.js';
+import { formatCityForAgents, cityGenesisSeedText } from './cityContext.js';
+import { pickVoidGrain } from './seedTemp.js';
 import {
   annotationTagsFromCard,
   climateOf,
@@ -935,32 +940,111 @@ async function seedMysteryPlot({
   return { plot: null, attempts, skipped: 'generation_failed' };
 }
 
-/** 1–2 коротких истории сразу после генезиса. Ошибка посева город не ломает. */
-export async function seedOpeningPlots({ config, runtime, domain, world, storage = null, log: parentLog, rng = Math.random }) {
+/** Стартовый посев генезиса: ситуация, затем эпизод. */
+export const OPENING_STORY_GRAVITIES = ['SITUATION', 'EPISODE'];
+
+export function voidSeedPackArgs(domain, { config, rng = Math.random } = {}) {
+  const grain = pickVoidGrain(config, rng);
+  if (grain === 'genesis') {
+    const seedText = cityGenesisSeedText(domain);
+    if (seedText) {
+      return { grain: 'genesis', fromVoid: false, fromGenesis: true, seedText };
+    }
+  }
+  return { grain: 'void', fromVoid: true, fromGenesis: false, seedText: '' };
+}
+
+export function pickLiveVoidGravity(rng = Math.random) {
+  return rng() < 0.5 ? 'SITUATION' : 'EPISODE';
+}
+
+export async function plantStakedStory({
+  config,
+  runtime,
+  domain,
+  world,
+  seedText,
+  gravity,
+  fromVoid = false,
+  fromGenesis = false,
+  log,
+}) {
+  const drafted = await brainstormFreeformPack({
+    config,
+    runtime,
+    seedText,
+    gravity,
+    fromVoid: Boolean(fromVoid) && !fromGenesis,
+    fromGenesis: Boolean(fromGenesis) && !fromVoid,
+    note: openStoryTitlesLine(domain),
+    log,
+  });
+  if (!drafted?.winner) {
+    log.warn('storyteller.opening_failed', { gravity, error: 'no_winner', fromVoid, fromGenesis });
+    return null;
+  }
+  const assembled = await assembleFreeformLabStory({
+    config,
+    runtime,
+    domain,
+    world,
+    candidate: drafted.winner,
+    gravity,
+    log,
+  });
+  const plot = createFreeformPlot({
+    domain,
+    world,
+    variant: assembled,
+    config,
+  });
+  const chronicleText = assembled.chronicle || drafted.winner.chronicle || drafted.winner.text;
+  const fact = chronicleText
+    ? appendChronicle(domain, world, {
+        text: chronicleText,
+        plotId: plot.id,
+        author: 'freeform:seed',
+      })
+    : null;
+  await refreshFreeformEndings({ runtime, domain, plot, log });
+  await setFreeformUrgency({ runtime, domain, plot, log });
+  return { plot, fact };
+}
+
+/** Две городские истории сразу после генезиса. Обе из описания города. Ошибка посева город не ломает. */
+export async function seedOpeningPlots({ config, runtime, domain, world, storage = null, log: parentLog }) {
   const log = (parentLog || getLogger()).child({ scope: 'storyteller.opening', domainId: domain.id });
-  const want = openingPlotCount(config, rng);
-  if (want <= 0) return [];
+  const seedText = cityGenesisSeedText(domain);
+  if (!seedText) {
+    log.warn('storyteller.opening_failed', { error: 'no_seed_text' });
+    log.info('storyteller.opening_done', { wanted: OPENING_STORY_GRAVITIES.length, got: 0, titles: [] });
+    return [];
+  }
   const seeded = [];
-  for (let i = 0; i < want; i += 1) {
+  for (const gravity of OPENING_STORY_GRAVITIES) {
     try {
-      const one = await seedPlot({
+      const planted = await plantStakedStory({
         config,
         runtime,
         domain,
         world,
-        storage,
-        opening: true,
+        seedText,
+        gravity,
+        fromVoid: false,
+        fromGenesis: true,
         log,
       });
-      if (one?.plot) seeded.push(one);
+      if (planted?.plot) seeded.push(planted.plot);
     } catch (err) {
-      log.warn('storyteller.opening_failed', { error: err.message, index: i });
+      log.warn('storyteller.opening_failed', { error: err.message, gravity });
     }
   }
   log.info('storyteller.opening_done', {
-    wanted: want,
+    wanted: OPENING_STORY_GRAVITIES.length,
     got: seeded.length,
-    titles: seeded.map((s) => s.plot.title),
+    titles: seeded.map((p) => p.title),
+    gravities: seeded.map((p) => p.gravity),
+    grain: 'genesis',
   });
   return seeded;
 }

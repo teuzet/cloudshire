@@ -12,9 +12,12 @@ const panel = document.getElementById('panel');
 const cityName = document.getElementById('cityName');
 const gameDate = document.getElementById('gameDate');
 const bg = document.getElementById('bg');
+const sheet = document.getElementById('sheet');
+const sheetBody = document.getElementById('sheetBody');
 
 let state = null;
 let tab = 'stats';
+let openOfficerId = null;
 
 function previewUserId() {
   return new URLSearchParams(location.search).get('userId') || '';
@@ -53,6 +56,44 @@ function portraitSrc(officer) {
   const id = officer?.id || officer?.officerId;
   if (id) return `/api/mini/officer-portrait/${encodeURIComponent(id)}${queryAuth()}`;
   return '';
+}
+
+function genderLabel(gender) {
+  if (gender === 'female') return 'женщина';
+  if (gender === 'male') return 'мужчина';
+  return '';
+}
+
+function portraitButton(slot) {
+  const id = slot?.officerId || '';
+  const src = portraitSrc(slot);
+  const inner = src
+    ? `<img class="portrait" src="${esc(src)}" alt="">`
+    : '';
+  return `<button type="button" class="portrait-btn${src ? '' : ' blank'}" data-open-officer="${esc(id)}" aria-label="Подробнее">${inner}</button>`;
+}
+
+function processMeta(p) {
+  if (!p) return '';
+  const stats = p.linkedStats?.length ? p.linkedStats.join(', ') : '';
+  const left = p.monthsLeft == null ? '' : `ещё ~${p.monthsLeft} мес.`;
+  const span =
+    p.expectedMonths == null
+      ? ''
+      : p.monthsDone != null
+        ? `${p.monthsDone} из ~${p.expectedMonths} мес.`
+        : `~${p.expectedMonths} мес.`;
+  const pause = p.paused ? 'на паузе' : '';
+  const blessed = p.blessed ? 'благословлено' : '';
+  return [pause, left, span, stats, blessed].filter(Boolean).join(' · ');
+}
+
+function blessMarkup(p) {
+  if (!p || p.paused || p.blessed || !p.id) return '';
+  if (p.canBless) {
+    return `<button type="button" class="bless-btn" data-bless="${esc(p.id)}">благословить · ${esc(p.blessCost)} маны</button>`;
+  }
+  return `<p class="meta">благословить · ${esc(p.blessCost)} маны (не хватает)</p>`;
 }
 
 function islandBgUrl(city) {
@@ -115,9 +156,7 @@ function renderProcesses(list, mana) {
   const cards = list
     .map((slot) => {
       const p = slot.process;
-      const portrait = slot.hasPortrait
-        ? `<img class="portrait" src="${esc(portraitSrc(slot))}" alt="">`
-        : '';
+      const portrait = portraitButton(slot);
       if (!p) {
         return `
         <article class="card officer">
@@ -126,19 +165,7 @@ function renderProcesses(list, mana) {
           <p class="meta">свободен</p>
         </article>`;
       }
-      const stats = p.linkedStats?.length ? p.linkedStats.join(', ') : '';
-      const left = p.monthsLeft == null ? '' : `ещё ~${p.monthsLeft} мес.`;
-      const pause = p.paused ? 'на паузе' : '';
-      const blessed = p.blessed ? 'благословлено' : '';
-      const meta = [pause, left, stats, blessed].filter(Boolean).join(' · ');
-      let bless = '';
-      if (!p.paused && !p.blessed && p.id) {
-        if (p.canBless) {
-          bless = `<button type="button" class="bless-btn" data-bless="${esc(p.id)}">благословить · ${esc(p.blessCost)} маны</button>`;
-        } else {
-          bless = `<p class="meta">благословить · ${esc(p.blessCost)} маны (не хватает)</p>`;
-        }
-      }
+      const meta = processMeta(p);
       return `
         <article class="card officer">
           ${portrait}
@@ -146,11 +173,68 @@ function renderProcesses(list, mana) {
           <p>${esc(p.summary)}</p>
           ${p.detail ? `<p class="muted">${esc(p.detail)}</p>` : ''}
           ${meta ? `<p class="meta">${esc(meta)}</p>` : ''}
-          ${bless}
+          ${blessMarkup(p)}
         </article>`;
     })
     .join('');
   return manaCard + cards;
+}
+
+function closeSheet() {
+  openOfficerId = null;
+  if (!sheet || sheet.hidden) return;
+  sheet.hidden = true;
+  if (sheetBody) sheetBody.innerHTML = '';
+  try {
+    tg?.BackButton?.hide();
+  } catch {
+    /* вне Telegram */
+  }
+}
+
+function openOfficerSheet(officerId, { focus = true } = {}) {
+  if (!officerId) return;
+  const slot = (state?.processes || []).find((p) => p.officerId === officerId);
+  if (!slot || !sheet || !sheetBody) return;
+  const proc = slot.process;
+  const src = portraitSrc(slot);
+  const nature = (slot.nature || '').trim();
+  const look = (slot.look || '').trim();
+  const temper = (slot.temper || '').trim();
+  const metaBits = [];
+  if (slot.ageYears != null) metaBits.push(`${slot.ageYears} лет`);
+  const gender = genderLabel(slot.gender);
+  if (gender) metaBits.push(gender);
+  const procMeta = proc ? processMeta(proc) : '';
+  const procBlock = proc
+    ? `<section class="sheet-section">
+        <h3>Дело</h3>
+        <p>${esc(proc.summary || '')}</p>
+        ${proc.detail ? `<p class="muted">${esc(proc.detail)}</p>` : ''}
+        ${procMeta ? `<p class="meta">${esc(procMeta)}</p>` : ''}
+        ${blessMarkup(proc)}
+      </section>`
+    : `<p class="meta">свободен</p>`;
+  sheetBody.innerHTML = `
+    ${src
+      ? `<img class="sheet-portrait" src="${esc(src)}" alt="">`
+      : `<div class="sheet-portrait blank" aria-hidden="true"></div>`}
+    ${slot.title ? `<p class="sheet-kicker">${esc(slot.title)}</p>` : ''}
+    <h2 id="sheetTitle">${esc(slot.name || '')}</h2>
+    ${metaBits.length ? `<p class="muted">${esc(metaBits.join(' · '))}</p>` : ''}
+    ${look ? `<p>${esc(look)}</p>` : ''}
+    ${temper ? `<p class="muted">${esc(temper)}</p>` : ''}
+    ${nature ? `<section class="sheet-section"><h3>Характер</h3><p>${esc(nature)}</p></section>` : ''}
+    ${procBlock}
+  `;
+  openOfficerId = officerId;
+  sheet.hidden = false;
+  try {
+    tg?.BackButton?.show();
+  } catch {
+    /* вне Telegram */
+  }
+  if (focus) sheet.querySelector('.sheet-close')?.focus();
 }
 
 function renderEvents(events) {
@@ -195,6 +279,26 @@ function renderOrders(list) {
     .join('');
 }
 
+function renderCity(city) {
+  const sections = city?.sections || [];
+  if (!sections.length) return empty('Описания города пока нет.');
+  return sections
+    .map((s) => {
+      const paras = String(s.text || '')
+        .split(/\n{2,}/)
+        .map((p) => p.trim())
+        .filter(Boolean)
+        .map((p) => `<p>${esc(p)}</p>`)
+        .join('');
+      return `
+        <article class="card lore">
+          <h2>${esc(s.title)}</h2>
+          ${paras || `<p>${esc(s.text || '')}</p>`}
+        </article>`;
+    })
+    .join('');
+}
+
 function render() {
   if (!state) return;
   if (!state.city) {
@@ -221,8 +325,15 @@ function render() {
         ? renderProcesses(state.processes, state.mana)
         : tab === 'orders'
           ? renderOrders(state.orders)
-          : renderStats(state.stats, state.faith);
+          : tab === 'city'
+            ? renderCity(state.city)
+            : renderStats(state.stats, state.faith);
   panel.innerHTML = body;
+  if (openOfficerId) {
+    const still = (state.processes || []).some((p) => p.officerId === openOfficerId);
+    if (still) openOfficerSheet(openOfficerId, { focus: false });
+    else closeSheet();
+  }
 }
 
 async function load() {
@@ -245,19 +356,8 @@ async function load() {
   }
 }
 
-document.getElementById('tabs').addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-tab]');
-  if (!btn) return;
-  tab = btn.dataset.tab;
-  for (const b of document.querySelectorAll('.tab')) b.classList.toggle('on', b === btn);
-  render();
-});
-
-document.getElementById('panel').addEventListener('click', async (e) => {
-  const btn = e.target.closest('[data-bless]');
-  if (!btn) return;
-  const processId = btn.getAttribute('data-bless');
-  btn.disabled = true;
+async function blessProcess(processId, btn) {
+  if (btn) btn.disabled = true;
   try {
     const res = await fetch(`/api/mini/bless${queryAuth()}`, {
       method: 'POST',
@@ -266,16 +366,56 @@ document.getElementById('panel').addEventListener('click', async (e) => {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      btn.disabled = false;
-      btn.textContent = data.message || data.error || 'не вышло';
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = data.message || data.error || 'не вышло';
+      }
       return;
     }
+    closeSheet();
     await load();
   } catch (err) {
-    btn.disabled = false;
-    btn.textContent = err.message || 'нет связи';
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = err.message || 'нет связи';
+    }
+  }
+}
+
+document.getElementById('tabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-tab]');
+  if (!btn) return;
+  tab = btn.dataset.tab;
+  closeSheet();
+  for (const b of document.querySelectorAll('.tab')) b.classList.toggle('on', b === btn);
+  render();
+});
+
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-close-sheet]')) {
+    closeSheet();
+    return;
+  }
+  const portraitBtn = e.target.closest('[data-open-officer]');
+  if (portraitBtn) {
+    openOfficerSheet(portraitBtn.getAttribute('data-open-officer'));
+    return;
+  }
+  const blessBtn = e.target.closest('[data-bless]');
+  if (blessBtn && !blessBtn.disabled) {
+    void blessProcess(blessBtn.getAttribute('data-bless'), blessBtn);
   }
 });
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeSheet();
+});
+
+try {
+  tg?.BackButton?.onClick(closeSheet);
+} catch {
+  /* вне Telegram */
+}
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') void load();
