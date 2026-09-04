@@ -407,6 +407,78 @@ export function formatOfficersCastHint(domain) {
   ].join('\n');
 }
 
+function pendingActionsOf(board) {
+  if (Array.isArray(board?.state?.pendingActions)) return board.state.pendingActions;
+  if (Array.isArray(board?.processes)) return board.processes;
+  return [];
+}
+
+function processLooksLive(process) {
+  const status = process?.status;
+  return !status || status === 'active' || status === 'paused';
+}
+
+/** Дело бита: сначала исход этого месяца, иначе живое на нити. */
+export function findProcessForOfficerHint(domain, { plot, outcome, boards } = {}) {
+  const homes = [domain, ...(boards || [])].filter(Boolean);
+  const wantId = String(outcome?.processId || '');
+  if (wantId) {
+    for (const home of homes) {
+      const process = pendingActionsOf(home).find((a) => String(a.id) === wantId);
+      if (process) return { process, domain: home };
+    }
+  }
+  const related = new Set((plot?.relatedProcessIds || []).map(String));
+  if (related.size) {
+    for (const home of homes) {
+      const process = pendingActionsOf(home).find(
+        (a) => related.has(String(a.id)) && processLooksLive(a),
+      );
+      if (process) return { process, domain: home };
+    }
+  }
+  if (outcome?.officerId || outcome?.office) {
+    return { process: outcome, domain };
+  }
+  return null;
+}
+
+/** Шпаргалка рассказчику: кто ведёт связанное дело — сан, имя, пол. */
+export function formatProcessOfficerHint(domain, { plot, outcome, boards } = {}) {
+  const found = findProcessForOfficerHint(domain, { plot, outcome, boards });
+  if (!found?.process) return '';
+  const homes = [found.domain, domain, ...(boards || [])].filter(Boolean);
+  let officer = null;
+  for (const home of homes) {
+    officer = findOfficer(home, {
+      officerId: found.process.officerId,
+      office: found.process.office,
+    });
+    if (officer) break;
+  }
+  if (!officer?.name) return '';
+  const who = officerGender(officer) === 'female' ? 'женщина' : 'мужчина';
+  return [
+    'САНОВНИК ПО ДЕЛУ (сан, имя, пол — для рода в речи; не герой истории, может мелькнуть в отчёте):',
+    `${officer.title} ${officer.name} (${who}).`,
+  ].join('\n');
+}
+
+/** Кратко для письма месяца: сан, имя, пол — чтобы род не угадывать. */
+export function formatOfficersBriefForNews(domain) {
+  const list = listOfficers(domain);
+  if (!list.length) return '';
+  const bits = list.map((o) => {
+    const gender = officerGender(o);
+    const who = gender === 'female' ? 'женщина' : 'мужчина';
+    return `${o.title} ${o.name} (${who})`;
+  });
+  return [
+    'САНОВНИКИ (сан, имя, пол — для рода в речи; не герои письма, могут мелькнуть в отчёте):',
+    bits.join('; ') + '.',
+  ].join('\n');
+}
+
 function fallbackNature(officer, config) {
   const axes = formatAxesForSpeech(officer.axes, config);
   return `${officer.title} ${officer.name} — ${axes}. Решения принимает в рамках своей должности.`;

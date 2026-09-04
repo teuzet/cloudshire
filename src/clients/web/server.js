@@ -18,7 +18,7 @@ import { FINISH_SHORT } from '../../game/rolls.js';
 import { resolveIslandImage } from '../../game/islandImage.js';
 import { resolveOfficerPortrait } from '../../game/officerImage.js';
 import { domainHasIslandImage, officerHasPortrait } from '../../storage/r2.js';
-import { knownPartnerLore } from '../../game/confluxBoard.js';
+import { knownPartnerLore, hydrateDomainFromConflux } from '../../game/confluxBoard.js';
 import { deriveOnboardingPhase, normalizeOnboardingDraft } from '../../game/onboarding.js';
 import { genesisTutorialText } from '../../game/progressBar.js';
 import { orderMonthsLeft } from '../../game/orders.js';
@@ -378,6 +378,7 @@ export function createWebServer({ config, app, runtime, storage }) {
       const world = await storage.getWorld();
       const domain = await storage.getDomainForUser(who.userId, world.id);
       const conflux = domain ? await findActiveConfluxForDomain(storage, domain.id) : null;
+      if (domain && conflux) hydrateDomainFromConflux(domain, conflux, { mode: 'ruler' });
       const payload = miniCityPayload({
         domain,
         conflux,
@@ -562,6 +563,7 @@ export function createWebServer({ config, app, runtime, storage }) {
         const lore = domain.lore || [];
         const chronicle = chronicleEntries(lore);
         const conflux = await findActiveConfluxForDomain(storage, domain.id);
+        if (conflux) hydrateDomainFromConflux(domain, conflux, { mode: 'ruler' });
         const partner = conflux
           ? (conflux.domainIds || []).find((id) => id !== domain.id)
           : null;

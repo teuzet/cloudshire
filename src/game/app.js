@@ -69,7 +69,7 @@ import { islandDeleteCheck } from '../clients/telegram/access.js';
 import { generateIslandImage, removeIslandImage } from './islandImage.js';
 import { generateOfficerPortraits, removeOfficerPortraits } from './officerImage.js';
 import { generateDomain } from './genesis.js';
-import { formatOfficersForPrompt } from './officers.js';
+import { formatOfficersForPrompt, formatOfficersBriefForNews } from './officers.js';
 import { formatIslandReveal } from './islandReveal.js';
 import { formatProgressBar, genesisTutorialText } from './progressBar.js';
 import { genesisDateMessage } from './tickClock.js';
@@ -1300,6 +1300,7 @@ export class GameApp {
             'Бытовой вопрос после закрытия — последствия, не продолжение беды.',
           firstMentionHintForSpeech(),
           peopleHint,
+          formatOfficersBriefForNews(domain),
           `Не начинай письмо с «${character.name}:».`,
           (() => {
             const board = formatBoardForSpeech(domain, {
@@ -1460,7 +1461,20 @@ export class GameApp {
   }
 
   async inspectDomain(domainId) {
-    return this.storage.getDomain(domainId);
+    const domain = await this.storage.getDomain(domainId);
+    if (!domain) return null;
+    const conflux = await findActiveConfluxForDomain(this.storage, domain.id);
+    if (conflux) hydrateDomainFromConflux(domain, conflux, { mode: 'ruler' });
+    return domain;
+  }
+
+  /** Своя доска: при сближении — после hydrate, без записи. */
+  async loadOwnBoard(userId, { mode = 'ruler' } = {}) {
+    const domain = await this.getOwnDomain(userId);
+    if (!domain) return { domain: null, conflux: null };
+    const conflux = await findActiveConfluxForDomain(this.storage, domain.id);
+    if (conflux) hydrateDomainFromConflux(domain, conflux, { mode });
+    return { domain, conflux };
   }
 
   async listUsers() {

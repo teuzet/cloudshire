@@ -56,6 +56,7 @@ import {
   PLOT_SUMMARY_MAX,
   isOrderPlot,
   isStakedStory,
+  plotHasLiveProcess,
 } from './plotlines.js';
 import { queueOrderRequest, listStandingOrders } from './orders.js';
 import {
@@ -394,7 +395,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
           id: p.id,
           title: p.title,
           kind: p.kind === 'errand' ? 'errand' : p.kind === 'order' ? 'order' : 'story',
-          hasProcess: Boolean((p.relatedProcessIds || []).length),
+          hasProcess: plotHasLiveProcess(domain, p),
           shared: Boolean(p.shared || p.isMainConflux),
           foreign: Boolean(
             ctx.conflux &&

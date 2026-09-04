@@ -1,6 +1,6 @@
 import { newId } from './ids.js';
 import { createLoreFact, createCharacterRecord, formatCastForPrompt, findCharacterByName, newCharactersSchema } from './models.js';
-import { formatOfficersCastHint } from './officers.js';
+import { formatOfficersCastHint, formatProcessOfficerHint } from './officers.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { attachChronicleToPlotlines, clipPlotText, PLOT_HOOK_MAX } from './plotlines.js';
@@ -204,6 +204,16 @@ export async function beatSharedPlot({
     : null;
 
   const nameOffer = offerNames(world, { female: 4, male: 4 });
+  const officerHome =
+    (domains || []).find((d) => String(d.id) === String(outcome?.ownerDomainId)) ||
+    visibleCities[0] ||
+    (domains || [])[0] ||
+    null;
+  const officerHint = formatProcessOfficerHint(officerHome, {
+    plot,
+    outcome,
+    boards: [...(domains || []), conflux],
+  });
 
   try {
     await runtime.run({
@@ -214,7 +224,7 @@ export async function beatSharedPlot({
       log,
       scene: 'conflux_story_beat',
       domainId: (conflux.domainIds || []).join('+'),
-      extraSystem: visibleCities.map(packCity).join('\n\n'),
+      extraSystem: [visibleCities.map(packCity).join('\n\n'), officerHint].filter(Boolean).join('\n\n'),
       userMessages: [
         {
           role: 'user',

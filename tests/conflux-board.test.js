@@ -14,7 +14,7 @@ import {
   isSharedPlot,
   chronicleReceiversForBeat,
 } from '../src/game/confluxBoard.js';
-import { createPlotline, isOrderPlot, isThreeActPlot, normalizePlotlines, closePlotline, formatBoardForSpeech } from '../src/game/plotlines.js';
+import { createPlotline, isOrderPlot, isThreeActPlot, normalizePlotlines, closePlotline, formatBoardForSpeech, releaseInactiveProcessesFromOpenPlots } from '../src/game/plotlines.js';
 
 function domain(id, extra = {}) {
   return {
@@ -263,4 +263,83 @@ test('речь правителя не отдаёт заголовок нити 
   assert.equal(speech.includes('«Седьмая капля»'), false);
   assert.equal(speech.includes(plot.id), true);
   assert.equal(speech.includes('седьмому удару'), true);
+});
+
+test('перенос забирает resolved дело закрытой нити', () => {
+  const closed = createPlotline({ title: 'Мост', kind: 'errand' });
+  closed.status = 'closed';
+  closed.relatedProcessIds = ['act_done'];
+  const a = domain('a', {
+    processes: [{ id: 'act_done', summary: 'Мост', status: 'resolved', plotlineId: closed.id }],
+  });
+  a.plotlines = [];
+  a.closedPlotlines = [closed];
+  const c = conflux();
+  takeDomainBoardIntoConflux(a, c);
+  assert.equal(a.state.pendingActions.length, 0);
+  assert.equal(c.closedPlotlines.some((p) => p.id === closed.id), true);
+  assert.equal(c.processes.length, 1);
+  assert.equal(c.processes[0].id, 'act_done');
+  assert.equal(c.processes[0].confluxId, c.id);
+  assert.equal(c.processes[0].ownerDomainId, 'a');
+});
+
+test('dehydrate подбирает сироту, чья нить уже на конфлюксе', () => {
+  const closed = createPlotline({ title: 'Мост', kind: 'errand' });
+  closed.status = 'closed';
+  closed.relatedProcessIds = ['act_done'];
+  const c = conflux();
+  c.closedPlotlines = [closed];
+  const a = domain('a', {
+    processes: [{ id: 'act_done', summary: 'Мост', status: 'resolved', plotlineId: closed.id }],
+  });
+  dehydrateDomainToConflux(a, c);
+  assert.equal(a.state.pendingActions.length, 0);
+  assert.equal(c.processes.some((p) => p.id === 'act_done'), true);
+  assert.equal(c.processes[0].confluxId, c.id);
+});
+
+test('dehydrate не снимает законченный id: это после битов, в конце тика', () => {
+  const story = createPlotline({ title: 'Смола', kind: 'story', synopsis: 'Лопнул мост.' });
+  story.relatedProcessIds = ['act_old', 'act_live'];
+  const c = conflux();
+  c.plotlines = [story];
+  c.processes = [
+    { id: 'act_old', status: 'resolved', confluxId: c.id, ownerDomainId: 'a' },
+    { id: 'act_live', status: 'active', confluxId: c.id, ownerDomainId: 'a' },
+  ];
+  const a = domain('a');
+  hydrateDomainFromConflux(a, c, { mode: 'ruler' });
+  dehydrateDomainToConflux(a, c);
+  assert.deepEqual(story.relatedProcessIds, ['act_old', 'act_live']);
+});
+
+test('release снимает законченные id с открытой нити, живое оставляет', () => {
+  const story = createPlotline({ title: 'Смола', kind: 'story', synopsis: 'Лопнул мост.' });
+  story.relatedProcessIds = ['act_old', 'act_live'];
+  releaseInactiveProcessesFromOpenPlots({
+    plotlines: [story],
+    state: {
+      pendingActions: [
+        { id: 'act_old', status: 'resolved' },
+        { id: 'act_live', status: 'active' },
+      ],
+    },
+  });
+  assert.deepEqual(story.relatedProcessIds, ['act_live']);
+});
+
+test('речь не считает законченное дело живым', () => {
+  const plot = createPlotline({
+    title: 'Смола',
+    kind: 'story',
+    synopsis: 'Лопнул канатный мост у оврага.',
+  });
+  plot.relatedProcessIds = ['act_old'];
+  const speech = formatBoardForSpeech({
+    plotlines: [plot],
+    state: { pendingActions: [{ id: 'act_old', status: 'resolved' }] },
+  });
+  assert.match(speech, /поручения ещё нет/);
+  assert.equal(speech.includes('дело уже идёт'), false);
 });

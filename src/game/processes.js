@@ -116,6 +116,12 @@ export function processIsFresh(action) {
   return Math.max(0, Number(action?.monthsDone) || 0) === 0;
 }
 
+/** Идёт или на паузе — для доски и слотов. Законченное на открытой нити не считается. */
+export function processIsLive(process) {
+  const status = process?.status;
+  return !status || status === 'active' || status === 'paused';
+}
+
 /** Дело этого города, а не соседа. */
 export function processOwnedBy(process, domainId) {
   if (!process || !domainId) return false;
@@ -371,6 +377,8 @@ export function applyEngineProgress(domain, rolls, { tick = null, config = null,
       finishLabel,
       blessed,
       ownerDomainId: r.ownerDomainId || process.ownerDomainId || null,
+      officerId: process.officerId || null,
+      office: process.office || null,
       intel: Boolean(process.intel),
       plotlineId: process.plotlineId || null,
       plotEngagement: process.plotEngagement || null,

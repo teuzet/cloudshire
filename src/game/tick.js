@@ -16,6 +16,7 @@ import {
   otherDomainId,
   maybeGrantAwarenessFromKnownLore,
 } from './confluxBoard.js';
+import { releaseInactiveProcessesFromOpenPlots } from './plotlines.js';
 import { resolveIslandImage } from './islandImage.js';
 import { getLogger } from '../log.js';
 import { shouldSendTickNews, splitTickNews } from './newsSchedule.js';
@@ -221,6 +222,14 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
       }
       await storage.saveConflux(conflux);
     }
+  }
+
+  for (const conflux of active) {
+    releaseInactiveProcessesFromOpenPlots({
+      plotlines: conflux.plotlines,
+      state: { pendingActions: conflux.processes || [] },
+    });
+    await storage.saveConflux(conflux);
   }
 
   const dockedNow = (await storage.listConfluxes({ status: ['docked'] })) || [];

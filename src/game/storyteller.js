@@ -107,7 +107,7 @@ import {
 import { refillMysteryAnnotationPool, refillSuspenseAnnotationPool } from './annotationCatalog.js';
 import { selectAnnotations } from './annotationSelector.js';
 import { maybeAppendStoryCityModifier } from './cityModifier.js';
-import { formatOfficersCastHint } from './officers.js';
+import { formatOfficersCastHint, formatProcessOfficerHint } from './officers.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 
@@ -1833,6 +1833,7 @@ export async function beatPlot({
       extraCity(domain, [
         ruler ? `Правитель города — ${ruler}. Этого человека в newCharacters не заводи, второго с тем же именем тоже.` : null,
         `Известные люди города:\n${formatCastForPrompt(domain.lore, { limit: 12 })}`,
+        formatProcessOfficerHint(domain, { plot, outcome }),
       ]),
       occupancy ? formatOccupancyForPrompt(occupancy) : null,
       mystery && plot.truthGraph

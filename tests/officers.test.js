@@ -14,6 +14,8 @@ import {
   isOffPortfolio,
   freeOfficers,
   formatOfficersForPrompt,
+  formatOfficersBriefForNews,
+  formatProcessOfficerHint,
   ensureOfficersFromLore,
   officerBusyAgentMessage,
 } from '../src/game/officers.js';
@@ -209,4 +211,99 @@ test('отказ занятому сановнику предлагает пау
   assert.match(msg, /Наблюдение за стаей/);
   assert.match(msg, /pause_process/);
   assert.match(msg, /revoke_process/);
+});
+
+test('письмо месяца видит сан, имя и пол сановников', () => {
+  const officers = makeOfficers().map((o, i) => ({
+    ...o,
+    gender: i % 2 === 0 ? 'female' : 'male',
+  }));
+  const brief = formatOfficersBriefForNews(domainWith(officers));
+  assert.match(brief, /Казначей Элара \(женщина\)/);
+  assert.match(brief, /Маршал Кален \(мужчина\)/);
+  assert.match(brief, /Хранитель Мира \(женщина\)/);
+  assert.match(brief, /Канцлер Орен \(мужчина\)/);
+  assert.doesNotMatch(brief, /занят/);
+  assert.equal(formatOfficersBriefForNews(domainWith([])), '');
+});
+
+test('рассказчик видит сановника по связанному делу', () => {
+  const officers = makeOfficers().map((o, i) => ({
+    ...o,
+    gender: i % 2 === 0 ? 'female' : 'male',
+  }));
+  const process = {
+    id: 'act_1',
+    summary: 'Мосты',
+    status: 'active',
+    officerId: 'off_t',
+    office: 'treasurer',
+  };
+  const domain = domainWith(officers, [process]);
+  const plot = { relatedProcessIds: ['act_1'] };
+  const hint = formatProcessOfficerHint(domain, { plot, outcome: { processId: 'act_1' } });
+  assert.match(hint, /Казначей Элара \(женщина\)/);
+  assert.doesNotMatch(hint, /Маршал/);
+  assert.doesNotMatch(hint, /занят/);
+});
+
+test('рассказчик видит сановника по живому делу нити, даже без исхода месяца', () => {
+  const officers = makeOfficers().map((o, i) => ({
+    ...o,
+    gender: i % 2 === 0 ? 'female' : 'male',
+  }));
+  const process = {
+    id: 'act_1',
+    summary: 'Мосты',
+    status: 'active',
+    officerId: 'off_m',
+    office: 'marshal',
+  };
+  const domain = domainWith(officers, [process]);
+  const hint = formatProcessOfficerHint(domain, { plot: { relatedProcessIds: ['act_1'] } });
+  assert.match(hint, /Маршал Кален \(мужчина\)/);
+  assert.equal(formatProcessOfficerHint(domain, { plot: { relatedProcessIds: [] } }), '');
+});
+
+test('рассказчик видит сановника и после завершения дела', () => {
+  const officers = makeOfficers().map((o, i) => ({
+    ...o,
+    gender: i % 2 === 0 ? 'female' : 'male',
+  }));
+  const process = {
+    id: 'act_1',
+    summary: 'Ров',
+    status: 'resolved',
+    officerId: 'off_k',
+    office: 'keeper',
+  };
+  const domain = domainWith(officers, [process]);
+  const hint = formatProcessOfficerHint(domain, {
+    plot: { relatedProcessIds: ['act_1'] },
+    outcome: { processId: 'act_1' },
+  });
+  assert.match(hint, /Хранитель Мира \(женщина\)/);
+});
+
+test('рассказчик находит сановника, если дело лежит на другой доске', () => {
+  const officers = makeOfficers().map((o, i) => ({
+    ...o,
+    gender: i % 2 === 0 ? 'female' : 'male',
+  }));
+  const home = domainWith(officers, []);
+  home.id = 'dom_a';
+  const process = {
+    id: 'act_1',
+    summary: 'Мосты',
+    status: 'active',
+    officerId: 'off_t',
+    office: 'treasurer',
+    ownerDomainId: 'dom_a',
+  };
+  const hint = formatProcessOfficerHint(home, {
+    plot: { relatedProcessIds: ['act_1'] },
+    outcome: { processId: 'act_1', ownerDomainId: 'dom_a' },
+    boards: [{ processes: [process] }],
+  });
+  assert.match(hint, /Казначей Элара \(женщина\)/);
 });

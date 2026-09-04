@@ -38,6 +38,7 @@ import {
   applyEngineProgress,
   processStatAverage,
   normalizeProcess,
+  processIsLive,
 } from './processes.js';
 import { releaseOfficerProcess } from './officers.js';
 
@@ -62,6 +63,12 @@ export function ensureErrandForProcess(domain, process, { tick = null, config = 
   const existing = (domain.plotlines || []).find((p) =>
     (p.relatedProcessIds || []).includes(processId),
   );
+  if (!processIsLive(process)) {
+    return {
+      plot: existing || findPlotline(domain, process?.plotlineId) || null,
+      created: false,
+    };
+  }
   if (existing) return { plot: existing, created: false };
 
   if (process?.plotlineId) {

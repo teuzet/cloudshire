@@ -380,6 +380,46 @@ export function stampProcessOnConflux(process, conflux, domainId) {
   return process;
 }
 
+function confluxPlotIds(conflux) {
+  const ids = new Set();
+  for (const p of [...(conflux?.plotlines || []), ...(conflux?.closedPlotlines || [])]) {
+    if (p?.id) ids.add(String(p.id));
+  }
+  return ids;
+}
+
+function confluxRelatedProcessIds(conflux) {
+  const ids = new Set();
+  for (const p of [...(conflux?.plotlines || []), ...(conflux?.closedPlotlines || [])]) {
+    for (const id of asIdList(p.relatedProcessIds)) ids.add(id);
+  }
+  return ids;
+}
+
+/** Дело принадлежит уехавшей нити — открытой или уже закрытой. */
+export function processBelongsOnConflux(process, conflux) {
+  if (!process || !conflux) return false;
+  if (process.confluxId && String(process.confluxId) === String(conflux.id)) return true;
+  if (confluxRelatedProcessIds(conflux).has(String(process.id))) return true;
+  if (process.plotlineId && confluxPlotIds(conflux).has(String(process.plotlineId))) return true;
+  return false;
+}
+
+function moveDomainProcessesToConflux(domain, conflux) {
+  const stay = [];
+  const moved = [];
+  for (const pr of domain.state?.pendingActions || []) {
+    if (processBelongsOnConflux(pr, conflux)) {
+      stampProcessOnConflux(pr, conflux, domain.id);
+      moved.push(pr);
+    } else stay.push(pr);
+  }
+  domain.state.pendingActions = stay;
+  const procById = new Map((conflux.processes || []).map((p) => [p.id, p]));
+  for (const pr of moved) procById.set(pr.id, pr);
+  conflux.processes = [...procById.values()];
+}
+
 export function normalizeConfluxBoard(conflux) {
   if (!conflux || typeof conflux !== 'object') return conflux;
   if (!conflux.awareness || typeof conflux.awareness !== 'object') conflux.awareness = {};
@@ -547,16 +587,7 @@ export function dehydrateDomainToConflux(domain, conflux) {
   }
   conflux.plotlines = [...plotById.values()];
 
-  const stay = [];
-  const movedProcs = [];
-  for (const pr of domain.state?.pendingActions || []) {
-    if (pr.confluxId) movedProcs.push(pr);
-    else stay.push(pr);
-  }
-  domain.state.pendingActions = stay;
-  const procById = new Map((conflux.processes || []).map((p) => [p.id, p]));
-  for (const pr of movedProcs) procById.set(pr.id, pr);
-  conflux.processes = [...procById.values()];
+  moveDomainProcessesToConflux(domain, conflux);
   domain.closedPlotlines = (domain.closedPlotlines || []).filter((p) => isOrderPlot(p));
 }
 
@@ -587,18 +618,7 @@ export function takeDomainBoardIntoConflux(domain, conflux) {
   }
   domain.closedPlotlines = keepClosed;
 
-  const keepProcs = [];
-  const movedPlotProcIds = new Set();
-  for (const p of conflux.plotlines) {
-    for (const id of asIdList(p.relatedProcessIds)) movedPlotProcIds.add(id);
-  }
-  for (const pr of domain.state?.pendingActions || []) {
-    if (movedPlotProcIds.has(String(pr.id))) {
-      stampProcessOnConflux(pr, conflux, domain.id);
-      if (!conflux.processes.some((x) => x.id === pr.id)) conflux.processes.push(pr);
-    } else keepProcs.push(pr);
-  }
-  domain.state.pendingActions = keepProcs;
+  moveDomainProcessesToConflux(domain, conflux);
 }
 
 export function createMainConfluxPlot({ a, b, conflux, world, config }) {

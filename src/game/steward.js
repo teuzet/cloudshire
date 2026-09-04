@@ -13,7 +13,7 @@ import {
   applyObjectiveSchedule,
 } from './processes.js';
 import { estimateProcessDuration } from './durationJudge.js';
-import { formatBoardForPrompt, isStakedStory } from './plotlines.js';
+import { formatBoardForPrompt, isStakedStory, plotHasLiveProcess } from './plotlines.js';
 import { ensureErrandForProcess, linkProcessToPlotline, rehomeUnrelatedProcess } from './plotEngine.js';
 import { judgeProcessAlignment, engagementOf } from './plotAlign.js';
 import { qualitativeStatsBrief, qualitativePopulation } from './stats.js';
@@ -247,7 +247,7 @@ export async function runOfficerAct({ config, runtime, domain, world, log: paren
     .map((p) => `- ${p.summary} (ещё ~${p.monthsLeft} мес.)`)
     .join('\n');
   const openStories = (domain.plotlines || []).filter(
-    (p) => p.kind === 'story' && !(p.relatedProcessIds || []).length,
+    (p) => p.kind === 'story' && !plotHasLiveProcess(domain, p),
   );
 
   await runtime.run({

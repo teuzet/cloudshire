@@ -344,13 +344,13 @@ export function startTelegramBot({ config, app, storage, runTick }) {
     }
 
     if (command.name === 'stats') {
-      const domain = await app.getOwnDomain(userId);
+      const { domain } = await app.loadOwnBoard(userId);
       if (!domain) return 'У тебя ещё нет острова.';
       return formatIslandStats(domain, config);
     }
 
     if (command.name === 'plotlines') {
-      const domain = await app.getOwnDomain(userId);
+      const { domain } = await app.loadOwnBoard(userId);
       if (!domain) return 'У тебя ещё нет острова.';
       return formatIslandPlotlines(domain);
     }

@@ -25,6 +25,7 @@ import {
   plotHasActiveProcess,
   attachChronicleToPlotlines,
   countOpen,
+  releaseInactiveProcessesFromOpenPlots,
 } from './plotlines.js';
 import {
   advancePlotMonth,
@@ -500,6 +501,8 @@ export async function resolveDomainMonth({
 
   refreshChronicleDigest(working, config);
   working.lastTickAt = new Date().toISOString();
+
+  releaseInactiveProcessesFromOpenPlots(working);
 
   log.info('month.done', {
     chronicle: chronicleAdds.length,

@@ -1,6 +1,6 @@
 import { newId } from './ids.js';
 import { parseSeedConfig } from './seedTemp.js';
-import { textsLookSame } from './processes.js';
+import { textsLookSame, processIsLive } from './processes.js';
 import { normalizeTruthGraph, judgeTruthGraph, parseMysteryShapes, normalizeFactList, RESOLUTION_FACT_MAX } from './mysteryGraph.js';
 import { normalizeDiscoveryLadder, normalizeHiddenPremises, judgeSuspenseCore } from './suspenseGraph.js';
 
@@ -820,7 +820,7 @@ export function plotCanFade(domain, plot, cfg) {
   if (isOrderPlot(plot)) return false;
   if (isStakedStory(plot) || isFreeformPlot(plot)) return false;
   if (!isOverdue(plot)) return false;
-  if (plotHasActiveProcess(domain, plot)) return false;
+  if (plotHasLiveProcess(domain, plot)) return false;
   const floor = Number(cfg?.temperature?.fadeBelow ?? 18);
   return Number(plot.temperature || 0) <= floor;
 }
@@ -865,13 +865,52 @@ export function plotsForProcess(domain, processId) {
   return (domain?.plotlines || []).filter((p) => (p.relatedProcessIds || []).includes(id));
 }
 
+function processesOnBoard(board) {
+  if (Array.isArray(board?.state?.pendingActions)) return board.state.pendingActions;
+  if (Array.isArray(board?.processes)) return board.processes;
+  return [];
+}
+
+function liveRelatedProcessIds(domain, plot) {
+  const ids = new Set((plot?.relatedProcessIds || []).map(String));
+  if (!ids.size) return [];
+  const live = [];
+  for (const a of processesOnBoard(domain)) {
+    if (!ids.has(String(a.id)) || !processIsLive(a)) continue;
+    live.push(String(a.id));
+  }
+  return live;
+}
+
 /** Поручение ещё идёт — нить рано убирать с доски, иначе дело получит пустую карточку. */
 export function plotHasActiveProcess(domain, plot) {
   const ids = new Set((plot?.relatedProcessIds || []).map(String));
   if (!ids.size) return false;
-  return (domain?.state?.pendingActions || []).some(
+  return processesOnBoard(domain).some(
     (a) => ids.has(String(a.id)) && (!a.status || a.status === 'active'),
   );
+}
+
+/** Идущее или на паузе: жрец, стюард и сход смотрят это, а не длину relatedProcessIds. */
+export function plotHasLiveProcess(domain, plot) {
+  return liveRelatedProcessIds(domain, plot).length > 0;
+}
+
+/**
+ * Законченное дело больше не занимает открытую карточку.
+ * Вызывать после битов месяца (пока id нужен плану), не в момент броска.
+ */
+export function releaseInactiveProcessesFromOpenPlots(board, { plots = null } = {}) {
+  const byId = new Map(processesOnBoard(board).map((p) => [String(p.id), p]));
+  const list = plots || board?.plotlines || [];
+  for (const plot of list) {
+    if (!plot || plot.status === 'closed') continue;
+    plot.relatedProcessIds = (plot.relatedProcessIds || []).filter((id) => {
+      const process = byId.get(String(id));
+      return Boolean(process && processIsLive(process));
+    });
+  }
+  return board;
 }
 
 function processEngagement(action) {
@@ -886,7 +925,7 @@ function processEngagement(action) {
 export function plotHasAttendingProcess(domain, plot) {
   const ids = new Set((plot?.relatedProcessIds || []).map(String));
   if (!ids.size) return false;
-  return (domain?.state?.pendingActions || []).some((a) => {
+  return processesOnBoard(domain).some((a) => {
     if (!ids.has(String(a.id)) || (a.status && a.status !== 'active')) return false;
     const eng = processEngagement(a);
     return eng === 'DIRECT' || eng === 'RELEVANT';
@@ -1816,7 +1855,8 @@ export function formatBoardForPrompt(domain) {
   return domain.plotlines
     .map((p) => {
       const stats = p.relatedStats.length ? ` | в игре: ${p.relatedStats.join('+')}` : '';
-      const proc = p.relatedProcessIds.length ? ` | дела: ${p.relatedProcessIds.join(', ')}` : '';
+      const liveIds = liveRelatedProcessIds(domain, p);
+      const proc = liveIds.length ? ` | дела: ${liveIds.join(', ')}` : '';
       const kindLabel = p.kind === 'errand' ? '(дело)' : p.kind === 'order' ? '(порядок)' : '';
       const term =
         p.kind === 'order'
@@ -1868,7 +1908,7 @@ export function formatBoardForSpeech(domain, { statsFeel = null, max = 8, viewer
               : foreign && viewerKnows
                 ? 'история соседа'
                 : 'история';
-      const duty = (p.relatedProcessIds || []).length
+      const duty = plotHasLiveProcess(domain, p)
         ? 'дело уже идёт'
         : p.kind === 'order'
           ? p.durationMonths

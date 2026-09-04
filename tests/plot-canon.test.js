@@ -74,6 +74,30 @@ test('нить с живым поручением нельзя считать с
   assert.equal(plotHasActiveProcess(domain, domain.plotlines[0]), false);
 });
 
+test('законченное дело не открывает закрытую нить', () => {
+  const domain = {
+    plotlines: [plot('plot_iara')],
+    closedPlotlines: [],
+    state: { pendingActions: [] },
+  };
+  closePlotline(domain, 'plot_iara', { tick: 6, reason: 'Иару нашли.' });
+  const result = ensureErrandForProcess(
+    domain,
+    {
+      id: 'act_search',
+      status: 'resolved',
+      plotlineId: 'plot_iara',
+      summary: 'Старый розыск',
+      expectedMonths: 2,
+    },
+    { tick: 7 },
+  );
+  assert.equal(result.created, false);
+  assert.equal(result.reopened, undefined);
+  assert.equal(domain.plotlines.length, 0);
+  assert.equal((domain.closedPlotlines || []).length, 1);
+});
+
 test('живое поручение возвращает закрытую нить, а не заводит пустую карточку', () => {
   const domain = {
     plotlines: [plot('plot_iara')],
