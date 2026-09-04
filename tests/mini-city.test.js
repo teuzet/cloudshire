@@ -210,8 +210,9 @@ test('мини-аппка: свои истории и участие в сопр
   assert.equal(well.nature, 'осторожна и памятлива');
   assert.equal(well.ageYears, 40);
   assert.equal(well.gender, 'female');
-  assert.match(well.look, /сухощавая/);
-  assert.match(well.look, /шрам у виска/);
+  assert.equal(well.look, undefined);
+  assert.ok(well.process.finishChances);
+  assert.equal(typeof well.process.finishChances.fail, 'number');
   assert.equal(well.temper, 'ровный, блестящий, суровый');
   assert.equal(fight.processes[0].blessCost, 20);
   assert.equal(fight.processes[0].canBless, true);

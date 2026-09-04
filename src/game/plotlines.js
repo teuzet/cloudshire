@@ -1004,19 +1004,9 @@ export function reopenClosedPlotline(domain, closedOrId) {
   return plot;
 }
 
-/** Внимание игрока → температура. Числом, не формулировкой. */
-export function warmPlotlines(domain, plotlineIds, cfg) {
-  normalizePlotlines(domain);
-  const amount = cfg?.temperature?.perTouch ?? 12;
-  const touched = [];
-  for (const id of [...new Set((plotlineIds || []).map(String))]) {
-    const p = findPlotline(domain, id);
-    if (!p) continue;
-    const before = p.temperature;
-    p.temperature = clamp100(before + amount);
-    touched.push({ id, from: before, to: p.temperature });
-  }
-  return touched;
+/** Температура карточки выключена. Поле оставляем, не ведём. */
+export function warmPlotlines() {
+  return [];
 }
 
 /** Месячные часы: возраст растёт, интерес остывает. */
@@ -1026,7 +1016,7 @@ export function advancePlotClocks(domain, cfg) {
   for (const p of domain.plotlines) {
     if (p.kind === 'order') continue;
     p.ageMonths += 1;
-    if (!isThreeActPlot(p)) p.temperature = clamp100(p.temperature - decay);
+    void decay;
   }
   return domain.plotlines;
 }

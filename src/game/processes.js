@@ -375,8 +375,8 @@ export function applyEngineProgress(domain, rolls, { tick = null, config = null,
       plotlineId: process.plotlineId || null,
       plotEngagement: process.plotEngagement || null,
       plotAligned: process.plotEngagement === 'DIRECT' || process.plotAligned === true,
-      // Обычный ход без завершения — фон, о нём отдельную запись не пишем.
-      mustNarrate: finished || r.kind !== 'normal',
+      // Отдельную запись — только финиш (или провал исхода). Обычный месяц молчит.
+      mustNarrate: finished,
     });
   }
   return outcomes;
@@ -391,18 +391,6 @@ export function formatProcessOutcomesForPrompt(outcomes) {
         return (
           `- [${o.processId}] «${o.summary}» — ЗАВЕРШЕНО в этом месяце. ` +
           `Исход броска: ${formatFinishForPrompt(o.finish, { blessed: o.blessed })}.`
-        );
-      }
-      if (o.kind === 'stall') {
-        return (
-          `- [${o.processId}] «${o.summary}» — ЗАСТОЙ: месяц прошёл без сдвига ` +
-          `(осталось ~${o.monthsLeft} мес.). ОБЯЗАТЕЛЬНА запись: что именно помешало.`
-        );
-      }
-      if (o.kind === 'surge') {
-        return (
-          `- [${o.processId}] «${o.summary}» — РЫВОК: сделано за два месяца вместо одного ` +
-          `(осталось ~${o.monthsLeft} мес.). ОБЯЗАТЕЛЬНА запись: что позволило успеть.`
         );
       }
       return (

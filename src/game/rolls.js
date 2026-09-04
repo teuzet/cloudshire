@@ -72,28 +72,18 @@ export function finishFailChance(statValue, cfg = {}) {
 }
 
 /**
- * Ход дела за месяц: 0 — застой, 1 — обычный, 2 — рывок.
- * Порог от среднего связанных статов, полосы широкие: необычное должно быть редким.
+ * Ход дела за месяц: всегда +1. Застой и рывок выключены.
  */
 export function rollProcessAdvance(avgStat, rng = Math.random) {
   const avg = Math.round(clampStat(avgStat));
-  const roll = Math.floor(rng() * 101);
-  let advance = 1;
-  let kind = 'normal';
-  if (roll > avg + 40) {
-    advance = 0;
-    kind = 'stall';
-  } else if (roll < avg - 40) {
-    advance = 2;
-    kind = 'surge';
-  }
+  void rng;
   return {
-    roll,
+    roll: null,
     avg,
-    advance,
-    kind,
-    unusual: kind !== 'normal',
-    thresholds: { stallAbove: avg + 40, surgeBelow: avg - 40 },
+    advance: 1,
+    kind: 'normal',
+    unusual: false,
+    thresholds: { stallAbove: null, surgeBelow: null },
   };
 }
 
@@ -187,6 +177,18 @@ export const FINISH_LABELS = {
     'Благословение покровителя сдвинуло исход на ступень вверх (провал→успех, успех→крит).',
 };
 
+/** Доли исхода в процентах — те же веса, что бросает rollProcessFinish. */
+export function finishChancePercents(avgStat, paceRatio = 1, { blessed = false, config = {} } = {}) {
+  const rolled = rollProcessFinish(avgStat, paceRatio, () => 0, config?.tick?.plot?.roll || {});
+  let { fail, ok, crit } = rolled.weights;
+  if (blessed) {
+    crit += ok;
+    ok = fail;
+    fail = 0;
+  }
+  return { fail, ok, crit };
+}
+
 /** Провал→успех, успех→крит. Крит остаётся критом. */
 export function applyBlessShift(finish) {
   if (finish === 'fail') return 'ok';
@@ -233,13 +235,11 @@ export function beatChance(plot, cfg) {
     const raw = Number(plot.urgency) / 100;
     return Math.max(b.minChance ?? 0.05, Math.min(b.maxChance ?? 0.8, Number.isFinite(raw) ? raw : 0));
   }
-  const temp = clampStat(plot?.temperature) / 100;
   const scale = Math.max(0, Math.min(100, plotScale(plot))) / 100;
   const maxAge = Math.max(1, Number(plot?.maxAgeMonths) || 6);
   const agePressure = Math.min(1, (Number(plot?.ageMonths) || 0) / maxAge);
   const raw =
     (b.baseChance ?? 0.15) +
-    temp * (b.temperatureWeight ?? 0.5) +
     scale * (b.importanceWeight ?? 0.2) +
     agePressure * (b.agePressure ?? 0.15);
   return Math.max(b.minChance ?? 0.05, Math.min(b.maxChance ?? 0.8, raw));

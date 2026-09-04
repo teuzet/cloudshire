@@ -85,7 +85,11 @@ function processMeta(p) {
         : `~${p.expectedMonths} мес.`;
   const pause = p.paused ? 'на паузе' : '';
   const blessed = p.blessed ? 'благословлено' : '';
-  return [pause, left, span, stats, blessed].filter(Boolean).join(' · ');
+  const chances = p.finishChances;
+  const odds = chances
+    ? `исход: провал ${chances.fail}% · успех ${chances.ok}% · крит ${chances.crit}%`
+    : '';
+  return [pause, left, span, stats, blessed, odds].filter(Boolean).join(' · ');
 }
 
 function blessMarkup(p) {
@@ -199,7 +203,6 @@ function openOfficerSheet(officerId, { focus = true } = {}) {
   const proc = slot.process;
   const src = portraitSrc(slot);
   const nature = (slot.nature || '').trim();
-  const look = (slot.look || '').trim();
   const temper = (slot.temper || '').trim();
   const metaBits = [];
   if (slot.ageYears != null) metaBits.push(`${slot.ageYears} лет`);
@@ -222,7 +225,6 @@ function openOfficerSheet(officerId, { focus = true } = {}) {
     ${slot.title ? `<p class="sheet-kicker">${esc(slot.title)}</p>` : ''}
     <h2 id="sheetTitle">${esc(slot.name || '')}</h2>
     ${metaBits.length ? `<p class="muted">${esc(metaBits.join(' · '))}</p>` : ''}
-    ${look ? `<p>${esc(look)}</p>` : ''}
     ${temper ? `<p class="muted">${esc(temper)}</p>` : ''}
     ${nature ? `<section class="sheet-section"><h3>Характер</h3><p>${esc(nature)}</p></section>` : ''}
     ${procBlock}

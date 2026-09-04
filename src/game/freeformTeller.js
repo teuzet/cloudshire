@@ -12,7 +12,7 @@ import {
   openStoryTitlesLine,
   applyFreeformProgress,
   freeformTickDecision,
-  pickEndingsForPack,
+  autotickCloseKind,
   findPlotEnding,
   normalizeFinish,
 } from './freeform.js';
@@ -316,6 +316,7 @@ export async function tellFreeformBeat({
   });
 
   const closing = decision.kind === 'closeDirect' || decision.kind === 'closeBad';
+  const closeKind = decision.kind === 'closeBad' ? autotickCloseKind(plot) : null;
   const endingSlots =
     decision.kind === 'closeDirect'
       ? [
@@ -326,8 +327,12 @@ export async function tellFreeformBeat({
               text: 'История закрылась тем, к чему шло дело.',
             },
         ]
-      : decision.kind === 'closeBad'
-        ? pickEndingsForPack(plot, 'BAD_ENDING', 3)
+      : closeKind
+        ? Array.from({ length: 3 }, (_, i) => ({
+            id: `close_${String(closeKind).toLowerCase()}_${i + 1}`,
+            kind: closeKind,
+            text: '',
+          }))
         : null;
 
   const { cfg, variants: drafted, prompt: architectPrompt = '' } = await architectFreeformBlanks({

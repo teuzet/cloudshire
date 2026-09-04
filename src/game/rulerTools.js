@@ -55,7 +55,7 @@ import {
   PLOT_TITLE_MAX,
   PLOT_SUMMARY_MAX,
   isOrderPlot,
-  isThreeActPlot,
+  isStakedStory,
 } from './plotlines.js';
 import { queueOrderRequest, listStandingOrders } from './orders.js';
 import {
@@ -90,24 +90,27 @@ function processPaceFeel(process) {
   return 'steady';
 }
 
-function paceHint(action) {
+function paceHint(action, note = null) {
   const obj = action.objectiveMonths || action.expectedMonths;
   const left = action.monthsLeft;
   const ratio = processPaceRatio(action);
+  const why = String(note || action.durationNote || '').trim();
+  const reason = why ? ` ${why.replace(/\.*$/, '.')}` : '';
   if (ratio < 0.95) {
     return (
-      `Честная оценка ${obj} мес., назначено ${action.expectedMonths} (осталось ${left}). ` +
+      `Честная оценка ${obj} мес., назначено ${action.expectedMonths} (осталось ${left}).${reason} ` +
       'В речи ПРИМИ срок покровителя и ПРЕДУПРЕДИ: спешка повышает риск тяжёлого исхода. ' +
-      'Если настаивает — согласись, не торгуйся дальше.'
+      'Если настаивает — согласись, не торгуйся дальше. ' +
+      'Не рапортуй итог до письма месяца.'
     );
   }
   if (ratio > 1.05) {
     return (
-      `Честная оценка ${obj} мес., отвели ${action.expectedMonths}. ` +
-      'Не спорь: будут делать обстоятельнее, риск провала ниже.'
+      `Честная оценка ${obj} мес., отвели ${action.expectedMonths}.${reason} ` +
+      'Не спорь: будут делать обстоятельнее, риск провала ниже. Не рапортуй итог до письма месяца.'
     );
   }
-  return `Работа займёт около ${obj} мес., пока ничего не сделано.`;
+  return `Работа займёт около ${obj} мес.${reason} Не рапортуй итог до письма месяца.`;
 }
 
 function syncErrandFromProcess(domain, action) {
@@ -139,7 +142,7 @@ function unrelatedAttachHint(originPlot) {
 }
 
 function queueAttachHint(domain, plot, action) {
-  if (!plot || !isThreeActPlot(plot) || !engagementAttends(engagementOf(action))) return '';
+  if (!plot || !isStakedStory(plot) || !engagementAttends(engagementOf(action))) return '';
   const head = attendingQueueForPlot(domain, plot)[0];
   if (!head || String(head.id) === String(action.id)) return '';
   return (
@@ -195,7 +198,7 @@ export function rulerReplyCommitError({
           'Такой приказ смертному не исполнить. Поставь commitment=refused, не уточняй, как его выполнить.',
       };
     }
-    if (requestKind !== 'order_long' && requestKind !== 'order_instant') {
+    if (requestKind !== 'order_long') {
       return {
         error: 'clarify_not_order',
         message:
@@ -221,17 +224,6 @@ export function rulerReplyCommitError({
         'Либо declare_process / update_process (commitment=process), ' +
         'либо спроси, чего не хватает, чтобы исполнить (commitment=clarify), ' +
         'либо честно откажи в речи и поставь commitment=refused.',
-    };
-  }
-  if (requestKind === 'order_instant' && commitment === 'none') {
-    return {
-      error: 'instant_ignored',
-      message:
-        'Покровитель велел решение сейчас, а в мире ничего не заведено. ' +
-        'declare_standing_order — если это порядок, который теперь соблюдают всегда; ' +
-        'declare_process на 1 месяц — если это дело с исходом. ' +
-        'Если воля ещё неясна (разовое это или всегда, кого, до какой меры) — спроси, commitment=clarify. ' +
-        'Либо откажи в речи с commitment=refused.',
     };
   }
   if (requestKind === 'order_impossible' && commitment !== 'refused') {
@@ -266,15 +258,16 @@ export function submitReplyTool(turn, character) {
           type: 'string',
           enum: [
             'order_long',
-            'order_instant',
             'order_impossible',
             'question',
             'smalltalk',
             'other',
           ],
           description:
-            'order_long — велел долгое дело (стройка, суд, поход); order_instant — велел решение сейчас ' +
-            '(закон, казнь, обряд, назначение); order_impossible — велел то, чего в этом мире не бывает ' +
+            'order_long — велел работу (стройка, суд, поход, разовое дело — declare_process); ' +
+            'постоянное правило — standing_order, не этот вид. ' +
+            '«Так и оставить / сами справятся» — commitment=none. ' +
+            'order_impossible — велел то, чего в этом мире не бывает ' +
             '(отправить тебя за край или в пустоту, воскресить мёртвых, стереть память, космос, перенос); ' +
             'question — спросил; smalltalk — беседа; other — прочее.',
         },
@@ -896,6 +889,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
           log: ctx.log,
         });
         applyObjectiveSchedule(action, estimated.months, askedRemaining);
+        if (estimated.note) action.durationNote = estimated.note;
         let plot = null;
         if (targetPlot) {
           targetPlot.relatedProcessIds = targetPlot.relatedProcessIds || [];
@@ -915,7 +909,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
         action.plotlineId = plot?.id || null;
         let originPlot = null;
         let rehomed = false;
-        if (plot && isThreeActPlot(plot) && !wantIntel) {
+        if (plot && isStakedStory(plot) && !wantIntel) {
           await judgeProcessAlignment({
             runtime: ctx.runtime,
             domain,
@@ -948,7 +942,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
         await save();
         const hint = rehomed
           ? unrelatedAttachHint(originPlot)
-          : `В речи: принял повеление. ${paceHint(action)} ` +
+          : `В речи: принял повеление. ${paceHint(action, estimated.note)} ` +
             'Не говори «уже строим» и не рапортуй механику; итог придёт с новостями месяца, ' +
             'а не в этой переписке.' +
             queueAttachHint(domain, plot, action);
@@ -1165,12 +1159,13 @@ export function buildRulerTools(domain, storage, character, ctx) {
             detail: action.detail,
           });
           applyObjectiveSchedule(action, estimated.months, remainingMonths);
+          if (estimated.note) action.durationNote = estimated.note;
         }
         syncErrandFromProcess(domain, action);
         if (plotId) {
           const current = findPlotline(domain, action.plotlineId);
           const target = findPlotline(domain, String(plotId));
-          if (current?.kind === 'errand' && target && isThreeActPlot(target)) {
+          if (current?.kind === 'errand' && target && isStakedStory(target)) {
             return toolFail(
               'retarget_needs_new_process',
               'Это поручение снято с истории. Не перевешивай его. revoke_process это дело, затем declare_process с уточнённой целью и plotId той нити.',
@@ -1187,7 +1182,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
         let originPlot = null;
         if (
           plot &&
-          isThreeActPlot(plot) &&
+          isStakedStory(plot) &&
           (goal != null || revised.rewritten || summary || detail || addDetail || plotId)
         ) {
           await judgeProcessAlignment({

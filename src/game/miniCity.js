@@ -1,11 +1,12 @@
 import { statEpithet } from './stats.js';
 import { plotConcerns } from './confluxBoard.js';
-import { activeProcesses, pausedProcesses, processOwnedBy } from './processes.js';
+import { activeProcesses, pausedProcesses, processOwnedBy, processStatAverage, processPaceRatio } from './processes.js';
+import { finishChancePercents } from './rolls.js';
 import { blessManaCost, currentMana } from './mana.js';
 import { listStandingOrders } from './orders.js';
 import { gameDateFromTickIndex, worldDateLabel } from './tickClock.js';
 import { domainHasIslandImage, officerHasPortrait } from '../storage/r2.js';
-import { formatAxesForSpeech, formatLookForSpeech } from './officers.js';
+import { formatAxesForSpeech } from './officers.js';
 
 function clip(text, max = 800) {
   const t = String(text || '').trim();
@@ -79,7 +80,7 @@ function ownProcesses(domain, conflux) {
   return out;
 }
 
-function slimProcess(process, config, { mana = 0 } = {}) {
+function slimProcess(process, config, { mana = 0, domain = null } = {}) {
   const names = (process.linkedStats || [])
     .map((id) => statName(config, id))
     .filter(Boolean);
@@ -102,6 +103,13 @@ function slimProcess(process, config, { mana = 0 } = {}) {
     blessed: Boolean(process.blessed),
     blessCost: cost,
     canBless: active && process.status !== 'paused' && !process.blessed && mana >= cost,
+    finishChances: (() => {
+      const avg = domain ? processStatAverage(domain, process, config) : 50;
+      return finishChancePercents(avg, processPaceRatio(process), {
+        blessed: Boolean(process.blessed),
+        config,
+      });
+    })(),
   };
 }
 
@@ -110,7 +118,7 @@ function officerAgeYears(officer) {
   return Number.isFinite(n) ? Math.max(0, Math.round(n)) : null;
 }
 
-function slimOfficerSlot(officer, process, config, mana) {
+function slimOfficerSlot(officer, process, config, mana, domain) {
   const ageYears = officerAgeYears(officer);
   const gender = officer?.gender === 'female' || officer?.gender === 'male' ? officer.gender : null;
   return {
@@ -121,11 +129,10 @@ function slimOfficerSlot(officer, process, config, mana) {
     hasPortrait: officerHasPortrait(officer),
     portraitUrl: officer.portraitUrl || null,
     nature: clip(officer.nature || '', 800),
-    look: clip(formatLookForSpeech(officer.look, gender), 280),
     temper: officer?.axes ? clip(formatAxesForSpeech(officer.axes, config), 120) : '',
     ageYears,
     gender,
-    process: process ? slimProcess(process, config, { mana }) : null,
+    process: process ? slimProcess(process, config, { mana, domain }) : null,
   };
 }
 
@@ -147,7 +154,7 @@ function collectEvents(domain, conflux, config, mana = 0) {
     return {
       title: clip(plot.title || 'История', 80),
       synopsis: clip(plot.synopsis || '', 600),
-      processes: procs.filter((pr) => related.has(String(pr.id))).map((pr) => slimProcess(pr, config, { mana })),
+      processes: procs.filter((pr) => related.has(String(pr.id))).map((pr) => slimProcess(pr, config, { mana, domain })),
     };
   });
 }
@@ -193,7 +200,7 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
             hasPortrait: officerHasPortrait(officer),
             portraitUrl: officer.portraitUrl || null,
             busy: Boolean(officer.processId),
-            process: proc ? slimProcess(proc, config, { mana }) : null,
+            process: proc ? slimProcess(proc, config, { mana, domain }) : null,
           }
         : null,
     };
@@ -249,7 +256,7 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
       const proc = o.processId
         ? ownProcesses(domain, conflux).find((p) => p.id === o.processId)
         : null;
-      return slimOfficerSlot(o, proc, config, mana);
+      return slimOfficerSlot(o, proc, config, mana, domain);
     }),
     orders,
   };

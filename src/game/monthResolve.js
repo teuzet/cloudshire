@@ -462,14 +462,23 @@ export async function resolveDomainMonth({
   }
 
   // 9. Хранитель: синопсисы по свежей хронике; «история всплыла» → жар считает движок.
-  const kept = await keepStories({
-    config,
-    runtime,
-    domain: working,
-    world,
-    chronicleAdds,
-    log,
-  });
+  const keepIds = new Set(
+    (beats || [])
+      .filter((b) => b?.plotId && (b.reason === 'process_finished' || b.reason === 'auto' || b.reason === 'roll' || b.reason === 'autotick' || b.reason === 'pierce'))
+      .map((b) => b.plotId),
+  );
+  const keepPlots = (working.plotlines || []).filter((p) => keepIds.has(p.id) && p.kind === 'story');
+  const kept = keepPlots.length
+    ? await keepStories({
+        config,
+        runtime,
+        domain: working,
+        world,
+        chronicleAdds,
+        plots: keepPlots,
+        log,
+      })
+    : null;
 
   await maybeRevealCanonicalUnknowns({
     runtime,

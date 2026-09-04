@@ -13,7 +13,7 @@ import {
   applyObjectiveSchedule,
 } from './processes.js';
 import { estimateProcessDuration } from './durationJudge.js';
-import { formatBoardForPrompt, isThreeActPlot } from './plotlines.js';
+import { formatBoardForPrompt, isStakedStory } from './plotlines.js';
 import { ensureErrandForProcess, linkProcessToPlotline, rehomeUnrelatedProcess } from './plotEngine.js';
 import { judgeProcessAlignment, engagementOf } from './plotAlign.js';
 import { qualitativeStatsBrief, qualitativePopulation } from './stats.js';
@@ -148,7 +148,7 @@ async function applyProcess(domain, args, { config, runtime, world, officer, log
     }).plot;
   }
   action.plotlineId = plot?.id || null;
-  if (plot && isThreeActPlot(plot)) {
+  if (plot && isStakedStory(plot)) {
     await judgeProcessAlignment({ runtime, domain, process: action, plot, log });
     if (engagementOf(action) === 'UNRELATED') {
       const moved = rehomeUnrelatedProcess(domain, action, {

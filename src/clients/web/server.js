@@ -19,6 +19,7 @@ import { resolveIslandImage } from '../../game/islandImage.js';
 import { resolveOfficerPortrait } from '../../game/officerImage.js';
 import { domainHasIslandImage, officerHasPortrait } from '../../storage/r2.js';
 import { knownPartnerLore } from '../../game/confluxBoard.js';
+import { deriveOnboardingPhase, normalizeOnboardingDraft } from '../../game/onboarding.js';
 import { genesisTutorialText } from '../../game/progressBar.js';
 import { orderMonthsLeft } from '../../game/orders.js';
 import { miniCityPayload } from '../../game/miniCity.js';
@@ -121,6 +122,41 @@ function chronicleRelations(entry, domain, extra = {}) {
       : null,
     processFinish: finish,
     processFinishLabel: finish ? FINISH_SHORT[finish] || finish : null,
+  };
+}
+
+async function bindingForDomain(storage, domain) {
+  const ownerId = domain?.ownerUserId ? String(domain.ownerUserId) : '';
+  if (ownerId) {
+    const owned = await storage.getUserBinding(ownerId);
+    if (owned) return owned;
+  }
+  const all = await storage.listUserBindings();
+  return all.find((b) => String(b.domainId || '') === String(domain?.id || '')) || null;
+}
+
+function onboardingArchive(binding, { userId = null, domainId = null, generating = false } = {}) {
+  const draft = normalizeOnboardingDraft(binding?.onboarding);
+  const uid = userId || binding?.userId || null;
+  return {
+    userId: uid ? String(uid) : null,
+    domainId: domainId || binding?.domainId || null,
+    channel: binding?.channel || null,
+    generating: Boolean(generating),
+    phase: deriveOnboardingPhase(draft, { generating }),
+    mode: draft.mode || null,
+    cityName: draft.cityName || null,
+    cityNameApproved: Boolean(draft.cityNameApproved),
+    patronName: draft.patronName || null,
+    patronNameApproved: Boolean(draft.patronNameApproved),
+    pitchedName: draft.pitchedName || null,
+    messageCount: (draft.messages || []).length,
+    messages: (draft.messages || []).map((m) => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      content: String(m.content || ''),
+      at: m.at || null,
+      kind: m.kind || 'onboarding',
+    })),
   };
 }
 
@@ -721,6 +757,58 @@ export function createWebServer({ config, app, runtime, storage }) {
       const domain = await app.inspectDomain(req.params.id);
       if (!domain) return res.status(404).json({ error: 'not found' });
       res.json(domain);
+    } catch (err) {
+      req.log?.error('http.error', { error: err.message });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  server.get('/api/domains/:id/image', async (req, res) => {
+    try {
+      const domain = await app.inspectDomain(req.params.id);
+      if (!domainHasIslandImage(domain)) return res.status(404).end();
+      if (domain.imageUrl) return res.redirect(domain.imageUrl);
+      const picture = await resolveIslandImage({ domain, config });
+      if (!picture?.abs) return res.status(404).end();
+      res.type('png').sendFile(picture.abs);
+    } catch (err) {
+      if (err.code === 'ENOENT') return res.status(404).end();
+      req.log?.error('http.error', { error: err.message });
+      res.status(500).end();
+    }
+  });
+
+  server.get('/api/domains/:id/onboarding', async (req, res) => {
+    try {
+      const domain = await app.inspectDomain(req.params.id);
+      if (!domain) return res.status(404).json({ error: 'not found' });
+      const binding = await bindingForDomain(storage, domain);
+      const userId = binding?.userId || domain.ownerUserId;
+      res.json(
+        onboardingArchive(binding, {
+          userId,
+          domainId: domain.id,
+          generating: userId ? app.isGenerating(userId) : false,
+        }),
+      );
+    } catch (err) {
+      req.log?.error('http.error', { error: err.message });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  server.get('/api/users/:userId/onboarding', async (req, res) => {
+    try {
+      const userId = String(req.params.userId || '').trim();
+      if (!userId) return res.status(400).json({ error: 'userId required' });
+      const binding = await storage.getUserBinding(userId);
+      if (!binding) return res.status(404).json({ error: 'not found' });
+      res.json(
+        onboardingArchive(binding, {
+          userId,
+          generating: app.isGenerating(userId),
+        }),
+      );
     } catch (err) {
       req.log?.error('http.error', { error: err.message });
       res.status(500).json({ error: err.message });

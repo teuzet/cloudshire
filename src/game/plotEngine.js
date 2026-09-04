@@ -137,7 +137,11 @@ export function attendingQueueForPlot(domain, plot) {
 export function rehomeUnrelatedProcess(domain, process, { tick = null, config = null } = {}) {
   if (!process || process.intel) return { plot: null, rehomed: false, originPlot: null };
   const attached = plotsForProcess(domain, process.id);
-  if (engagementAttends(engagementOf(process))) {
+  const engagement = engagementOf(process);
+  if (engagement == null) {
+    return { plot: attached[0] || findPlotline(domain, process.plotlineId) || null, rehomed: false, originPlot: null };
+  }
+  if (engagementAttends(engagement)) {
     return { plot: attached[0] || findPlotline(domain, process.plotlineId) || null, rehomed: false, originPlot: null };
   }
     const stories = attached.filter((p) => p.kind === 'story' && !isFreeformPlot(p));
@@ -345,8 +349,9 @@ export function planBeats({
     if (!outcome?.mustNarrate) continue;
     if (outcome.intel) continue;
     for (const plot of plotsForProcess(domain, outcome.processId)) {
-      if (isStakedStory(plot) || isFreeformPlot(plot)) continue;
-      if (isThreeActPlot(plot) && !engagementAttends(outcome.plotEngagement || engagementOf(findProcessById(domain, outcome.processId)))) {
+      if (isFreeformPlot(plot) && !isStakedStory(plot)) continue;
+      const relation = outcome.plotEngagement || engagementOf(findProcessById(domain, outcome.processId));
+      if ((isThreeActPlot(plot) || isStakedStory(plot)) && relation && !engagementAttends(relation)) {
         continue;
       }
       if (isThreeActPlot(plot) && plot.ending) continue;
@@ -402,7 +407,7 @@ export function planBeats({
   // Трёхтактные: только если нет ни одного активного дела; без окраски.
   for (const plot of domain.plotlines) {
     if (plot.kind !== 'story') continue;
-    if (isStakedStory(plot) || isFreeformPlot(plot)) continue;
+    if (isFreeformPlot(plot) && !isStakedStory(plot)) continue;
     if (taken.has(plot.id)) continue;
     if (slotsUsed >= cap) break;
     if (isThreeActPlot(plot) && plotHasAttendingProcess(domain, plot)) continue;

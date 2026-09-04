@@ -62,6 +62,36 @@ export function mergePlayerDirectives(base, patch = {}) {
   });
 }
 
+const CANON_PREFIXES = {
+  cityName: /^имя города\b/i,
+  patronName: /^имя покровителя\b/i,
+  patronGender: /^пол покровителя\b/i,
+};
+
+function replacePrefixed(list, re, line) {
+  const filtered = (list || []).filter((x) => !re.test(x));
+  return line ? [...filtered, line] : filtered;
+}
+
+/** Имя / пол / канон — текущие значения: смена затирает старую строку. */
+export function upsertCanonicalDirectives(dirs, { cityName, patronName, patronGender } = {}) {
+  const next = normalizePlayerDirectives(dirs);
+  if (cityName) {
+    next.required = replacePrefixed(next.required, CANON_PREFIXES.cityName, `имя города: ${cityName}`);
+  }
+  if (patronName) {
+    next.required = replacePrefixed(next.required, CANON_PREFIXES.patronName, `имя покровителя: ${patronName}`);
+  }
+  if (patronGender === 'male' || patronGender === 'female') {
+    next.required = replacePrefixed(
+      next.required,
+      CANON_PREFIXES.patronGender,
+      `пол покровителя: ${patronGender === 'female' ? 'женщина' : 'мужчина'}`,
+    );
+  }
+  return next;
+}
+
 export function addDirective(dirs, kind, text) {
   const next = normalizePlayerDirectives(dirs);
   const line = clipLine(text);

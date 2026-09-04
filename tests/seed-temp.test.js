@@ -39,15 +39,17 @@ test('конфиг посева: общий max, сдвиги по источн�
   assert.equal(applySeedDelta(10.4, 'void', 'idle', parsed), 10.5);
 });
 
-test('default.yaml совпадает с калибровкой: 6 месяцев на старте → P=1', () => {
+test('default.yaml совпадает с калибровкой: поручение стартует с 10', () => {
   const seed = plotConfig(fileCfg).seed;
   assert.equal(seed.max, 10);
   assert.equal(seed.start, 5);
+  assert.equal(seed.errandStart, 10);
   assert.equal(seed.errand.miss, 2);
   assert.equal(seed.errand.seed, -6);
   assert.equal(seed.errand.idle, 1);
-  assert.equal(errandSeedChance(seed.start, 6, seed), 1);
-  assert.equal(errandSeedChance(seed.start, 3, seed), 0.5);
+  assert.equal(errandSeedChance(seed.errandStart, 1, seed), 1 / 3);
+  assert.equal(errandSeedChance(seed.errandStart, 2, seed), 2 / 3);
+  assert.equal(errandSeedChance(seed.errandStart, 3, seed), 1);
   assert.equal(worldSeedChance(seed.start, seed), 0.5);
   assert.equal(seed.voidGenesisChance, 0.5);
 });
@@ -69,6 +71,6 @@ test('домен нормализует дробную температуру в
   assert.equal(domain.state.seedTemp.errand, 5);
   const fresh = { state: emptyState() };
   normalizeDomain(fresh);
-  assert.deepEqual(fresh.state.seedTemp, { chronicle: 5, void: 5, errand: 5 });
+  assert.deepEqual(fresh.state.seedTemp, { chronicle: 5, void: 5, errand: 10 });
   assert.deepEqual(normalizeSeedTemp(null).errand, 5);
 });

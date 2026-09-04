@@ -13,7 +13,7 @@ import {
   applyPatronName,
   inferRulerGender,
 } from './models.js';
-import { formatPlayerBrief } from './onboarding.js';
+import { formatPlayerBrief, substituteCityName } from './onboarding.js';
 import { seedOpeningPlots } from './storyteller.js';
 import { ensureCityEntities } from './cityEntities.js';
 import {
@@ -29,7 +29,7 @@ import { toolFail } from '../agents/toolResult.js';
 import { formatWorldContractForPrompt } from './worldContract.js';
 import { formatFrozenConceptForPrompt, openingLoreFromConcept } from './genesisConcept.js';
 import { axesSnapshotTags, normalizeAxesState } from './genesisAxes.js';
-import { generateOfficers, requestCityStrengths } from './officers.js';
+import { generateOfficers, requestCityStrengths, formatOfficerIntroSpeech } from './officers.js';
 
 function aspectDefs(config) {
   return config.genesis.aspects || [];
@@ -154,6 +154,7 @@ async function generateCore({
   population,
   forcedName,
   forcedPatronName = null,
+  forcedPatronGender = null,
   playerBrief,
   frozenConcept = null,
   onProgress,
@@ -168,6 +169,8 @@ async function generateCore({
       ? String(forcedName).trim()
       : null;
   const lockedPatron = forcedPatronName ? String(forcedPatronName).trim() : null;
+  const lockedGender =
+    forcedPatronGender === 'female' || forcedPatronGender === 'male' ? forcedPatronGender : null;
   const briefText = formatPlayerBrief(playerBrief);
 
   const tools = [
@@ -233,6 +236,7 @@ async function generateCore({
         }
 
         let lore = Array.isArray(fixed.openingLore) ? fixed.openingLore.filter(Boolean) : [];
+        lore = lore.map((line) => substituteCityName(line, lockedName || fixed.domainName));
         while (lore.length < loreMin) {
           lore.push(`Факт основания ${lore.length + 1}: город помнит знак покровителя.`);
         }
@@ -285,7 +289,7 @@ async function generateCore({
     cosmologyBlock(),
     `Население (внутреннее): ${population}`,
     lockedName
-      ? `Имя города УЖЕ выбрано: «${lockedName}» — поле domainName = точно это.`
+      ? `Имя города УЖЕ выбрано игроком: «${lockedName}» — поле domainName = точно это. Это данное, не предмет космологии: не отвергай из-за звучания.`
       : 'Имя города — придуманное, кириллицей, не русское и не земное.',
     '',
     'ПОЖЕЛАНИЯ ИГРОКА:',
@@ -300,12 +304,17 @@ async function generateCore({
         ].join('\n')
       : `openingLore: минимум ${loreMin} коротких ПОСТОЯННЫХ фактов (не новости месяца).`,
     '',
-    `openingLore: минимум ${loreMin} коротких строк.`,
+    `openingLore: минимум ${loreMin} коротких строк. Если в концепте есть %cityName — подставь настоящее имя в нужном падеже, плейсхолдер не оставляй.`,
     'Учти изоляцию острова: без паломников/торговцев «из соседних регионов».',
     '',
     lockedPatron
       ? [
-          `Имя покровителя УЖЕ дано: «${lockedPatron}». Храм и культ города — его.`,
+          `Имя покровителя УЖЕ дано: «${lockedPatron}». Храм и культ города — его. Это данное, не отвергай из-за звучания.`,
+          lockedGender === 'female'
+            ? 'Пол покровителя: женщина. Пиши «покровительница», женский род согласования.'
+            : lockedGender === 'male'
+              ? 'Пол покровителя: мужчина. Пиши «покровитель», мужской род согласования.'
+              : 'Род по полу, если известен; иначе нейтрально по имени.',
           'greeting — ПЕРВАЯ РЕПЛИКА правителя к этому богу по имени:',
           `- Обратись «${lockedPatron}». Не проси, как звать: имя уже известно.`,
           '- 1–3 коротких предложения, живая речь от первого лица.',
@@ -560,7 +569,21 @@ async function generateCityBrief({ runtime, domain, log }) {
       log,
       scene: 'city_brief',
       domainId: domain.id,
-      extraSystem: `Город «${domain.name}».\n${String(domain.description || '').trim()}`,
+          extraSystem: [
+            `Город «${domain.name}».`,
+            domain.state?.patronName
+              ? `Покровитель: «${domain.state.patronName}»${
+                  domain.state.patronGender === 'female'
+                    ? ', женщина'
+                    : domain.state.patronGender === 'male'
+                      ? ', мужчина'
+                      : ''
+                }.`
+              : '',
+            String(domain.description || '').trim(),
+          ]
+            .filter(Boolean)
+            .join('\n'),
       userMessages: [
         {
           role: 'user',
@@ -591,6 +614,7 @@ export async function generateDomain({
   onProgress,
   forcedName = null,
   forcedPatronName = null,
+  forcedPatronGender = null,
   frozenConcept = null,
   axes = null,
   playerDirectives = null,
@@ -623,6 +647,7 @@ export async function generateDomain({
     population,
     forcedName: lockedName,
     forcedPatronName,
+    forcedPatronGender,
     playerBrief,
     frozenConcept,
     onProgress,
@@ -726,11 +751,16 @@ export async function generateDomain({
   syncFaith(domain);
 
   if (forcedPatronName) {
-    applyPatronName(domain, forcedPatronName, { world, allowReplace: true });
+    applyPatronName(domain, forcedPatronName, {
+      world,
+      allowReplace: true,
+      gender: forcedPatronGender || null,
+    });
   }
 
   await onProgress?.('сановники города');
   await generateOfficers({ domain, world, config, runtime, log });
+  domain._officerIntro = formatOfficerIntroSpeech(domain);
   await storage.saveWorld(world);
 
   await onProgress?.('бриф города');
@@ -738,15 +768,14 @@ export async function generateDomain({
 
   await storage.saveDomain(domain);
   const prev = await storage.getUserBinding(String(ownerUserId));
-  await storage.saveUserBinding({
-    ...(prev || {}),
-    userId: String(ownerUserId),
-    worldId: world.id,
-    domainId: domain.id,
-    channel: channel || prev?.channel || null,
-    telegramChatId: prev?.telegramChatId ?? null,
-    createdAt: prev?.createdAt || new Date().toISOString(),
-  });
+  await storage.saveUserBinding(
+    userBindingAfterGenesis(prev, {
+      ownerUserId,
+      worldId: world.id,
+      domainId: domain.id,
+      channel,
+    }),
+  );
 
   domain._greeting =
     core.greeting && looksLikePatronAddress(core.greeting, forcedPatronName) && !looksLikeTouristGreeting(core.greeting)
@@ -784,6 +813,23 @@ export function inferChannel(ownerUserId, explicit = null) {
   if (id.startsWith('playtest')) return 'playtest';
   if (id.startsWith('cli')) return 'cli';
   return 'unknown';
+}
+
+/** Binding после генезиса: архив чата оставляем, фазу generating снимаем. */
+export function userBindingAfterGenesis(prev, { ownerUserId, worldId, domainId, channel } = {}) {
+  const onboarding = prev?.onboarding
+    ? { ...prev.onboarding, phase: 'done' }
+    : null;
+  return {
+    ...(prev || {}),
+    userId: String(ownerUserId),
+    worldId,
+    domainId,
+    channel: channel || prev?.channel || null,
+    telegramChatId: prev?.telegramChatId ?? null,
+    onboarding,
+    createdAt: prev?.createdAt || new Date().toISOString(),
+  };
 }
 
 export function domainSummary(domain) {

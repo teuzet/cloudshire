@@ -10,6 +10,7 @@ const DEFAULT_DELTAS = { seed: -6, miss: 2, idle: 1 };
 export const DEFAULT_SEED = {
   max: 10,
   start: 5,
+  errandStart: 10,
   worldLiveBelow: 3,
   errandDurationDiv: 3,
   voidGenesisChance: 0.5,
@@ -39,9 +40,11 @@ function parseDeltas(raw, fallback = DEFAULT_DELTAS) {
 export function parseSeedConfig(raw = {}) {
   const max = Math.max(0.001, num(raw.max, DEFAULT_SEED.max));
   const start = clamp(num(raw.start, DEFAULT_SEED.start), 0, max);
+  const errandStart = clamp(num(raw.errandStart ?? raw.errand?.start, DEFAULT_SEED.errandStart), 0, max);
   return {
     max,
     start,
+    errandStart,
     worldLiveBelow: Math.max(0, num(raw.worldLiveBelow, DEFAULT_SEED.worldLiveBelow)),
     errandDurationDiv: Math.max(0.001, num(raw.errandDurationDiv, DEFAULT_SEED.errandDurationDiv)),
     voidGenesisChance: clamp(num(raw.voidGenesisChance, DEFAULT_SEED.voidGenesisChance), 0, 1),
@@ -65,8 +68,10 @@ export function clampSeedTemp(value, cfg = DEFAULT_SEED) {
 }
 
 export function emptySeedTemp(cfg = DEFAULT_SEED) {
-  const start = clampSeedTemp(cfg.start, cfg);
-  return { chronicle: start, void: start, errand: start };
+  const parsed = cfg.errandStart != null || cfg.start != null ? parseSeedConfig(cfg) : DEFAULT_SEED;
+  const start = clampSeedTemp(parsed.start ?? cfg.start, parsed);
+  const errandStart = clampSeedTemp(parsed.errandStart ?? parsed.start, parsed);
+  return { chronicle: start, void: start, errand: errandStart };
 }
 
 export function normalizeSeedTemp(raw, cfg = DEFAULT_SEED) {

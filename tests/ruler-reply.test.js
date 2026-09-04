@@ -17,12 +17,12 @@ test('приказ без действия — ошибка; уточняющи�
   });
   assert.equal(asked, null);
 
-  const instant = rulerReplyCommitError({
-    requestKind: 'order_instant',
-    commitment: 'clarify',
-    text: 'Закон навсегда или только на этот месяц?',
+  const leaveIt = rulerReplyCommitError({
+    requestKind: 'smalltalk',
+    commitment: 'none',
+    text: 'Пусть сами справятся с канавой.',
   });
-  assert.equal(instant, null);
+  assert.equal(leaveIt, null);
 });
 
 test('уточнение без вопроса или после уже заведённого дела — нельзя', () => {

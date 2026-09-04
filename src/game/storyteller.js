@@ -2575,7 +2575,7 @@ async function runStoryKeep({
           '',
           'Открытые истории:',
           plotBlocks,
-          otherLines.length ? `\nПрочие записи месяца:\n${otherLines.join('\n')}` : null,
+          null,
         ]
           .filter(Boolean)
           .join('\n'),
@@ -2603,10 +2603,16 @@ export async function keepStories({
   domain,
   world,
   chronicleAdds = [],
+  plots: onlyPlots = null,
   log: parentLog,
 }) {
-  const plots = (domain.plotlines || []).filter((p) => p.kind !== 'order');
+  const requested = Array.isArray(onlyPlots) ? onlyPlots : null;
+  const plots = (requested || domain.plotlines || []).filter((p) => p && p.kind !== 'order');
   if (!plots.length) return null;
+  const keepIds = new Set(plots.map((p) => p.id));
+  chronicleAdds = (chronicleAdds || []).filter((f) =>
+    (f.relatedPlotlineIds || []).some((id) => keepIds.has(id)),
+  );
   const log = (parentLog || getLogger()).child({ scope: 'storyteller.keep', domainId: domain.id });
   return runStoryKeep({
     agentId: 'storyKeep',

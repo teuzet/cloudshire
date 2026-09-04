@@ -7,6 +7,7 @@
   --accent: #c4a35a;
   --user: #2f4a3c;
   --bot: #2a3340;
+  --danger: #c45a5a;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
 }
 
@@ -22,14 +23,12 @@ body {
   min-height: 100vh;
 }
 
+.hidden { display: none !important; }
+
 .layout {
   display: grid;
-  grid-template-columns: 320px 1fr;
-  min-height: 100vh;
-}
-
-.layout.admin {
   grid-template-columns: 300px 1fr;
+  min-height: 100vh;
 }
 
 .main {
@@ -37,64 +36,6 @@ body {
   flex-direction: column;
   min-height: 100vh;
   min-width: 0;
-}
-
-.feed-wrap {
-  border-bottom: 1px solid var(--line);
-  padding: 0.75rem 1rem 0.5rem;
-  background: rgba(0, 0, 0, 0.15);
-}
-
-.feed-wrap h2 {
-  font-size: 0.85rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  margin: 0 0 0.4rem;
-}
-
-.messages.compact {
-  flex: none;
-  max-height: 160px;
-  padding: 0.35rem 0 0.75rem;
-  gap: 0.45rem;
-}
-
-.messages.dialog {
-  flex: none;
-  max-height: min(42vh, 420px);
-  padding: 0.35rem 0 0.75rem;
-  gap: 0.45rem;
-}
-
-.messages.dialog .bubble,
-.messages.compact .bubble {
-  max-width: 100%;
-  font-size: 0.85rem;
-  padding: 0.5rem 0.7rem;
-}
-
-.grids {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
-  padding: 1rem;
-}
-
-.grids section h2 {
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
-  margin: 0 0 0.35rem;
-}
-
-.grids .span2 {
-  grid-column: 1 / -1;
-}
-
-.grids .panel.tall {
-  max-height: 280px;
 }
 
 .side {
@@ -108,7 +49,7 @@ body {
   font-family: "IBM Plex Serif", Georgia, serif;
   font-weight: 600;
   font-size: 1.4rem;
-  margin: 0 0 1rem;
+  margin: 0 0 0.35rem;
   color: var(--accent);
 }
 
@@ -120,6 +61,9 @@ body {
   margin: 1rem 0 0.4rem;
 }
 
+.muted { color: var(--muted); }
+.small { font-size: 0.75rem; }
+
 label {
   display: block;
   font-size: 0.85rem;
@@ -127,11 +71,9 @@ label {
   margin-bottom: 0.75rem;
 }
 
-input, button {
-  font: inherit;
-}
+input, button { font: inherit; }
 
-label input, label select, .composer input {
+label input, label select {
   width: 100%;
   margin-top: 0.35rem;
   padding: 0.55rem 0.7rem;
@@ -139,6 +81,17 @@ label input, label select, .composer input {
   border-radius: 8px;
   background: var(--panel);
   color: var(--ink);
+}
+
+select {
+  width: 100%;
+  margin-bottom: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
 }
 
 .row {
@@ -159,21 +112,15 @@ button {
 button:hover { border-color: var(--accent); }
 button:disabled {
   opacity: 0.55;
-  cursor: wait;
+  cursor: default;
 }
 button.busy {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-button.accent {
-  background: #3a3220;
-  border-color: var(--accent);
-  color: #f3e6c4;
+  cursor: wait;
 }
 
 button.danger {
   background: #3a2020;
-  border-color: #c45a5a;
+  border-color: var(--danger);
   color: #f3c4c4;
 }
 
@@ -183,9 +130,7 @@ button.danger {
   border-top: 1px dashed #6a3030;
 }
 
-.danger-zone h2 {
-  color: #c45a5a;
-}
+.danger-zone h2 { color: var(--danger); }
 
 .danger-hint {
   font-size: 0.75rem;
@@ -193,60 +138,295 @@ button.danger {
   line-height: 1.35;
 }
 
-.danger-zone .danger {
-  width: 100%;
-}
+.danger-actions { margin-bottom: 0; }
+.danger-actions .danger { flex: 1; }
 
-.panel {
+.status-card {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 0.6rem;
+  padding: 0.7rem 0.8rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.status-card .date {
+  font-family: "IBM Plex Serif", Georgia, serif;
+  color: var(--accent);
+  margin: 0 0 0.25rem;
+}
+
+.status-card .tick-flag {
+  display: inline-block;
+  margin-top: 0.35rem;
   font-size: 0.72rem;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 220px;
-  overflow: auto;
-  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
 }
 
-.panel.tall {
-  max-height: 320px;
-}
-
-select {
-  width: 100%;
-  margin-bottom: 0.5rem;
-  padding: 0.45rem 0.55rem;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
-  color: var(--ink);
-  font: inherit;
-}
-
-label.muted input[readonly] {
-  opacity: 0.85;
-}
-
-.chat {
+.conflux-list {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  gap: 0.45rem;
+  margin-bottom: 0.75rem;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.conflux-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.conflux-card strong { display: block; margin: 0.1rem 0; }
+
+/* ---------- шапка города ---------- */
+
+.city-head {
+  border-bottom: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.city-image-wrap {
+  margin: 0.75rem 1rem 0;
+}
+
+.city-image {
+  display: block;
+  width: 100%;
+  max-height: 280px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.city-image-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 140px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  background: var(--panel);
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+}
+
+.city-head-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.75rem 1rem 0.35rem;
+}
+
+.city-head-bar h2 {
+  font-family: "IBM Plex Serif", Georgia, serif;
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 0 0 0.2rem;
+}
+
+.city-head-bar p { margin: 0; font-size: 0.82rem; }
+
+.chat-actions { margin: 0; flex-wrap: wrap; justify-content: flex-end; }
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.35rem 1rem 0.85rem;
+}
+
+.stat {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.78rem;
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+
+.stat b { font-weight: 600; }
+.stat .val { color: var(--accent); }
+
+/* ---------- вкладки ---------- */
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.55rem 1rem 0;
+  border-bottom: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.tab {
+  border-color: transparent;
+  color: var(--muted);
+  background: transparent;
+  border-radius: 8px 8px 0 0;
+  padding: 0.4rem 0.7rem;
+}
+
+.tab.active {
+  color: var(--ink);
+  border-color: var(--line);
+  border-bottom-color: var(--bg);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--accent);
+}
+
+.tab-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.ins-block { margin-bottom: 1.15rem; }
+
+.ins-block h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.ins-block ul { margin: 0; padding-left: 1.15rem; }
+
+.ins-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.ins-card.dim { opacity: 0.55; }
+.ins-card h4 { margin: 0 0 0.2rem; font-size: 0.95rem; }
+.ins-card p { margin: 0.35rem 0 0; }
+
+.person-card {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.person-card img,
+.person-fallback {
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #1b2128;
+  border: 1px solid var(--line);
+}
+
+.person-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-align: center;
+  padding: 0.3rem;
+}
+
+.pre { white-space: pre-wrap; word-break: break-word; }
+
+.kvs { display: grid; gap: 0.2rem; }
+
+.kv {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px dotted var(--line);
+  padding-bottom: 0.15rem;
+}
+
+.kv span:last-child { text-align: right; }
+
+.meter {
+  height: 6px;
+  background: var(--line);
+  border-radius: 99px;
+  overflow: hidden;
+  margin: 0.2rem 0 0.1rem;
+}
+
+.meter > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: inherit;
+}
+
+/* ---------- окна чатов ---------- */
+
+.chat-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+}
+
+.chat-window {
+  width: min(760px, 100%);
+  height: min(82vh, 740px);
+  background: #171c22;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+}
+
+.chat-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.chat-top strong {
+  display: block;
+  font-family: "IBM Plex Serif", Georgia, serif;
+  color: var(--accent);
 }
 
 .messages {
   flex: 1;
   overflow: auto;
-  padding: 1.25rem;
+  padding: 1rem 1.15rem;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.7rem;
 }
 
 .bubble {
-  max-width: 70%;
-  padding: 0.75rem 0.9rem;
+  max-width: 78%;
+  padding: 0.7rem 0.85rem;
   border-radius: 12px;
   line-height: 1.45;
   white-space: pre-wrap;
@@ -271,19 +451,9 @@ label.muted input[readonly] {
   margin-bottom: 0.25rem;
 }
 
-.composer {
-  display: flex;
-  gap: 0.5rem;
-  padding: 1rem;
-  border-top: 1px solid var(--line);
-  background: rgba(0, 0, 0, 0.25);
-}
-
-.composer input { flex: 1; margin-top: 0; }
-
 @media (max-width: 860px) {
   .layout { grid-template-columns: 1fr; }
-  .side { border-right: none; border-bottom: 1px solid var(--line); max-height: 40vh; }
-  .bubble { max-width: 90%; }
-  .grids { grid-template-columns: 1fr; }
+  .side { border-right: none; border-bottom: 1px solid var(--line); max-height: 42vh; }
+  .city-head-bar { flex-direction: column; }
+  .bubble { max-width: 92%; }
 }

@@ -151,6 +151,16 @@ export function endingsOfKind(plot, kind) {
   return (plot?.endings || []).filter((e) => e.kind === want);
 }
 
+/** Тип концовки при автотике / провале: успехи = depth − failCount. */
+export function autotickCloseKind(plot, rng = Math.random) {
+  const depth = Math.max(1, Number(plot?.maxDepth) || defaultFreeformMaxDepth(plot?.gravity));
+  const fails = Math.max(0, Number(plot?.failCount) || 0);
+  const successes = Math.max(0, depth - fails);
+  if (successes <= 0) return 'BAD_ENDING';
+  if (fails <= 0) return 'NEUTRAL_ENDING';
+  return rng() < successes / depth ? 'NEUTRAL_ENDING' : 'BAD_ENDING';
+}
+
 export function pickEndingsForPack(plot, kind, n = 3) {
   const want = String(kind || '').toUpperCase();
   let pool = endingsOfKind(plot, kind);

@@ -14,7 +14,7 @@ import {
   PLOT_ENDING_MAX,
   PLOT_HOOK_MAX,
 } from '../src/game/plotlines.js';
-import { advanceWorldMonths, normalizeFinish, freeformConfig, openStoryTitlesLine, formatFreeformGravityForPrompt, formatFreeformChronicleSeed, formatBrainstormCandidateForPrompt, parseFreeformGravity, parseFreeformUrgency, FREEFORM_GRAVITY, clampFreeformCountdown, createFreeformPlot, sampleFreeformMaxDepth, advanceFreeformDepth, formatFreeformDepth, plotCardForPrompt, applyFreeformProgress, freeformTickDecision, rollFreeformCountdown, maxFailsForGravity } from '../src/game/freeform.js';
+import { advanceWorldMonths, normalizeFinish, freeformConfig, openStoryTitlesLine, formatFreeformGravityForPrompt, formatFreeformChronicleSeed, formatBrainstormCandidateForPrompt, parseFreeformGravity, parseFreeformUrgency, FREEFORM_GRAVITY, clampFreeformCountdown, createFreeformPlot, sampleFreeformMaxDepth, advanceFreeformDepth, formatFreeformDepth, plotCardForPrompt, applyFreeformProgress, freeformTickDecision, autotickCloseKind, rollFreeformCountdown, maxFailsForGravity } from '../src/game/freeform.js';
 import { parseFreeformPick, formatFreeformVariants, formatFreeformCardJudgeCase, formatFreeformCardJudgeRepair, parseFreeformPackReview, FREEFORM_PACK_JUDGE_CODES } from '../src/game/freeformJudge.js';
 import { normalizeSeedBlank, pickFreeformSeedAxes, pickFreeformSeedAxisPairs, formatFreeformSeedAxesForPrompt, formatFreeformSeedAxisPairsForPrompt } from '../src/game/freeformArchitect.js';
 import { listLegalBeatDynamics, pickFreeformBeatDynamics, formatBeatDynamicsForPrompt } from '../src/game/freeformDynamics.js';
@@ -926,6 +926,17 @@ test('urgency enum, провалы и решение хода', () => {
   applyFreeformProgress(sit, { autotick: true });
   assert.equal(sit.failCount, 1);
   assert.equal(freeformTickDecision(sit, { autotick: true }).kind, 'closeBad');
+});
+
+test('автотик/провал: тип концовки по отношению успехов к глубине', () => {
+  assert.equal(autotickCloseKind({ maxDepth: 3, failCount: 3 }), 'BAD_ENDING');
+  assert.equal(autotickCloseKind({ maxDepth: 3, failCount: 0 }), 'NEUTRAL_ENDING');
+  const tones = new Set();
+  for (let i = 0; i < 40; i += 1) {
+    tones.add(autotickCloseKind({ maxDepth: 3, failCount: 2 }, () => i / 40));
+  }
+  assert.ok(tones.has('NEUTRAL_ENDING'));
+  assert.ok(tones.has('BAD_ENDING'));
 });
 
 test('DIRECT успех на maxDepth являет связанную концовку и закрывает', async () => {

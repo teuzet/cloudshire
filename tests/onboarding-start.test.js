@@ -23,6 +23,8 @@ import {
   occupiedNameList,
   isCityNameOccupied,
   validateCityNameAvailable,
+  validateCityName,
+  validatePatronName,
   canStartOnboarding,
   ONBOARDING_NEED_NAME_NOTE,
 } from '../src/game/onboarding.js';
@@ -67,6 +69,8 @@ test('согласие на питч — да/начинаем/готов, не 
   assert.equal(playerConsentsToStart('да', pitched), true);
   assert.equal(playerConsentsToStart('да, Сарвел', pitched), true);
   assert.equal(playerConsentsToStart('создавай', pitched), true);
+  assert.equal(playerConsentsToStart('запускай', pitched), true);
+  assert.equal(playerConsentsToStart('запускаем', pitched), true);
   assert.equal(playerConsentsToStart('готов', pitched), true);
   assert.equal(playerConsentsToStart('я готов', pitched), true);
   assert.equal(playerConsentsToStart('Давай быстрый старт', pitched), false);
@@ -195,7 +199,7 @@ test('оси без концепта — не питч; карточка не в
   const card = formatOnboardingStatusCard(draft, { genesis: { axes: [] } });
   assert.match(card, /Город ещё не предложен/);
   assert.doesNotMatch(card, /Имя уже названо/);
-  assert.match(card, /концепт=нет/);
+  assert.match(card, /"concept": "нет"/);
 });
 
 test('карточка questions держит агента на следующей оси', () => {
@@ -559,4 +563,37 @@ test('отказ инструмента дописывается в речь и�
 test('онбординг без канона жреца и foreign', () => {
   const cfg = loadConfig();
   assert.deepEqual(cfg.agents.onboarding.canon, ['world']);
+});
+
+test('имена игрока: Стоунхейвен и Сарай проходят; запятая в имени бога ок', () => {
+  assert.equal(validateCityName('Стоунхейвен').ok, true);
+  assert.equal(validateCityName('Сарай').ok, true);
+  assert.equal(validateCityName('город').ok, false);
+  assert.equal(validatePatronName('Ксарр, Шепот Листьев').ok, true);
+  assert.equal(validatePatronName('Ксарр, Шепот Листьев').name, 'Ксарр, Шепот Листьев');
+});
+
+test('карточка хода — полный JSON осей и директив', () => {
+  const cfg = loadConfig();
+  const draft = emptyOnboardingDraft();
+  draft.mode = 'brief';
+  draft.axes = { climateBand: { value: 'WARM', source: 'player' } };
+  draft.patronName = 'Сайра';
+  draft.patronNameApproved = true;
+  draft.patronGender = 'male';
+  const card = formatOnboardingStatusCard(draft, cfg);
+  assert.match(card, /"landscapeForm"/);
+  assert.match(card, /"climateBand"/);
+  assert.match(card, /"required"/);
+  assert.match(card, /"preferred"/);
+  assert.match(card, /"forbidden"/);
+  assert.match(card, /"gender": "male"/);
+  assert.doesNotMatch(card, /Следующая:/);
+});
+
+test('unknown_axis игроку не показывают', () => {
+  const hidden = appendOnboardingToolErrors('Ось записана.', [
+    { name: 'set_axis', result: { ok: false, error: 'unknown_axis', agentMessage: 'Нет оси «economy».' } },
+  ]);
+  assert.equal(hidden, 'Ось записана.');
 });

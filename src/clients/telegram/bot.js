@@ -28,9 +28,23 @@ function splitTelegramMessage(text) {
   return chunks;
 }
 
-async function sendChunks(bot, chatId, text) {
-  for (const chunk of splitTelegramMessage(text)) {
-    await bot.sendMessage(chatId, chunk);
+function toOnboardingTelegramHtml(text) {
+  let s = String(text || '');
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  s = s.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<i>$1</i>');
+  s = s.replace(/&(?!(?:amp|lt|gt|quot|#\d+|#x[\da-f]+);)/gi, '&amp;');
+  s = s.replace(/</g, (match, offset, whole) => {
+    const rest = whole.slice(offset);
+    if (/^<\/?(?:b|i|em|strong)>/i.test(rest)) return match;
+    return '&lt;';
+  });
+  return s;
+}
+
+async function sendChunks(bot, chatId, text, { html = false } = {}) {
+  const opts = html ? { parse_mode: 'HTML' } : undefined;
+  for (const chunk of splitTelegramMessage(html ? toOnboardingTelegramHtml(text) : text)) {
+    await bot.sendMessage(chatId, chunk, opts);
   }
 }
 
@@ -203,30 +217,34 @@ export function startTelegramBot({ config, app, storage, runTick }) {
 
   void loadPersistedChats();
 
-  app.onOutbound(async ({ userId, message, channel, photoPath, photoBuffer, photoUrl, edit, kind }) => {
+  app.onOutbound(async ({ userId, message, channel, photoPath, photoBuffer, photoUrl, edit, kind, agent }) => {
     if (channel && channel !== 'telegram') return;
     const chatId = chatByUser.get(String(userId));
     if (!chatId) {
       console.warn(`[telegram] no chatId for ${userId}, drop ${kind || 'message'}`);
       return;
     }
+    const html = agent === 'onboarding';
+    const htmlOpts = html ? { parse_mode: 'HTML' } : {};
+    const outboundText = html ? toOnboardingTelegramHtml(message) : message;
     try {
       if (edit && message) {
         const prev = editable.get(userId);
         if (prev) {
           try {
-            await bot.editMessageText(message, {
+            await bot.editMessageText(outboundText, {
               chat_id: prev.chatId,
               message_id: prev.messageId,
+              ...htmlOpts,
             });
           } catch (err) {
             if (!/message is not modified/i.test(err.message || '')) {
-              const sent = await bot.sendMessage(chatId, message);
+              const sent = await bot.sendMessage(chatId, outboundText, htmlOpts);
               editable.set(userId, { chatId, messageId: sent.message_id });
             }
           }
         } else {
-          const sent = await bot.sendMessage(chatId, message);
+          const sent = await bot.sendMessage(chatId, outboundText, htmlOpts);
           editable.set(userId, { chatId, messageId: sent.message_id });
         }
         if (kind === 'game_start' || kind === 'generating_error' || kind === 'island_reveal') {
@@ -239,11 +257,11 @@ export function startTelegramBot({ config, app, storage, runTick }) {
       }
       const photo = photoUrl || photoPath || photoBuffer;
       if (photo) {
-        if (message) await sendChunks(bot, chatId, message);
+        if (message) await sendChunks(bot, chatId, message, { html });
         await bot.sendPhoto(chatId, photo);
         return;
       }
-      if (message) await sendChunks(bot, chatId, message);
+      if (message) await sendChunks(bot, chatId, message, { html });
     } catch (err) {
       console.error('[telegram] outbound failed:', err.message);
       if ((photoUrl || photoPath || photoBuffer) && message) {
@@ -384,7 +402,7 @@ export function startTelegramBot({ config, app, storage, runTick }) {
         bootstrap,
       });
       if (result.reply) {
-        await sendChunks(bot, msg.chat.id, result.reply);
+        await sendChunks(bot, msg.chat.id, result.reply, { html: result.agent === 'onboarding' });
       }
     } catch (err) {
       console.error('[telegram] handler error:', err);

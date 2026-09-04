@@ -29,6 +29,7 @@ export function emptyState() {
     quietPicks: [],
     // Как обращаться к божеству-покровителю; null = ещё не названо
     patronName: null,
+    patronGender: null,
     // Вера — среднее четырёх статов, не ключ в domain.stats
     faith: null,
     mana: 0,
@@ -50,6 +51,7 @@ export function normalizeDomain(domain) {
     if (!Array.isArray(domain.state.monthLog)) domain.state.monthLog = [];
     if (!Array.isArray(domain.state.quietPicks)) domain.state.quietPicks = [];
     if (!('patronName' in domain.state)) domain.state.patronName = null;
+    if (!('patronGender' in domain.state)) domain.state.patronGender = null;
     if (!Number.isFinite(Number(domain.state.faith))) domain.state.faith = null;
     if (!Number.isFinite(Number(domain.state.mana))) domain.state.mana = 0;
     if (!Number.isFinite(Number(domain.state.manaAccrue))) domain.state.manaAccrue = 0;
@@ -545,7 +547,7 @@ export function ensurePatronFact(domain, { world = null } = {}) {
   return fact;
 }
 
-export function applyPatronName(domain, raw, { world = null, allowReplace = false } = {}) {
+export function applyPatronName(domain, raw, { world = null, allowReplace = false, gender = null } = {}) {
   const cleaned = String(raw || '')
     .trim()
     .replace(/\s+/g, ' ')
@@ -557,8 +559,9 @@ export function applyPatronName(domain, raw, { world = null, allowReplace = fals
     return { error: 'locked', previous: prev, patronName: prev };
   }
   domain.state.patronName = cleaned;
+  if (gender === 'male' || gender === 'female') domain.state.patronGender = gender;
   ensurePatronFact(domain, { world });
-  return { ok: true, patronName: cleaned, previous: prev };
+  return { ok: true, patronName: cleaned, patronGender: domain.state.patronGender || null, previous: prev };
 }
 
 /** Краткая пометка «где / кого касается» для хроники стыка. */

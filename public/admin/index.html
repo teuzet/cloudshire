@@ -12,14 +12,12 @@
       <h1>Cloudshire</h1>
       <p class="muted">Админка · игроки только в Telegram</p>
 
-      <pre id="status" class="panel"></pre>
-
+      <div id="status" class="status-card"></div>
       <div class="row">
         <button type="button" id="btnRefresh">Обновить</button>
-        <button type="button" id="btnTick" class="accent">Force tick</button>
       </div>
 
-      <h2>Домены</h2>
+      <h2>Города</h2>
       <select id="domainSelect"></select>
 
       <h2>Conflux</h2>
@@ -32,7 +30,7 @@
       <div class="row">
         <button type="button" id="btnConfluxRefresh">Обновить conflux</button>
       </div>
-      <pre id="confluxPanel" class="panel"></pre>
+      <div id="confluxPanel" class="conflux-list"></div>
 
       <h2>Force conflux</h2>
       <label class="muted">Город A
@@ -53,49 +51,64 @@
 
       <div class="danger-zone">
         <h2>Опасно</h2>
-        <p class="muted danger-hint">Стирает мир и домены (архив в Mongo/диске).</p>
-        <button type="button" id="btnWipe" class="danger">Wipe all…</button>
+        <p class="muted danger-hint">
+          Тик крутит месяц сразу всем городам. Вайп стирает мир и домены (архив в Mongo/диске).
+        </p>
+        <div class="row danger-actions">
+          <button type="button" id="btnTick" class="danger">Force tick…</button>
+          <button type="button" id="btnWipe" class="danger">Wipe all…</button>
+        </div>
       </div>
     </aside>
 
     <main class="main">
-      <section class="feed-wrap">
-        <h2>Диалог с правителем <span id="dialogMeta" class="muted"></span></h2>
-        <div id="messages" class="messages dialog"></div>
-      </section>
+      <header class="city-head">
+        <div id="cityImageWrap" class="city-image-wrap hidden">
+          <img id="cityImage" class="city-image" alt="" />
+          <div id="cityImageEmpty" class="city-image-empty hidden">нет вида острова</div>
+        </div>
+        <div class="city-head-bar">
+          <div>
+            <h2 id="cityTitle">выбери город</h2>
+            <p id="citySub" class="muted"></p>
+          </div>
+          <div class="row chat-actions">
+            <button type="button" id="btnRulerChat" disabled>Диалог правителя</button>
+            <button type="button" id="btnOnboardChat" disabled>Онбординг</button>
+          </div>
+        </div>
+        <div id="statsRow" class="stats"></div>
+      </header>
 
-      <div class="grids">
-        <section>
-          <h2>Домен</h2>
-          <pre id="domain" class="panel tall"></pre>
-        </section>
-        <section>
-          <h2>Статы / правитель</h2>
-          <pre id="rulerPanel" class="panel tall"></pre>
-        </section>
-        <section>
-          <h2>Процессы</h2>
-          <pre id="pending" class="panel tall"></pre>
-        </section>
-        <section>
-          <h2>Плотлайны</h2>
-          <pre id="plotlines" class="panel tall"></pre>
-        </section>
-        <section class="span2">
-          <h2>Описание</h2>
-          <pre id="genesis" class="panel tall"></pre>
-        </section>
-        <section class="span2">
-          <h2>Хроника</h2>
-          <pre id="chronicle" class="panel tall"></pre>
-        </section>
-        <section class="span2">
-          <h2>Факты</h2>
-          <pre id="facts" class="panel tall"></pre>
-        </section>
+      <div id="cityTabs" class="tabs">
+        <button type="button" class="tab active" data-tab="overview">Обзор</button>
+        <button type="button" class="tab" data-tab="genesis">Генезис</button>
+        <button type="button" class="tab" data-tab="brief">Бриф</button>
+        <button type="button" class="tab" data-tab="stories">Истории</button>
+        <button type="button" class="tab" data-tab="orders">Указы</button>
+        <button type="button" class="tab" data-tab="people">Люди</button>
+        <button type="button" class="tab" data-tab="chronicle">Хроника</button>
+        <button type="button" class="tab" data-tab="facts">Факты</button>
+        <button type="button" class="tab" data-tab="processes">Дела</button>
+        <button type="button" class="tab" data-tab="conflux">Сопряжение</button>
       </div>
+      <div id="tabBody" class="tab-body">выбери город в списке слева</div>
     </main>
   </div>
+
+  <div id="chatOverlay" class="chat-overlay hidden">
+    <div class="chat-window" role="dialog" aria-modal="true">
+      <header class="chat-top">
+        <div>
+          <strong id="chatTitle">Чат</strong>
+          <span id="chatMeta" class="muted"></span>
+        </div>
+        <button type="button" id="btnChatClose" title="Закрыть">✕</button>
+      </header>
+      <div id="chatMessages" class="messages dialog"></div>
+    </div>
+  </div>
+
   <script src="/admin/app.js"></script>
 </body>
 </html>

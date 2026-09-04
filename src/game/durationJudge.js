@@ -9,6 +9,16 @@ import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { deadlineRemainingMs } from '../agents/runtime.js';
 import { formatCityForAgents } from './cityContext.js';
+import { chronicleEntries } from './models.js';
+
+function recentChronicleTail(domain, n = 10) {
+  const rows = chronicleEntries(domain?.lore || []).slice(-n);
+  if (!rows.length) return '(хроники ещё нет)';
+  return rows
+    .map((f) => `- ${String(f.text || '').trim()}`)
+    .filter((line) => line.length > 2)
+    .join('\n');
+}
 
 /**
  * @returns {Promise<{ months: number, note: string|null, source: 'agent'|'fallback' }>}
@@ -30,7 +40,7 @@ export async function estimateProcessDuration({
       description: 'Честная оценка, сколько месяцев займёт это дело в этом городе.',
       parameters: {
         type: 'object',
-        required: ['months'],
+        required: ['months', 'note'],
         properties: {
           months: {
             type: 'number',
@@ -49,8 +59,10 @@ export async function estimateProcessDuration({
         if (!Number.isFinite(n) || n < 1 || n > 12) {
           return toolFail('range', 'months — целое от 1 до 12.');
         }
+        const note = String(args.note || '').trim();
+        if (!note) return toolFail('note', 'Нужна одна бытовая фраза, почему столько месяцев.');
         draft.months = n;
-        draft.note = String(args.note || '').trim() || null;
+        draft.note = note;
         return { ok: true };
       },
     },
@@ -85,6 +97,9 @@ export async function estimateProcessDuration({
             '',
             `Дело: ${summary}`,
             detail ? `Поручение: ${detail}` : null,
+            '',
+            'Недавняя хроника (без секретов):',
+            recentChronicleTail(domain, 10),
             '',
             `Город: ${formatCityForAgents(domain)}`,
             `Людей: ${qualitativePopulation(domain?.population || 0)}`,

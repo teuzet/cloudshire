@@ -356,7 +356,7 @@ export function formatOfficersForPrompt(domain, config) {
     const busy = duty ? `занят идущим делом «${duty.summary}»` : 'свободен';
     const strategy = officeStrategy(o, config);
     lines.push(
-      `- ${o.title} ${o.name} (${o.office}, стат ${o.statId}): ${o.nature || formatAxesForSpeech(o.axes, config)}. ` +
+      `- ${o.title} ${o.name} (${o.gender === 'female' ? 'женщина' : o.gender === 'male' ? 'мужчина' : 'пол не задан'}, ${o.office}, стат ${o.statId}): ${o.nature || formatAxesForSpeech(o.axes, config)}. ` +
         (strategy ? `Как действует: ${strategy} ` : '') +
         `Сейчас ${busy}.`,
     );
@@ -381,6 +381,20 @@ export function formatOfficersForPrompt(domain, config) {
     'Если покровитель хочет занятого сановника на новое: назови текущее дело и предложи паузу или отмену, затем новое.',
   );
   return lines.join('\n');
+}
+
+export function formatOfficerIntroSpeech(domain) {
+  const list = listOfficers(domain);
+  if (!list.length) return null;
+  const bits = list.map((o) => {
+    const nature = String(o.nature || '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .replace(/[.!?]+$/, '');
+    const who = nature || o.office || o.title;
+    return `${o.title} ${o.name} — ${who}`;
+  });
+  return `Пока назову тех, кто держит город: ${bits.join('; ')}.`;
 }
 
 export function formatOfficersCastHint(domain) {

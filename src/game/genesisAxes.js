@@ -36,6 +36,36 @@ export function genesisAxisById(config, axisId) {
   return genesisAxisGroups(config).find((g) => g.id === axisId) || null;
 }
 
+export const AXIS_ID_ALIASES = {
+  economy: 'productiveBase',
+  era: 'historicalCondition',
+};
+
+/** Каталожный id или короткий алиас (economy → productiveBase). */
+export function resolveAxisId(config, axisId) {
+  const raw = String(axisId || '').trim();
+  if (!raw) return null;
+  if (genesisAxisById(config, raw)) return raw;
+  const aliased = AXIS_ID_ALIASES[raw] || AXIS_ID_ALIASES[raw.toLowerCase()];
+  if (aliased && genesisAxisById(config, aliased)) return aliased;
+  return null;
+}
+
+export function formatOnboardingAxesBlank(config, axes) {
+  const state = normalizeAxesState(axes);
+  const out = {};
+  for (const id of GENESIS_AXIS_ORDER) {
+    const group = genesisAxisById(config, id);
+    if (!group) continue;
+    const row = state[id];
+    out[id] = {
+      name: group.name || id,
+      value: row?.value || null,
+    };
+  }
+  return out;
+}
+
 function normalizeAxisToken(s) {
   return String(s || '')
     .trim()

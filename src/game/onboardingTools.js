@@ -14,6 +14,8 @@ import {
   clipOnboardingBrief,
   validateCityNameAvailable,
   validatePatronName,
+  normalizePatronGender,
+  onboardingConceptFingerprint,
   isCityNameOccupied,
   occupiedCityNameError,
   occupiedNameList,
@@ -26,6 +28,7 @@ import {
   sampleGenesisAxes,
   setAxisValue,
   genesisAxisById,
+  resolveAxisId,
   formatGenesisAxesForPrompt,
   missingAxisIds,
   nextAxisOffer,
@@ -38,6 +41,7 @@ import {
 } from './genesisAxes.js';
 import {
   mergePlayerDirectives,
+  upsertCanonicalDirectives,
   recordCosmologyConflicts,
   resolveCosmologyConflict,
   hasUnresolvedConflicts,
@@ -72,8 +76,29 @@ function applySampledAxis(draft, config, axisId, source = 'sampled') {
   return true;
 }
 
+function applyAxisDirectiveFlag(draft, resolved, { required = false, preferred = false } = {}) {
+  if (!resolved || resolved.catalog) return;
+  const line = String(resolved.value || '').trim();
+  if (!line) return;
+  if (required) {
+    draft.playerDirectives = mergePlayerDirectives(draft.playerDirectives, { required: [line] });
+  } else if (preferred) {
+    draft.playerDirectives = mergePlayerDirectives(draft.playerDirectives, { preferred: [line] });
+  }
+}
+
+function applyCanonicalNameFacts(draft) {
+  draft.playerDirectives = upsertCanonicalDirectives(draft.playerDirectives, {
+    cityName: draft.cityNameApproved ? draft.cityName : null,
+    patronName: draft.patronNameApproved ? draft.patronName : null,
+    patronGender: draft.patronGender || null,
+  });
+}
+
 async function runCityConcept({ app, draft, userId, saveDraft, text }) {
-  if (hasReadyConcept(draft) && !playerAsksReroll(text)) {
+  const fingerprint = onboardingConceptFingerprint(draft);
+  const snapshotUnchanged = draft.conceptFingerprint && draft.conceptFingerprint === fingerprint;
+  if (hasReadyConcept(draft) && !playerAsksReroll(text) && snapshotUnchanged) {
     return {
       ok: true,
       status: 'READY',
@@ -120,6 +145,9 @@ async function runCityConcept({ app, draft, userId, saveDraft, text }) {
     playerBrief: draft.playerBrief,
     axisInterview: draft.axisInterview,
     occupiedNames: occupiedNameList(occupied),
+    lockedName: draft.cityNameApproved ? draft.cityName : null,
+    lockedPatronName: draft.patronNameApproved ? draft.patronName : null,
+    lockedPatronGender: draft.patronGender || null,
   });
   if (!result.ok && result.concept?.status !== 'NEEDS_PLAYER_REVISION') {
     return toolFail('concept_failed', 'Концепт не собрался. Попробуй ещё раз.');
@@ -149,6 +177,7 @@ async function runCityConcept({ app, draft, userId, saveDraft, text }) {
   }
   draft.pitchedName = result.concept.name;
   draft.pitched = true;
+  draft.conceptFingerprint = onboardingConceptFingerprint(draft);
   draft.phase = deriveOnboardingPhase(draft);
   await saveDraft();
   return {
@@ -200,6 +229,7 @@ export function buildOnboardingTools({
           cityNameApproved: draft.cityNameApproved,
           patronName: draft.patronName,
           patronNameApproved: Boolean(draft.patronNameApproved),
+          patronGender: draft.patronGender || null,
           canStart: canStartOnboarding(draft),
           pitchedName: draft.pitchedName || null,
           pitched: hasPitchedCity(draft) || hasReadyConcept(draft),
@@ -318,21 +348,26 @@ export function buildOnboardingTools({
     },
     {
       name: 'set_axis',
-      description: 'Точечно задать ось — id из каталога или любая формулировка из описания игрока.',
+      description:
+        'Задать любую ось по id каталога (или алиасу). value — id каталога или свободная формулировка игрока. required/preferred — только для свободной строки, не для id каталога.',
       parameters: {
         type: 'object',
         required: ['axisId', 'value'],
         properties: {
           axisId: { type: 'string' },
           value: { type: 'string' },
+          required: { type: 'boolean' },
+          preferred: { type: 'boolean' },
         },
       },
-      handler: async ({ axisId, value }) => {
-        const group = genesisAxisById(app.config, axisId);
+      handler: async ({ axisId, value, required = false, preferred = false }) => {
+        const resolvedId = resolveAxisId(app.config, axisId);
+        const group = resolvedId ? genesisAxisById(app.config, resolvedId) : null;
         if (!group) return toolFail('unknown_axis', `Нет оси «${axisId}».`);
         const resolved = resolveAxisChoice(group, value);
         if (!resolved) return toolFail('empty_value', 'Нужно значение оси.');
-        draft.axes = setAxisValue(draft.axes, axisId, resolved.value, 'player');
+        draft.axes = setAxisValue(draft.axes, resolvedId, resolved.value, 'player');
+        applyAxisDirectiveFlag(draft, resolved, { required, preferred });
         await saveDraft();
         const offer = nextAxisOffer(app.config, draft.axes);
         return {
@@ -547,7 +582,7 @@ export function buildOnboardingTools({
     {
       name: 'set_player_brief',
       description:
-        'Записать/обновить бриф пожеланий для генезиса. Формулировки игрока важнее краткости.',
+        'Записать/обновить бриф и директивы этого хода. Формулировки игрока важнее краткости.',
       parameters: {
         type: 'object',
         properties: {
@@ -555,9 +590,20 @@ export function buildOnboardingTools({
           ruler: { type: 'string' },
           freeform: { type: 'string' },
           replace: { type: 'boolean' },
+          required: { type: 'array', items: { type: 'string' } },
+          preferred: { type: 'array', items: { type: 'string' } },
+          forbidden: { type: 'array', items: { type: 'string' } },
         },
       },
-      handler: async ({ city, ruler, freeform, replace = false }) => {
+      handler: async ({
+        city,
+        ruler,
+        freeform,
+        replace = false,
+        required,
+        preferred,
+        forbidden,
+      }) => {
         if (!draft.playerBrief) draft.playerBrief = { city: '', ruler: '', freeform: '' };
         if (replace) {
           draft.playerBrief = { city: city || '', ruler: ruler || '', freeform: freeform || '' };
@@ -567,12 +613,21 @@ export function buildOnboardingTools({
           if (freeform) draft.playerBrief.freeform = freeform;
         }
         clipOnboardingBrief(draft.playerBrief);
+        if (required || preferred || forbidden) {
+          draft.playerDirectives = mergePlayerDirectives(draft.playerDirectives, {
+            required,
+            preferred,
+            forbidden,
+          });
+        }
+        applyCanonicalNameFacts(draft);
         const hits = scanBriefConflicts(draft);
         draft.phase = deriveOnboardingPhase(draft);
         await saveDraft();
         return {
           ok: true,
           playerBrief: draft.playerBrief,
+          playerDirectives: draft.playerDirectives,
           cosmologyHits: hits,
           hint: hits.length
             ? 'Есть очевидный запрет — назови игроку и record_cosmology_conflicts, не адаптируй молча.'
@@ -622,6 +677,7 @@ export function buildOnboardingTools({
         draft.pitchedName = v.name;
         draft.pitched = true;
         if (draft.concept?.status === 'READY') draft.concept.name = v.name;
+        applyCanonicalNameFacts(draft);
         draft.phase = deriveOnboardingPhase(draft);
         await saveDraft();
         return { ok: true, cityName: v.name };
@@ -629,13 +685,16 @@ export function buildOnboardingTools({
     },
     {
       name: 'set_patron_name',
-      description: 'Имя бога, как назвал игрок. Без этого start_new_game нельзя.',
+      description: 'Имя бога, как назвал игрок, и пол (male/female). Без имени start_new_game нельзя.',
       parameters: {
         type: 'object',
         required: ['name'],
-        properties: { name: { type: 'string' } },
+        properties: {
+          name: { type: 'string' },
+          gender: { type: 'string', description: 'male / female / мужчина / женщина' },
+        },
       },
-      handler: async ({ name }) => {
+      handler: async ({ name, gender }) => {
         const v = validatePatronName(name);
         if (!v.ok) {
           draft.patronNameApproved = false;
@@ -644,8 +703,28 @@ export function buildOnboardingTools({
         }
         draft.patronName = v.name;
         draft.patronNameApproved = true;
+        const g = normalizePatronGender(gender);
+        if (g) draft.patronGender = g;
+        applyCanonicalNameFacts(draft);
         await saveDraft();
-        return { ok: true, patronName: v.name };
+        return { ok: true, patronName: v.name, patronGender: draft.patronGender || null };
+      },
+    },
+    {
+      name: 'set_patron_gender',
+      description: 'Пол покровителя: male/female. Смена затирает предыдущее.',
+      parameters: {
+        type: 'object',
+        required: ['gender'],
+        properties: { gender: { type: 'string' } },
+      },
+      handler: async ({ gender }) => {
+        const g = normalizePatronGender(gender);
+        if (!g) return toolFail('invalid_patron_gender', 'Нужен пол: мужчина или женщина.');
+        draft.patronGender = g;
+        applyCanonicalNameFacts(draft);
+        await saveDraft();
+        return { ok: true, patronGender: g };
       },
     },
     {
@@ -719,6 +798,7 @@ export function buildOnboardingTools({
           channel,
           forcedName: draft.cityName,
           forcedPatronName: draft.patronName,
+          forcedPatronGender: draft.patronGender || null,
           frozenConcept: draft.concept,
           axes: draft.axes,
           playerDirectives: draft.playerDirectives,

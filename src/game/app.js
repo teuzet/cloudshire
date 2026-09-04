@@ -34,11 +34,11 @@ import {
   extractUserCityName,
   formatPlayerBrief,
   claimsOnboardingAlreadyCreated,
+  claimsOnboardingGenerating,
   extractPitchedCityName,
   lastPitchedCityName,
   playerAsksReroll,
   planOnboardingAutoStart,
-  formatOnboardingStartReply,
   formatOnboardingStatusCard,
   appendOnboardingToolErrors,
   deriveOnboardingPhase,
@@ -56,6 +56,8 @@ import {
   ONBOARDING_NEED_NAME_NOTE,
   ONBOARDING_BUSY_REPLY,
   ONBOARDING_HISTORY_MESSAGES,
+  ONBOARDING_STORE_MESSAGES,
+  GENESIS_WATCHDOG_MS,
   LONG_USER_MESSAGE_MIN,
   BRIEF_CITY_MAX,
   BRIEF_RULER_MAX,
@@ -152,6 +154,7 @@ export class GameApp {
     this.generatingUsers = new Set();
     /** Пока обрабатывается сообщение пользователя — второй апдейт не стартует параллельный ход. */
     this.busyUsers = new Set();
+    this.generatingTimeouts = new Map();
     /** Текст прогресса генезиса (для Telegram edit и баннера /play). */
     this.generatingProgress = new Map();
     /** Пока идёт world tick — чат с доменом отвечает системно. */
@@ -280,13 +283,14 @@ export class GameApp {
     }
   }
 
-  startDomainGeneration(userId, { channel, forcedName, forcedPatronName, frozenConcept, axes, playerDirectives, playerBrief }) {
+  startDomainGeneration(userId, { channel, forcedName, forcedPatronName, forcedPatronGender, frozenConcept, axes, playerDirectives, playerBrief }) {
     const uid = String(userId);
     if (this.generatingUsers.has(uid)) {
       getLogger().warn('genesis.already_running', { userId: uid });
       return;
     }
     this.generatingUsers.add(uid);
+    this.armGenesisWatchdog(uid, channel);
     const log = getLogger().child({ userId: uid, scope: 'genesis' });
 
     const run = async () => {
@@ -332,6 +336,7 @@ export class GameApp {
           channel,
           forcedName: forcedName || null,
           forcedPatronName: forcedPatronName || null,
+          forcedPatronGender: forcedPatronGender || null,
           frozenConcept,
           axes,
           playerDirectives,
@@ -406,6 +411,19 @@ export class GameApp {
           domainId: domain.id,
           kind: 'game_start',
         });
+        const officerIntro = domain._officerIntro;
+        if (officerIntro) {
+          const officerLine = officerIntro.startsWith(domain.characters[0].name)
+            ? officerIntro
+            : `${domain.characters[0].name}: ${officerIntro}`;
+          await this.persistDialog(domain, 'assistant', officerLine);
+          await this.emitOutbound(uid, officerLine, {
+            channel,
+            agent: 'ruler',
+            domainId: domain.id,
+            kind: 'officer_intro',
+          });
+        }
         log.info('genesis.done', {
           domainId: domain.id,
           name: domain.name,
@@ -418,12 +436,14 @@ export class GameApp {
           error: err.message,
           stack: err.stack,
         });
+        await this.resetOnboardingAfterGenesisFail(uid);
         await this.emitOutbound(
           uid,
-          `Не удалось создать остров: ${err.message || err}. Можно поправить имя или концепт и снова попросить старт.`,
+          `Не удалось создать остров: ${err.message || err}. Остров не создан. Можно снова попросить старт.`,
           { channel, agent: 'onboarding', kind: 'generating_error', edit: 'genesis' },
         );
       } finally {
+        this.clearGenesisWatchdog(uid);
         this.generatingUsers.delete(uid);
       }
     };
@@ -433,6 +453,48 @@ export class GameApp {
         log.error('genesis.unhandled', { error: err.message, stack: err.stack }),
       );
     });
+  }
+
+  armGenesisWatchdog(userId, channel) {
+    const uid = String(userId);
+    this.clearGenesisWatchdog(uid);
+    const timer = setTimeout(() => {
+      void this.failStuckGeneration(uid, channel);
+    }, GENESIS_WATCHDOG_MS);
+    this.generatingTimeouts.set(uid, timer);
+  }
+
+  clearGenesisWatchdog(userId) {
+    const uid = String(userId);
+    const timer = this.generatingTimeouts.get(uid);
+    if (timer) clearTimeout(timer);
+    this.generatingTimeouts.delete(uid);
+  }
+
+  async failStuckGeneration(userId, channel) {
+    const uid = String(userId);
+    if (!this.generatingUsers.has(uid)) return;
+    this.generatingUsers.delete(uid);
+    this.generatingTimeouts.delete(uid);
+    getLogger().error('genesis.watchdog', { userId: uid });
+    await this.resetOnboardingAfterGenesisFail(uid);
+    await this.emitOutbound(
+      uid,
+      'Не удалось создать остров: слишком долго. Остров не создан. Можно снова попросить старт.',
+      { channel, agent: 'onboarding', kind: 'generating_error', edit: 'genesis' },
+    );
+  }
+
+  async resetOnboardingAfterGenesisFail(userId) {
+    try {
+      const binding = await this.getOrCreateOnboardingBinding(userId);
+      if (!binding?.onboarding) return;
+      binding.onboarding.phase = deriveOnboardingPhase(binding.onboarding, { generating: false });
+      binding.updatedAt = new Date().toISOString();
+      await this.storage.saveUserBinding(binding);
+    } catch (err) {
+      getLogger().warn('genesis.reset_draft_failed', { error: err.message });
+    }
   }
 
   async getOrCreateOnboardingBinding(userId) {
@@ -569,15 +631,12 @@ export class GameApp {
 
     let reply = result.text;
     const rawReply = String(reply || '');
-    if (startedGenerating && !rawReply.trim()) {
-      reply = formatOnboardingStartReply(draft.cityName);
-    }
 
     const auto = planOnboardingAutoStart({
       userText: text,
       reply,
       draft,
-      usedStart: usedTools.has('start_new_game'),
+      usedStart: startFlag.started,
       generating: this.isGenerating(userId),
       occupiedByKey,
     });
@@ -596,13 +655,13 @@ export class GameApp {
         channel,
         forcedName: draft.cityName,
         forcedPatronName: draft.patronName,
+        forcedPatronGender: draft.patronGender || null,
         frozenConcept: draft.concept,
         axes: draft.axes,
         playerDirectives: draft.playerDirectives,
         playerBrief: { ...(draft.playerBrief || {}) },
       });
       startedGenerating = true;
-      reply = formatOnboardingStartReply(draft.cityName);
     } else if (auto.stripFalseStart) {
       log.warn('onboarding.false_start_claim', {
         reason: auto.reason,
@@ -643,10 +702,10 @@ export class GameApp {
       reply = appendNameTakenNote(rawReply, auto.takenName);
     }
 
-    // Нельзя говорить «уже создан», пока генезис только стартовал.
+    // Старт говорит только система (прогресс-бар). Речь агента про «уже готов» срезаем.
     if (startedGenerating || this.isGenerating(userId)) {
-      if (claimsOnboardingAlreadyCreated(reply) || !String(reply || '').trim()) {
-        reply = formatOnboardingStartReply(draft.cityName);
+      if (claimsOnboardingAlreadyCreated(reply) || claimsOnboardingGenerating(reply)) {
+        reply = '';
       }
     }
 
@@ -657,7 +716,9 @@ export class GameApp {
       draft.messages.push({ role: 'user', content: text || userContent, at: new Date().toISOString() });
     }
     draft.messages.push({ role: 'assistant', content: reply, at: new Date().toISOString() });
-    if (draft.messages.length > 40) draft.messages = draft.messages.slice(-30);
+    if (draft.messages.length > ONBOARDING_STORE_MESSAGES) {
+      draft.messages = draft.messages.slice(-Math.max(ONBOARDING_HISTORY_MESSAGES, 60));
+    }
     const nameInReply = extractPitchedCityName(reply);
     if (nameInReply && !draft.cityNameApproved) {
       draft.pitchedName = nameInReply;
@@ -775,8 +836,11 @@ export class GameApp {
     const conditionFeel = qualitativeStatsBrief(domain.stats || {}, this.config);
     const attitudes = formatRulerAttitudes(character, this.config);
     const patronName = domain.state?.patronName || null;
+    const patronGender = domain.state?.patronGender || null;
+    const patronGenderWord =
+      patronGender === 'female' ? 'женщина' : patronGender === 'male' ? 'мужчина' : null;
     const patronLine = patronName
-      ? `Имя покровителя: «${patronName}» — обращайся только так. Не предлагай другое и не вызывай set_patron_name.`
+      ? `Имя покровителя: «${patronName}»${patronGenderWord ? `, пол: ${patronGenderWord}` : ''} — обращайся только так. Не предлагай другое и не вызывай set_patron_name.`
       : 'Имя покровителя ещё не названо.';
     const undock = recentUndockFact(domain);
     const undockCanon = undock
@@ -1036,8 +1100,14 @@ export class GameApp {
         ].join('\n')
       : '';
     const patronName = domain.state?.patronName || null;
+    const patronGenderWord =
+      domain.state?.patronGender === 'female'
+        ? 'женщина'
+        : domain.state?.patronGender === 'male'
+          ? 'мужчина'
+          : null;
     const addressHint = patronName
-      ? `Обращайся к покровителю как «${patronName}». Не подменяй чужим именем бога.`
+      ? `Обращайся к покровителю как «${patronName}»${patronGenderWord ? ` (${patronGenderWord})` : ''}. Не подменяй чужим именем бога.`
       : 'Имя покровителя неизвестно — обратись «покровитель», без выдуманных имён.';
 
     const scopeHint = foreign.length
@@ -1285,8 +1355,14 @@ export class GameApp {
     const fallback = String(fact || '').trim();
     if (!character) return fallback;
     const patronName = domain.state?.patronName || null;
+    const patronGenderWord =
+      domain.state?.patronGender === 'female'
+        ? 'женщина'
+        : domain.state?.patronGender === 'male'
+          ? 'мужчина'
+          : null;
     const addressHint = patronName
-      ? `Обращайся к покровителю как «${patronName}». Не подменяй чужим именем бога.`
+      ? `Обращайся к покровителю как «${patronName}»${patronGenderWord ? ` (${patronGenderWord})` : ''}. Не подменяй чужим именем бога.`
       : 'Имя покровителя неизвестно — обратись «покровитель», без выдуманных имён.';
     const months = Math.max(0, Math.round(Number(remaining) || 0));
     const when =

@@ -1,4 +1,9 @@
-import { emptyPlayerDirectives, normalizePlayerDirectives, hasUnresolvedConflicts } from './playerDirectives.js';
+import {
+  emptyPlayerDirectives,
+  normalizePlayerDirectives,
+  hasUnresolvedConflicts,
+  upsertCanonicalDirectives,
+} from './playerDirectives.js';
 import {
   emptyAxesState,
   normalizeAxesState,
@@ -6,6 +11,7 @@ import {
   normalizeAxisInterview,
   missingAxisIds,
   nextAxisOffer,
+  formatOnboardingAxesBlank,
 } from './genesisAxes.js';
 
 const BANNED_EXACT = new Set(
@@ -47,25 +53,6 @@ const BANNED_SUBSTR = [
   'dick',
 ];
 
-/** Слова, от которых лучше уходить в именах (все острова и так летают / не вывески). */
-const NAME_CLICHE_SUBSTR = [
-  'облак',
-  'небо',
-  'летаю',
-  'остров',
-  'аэро',
-  'скай',
-  'cloud',
-  'шире',
-  'cloudshire',
-  'верстак',
-  'наковальн',
-  'базар',
-  'рынок',
-  'колодец',
-  'жернов',
-];
-
 export const ONBOARDING_MODES = ['quick', 'brief', 'questions', 'dossier'];
 /** Потолок для генезиса: подробное ТЗ влезает, стенограмма чата — нет. */
 export const BRIEF_CITY_MAX = 24000;
@@ -77,7 +64,10 @@ export const BRIEF_PROMPT_CITY_MAX = 16000;
 export const BRIEF_PROMPT_RULER_MAX = 2500;
 export const LONG_USER_MESSAGE_MIN = 500;
 export const DOSSIER_SWITCH_MIN = 800;
-export const ONBOARDING_HISTORY_MESSAGES = 12;
+export const ONBOARDING_HISTORY_MESSAGES = 30;
+export const ONBOARDING_STORE_MESSAGES = 80;
+export const CITY_NAME_PLACEHOLDER = '%cityName';
+export const GENESIS_WATCHDOG_MS = 10 * 60 * 1000;
 export const FALSE_START_STRIP_MAX = 400;
 
 /** Последний вызов каждого tool: если он упал — это отказ, который надо показать игроку. */
@@ -91,7 +81,10 @@ export function unresolvedToolFails(toolTrace = []) {
 }
 
 export function appendOnboardingToolErrors(reply, toolTrace) {
-  const fails = unresolvedToolFails(toolTrace);
+  const fails = unresolvedToolFails(toolTrace).filter((t) => {
+    const err = String(t.result?.error || '');
+    return err !== 'unknown_axis';
+  });
   if (!fails.length) return String(reply || '');
   const lines = fails.map((t) => {
     const msg = t.result.agentMessage || t.result.message || t.result.error || 'ошибка';
@@ -119,6 +112,7 @@ export function emptyOnboardingDraft() {
     pitchedName: null,
     patronName: null,
     patronNameApproved: false,
+    patronGender: null,
     axes: emptyAxesState(),
     playerDirectives: emptyPlayerDirectives(),
     concept: null,
@@ -157,6 +151,8 @@ export function normalizeOnboardingDraft(draft) {
   if (!('cityNameApproved' in d)) d.cityNameApproved = false;
   if (!('patronName' in d)) d.patronName = null;
   if (!('patronNameApproved' in d)) d.patronNameApproved = false;
+  if (!('patronGender' in d)) d.patronGender = null;
+  d.patronGender = normalizePatronGender(d.patronGender);
   clipOnboardingBrief(d.playerBrief);
   d.phase = deriveOnboardingPhase(d);
   return d;
@@ -200,38 +196,113 @@ export function canStartOnboarding(draft) {
   );
 }
 
+export function substituteCityName(text, name) {
+  if (text == null) return text;
+  return String(text).split(CITY_NAME_PLACEHOLDER).join(name || 'город');
+}
+
+export function displayConceptPreview(concept, cityName = null) {
+  if (!concept?.preview) return '';
+  return substituteCityName(concept.preview, cityName || concept.name || 'город');
+}
+
+export function onboardingConceptFingerprint(draft) {
+  const d = draft || {};
+  const dirs = normalizePlayerDirectives(d.playerDirectives);
+  return JSON.stringify({
+    axes: normalizeAxesState(d.axes),
+    required: dirs.required,
+    preferred: dirs.preferred,
+    forbidden: dirs.forbidden,
+    cityName: d.cityName || null,
+    patronName: d.patronName || null,
+    uniqueFeature: d.axisInterview?.uniqueFeature || null,
+  });
+}
+
+export function normalizePatronGender(raw) {
+  const s = String(raw || '')
+    .trim()
+    .toLowerCase();
+  if (!s) return null;
+  if (['m', 'male', 'м', 'муж', 'мужчина', 'мужской'].includes(s)) return 'male';
+  if (['f', 'female', 'ж', 'жен', 'женщина', 'женский'].includes(s)) return 'female';
+  return null;
+}
+
+export function extractPatronGender(text) {
+  const raw = String(text || '');
+  if (!raw.trim()) return null;
+  if (/\bя\s+(богиня|покровительница)\b/i.test(raw)) return 'female';
+  if (/\bя\s+(бог|покровитель)\b/i.test(raw)) return 'male';
+  if (/\b(пол[аеу]?\s+)?(женский|женщина|женск)\b/i.test(raw)) return 'female';
+  if (/\b(пол[аеу]?\s+)?(мужской|мужчина|мужск)\b/i.test(raw)) return 'male';
+  return null;
+}
+
+function conflictsVisibleOnCard(draft) {
+  const dirs = normalizePlayerDirectives(draft?.playerDirectives);
+  if (!draft?.cityNameApproved || !draft?.cityName) return dirs.unresolvedConflicts;
+  const locked = String(draft.cityName).toLowerCase();
+  return dirs.unresolvedConflicts.filter((c) => {
+    const requested = String(c.requested || '').toLowerCase();
+    const reason = String(c.reason || '').toLowerCase();
+    if (requested === locked) return false;
+    if (requested.includes(locked) && /имя|назван|звуч|земн|русск|кальк/i.test(reason)) return false;
+    return true;
+  });
+}
+
 export function formatOnboardingStatusCard(draft, config, { generating = false, occupiedByKey = null } = {}) {
   const d = draft || emptyOnboardingDraft();
   const phase = deriveOnboardingPhase(d, { generating });
   const dirs = normalizePlayerDirectives(d.playerDirectives);
-  const axes = normalizeAxesState(d.axes);
-  const axisCount = Object.keys(axes).length;
   const pitched = hasPitchedCity(d) || hasReadyConcept(d);
   const brief = d.playerBrief || {};
   const cityPreview = String(brief.city || '').trim().slice(0, BRIEF_PROMPT_CITY_MAX);
   const rulerPreview = String(brief.ruler || '').trim().slice(0, BRIEF_PROMPT_RULER_MAX);
   const freeformPreview = String(brief.freeform || '').trim().slice(0, 4000);
-  const conceptLine = hasReadyConcept(d)
-    ? `концепт=READY «${d.concept.name}»`
+  const conceptStatus = hasReadyConcept(d)
+    ? `READY «${d.concept.name}»`
     : d.concept?.status === 'NEEDS_PLAYER_REVISION'
-      ? 'концепт=нужна правка космологии'
-      : 'концепт=нет';
+      ? 'нужна правка космологии'
+      : 'нет';
+  const visibleConflicts = conflictsVisibleOnCard(d);
+  const snapshot = {
+    mode: d.mode || null,
+    phase,
+    cityName: {
+      value: d.cityName || null,
+      locked: Boolean(d.cityNameApproved && d.cityName),
+    },
+    patron: {
+      name: d.patronName || null,
+      gender: d.patronGender || null,
+      locked: Boolean(d.patronNameApproved && d.patronName),
+    },
+    concept: conceptStatus,
+    preview: hasReadyConcept(d) ? displayConceptPreview(d.concept, d.cityName || d.concept.name) : null,
+    axes: formatOnboardingAxesBlank(config, d.axes),
+    required: dirs.required,
+    preferred: dirs.preferred,
+    forbidden: dirs.forbidden,
+    canStart: canStartOnboarding(d),
+  };
   const lines = [
-    `фаза=${phase}; режим=${d.mode || 'не выбран'};`,
-    `питч=${d.pitchedName || d.concept?.name || '—'}; имя=${d.cityName || '—'} approved=${Boolean(d.cityNameApproved)};`,
-    `покровитель=${d.patronName || '—'} approved=${Boolean(d.patronNameApproved)};`,
-    `${conceptLine}; оси=${axisCount}; required=${dirs.required.length}; конфликты=${dirs.unresolvedConflicts.length};`,
-    `ждатьСтарта=${canStartOnboarding(d) ? 'да, после явного согласия' : 'нет'}.`,
+    'СНИМОК ХОДА (JSON — источник правды; ключи осей только из каталога; value = null / id / свободная строка игрока):',
+    JSON.stringify(snapshot, null, 2),
   ];
-  if (dirs.unresolvedConflicts.length) {
+  if (dirs.required.length === 0 && String(brief.city || '').trim().length > 80) {
+    lines.push(
+      'Чеклист: бриф уже длинный, а required пуст. Выпиши жёсткие факты этого хода в required сейчас, не зови концепт.',
+    );
+  }
+  if (visibleConflicts.length) {
     lines.push('Неразрешённые конфликты космологии (назови игроку, предложи адаптации, не чини молча):');
-    for (const c of dirs.unresolvedConflicts) {
+    for (const c of visibleConflicts) {
       lines.push(`- «${c.requested}»: ${c.reason}`);
       for (const a of c.adaptations || []) lines.push(`    можно: ${a}`);
     }
-  }
-  if (hasReadyConcept(d) && d.concept.preview) {
-    lines.push(`PREVIEW КОНЦЕПТА (это и есть питч, не выдумывай другой город):\n${d.concept.preview}`);
   }
   if (cityPreview) lines.push(`бриф города для генезиса:\n${cityPreview}`);
   if (rulerPreview) lines.push(`правитель:\n${rulerPreview}`);
@@ -245,8 +316,8 @@ export function formatOnboardingStatusCard(draft, config, { generating = false, 
           ? 'Сначала разреши конфликты космологии.'
           : hasPatronName(d)
             ? 'Согласие («да/начинаем/создавай/готов») → set_city_name + start_new_game.'
-            : 'Спроси, как к игроку-богу обращаться. Имя бога придумывает игрок, не ты. Без set_patron_name генезис не стартует.') +
-        ' Новый набор — только если игрок просит другой город.',
+            : 'Спроси, как к игроку-богу обращаться и какого пола. Имя бога придумывает игрок, не ты. Без set_patron_name генезис не стартует.') +
+        ' request_city_concept снова — только если игрок просит другой город или снимок осей/директив изменился.',
     );
   }
   if (d.mode === 'quick' && !hasReadyConcept(d)) {
@@ -256,18 +327,13 @@ export function formatOnboardingStatusCard(draft, config, { generating = false, 
   }
   if (d.mode === 'brief' && !hasReadyConcept(d)) {
     const missing = missingAxisIds(config, d.axes);
-    const offer = nextAxisOffer(config, d.axes);
     lines.push(
-      'Режим brief: описание любой длины. Сохрани текст в set_player_brief. Выведи из него set_axis, что можешь.',
+      'Режим brief: описание любой длины. Сохрани текст в set_player_brief вместе с required/preferred. Выведи из него set_axis, что можешь (ось по id, не по nextAxis).',
     );
-    if (missing.length && offer) {
-      const variants = offer.open
-        ? 'Открытый вопрос: конкретная вещь, не тип каталога. random — тип из каталога.'
-        : `Варианты: ${offer.options.map((o) => `${o.id} «${o.label}»`).join('; ')}.`;
+    if (missing.length) {
       lines.push(
-        `Не хватает осей (${missing.length}). Следующая: «${offer.prompt}».`,
-        variants,
-        'Плюс random (пул каталога) или agent. Свой ответ — тоже choice. Один вопрос за ход.',
+        `Пустые оси (${missing.length}): ${missing.join(', ')}. Можно спросить одну пустую за ход — это речь, не указатель в туле.`,
+        'set_axis(axisId, value) пишет любую ось. resolve_axis — тонкая обёртка над текущей пустой. random / agent допустимы.',
         'Не request_city_concept, пока все оси не закрыты.',
       );
     } else {
@@ -276,22 +342,19 @@ export function formatOnboardingStatusCard(draft, config, { generating = false, 
   }
   if (d.mode === 'questions' && !hasReadyConcept(d)) {
     const interview = normalizeAxisInterview(d.axisInterview);
+    const missing = missingAxisIds(config, d.axes);
     const offer = nextAxisOffer(config, d.axes);
     if (offer) {
-      if (offer.open) {
-        lines.push(
-          `АНКЕТА. Текущая ось ${offer.axisId}. Задай ОДИН открытый вопрос: «${offer.prompt}».`,
-          'Не предлагай однословные типы каталога (ландшафт, материал, обычай…). Нужна конкретная вещь. random — тип из каталога. agent — можно придумать.',
-          'Свой ответ игрока запиши в resolve_axis choice как есть.',
-          'Не sample_genesis_axes и не request_city_concept, пока оси не закрыты.',
-        );
-      } else {
-        lines.push(
-          `АНКЕТА. Текущая ось ${offer.axisId}. Задай ОДИН вопрос: «${offer.prompt}».`,
-          `Подсказки (и пул random): ${offer.options.map((o) => `${o.id} «${o.label}»`).join('; ')}.`,
-          'Свой ответ игрока запиши в resolve_axis choice как есть, не подгоняй под каталог. random — только из каталога. agent — можно придумать.',
-          'Не sample_genesis_axes и не request_city_concept, пока оси не закрыты.',
-        );
+      lines.push(
+        'АНКЕТА. Можно спросить одну пустую ось за ход. Задай ОДИН вопрос своими словами.',
+        offer.open
+          ? `Если спрашиваешь ${offer.axisId} — открытый вопрос: «${offer.prompt}». Нужна конкретная вещь, не тип каталога.`
+          : `Если спрашиваешь ${offer.axisId}: «${offer.prompt}». Подсказки: ${(offer.options || []).map((o) => `${o.id} «${o.label}»`).join('; ')}.`,
+        'Свой ответ игрока запиши в set_axis или resolve_axis choice как есть, не подгоняй под каталог. random — только из каталога. agent — можно придумать.',
+        'Не sample_genesis_axes и не request_city_concept, пока оси не закрыты.',
+      );
+      if (missing.includes('signatureDomain')) {
+        lines.push('signatureDomain — открытый вопрос про конкретную узнаваемую вещь, не однословный тип.');
       }
     } else if (!interview.uniqueFeatureAsked) {
       lines.push(
@@ -334,12 +397,14 @@ export function formatPlayerBrief(brief = {}) {
   return parts.length ? parts.join('\n') : '(пожеланий нет — полная свобода генезиса)';
 }
 
+const PLAYER_NAME_CHARS = /^[\p{L}\p{M}\d\s\-',«»""]+$/u;
+
 export function validatePatronName(raw) {
   const name = String(raw || '').trim().replace(/\s+/g, ' ');
   if (name.length < 2) return { ok: false, reason: 'Слишком коротко.' };
   if (name.length > 40) return { ok: false, reason: 'Слишком длинно (до 40 символов).' };
-  if (!/^[\p{L}\p{M}\d\s\-']+$/u.test(name)) {
-    return { ok: false, reason: 'Только буквы, цифры, пробел, дефис.' };
+  if (!PLAYER_NAME_CHARS.test(name)) {
+    return { ok: false, reason: 'Только буквы, цифры, пробел, дефис, запятая.' };
   }
   const lower = name.toLowerCase();
   if (BANNED_EXACT.has(lower) || ['бог', 'богиня', 'покровитель', 'покровительница'].includes(lower)) {
@@ -362,12 +427,12 @@ export function validateCityName(raw) {
   if (name.length > 40) {
     return { ok: false, reason: 'Слишком длинно (до 40 символов).' };
   }
-  if (!/^[\p{L}\p{M}\d\s\-']+$/u.test(name)) {
-    return { ok: false, reason: 'Только буквы, цифры, пробел, дефис.' };
+  if (!PLAYER_NAME_CHARS.test(name)) {
+    return { ok: false, reason: 'Только буквы, цифры, пробел, дефис, запятая.' };
   }
   const lower = name.toLowerCase();
   if (BANNED_EXACT.has(lower)) {
-    return { ok: false, reason: 'Слишком плоское или запрещённое имя. Нужно звучное фэнтезийное.' };
+    return { ok: false, reason: 'Слишком плоское или запрещённое имя.' };
   }
   for (const bad of BANNED_SUBSTR) {
     if (lower.includes(bad)) {
@@ -377,21 +442,8 @@ export function validateCityName(raw) {
   if (/^(город|island|city)\b/i.test(name) || /\b(город|city)$/i.test(name)) {
     return { ok: false, reason: 'Не «просто город». Нужно собственное имя места.' };
   }
-  if (/^\d+$/.test(name)) {
-    return { ok: false, reason: 'Одни цифры — не имя.' };
-  }
-  // Too generic: single common word
-  if (['остров', 'небо', 'облако', 'земля', 'мир'].includes(lower)) {
-    return { ok: false, reason: 'Слишком общее. Сделай имя конкретнее и характернее.' };
-  }
-  for (const cliche of NAME_CLICHE_SUBSTR) {
-    if (lower.includes(cliche)) {
-      return {
-        ok: false,
-        reason:
-          'Имя слишком «про летающий остров/небо». Назови город по местным чертам (камень, торг, храм, руда…), не по полёту.',
-      };
-    }
+  if (/^\d+$/.test(name) || /^[\s\-',«»""]+$/.test(name)) {
+    return { ok: false, reason: 'Одни цифры или знаки — не имя.' };
   }
   return { ok: true, name };
 }
@@ -588,12 +640,12 @@ export function applyUserNamedCity(draft, text, occupiedByKey = null) {
 }
 
 const USER_PATRON_RES = [
-  /зови(?:те)?\s+меня\s+[«"]?([\p{Lu}][\p{L}\p{M}\s'-]{0,39})/u,
-  /называй(?:те)?\s+меня\s+[«"]?([\p{Lu}][\p{L}\p{M}\s'-]{0,39})/u,
-  /меня\s+зовут\s+[«"]?([\p{Lu}][\p{L}\p{M}\s'-]{0,39})/u,
-  /обраща(?:йся|йтесь)\s+(?:ко?\s+мне\s+)?(?:как\s+)?[«"]?([\p{Lu}][\p{L}\p{M}\s'-]{0,39})/u,
-  /(?:я|мое\s+имя|моё\s+имя)\s*[—–:-]\s*[«"]?([\p{Lu}][\p{L}\p{M}\s'-]{0,39})/u,
-  /имя\s+(?:бога|покровителя)\s*[—–:-]?\s*[«"]?([\p{Lu}][\p{L}\p{M}\s'-]{0,39})/u,
+  /зови(?:те)?\s+меня\s+[«"]?([\p{Lu}][\p{L}\p{M}\s,'-]{0,39})/u,
+  /называй(?:те)?\s+меня\s+[«"]?([\p{Lu}][\p{L}\p{M}\s,'-]{0,39})/u,
+  /меня\s+зовут\s+[«"]?([\p{Lu}][\p{L}\p{M}\s,'-]{0,39})/u,
+  /обраща(?:йся|йтесь)\s+(?:ко?\s+мне\s+)?(?:как\s+)?[«"]?([\p{Lu}][\p{L}\p{M}\s,'-]{0,39})/u,
+  /(?:я|мое\s+имя|моё\s+имя)\s*[—–:-]\s*[«"]?([\p{Lu}][\p{L}\p{M}\s,'-]{0,39})/u,
+  /имя\s+(?:бога|покровителя)\s*[—–:-]?\s*[«"]?([\p{Lu}][\p{L}\p{M}\s,'-]{0,39})/u,
 ];
 
 export function extractUserPatronName(text) {
@@ -610,7 +662,16 @@ export function extractUserPatronName(text) {
 }
 
 export function applyUserNamedPatron(draft, text) {
-  if (!draft || draft.patronNameApproved) return null;
+  if (!draft) return null;
+  const gender = extractPatronGender(text);
+  if (gender) {
+    draft.patronGender = gender;
+    draft.playerDirectives = upsertCanonicalDirectives(draft.playerDirectives, {
+      patronGender: gender,
+      patronName: draft.patronNameApproved ? draft.patronName : null,
+    });
+  }
+  if (draft.patronNameApproved) return gender ? draft.patronName : null;
   const named = extractUserPatronName(text);
   if (named) {
     draft.patronName = named;
@@ -672,14 +733,16 @@ export function playerConsentsToStart(text, { pitched = false } = {}) {
     return false;
   }
   if (
-    /^(да|ок|окей|хорошо|ладно|этот|выбираю|начинаем|начинай|создавай|создаём|создаем|поехали|старт|вперёд|вперед|берём|берем|согласен|подходит|идёт|идет|давай|готов)(?!\p{L})/iu.test(
+    /^(да|ок|окей|хорошо|ладно|этот|выбираю|начинаем|начинай|создавай|создаём|создаем|поехали|старт|вперёд|вперед|берём|берем|согласен|подходит|идёт|идет|давай|готов|запускай|запускаем)(?!\p{L})/iu.test(
       raw,
     )
   ) {
     return true;
   }
   if (/^(я\s+)?готов(?!\s+ли)/iu.test(raw)) return true;
-  if (/(?<!\p{L})(начинаем|создавай|поехали|поднимай\s+остров)(?!\p{L})/iu.test(raw)) return true;
+  if (/(?<!\p{L})(начинаем|создавай|поехали|поднимай\s+остров|запускай|запускаем)(?!\p{L})/iu.test(raw)) {
+    return true;
+  }
   return false;
 }
 

@@ -45,7 +45,7 @@ export function openingLoreFromConcept(concept, { min = 8, max = 12 } = {}) {
   const name = concept.name || 'город';
   const lines = [];
   const push = (s) => {
-    const t = clip(s, 220);
+    const t = clip(String(s || '').split('%cityName').join(name), 220);
     if (t && !lines.includes(t)) lines.push(t);
   };
   push(`Город «${name}» стоит в центре летающего острова.`);
@@ -170,6 +170,9 @@ export async function requestCityConcept({
   playerBrief,
   axisInterview = null,
   occupiedNames = [],
+  lockedName = null,
+  lockedPatronName = null,
+  lockedPatronGender = null,
   log: parentLog,
 } = {}) {
   const log = (parentLog || getLogger()).child({ scope: 'genesis.concept' });
@@ -209,7 +212,7 @@ export async function requestCityConcept({
         },
       },
       handler: async (args) => {
-        const { concept, reason } = normalizeConcept(args);
+        const { concept, reason } = normalizeConcept(lockedName ? { ...args, name: lockedName } : args);
         if (reason) {
           draft.fail = reason;
           const why =
@@ -220,7 +223,7 @@ export async function requestCityConcept({
         }
         if (concept.status === 'READY') {
           const hits = matchCosmologyHeuristic(
-            [concept.name, concept.identity?.oneLine, concept.preview].filter(Boolean).join('\n'),
+            [concept.identity?.oneLine, concept.preview].filter(Boolean).join('\n'),
           );
           if (hits.length) {
             draft.data = {
@@ -259,9 +262,20 @@ export async function requestCityConcept({
         role: 'user',
         content: [
           'Напиши краткий питч города по осям. Не полный Genesis и не энциклопедию.',
-          'Имя: 1–3 слова кириллицей, как топоним места. Не русское земное (не Белогорье). Не про небо/полёт.',
-          'Не называй город именем игры, продуктом или латинской калькой.',
-          'preview 80–200 слов: имя, силуэт острова, чем живут, характер. Без списка «1. 2. 3.».',
+          lockedName
+            ? `Имя города УЖЕ дано игроком: «${lockedName}». Поле name = точно это. Это данное: не поднимай конфликт космологии из-за звучания.`
+            : 'Имя: 1–3 слова кириллицей, как топоним места. Не русское земное (не Белогорье). Не про небо/полёт. Не имя игры и не латинская калька.',
+          lockedPatronName
+            ? `Имя покровителя уже дано: «${lockedPatronName}»${
+                lockedPatronGender === 'female'
+                  ? ' (женщина)'
+                  : lockedPatronGender === 'male'
+                    ? ' (мужчина)'
+                    : ''
+              }. Не отвергай его из-за звучания.`
+            : '',
+          'Поле name отдельно. В preview / identity и прочей прозе только плейсхолдер %cityName в именительном («город %cityName стоит…»). Косвенные падежи обходи («здесь», «этот город»).',
+          'preview 80–200 слов: силуэт острова, чем живут, характер. Без списка «1. 2. 3.».',
           'Если PLAYER_REQUIRED ломает космологию — status NEEDS_PLAYER_REVISION, не чини молча.',
           occupied.length ? `Занятые имена, не предлагай: ${occupied.join(', ')}` : '',
           '',

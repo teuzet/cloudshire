@@ -101,7 +101,7 @@ test('plotAlign: старый boolean и безопасный default', () => {
   assert.equal(engagementOf({ plotEngagement: 'RELEVANT' }), 'RELEVANT');
   assert.equal(engagementOf({ plotAligned: true }), 'DIRECT');
   assert.equal(engagementOf({ plotAligned: false }), 'RELEVANT');
-  assert.equal(engagementOf({}), 'UNRELATED');
+  assert.equal(engagementOf({}), null);
   const p = {};
   assert.equal(applyEngagement(p, 'DIRECT'), 'DIRECT');
   assert.equal(p.plotAligned, true);
