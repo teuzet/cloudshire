@@ -146,7 +146,7 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
   // Нить пережила отпущенный ей срок — движок обязан её закрыть битом-финалом.
   const stalePlots = plots.filter((p) => isOverdue(p));
   const errands = plots.filter((p) => p.kind === 'errand');
-  const boardOverflow = plots.length > (plotCfg.board?.maxOpen ?? 5);
+  const boardOverflow = plots.length > (plotCfg.board?.maxOpen ?? 4);
 
   const myConfluxes = confluxes.filter((c) => (c.domainIds || []).includes(domain.id));
   const active = myConfluxes.find((c) => c.status === 'approaching' || c.status === 'docked');

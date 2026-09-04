@@ -68,18 +68,27 @@ export function clampSeedTemp(value, cfg = DEFAULT_SEED) {
 }
 
 export function emptySeedTemp(cfg = DEFAULT_SEED) {
-  const parsed = cfg.errandStart != null || cfg.start != null ? parseSeedConfig(cfg) : DEFAULT_SEED;
-  const start = clampSeedTemp(parsed.start ?? cfg.start, parsed);
-  const errandStart = clampSeedTemp(parsed.errandStart ?? parsed.start, parsed);
-  return { chronicle: start, void: start, errand: errandStart };
+  const parsed = seedConfig(cfg);
+  return { chronicle: parsed.start, void: parsed.start, errand: parsed.errandStart };
 }
 
 export function normalizeSeedTemp(raw, cfg = DEFAULT_SEED) {
-  const base = emptySeedTemp(cfg);
+  const parsed = seedConfig(cfg);
+  const base = emptySeedTemp(parsed);
   const src = raw && typeof raw === 'object' ? raw : {};
   const out = { ...base };
   for (const key of SEED_SOURCES) {
-    out[key] = clampSeedTemp(src[key], cfg);
+    if (src[key] == null || src[key] === '') continue;
+    out[key] = clampSeedTemp(src[key], parsed);
+  }
+  // Старые сейвы держали поручение на start (5). Не трогали каналы — все три на start.
+  if (
+    Number(src.errand) === parsed.start &&
+    Number(out.chronicle) === parsed.start &&
+    Number(out.void) === parsed.start &&
+    parsed.errandStart !== parsed.start
+  ) {
+    out.errand = parsed.errandStart;
   }
   return out;
 }

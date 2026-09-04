@@ -17,14 +17,10 @@ import {
 import {
   normalizePlotlines,
   plotConfig,
-  plotSeedChance,
-  pickSequelSeed,
-  allowSequelAfter,
   findPlotline,
   closePlotline,
   plotHasActiveProcess,
   attachChronicleToPlotlines,
-  countOpen,
   releaseInactiveProcessesFromOpenPlots,
 } from './plotlines.js';
 import {
@@ -41,7 +37,8 @@ import {
 import { planOrderTicks, pickOrderOutcome, expireTimedOrders } from './orders.js';
 import { resolvePendingOrders } from './orderSmith.js';
 import { fireConfluxDockOrder } from './orderDock.js';
-import { seedPlot, beatPlot, tickOrder, quietMonth, keepStories, fadeQuietPlot, plantStakedStory, voidSeedPackArgs, pickLiveVoidGravity } from './storyteller.js';
+import { beatPlot, tickOrder, quietMonth, keepStories, fadeQuietPlot, plantStakedStory } from './storyteller.js';
+import { decideMonthSeed, applyMonthSeedTemps } from './seedChannels.js';
 import { resolveSuspenseLegacy } from './legacyResolver.js';
 import { scoreMonthStats, factsForStatJudge } from './statJudge.js';
 import { runSteward } from './steward.js';
@@ -206,7 +203,6 @@ export async function resolveDomainMonth({
   });
 
   // 4. Биты процессов и историй.
-  const sequelOffers = [];
   const suspenseClosures = [];
   for (const beat of beats) {
     const plot = findPlotline(working, beat.plotId);
@@ -277,19 +273,6 @@ export async function resolveDomainMonth({
             lastEntry: result.fact.text,
             closeReason: result.closeReason || '',
             hook: result.sequelHook || '',
-          });
-        }
-        if (result.sequelHook && allowSequelAfter(plot)) {
-          sequelOffers.push({
-            id: plot.id,
-            title: plot.title,
-            synopsis: plot.synopsis,
-            closeWhen: plot.closeWhen,
-            reason: result.closeReason || '',
-            hook: result.sequelHook,
-            lastEntry: result.fact.text,
-            gravity: plot.gravity,
-            storyType: plot.storyType,
           });
         }
       }
@@ -370,57 +353,42 @@ export async function resolveDomainMonth({
     }
   }
 
-  // 6. Посев мира: сиквел занимает освободившийся слот; иначе обычный посев, если живых историй нет.
-  const { stories } = countOpen(working);
-  const sequel = pickSequelSeed(working, sequelOffers, cfg);
-  const seedChance = sequel ? 1 : plotSeedChance(working, cfg, world.tickIndex);
-  const wantSeed =
-    cap - used > 0 &&
-    (Boolean(sequel) || stories === 0) &&
-    (Boolean(sequel) || Math.random() < seedChance);
+  // 6. Посев мира: каналы хроника / пустота / поручение. Хроника и пустота — пока историй < 3.
+  const seedDecision = decideMonthSeed({
+    domain: working,
+    world,
+    config,
+    processOutcomes,
+    chronicleAdds,
+  });
   let sequelledId = null;
-  if (wantSeed) {
-    if (sequel) {
-      const seeded = await seedPlot({
-        config,
-        runtime,
-        domain: working,
-        world,
-        storage,
-        fromClosed: sequel,
-        storyType:
-          sequel?.storyType === 'mystery' || sequel?.storyType === 'suspense' ? sequel.storyType : null,
-        log,
-      });
-      if (seeded?.fact) {
-        chronicleAdds.push(seeded.fact);
-        used += 1;
-      }
-      if (seeded?.plot && sequel?.id) sequelledId = sequel.id;
+  if (seedDecision.source) {
+    const planted = await plantStakedStory({
+      config,
+      runtime,
+      domain: working,
+      world,
+      seedText: seedDecision.seedText,
+      gravity: seedDecision.gravity,
+      fromVoid: seedDecision.fromVoid,
+      fromGenesis: seedDecision.fromGenesis,
+      log,
+    });
+    if (planted?.plot) {
+      if (planted.fact) chronicleAdds.push(planted.fact);
+      used += 1;
     } else {
-      const grain = voidSeedPackArgs(working, { config });
-      const planted = await plantStakedStory({
-        config,
-        runtime,
-        domain: working,
-        world,
-        seedText: grain.seedText,
-        gravity: pickLiveVoidGravity(),
-        fromVoid: grain.fromVoid,
-        fromGenesis: grain.fromGenesis,
-        log,
-      });
-      if (planted?.fact) {
-        chronicleAdds.push(planted.fact);
-        used += 1;
-      }
-      log.info('month.void_seed', {
-        grain: grain.grain,
-        gravity: planted?.plot?.gravity || null,
-        title: planted?.plot?.title || null,
-      });
+      seedDecision.events[seedDecision.source] = 'miss';
     }
+    log.info('month.seed', {
+      source: seedDecision.source,
+      grain: seedDecision.grain,
+      gravity: planted?.plot?.gravity || seedDecision.gravity,
+      title: planted?.plot?.title || null,
+      stories: seedDecision.stories,
+    });
   }
+  applyMonthSeedTemps(working, seedDecision.events, config);
 
   for (const closed of suspenseClosures) {
     if (closed.id === sequelledId) continue;
@@ -509,9 +477,9 @@ export async function resolveDomainMonth({
     plots: working.plotlines.length,
     slotsUsed: used,
     cap,
-    seedChance: Number(seedChance.toFixed(2)),
-    seeded: wantSeed,
-    sequelOf: sequel?.id || null,
+    seedSource: seedDecision.source,
+    seeded: Boolean(seedDecision.source),
+    seedTemps: working.state?.seedTemp || null,
     ordersPlanned: orderPlan.length,
     kept: kept ? { updated: kept.updated } : null,
     statsScored: scored?.scored ?? 0,

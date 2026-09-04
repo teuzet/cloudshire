@@ -422,7 +422,7 @@ export function plotConfig(config) {
   return {
     enabled: p.enabled !== false,
     board: {
-      maxOpen: Math.max(2, Math.min(10, Number(board.maxOpen) || 5)),
+      maxOpen: Math.max(2, Math.min(10, Number(board.maxOpen) || 4)),
       targetImportance: Math.max(0, Math.min(400, Number(board.targetImportance ?? 100))),
       seedMaxChance: Number(board.seedMaxChance ?? 0.5),
       seedCooldownMonths: Math.max(0, Math.min(12, Number(board.seedCooldownMonths) ?? 2)),
@@ -842,7 +842,7 @@ export function countOpen(domain) {
 
 export function boardHasRoom(domain, cfg) {
   const { stories } = countOpen(domain);
-  const maxOpen = cfg?.board?.maxOpen ?? 5;
+  const maxOpen = cfg?.board?.maxOpen ?? 4;
   return {
     story: stories < maxOpen,
     errand: true,
