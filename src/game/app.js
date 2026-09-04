@@ -935,10 +935,11 @@ export class GameApp {
 
     const holdMs = Number(this.config.agents?.ruler?.holdAfterMs);
     const holdDelay = Number.isFinite(holdMs) && holdMs > 0 ? holdMs : 10_000;
+    let holdTask = Promise.resolve();
     const holdTimer = setTimeout(() => {
       const line = rulerHoldLine(this.config, character);
       if (!line) return;
-      void this.emitOutbound(domain.ownerUserId, line, {
+      holdTask = this.emitOutbound(domain.ownerUserId, line, {
         channel,
         kind: 'ruler_hold',
         domainId: domain.id,
@@ -1049,6 +1050,7 @@ export class GameApp {
       };
     } finally {
       clearTimeout(holdTimer);
+      await holdTask;
     }
   }
 

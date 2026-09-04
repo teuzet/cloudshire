@@ -14,6 +14,7 @@ import {
   parseSlashCommand,
 } from '../src/clients/telegram/access.js';
 import { formatIslandPlotlines, formatIslandStats } from '../src/clients/telegram/views.js';
+import { rememberHoldMessage, deleteRememberedHolds } from '../src/clients/telegram/bot.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const config = yaml.load(fs.readFileSync(path.join(root, 'config/default.yaml'), 'utf8'));
@@ -93,4 +94,27 @@ test('сводка статов и нитей читается без механ
   const board = formatIslandPlotlines(domain);
   assert.match(board, /Пустая келья/);
   assert.match(board, /закроется, когда/);
+});
+
+test('hold в телеге запоминается и снимается, когда пришёл ответ', async () => {
+  const holds = new Map();
+  const deleted = [];
+  const bot = {
+    deleteMessage: async (chatId, messageId) => {
+      deleted.push({ chatId, messageId });
+    },
+  };
+
+  rememberHoldMessage(holds, '42', 100, 7);
+  rememberHoldMessage(holds, '42', 100, 8);
+  await deleteRememberedHolds(bot, holds, '42');
+  assert.deepEqual(deleted, [
+    { chatId: 100, messageId: 7 },
+    { chatId: 100, messageId: 8 },
+  ]);
+  assert.equal(holds.size, 0);
+
+  deleted.length = 0;
+  await deleteRememberedHolds(bot, holds, '42');
+  assert.deepEqual(deleted, []);
 });

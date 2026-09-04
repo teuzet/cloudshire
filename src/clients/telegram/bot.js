@@ -48,6 +48,32 @@ async function sendChunks(bot, chatId, text, { html = false } = {}) {
   }
 }
 
+/** @typedef {{ chatId: number|string, messageIds: number[] }} HoldRef */
+
+export function rememberHoldMessage(holds, userId, chatId, messageId) {
+  const uid = String(userId || '');
+  const id = Number(messageId);
+  if (!uid || !Number.isFinite(id)) return;
+  const prev = holds.get(uid) || { chatId, messageIds: [] };
+  prev.chatId = chatId;
+  if (!prev.messageIds.includes(id)) prev.messageIds.push(id);
+  holds.set(uid, prev);
+}
+
+export async function deleteRememberedHolds(bot, holds, userId) {
+  const uid = String(userId || '');
+  const prev = holds.get(uid);
+  holds.delete(uid);
+  if (!prev?.messageIds?.length || typeof bot?.deleteMessage !== 'function') return;
+  for (const messageId of prev.messageIds) {
+    try {
+      await bot.deleteMessage(prev.chatId, messageId);
+    } catch (err) {
+      console.warn('[telegram] hold delete failed:', err.message);
+    }
+  }
+}
+
 function botCommandList(commands) {
   return (commands || [])
     .map((c) => ({
@@ -172,6 +198,8 @@ export function startTelegramBot({ config, app, storage, runTick }) {
   const pendingDelete = new Map();
   /** @type {Map<string, { chatId: number|string, messageId: number }>} */
   const editable = new Map();
+  /** @type {Map<string, HoldRef>} */
+  const holds = new Map();
 
   async function rememberChat(userId, chatId) {
     const uid = String(userId);
@@ -228,6 +256,13 @@ export function startTelegramBot({ config, app, storage, runTick }) {
     const htmlOpts = html ? { parse_mode: 'HTML' } : {};
     const outboundText = html ? toOnboardingTelegramHtml(message) : message;
     try {
+      if (kind === 'ruler_hold') {
+        if (!outboundText) return;
+        const sent = await bot.sendMessage(chatId, outboundText, htmlOpts);
+        rememberHoldMessage(holds, userId, chatId, sent.message_id);
+        return;
+      }
+      await deleteRememberedHolds(bot, holds, userId);
       if (edit && message) {
         const prev = editable.get(userId);
         if (prev) {
@@ -401,11 +436,13 @@ export function startTelegramBot({ config, app, storage, runTick }) {
         channel: 'telegram',
         bootstrap,
       });
+      await deleteRememberedHolds(bot, holds, userId);
       if (result.reply) {
         await sendChunks(bot, msg.chat.id, result.reply, { html: result.agent === 'onboarding' });
       }
     } catch (err) {
       console.error('[telegram] handler error:', err);
+      await deleteRememberedHolds(bot, holds, userId);
       await bot.sendMessage(msg.chat.id, 'Произошла ошибка. Попробуй ещё раз чуть позже.');
     }
   });
