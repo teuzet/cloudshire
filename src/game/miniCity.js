@@ -5,16 +5,21 @@ import { finishChancePercents } from './rolls.js';
 import { blessManaCost, currentMana } from './mana.js';
 import { cityRules, confluxDirective } from './cityRules.js';
 import { gameDateFromTickIndex } from './tickClock.js';
-import { gameDateFromDay } from './gameClock.js';
+import { gameDateFromDay, realWaitLabel } from './gameClock.js';
 import {
   DIFFICULTY_SPEC,
   DURATION_SPEC,
   normalizeDifficultyBand,
   normalizeDurationBand,
 } from './bands.js';
-import { deedDurationBand, deedRemainingBand } from './deeds.js';
+import { deedDurationBand, deedRemainingBand, deedRemainingDays } from './deeds.js';
 import { paceLabel } from './deedMath.js';
-import { dreadFlag, knownThreatsForSpeech } from './threats.js';
+import {
+  dreadFlag,
+  findThreat,
+  knownThreatsForSpeech,
+  remainingDays as threatRemainingDays,
+} from './threats.js';
 import { chronicleEntries } from './models.js';
 import { parseCityBrief } from './cityContext.js';
 import { domainHasIslandImage, officerHasPortrait } from '../storage/r2.js';
@@ -210,9 +215,9 @@ function ownProcesses(domain, conflux) {
 }
 
 /**
- * Дело для игрока. Как и жрецу, отдаём полосы, а не дни: точное число срока —
- * внутренний жребий движка, и, увидев его в справочнике, игрок начнёт считать
- * то, чего жрец не обещал.
+ * Дело для игрока. Полосы — это язык агентов, чтобы они не считали числа;
+ * игроку числа как раз нужны: по ним он решает, заглянуть ли через полчаса
+ * или уйти на ночь. Поэтому здесь и игровые дни, и прикидка реального времени.
  */
 function slimProcess(process, config, { mana = 0, domain = null, day = 0 } = {}) {
   const names = (process.linkedStats || [])
@@ -221,12 +226,16 @@ function slimProcess(process, config, { mana = 0, domain = null, day = 0 } = {})
   const cost = blessManaCost(process);
   const active = !process.status || process.status === 'active';
   const paused = process.status === 'paused';
+  const left = paused ? null : deedRemainingDays(process, day);
   return {
     id: process.id,
     summary: clip(process.summary || 'Дело', 180),
     detail: clip(process.detail || '', 1200),
-    // На паузе остаток не тикает: показывать «ещё недели» было бы враньём.
+    // На паузе остаток не тикает: показывать срок было бы враньём.
+    remainingDays: left,
+    remainingReal: left == null ? null : realWaitLabel(left, config),
     remaining: paused ? null : durationWord(deedRemainingBand(process, day)),
+    totalDays: Math.max(1, Math.round(Number(process.scheduledDays) || 0)) || null,
     duration: durationWord(deedDurationBand(process)),
     difficulty: difficultyWord(process.difficulty),
     pace: paceLabel(process.paceShift),
@@ -287,12 +296,19 @@ function collectEvents(domain, conflux, config, mana = 0, day = 0) {
     return {
       title: clip(plot.title || 'История', 80),
       synopsis: clip(plot.synopsis || '', 600),
-      // Ровно то, что знает жрец: формулировка и полоса остатка, без числа дней.
-      threats: knownThreatsForSpeech(plot, day).map((t) => ({
-        text: clip(t.text || '', 300),
-        remaining: durationWord(t.remainingBand),
-        kind: t.kind,
-      })),
+      // Что город знает, то и показываем — со сроком. Известная беда через
+      // двадцать реальных минут это ровно тот повод остаться в игре,
+      // ради которого игрок и смотрит справочник.
+      threats: knownThreatsForSpeech(plot, day).map((t) => {
+        const left = threatRemainingDays(findThreat(plot, t.id), day);
+        return {
+          text: clip(t.text || '', 300),
+          remainingDays: left,
+          remainingReal: realWaitLabel(left, config),
+          remaining: durationWord(t.remainingBand),
+          kind: t.kind,
+        };
+      }),
       dread: dreadFlag(plot, day),
       processes: procs
         .filter((pr) => related.has(String(pr.id)))

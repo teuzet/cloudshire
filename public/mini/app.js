@@ -74,12 +74,20 @@ function portraitButton(slot) {
   return `<button type="button" class="portrait-btn${src ? '' : ' blank'}" data-open-officer="${esc(id)}" aria-label="Подробнее">${inner}</button>`;
 }
 
+/** Сколько ждать: игровой срок и рядом реальный, чтобы игрок мог спланировать. */
+function waitText(days, real) {
+  if (days == null) return '';
+  const d = Math.max(0, Math.round(days));
+  const word = d % 10 === 1 && d % 100 !== 11 ? 'день' : d % 10 >= 2 && d % 10 <= 4 && (d % 100 < 12 || d % 100 > 14) ? 'дня' : 'дней';
+  return real ? `${d} ${word} (${real})` : `${d} ${word}`;
+}
+
 function processMeta(p) {
   if (!p) return '';
   const stats = p.linkedStats?.length ? p.linkedStats.join(', ') : '';
   const pause = p.paused ? 'на паузе' : '';
-  const left = p.remaining ? `ещё ${p.remaining}` : '';
-  const span = p.duration ? `работы на ${p.duration}` : '';
+  const left = p.remainingDays != null ? `ещё ${waitText(p.remainingDays, p.remainingReal)}` : '';
+  const span = p.totalDays ? `всего ${waitText(p.totalDays)}` : '';
   const hard = p.impossible ? 'невыполнимо' : p.difficulty ? `дело ${p.difficulty}` : '';
   const pace = p.pace && p.pace !== 'обычно' ? p.pace : '';
   const blessed = p.blessed ? 'благословлено' : '';
@@ -244,16 +252,22 @@ function renderEvents(events) {
       const deeds = e.processes?.length
         ? e.processes
             .map((p) => {
-              const left = p.remaining ? ` · ещё ${p.remaining}` : p.paused ? ' · на паузе' : '';
+              const left =
+                p.remainingDays != null
+                  ? ` · ещё ${waitText(p.remainingDays, p.remainingReal)}`
+                  : p.paused
+                    ? ' · на паузе'
+                    : '';
               return `<p class="meta">${esc(p.summary)}${esc(left)}</p>`;
             })
             .join('')
         : '<p class="meta">Связанных дел нет.</p>';
-      // Нависшее — то, что город уже знает; сроки словом, как их говорит жрец.
       const threats = (e.threats || [])
         .map(
           (t) =>
-            `<p class="threat${t.kind === 'разрешение' ? ' calm' : ''}">${esc(t.text)} — ${esc(t.remaining)}</p>`,
+            `<p class="threat${t.kind === 'разрешение' ? ' calm' : ''}">${esc(t.text)} — ${esc(
+              waitText(t.remainingDays, t.remainingReal),
+            )}</p>`,
         )
         .join('');
       const dread = e.dread && e.dread !== 'спокойно'

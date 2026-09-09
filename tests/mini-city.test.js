@@ -226,11 +226,6 @@ test('мини-аппка: свои истории и участие в сопр
   assert.equal(fight.processes[0].summary, 'Сторожить проход');
   assert.equal(view.processes.length, 4);
   assert.equal(
-    view.processes.some((p) => p.process?.remaining === 'недели'),
-    true,
-    'остаток дела — полоса словами, а не число дней',
-  );
-  assert.equal(
     view.processes.some((p) => 'monthsLeft' in (p.process || {})),
     false,
     'месячных полей в справочнике больше нет',
@@ -251,7 +246,10 @@ test('мини-аппка: свои истории и участие в сопр
   assert.equal(well.process.duration, 'сезон');
   assert.equal(well.process.difficulty, 'трудное');
   assert.equal(well.process.pace, 'обычно');
-  assert.equal(well.process.remaining, 'недели', 'работы на сезон, но до срока осталось 65 дней');
+  // Игроку — числа: по ним он решает, заглядывать ли через полчаса.
+  assert.equal(well.process.remainingDays, 65);
+  assert.equal(well.process.totalDays, 90);
+  assert.equal(well.process.remainingReal, '~4,3 ч', '65 игровых дней это 260 реальных минут');
   assert.equal(well.nature, 'осторожна и памятлива');
   assert.equal(well.ageYears, 40);
   assert.equal(well.gender, 'female');
@@ -272,7 +270,8 @@ test('мини-аппка: свои истории и участие в сопр
     ['Колодец обвалится'],
     'скрытая беда в справочник не попадает',
   );
-  assert.equal(well2.threats[0].remaining, 'дни', 'до обвала пять дней — полоса дней');
+  assert.equal(well2.threats[0].remainingDays, 5);
+  assert.equal(well2.threats[0].remainingReal, '~20 мин', 'известная беда идёт со сроком');
   assert.equal(well2.threats[0].kind, 'угроза');
   assert.equal(typeof well2.dread, 'string', 'скрытая беда видна только как чутьё');
   assert.equal('loyalty' in (view.city || {}), false);

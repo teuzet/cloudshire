@@ -13,6 +13,7 @@ import {
   worldDateLabel,
   spanBandLabel,
   humanSpan,
+  realWaitLabel,
   skipGameDays,
 } from '../src/game/gameClock.js';
 
@@ -63,6 +64,17 @@ test('realTimeOfDay обратна currentDay', () => {
 });
 
 // ─────────────────────────── ручная промотка ───────────────────────────
+
+test('игровой срок переводится в реальное ожидание для игрока', () => {
+  assert.equal(realWaitLabel(0), 'вот-вот');
+  assert.equal(realWaitLabel(1), '~4 мин');
+  assert.equal(realWaitLabel(5), '~20 мин');
+  assert.equal(realWaitLabel(20), '~80 мин');
+  assert.equal(realWaitLabel(30), '~2 ч', 'игровой месяц — два реальных часа');
+  assert.equal(realWaitLabel(360), '~1 сут', 'игровой год — реальные сутки');
+  // Скорость времени настраиваемая: ярлык обязан идти за конфигом, а не за константой.
+  assert.equal(realWaitLabel(360, { time: { realHoursPerYear: 48 } }), '~2 сут');
+});
 
 test('промотка двигает якорь, а не заводит второй счётчик', () => {
   const world = {};

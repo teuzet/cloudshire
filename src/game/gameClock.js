@@ -125,6 +125,28 @@ export function spanBandLabel(days) {
   return 'годы';
 }
 
+/**
+ * Сколько реального времени ждать — то, что видит игрок рядом с игровым сроком.
+ *
+ * Полосы нужны агентам, чтобы они не считали; игроку числа нужны как раз для
+ * счёта: он по ним решает, заглянуть ли через полчаса или можно уйти спать.
+ * Поэтому здесь не полоса, а прикидка в минутах и часах.
+ */
+export function realWaitLabel(days, config = null) {
+  const d = Math.max(0, Number(days) || 0);
+  if (!d) return 'вот-вот';
+  const minutes = gameDaysToRealMs(d, config) / 60000;
+  if (minutes < 1) return 'меньше минуты';
+  if (minutes < 90) return `~${Math.round(minutes)} мин`;
+  const hours = minutes / 60;
+  if (hours < 24) {
+    const rounded = hours < 10 ? Math.round(hours * 10) / 10 : Math.round(hours);
+    return `~${String(rounded).replace('.', ',')} ч`;
+  }
+  const realDays = Math.round((hours / 24) * 10) / 10;
+  return `~${String(realDays).replace('.', ',')} сут`;
+}
+
 /** Приблизительный человеческий срок для речи жреца. */
 export function humanSpan(days) {
   const d = Math.max(0, Math.round(Number(days) || 0));
