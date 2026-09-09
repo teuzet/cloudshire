@@ -95,8 +95,8 @@ import {
 import { formatMysteryJudgeCase, judgeMysteryCascade, summarizeJudgeAttempt, judgeMysteryPresentation, formatMysteryPresentationJudgeCase, formatJudgeRevisionForPrompt, literaryJudgeAccepts } from './mysteryJudge.js';
 import { formatSuspenseJudgeCase, judgeSuspenseSeed } from './suspenseJudge.js';
 import { ensureCityEntities, pickMysteryAnchors, formatMysteryAnchorsForPrompt } from './cityEntities.js';
-import { formatCityForAgents, cityGenesisSeedText } from './cityContext.js';
-import { pickVoidGrain } from './seedTemp.js';
+import { formatCityForAgents } from './cityContext.js';
+import { voidGrainPack } from './seedChannels.js';
 import {
   annotationTagsFromCard,
   climateOf,
@@ -942,14 +942,7 @@ async function seedMysteryPlot({
 }
 
 export function voidSeedPackArgs(domain, { config, rng = Math.random } = {}) {
-  const grain = pickVoidGrain(config, rng);
-  if (grain === 'genesis') {
-    const seedText = cityGenesisSeedText(domain);
-    if (seedText) {
-      return { grain: 'genesis', fromVoid: false, fromGenesis: true, seedText };
-    }
-  }
-  return { grain: 'void', fromVoid: true, fromGenesis: false, seedText: '' };
+  return voidGrainPack(domain, { config, rng });
 }
 
 export function pickLiveVoidGravity(rng = Math.random) {

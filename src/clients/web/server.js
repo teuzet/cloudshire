@@ -32,6 +32,7 @@ import { blessManaCost } from '../../game/mana.js';
 import { liveThreats, remainingDays as threatRemainingDays } from '../../game/threats.js';
 import { priestOrders } from '../../game/priestOrders.js';
 import { notifySettings } from '../../game/notify.js';
+import { canDropPlayStory } from '../../game/playDev.js';
 import { mountFreeformLab } from './freeformLab.js';
 import {
   validateTelegramInitData,
@@ -669,7 +670,10 @@ export function createWebServer({ config, app, runtime, storage }) {
             priestOrders: priestOrders(domain),
             notify: notifySettings(domain),
             monthLog: domain.state?.monthLog || [],
-            plotlines: (domain.plotlines || []).map((p) => inspectPlot(p, day)),
+            plotlines: (domain.plotlines || []).map((p) => ({
+              ...inspectPlot(p, day),
+              canDrop: canDropPlayStory(domain, p),
+            })),
             closedPlotlines: (domain.closedPlotlines || []).slice(-20).map(stripPlotSecrets),
             cast: castRecords(lore),
             facts: lore
@@ -769,6 +773,58 @@ export function createWebServer({ config, app, runtime, storage }) {
           if (typeof resync === 'function') await resync();
           getLogger().warn('play.wipe', { userId: String(req.body?.userId || ''), status });
           res.json({ ok: true, status });
+        } catch (err) {
+          req.log?.error('http.error', { error: err.message, stack: err.stack });
+          res.status(500).json({ error: err.message });
+        }
+      });
+
+      server.post('/api/play/seed', async (req, res) => {
+        try {
+          const userId = String(req.body?.userId || 'local-user');
+          const result = await app.forceSeedStory(userId, {
+            gravity: req.body?.gravity,
+            grain: req.body?.grain,
+          });
+          if (!result.ok) {
+            const status =
+              result.error === 'ticking' || result.error === 'busy' || result.error === 'board_full'
+                ? 409
+                : result.error === 'no_domain'
+                  ? 404
+                  : result.error === 'plant_failed'
+                    ? 502
+                    : 400;
+            return res.status(status).json(result);
+          }
+          getLogger().info('play.force_seed', {
+            userId,
+            grain: result.grain,
+            gravity: result.gravity,
+            title: result.plot?.title,
+          });
+          res.json(result);
+        } catch (err) {
+          req.log?.error('http.error', { error: err.message, stack: err.stack });
+          res.status(500).json({ error: err.message });
+        }
+      });
+
+      server.post('/api/play/drop-story', async (req, res) => {
+        try {
+          const userId = String(req.body?.userId || 'local-user');
+          const plotId = String(req.body?.plotId || '').trim();
+          const result = await app.dropPlayStory(userId, plotId);
+          if (!result.ok) {
+            const status =
+              result.error === 'ticking'
+                ? 409
+                : result.error === 'not_found' || result.error === 'no_domain'
+                  ? 404
+                  : 400;
+            return res.status(status).json(result);
+          }
+          res.json(result);
         } catch (err) {
           req.log?.error('http.error', { error: err.message, stack: err.stack });
           res.status(500).json({ error: err.message });

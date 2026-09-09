@@ -1,6 +1,7 @@
 /**
  * Каталог важных сущностей города. Собирает отдельный агент после генезиса.
- * Полный список модели-рассказчику не отдаём: система кладёт в завязку тайны 1 якорь, редко 2.
+ * Полный список модели-рассказчику не отдаём: в завязку тайны — 1 якорь, редко 2;
+ * в посев из генезиса — срез одного вида, не весь бриф.
  */
 
 import { newId } from './ids.js';
@@ -34,6 +35,43 @@ export const ENTITY_KIND_LABELS = {
   artifact: 'артефакт',
   substance: 'вещество',
   secret_place: 'тайное место',
+};
+
+export const GENESIS_SLICE_ITEM_MAX = 3;
+
+/** Аспекты генезиса, из которых срез менее похож на инженерный крючок острова. */
+const CIVIC_ASPECT_IDS = [
+  'customs',
+  'society',
+  'faith',
+  'governance',
+  'dailyLife',
+  'crafts',
+  'economy',
+  'history',
+  'relations',
+  'knowledge',
+];
+
+const ASPECT_TITLES = {
+  overview: 'Общий облик',
+  history: 'История и основание',
+  geography: 'География и климат',
+  districts: 'Районы и планировка',
+  economy: 'Хозяйство и ресурсы',
+  crafts: 'Ремёсла',
+  society: 'Общество и сословия',
+  customs: 'Обычаи и праздники',
+  faith: 'Вера и культ',
+  governance: 'Власть и закон',
+  defense: 'Оборона и сила',
+  knowledge: 'Знание и обучение',
+  landmarks: 'Места силы',
+  transport: 'Пути',
+  dailyLife: 'Повседневность',
+  relations: 'Внешний горизонт',
+  threats: 'Хронические риски',
+  rumors: 'Предания',
 };
 
 const STRANGE_KINDS = new Set(['cult', 'artifact', 'substance', 'secret_place']);
@@ -180,6 +218,64 @@ export function pickMysteryAnchors(catalog, plotCfgOrEntities = {}, rng = Math.r
     });
   }
   return shuffle(out, rng);
+}
+
+function pickFrom(list, rng) {
+  if (!list.length) return null;
+  return list[Math.min(list.length - 1, Math.max(0, Math.floor(rng() * list.length)))];
+}
+
+/**
+ * Зерно посева из генезиса: один вид каталога (до трёх пунктов) или один аспект.
+ * Полный бриф и остальные виды в срез не входят — иначе модель берёт самый громкий крючок.
+ */
+export function pickGenesisSlice(domain, rng = Math.random) {
+  const catalog = normalizeCityEntities(domain?.cityEntities);
+  const byKind = new Map();
+  for (const item of catalog) {
+    const list = byKind.get(item.kind) || [];
+    list.push(item);
+    byKind.set(item.kind, list);
+  }
+  const kinds = ENTITY_KINDS.filter((k) => byKind.get(k)?.length);
+  if (kinds.length) {
+    const kind = pickFrom(kinds, rng);
+    const items = shuffle(byKind.get(kind), rng).slice(0, GENESIS_SLICE_ITEM_MAX);
+    return { source: 'entities', kind, items };
+  }
+  const aspects = domain?.aspects && typeof domain.aspects === 'object' ? domain.aspects : {};
+  const present = Object.keys(aspects).filter((id) => String(aspects[id] || '').trim());
+  if (!present.length) return null;
+  const civic = present.filter((id) => CIVIC_ASPECT_IDS.includes(id));
+  const pool = civic.length ? civic : present;
+  const aspectId = pickFrom(pool, rng);
+  if (!aspectId) return null;
+  return {
+    source: 'aspect',
+    aspectId,
+    title: ASPECT_TITLES[aspectId] || aspectId,
+    text: String(aspects[aspectId]).trim(),
+  };
+}
+
+export function formatGenesisSliceForPrompt(slice, domain = {}) {
+  if (!slice) return '';
+  const name = String(domain.name || '').trim();
+  const head = name ? `Город «${name}».` : '';
+  if (slice.source === 'entities' && slice.items?.length) {
+    const kindName = ENTITY_KIND_LABELS[slice.kind] || slice.kind;
+    const lines = slice.items.map((item) => `- ${item.name}: ${item.about}`);
+    return [head, `Срез каталога — ${kindName} (не полный бриф города):`, ...lines]
+      .filter(Boolean)
+      .join('\n');
+  }
+  if (slice.source === 'aspect' && slice.text) {
+    const title = slice.title || slice.aspectId || 'аспект';
+    return [head, `Срез генезиса — ${title} (не полный бриф города):`, slice.text]
+      .filter(Boolean)
+      .join('\n\n');
+  }
+  return '';
 }
 
 /** Текст только по выданным якорям — полный каталог сюда не попадает. */

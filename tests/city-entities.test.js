@@ -5,6 +5,8 @@ import {
   capCityEntities,
   pickMysteryAnchors,
   formatMysteryAnchorsForPrompt,
+  pickGenesisSlice,
+  formatGenesisSliceForPrompt,
   hasCityEntityCatalog,
   ensureCityEntities,
 } from '../src/game/cityEntities.js';
@@ -111,6 +113,37 @@ test('второй якорь выпадает редко', () => {
 test('пустой каталог не даёт якорей', () => {
   assert.deepEqual(pickMysteryAnchors([], { inventChance: 1 }), []);
   assert.equal(formatMysteryAnchorsForPrompt([]), '');
+});
+
+test('срез генезиса — один вид каталога, не весь бриф', () => {
+  const domain = { name: 'Варшела', cityEntities: catalog() };
+  const slice = pickGenesisSlice(domain, () => 0);
+  assert.equal(slice.source, 'entities');
+  assert.equal(slice.kind, 'place');
+  assert.equal(slice.items.length, 1);
+  assert.equal(slice.items[0].name, 'Верхний ярус');
+  const text = formatGenesisSliceForPrompt(slice, domain);
+  assert.match(text, /Верхний ярус/);
+  assert.match(text, /Срез каталога/);
+  assert.doesNotMatch(text, /Водяные чаны/);
+  assert.doesNotMatch(text, /Ночной обход/);
+});
+
+test('без каталога срез берёт гражданский аспект, не угрозы', () => {
+  const domain = {
+    name: 'Варшела',
+    aspects: {
+      threats: 'Водосборы трескаются каждое лето.',
+      customs: 'На равноденствие дворы меняются хлебом.',
+    },
+  };
+  const slice = pickGenesisSlice(domain, () => 0);
+  assert.equal(slice.source, 'aspect');
+  assert.equal(slice.aspectId, 'customs');
+  const text = formatGenesisSliceForPrompt(slice, domain);
+  assert.match(text, /равноденствие/);
+  assert.doesNotMatch(text, /Водосборы/);
+  assert.equal(pickGenesisSlice({}), null);
 });
 
 test('нормализация домена поднимает пустой каталог', () => {

@@ -6,6 +6,7 @@
 import { chronicleEntries } from './models.js';
 import { countOpen, plotConfig } from './plotlines.js';
 import { cityGenesisSeedText } from './cityContext.js';
+import { pickGenesisSlice, formatGenesisSliceForPrompt } from './cityEntities.js';
 import { FINISH_SHORT } from './rolls.js';
 import {
   SEED_SOURCES,
@@ -135,22 +136,28 @@ export function formatErrandGrain(outcome, chronicleAdds = []) {
     .join('\n');
 }
 
+/** Зерно генезиса: срез каталога или аспекта, иначе сжатый бриф. */
+export function cityGenesisGrainText(domain, { rng = Math.random } = {}) {
+  const slice = pickGenesisSlice(domain, rng);
+  const fromSlice = slice ? formatGenesisSliceForPrompt(slice, domain) : '';
+  return fromSlice || cityGenesisSeedText(domain);
+}
+
 export function voidGrainPack(domain, { config, rng = Math.random } = {}) {
   const grain = pickVoidGrain(config, rng);
   if (grain === 'genesis') {
-    const seedText = cityGenesisSeedText(domain);
+    const seedText = cityGenesisGrainText(domain, { rng });
     if (seedText) return { grain: 'genesis', fromVoid: false, fromGenesis: true, seedText };
   }
   return { grain: 'void', fromVoid: true, fromGenesis: false, seedText: '' };
 }
 
 /**
- * Зерно стартовой нити: описание города и заранее назначенная gravity.
- * Бросок канала здесь не нужен — обе стартовые истории родом из описания,
- * и порядок их тяжести задан заранее. `null`, если описания нет.
+ * Зерно стартовой нити из генезиса: срез города и заранее назначенная gravity.
+ * `null`, если среза и описания нет.
  */
-export function openingGrain(domain, { gravity = null } = {}) {
-  const seedText = cityGenesisSeedText(domain);
+export function openingGrain(domain, { gravity = null, rng = Math.random } = {}) {
+  const seedText = cityGenesisGrainText(domain, { rng });
   if (!seedText) return null;
   return {
     source: 'void',
@@ -159,6 +166,18 @@ export function openingGrain(domain, { gravity = null } = {}) {
     fromVoid: false,
     fromGenesis: true,
     grain: 'genesis',
+  };
+}
+
+/** Стартовая нить из настоящей пустоты: без 50/50 с генезисом живого канала. */
+export function openingVoidGrain({ gravity = null } = {}) {
+  return {
+    source: 'void',
+    gravity: gravity || null,
+    seedText: '',
+    fromVoid: true,
+    fromGenesis: false,
+    grain: 'void',
   };
 }
 

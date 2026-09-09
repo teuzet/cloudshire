@@ -5,8 +5,10 @@ import { voidSeedPackArgs } from '../src/game/storyteller.js';
 import { openingGrain } from '../src/game/seedChannels.js';
 import {
   OPENING_STORY_GRAVITIES,
+  OPENING_STORY_GRAINS,
   OPENING_SEED_REAL_MINUTES,
   openingSeedDelays,
+  openingPairGrains,
   enqueueOpeningSeeds,
   seedQueue,
 } from '../src/game/seedSchedule.js';
@@ -98,13 +100,20 @@ test('генезис ставит заявки, а не сажает нити н
   const requests = enqueueOpeningSeeds(domain, { day: 223, rng: () => 0.5 });
 
   assert.deepEqual(OPENING_STORY_GRAVITIES, ['SITUATION', 'EPISODE']);
+  assert.deepEqual(OPENING_STORY_GRAINS, ['genesis', 'void']);
   assert.equal(domain.plotlines.length, 0, 'на месте не сажаем: иначе рассказать о них некому');
   assert.equal(seedQueue(domain).length, 2);
   assert.deepEqual(
     requests.map((r) => r.gravity),
     ['SITUATION', 'EPISODE'],
   );
-  assert.ok(requests.every((r) => r.grain === 'genesis'));
+  assert.deepEqual(
+    requests.map((r) => r.grain),
+    ['genesis', 'void'],
+    'rng 0.5: ситуация из генезиса, эпизод из пустоты',
+  );
+  assert.deepEqual(openingPairGrains(() => 0), ['void', 'genesis']);
+  assert.deepEqual(openingPairGrains(() => 0.5), ['genesis', 'void']);
   assert.ok(requests.every((r) => r.appearDay > 223));
   assert.ok(requests[1].appearDay > requests[0].appearDay);
 });
@@ -144,6 +153,32 @@ test('появление стартовой нити рассказываетс�
   assert.doesNotMatch(calls[0].extra, /НЕТ ЗАТРАВКИ/);
 });
 
+test('появление стартовой нити из пустоты не берёт бриф', async () => {
+  const domain = makeDomain();
+  const world = { id: 'w1', tickIndex: 0, dayIndex: 223, jobs: [] };
+  const requests = enqueueOpeningSeeds(domain, { day: 223, rng: () => 0.5 });
+  const request = requests.find((r) => r.grain === 'void');
+  const calls = [];
+
+  const res = await seedAppearEvent({
+    config: loadConfig(),
+    runtime: openingRuntime(calls),
+    domain,
+    world,
+    day: request.appearDay,
+    requestId: request.id,
+    rng: () => 0.5,
+    log: silentLog,
+  });
+
+  assert.equal(res.occasion, 'новая история');
+  assert.equal(res.plot.gravity, 'EPISODE');
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].extra, /НЕТ ЗАТРАВКИ/);
+  assert.doesNotMatch(calls[0].extra, /ОПИСАНИЕ ГОРОДА/);
+  assert.doesNotMatch(calls[0].user, /Праотца/);
+});
+
 test('зерно стартовой нити — описание города и заданная тяжесть', () => {
   const grain = openingGrain(makeDomain(), { gravity: 'EPISODE' });
   assert.equal(grain.grain, 'genesis');
@@ -152,6 +187,20 @@ test('зерно стартовой нити — описание города �
   assert.equal(grain.fromVoid, false);
   assert.match(grain.seedText, /Праотца/);
   assert.equal(openingGrain({}, { gravity: 'EPISODE' }), null, 'без описания зерна нет');
+});
+
+test('посев из генезиса отдаёт срез каталога, а не весь бриф', () => {
+  const domain = {
+    name: 'Варшела',
+    cityBrief: 'Вертикальный город вокруг Праотца, джунгли давят на край освоенного ядра.',
+    cityEntities: [
+      { kind: 'custom', name: 'Обмен хлебом', about: 'На равноденствие дворы меняются караваями.' },
+    ],
+  };
+  const grain = openingGrain(domain, { gravity: 'SITUATION', rng: () => 0 });
+  assert.match(grain.seedText, /Обмен хлебом/);
+  assert.match(grain.seedText, /Срез каталога/);
+  assert.doesNotMatch(grain.seedText, /Праотца/);
 });
 
 test('пустой посев: 50% генезис города, иначе настоящая пустота', () => {

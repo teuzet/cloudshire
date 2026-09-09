@@ -9,6 +9,7 @@ let busy = false;
 let inspectTab = 'city';
 let inspectData = null;
 let lastCityDay = null;
+let canDev = false;
 
 $('userId').value = userId;
 
@@ -207,10 +208,19 @@ async function refresh({ force = false } = {}) {
 
     $('btnTick').classList.toggle('hidden', !state.canForceTick);
     $('btnTick').disabled = Boolean(state.ticking || state.generating);
+    $('btnSeed').classList.toggle('hidden', !state.canForceTick);
+    $('btnSeed').disabled = Boolean(state.ticking || state.generating);
     $('btnWipe').classList.toggle('hidden', !state.canWipe);
     $('wipeNote').hidden = !state.canWipe;
     $('btnWipe').disabled = Boolean(state.ticking);
     renderIslands(state.islands || []);
+    const nextDev = Boolean(state.canForceTick);
+    if (nextDev !== canDev) {
+      canDev = nextDev;
+      if (!$('inspector').classList.contains('hidden')) renderInspector();
+    } else {
+      canDev = nextDev;
+    }
 
     if (state.generating) {
       setBanner(state.generatingProgress || 'Остров создаётся — правитель напишет сам, это минута-две.');
@@ -497,7 +507,13 @@ function plotCard(p, names = {}) {
     (p.relatedProcessIds?.length
       ? `<p class="small muted">дела: ${esc(p.relatedProcessIds.join(', '))}</p>`
       : '') +
-    `<p class="small muted">${esc(p.id)}</p></article>`
+    `<p class="small muted">${esc(p.id)}</p>` +
+    (canDev && p.canDrop
+      ? `<div class="row-actions"><button type="button" class="drop-btn" data-drop="${esc(p.id)}">снять с хроникой</button></div>`
+      : canDev && p.kind === 'story' && !p.shared && !p.isMainConflux
+        ? '<p class="small muted">снять нельзя: на истории ещё есть дело</p>'
+        : '') +
+    `</article>`
   );
 }
 
@@ -527,6 +543,26 @@ function awarenessMeter(label, value) {
   );
 }
 
+function seedFormHtml() {
+  if (!canDev) return '';
+  return (
+    '<form class="seed-form" data-seed-form="1">' +
+    '<label>масштаб<select name="gravity">' +
+    '<option value="SITUATION">SITUATION</option>' +
+    '<option value="EPISODE" selected>EPISODE</option>' +
+    '<option value="CRISIS">CRISIS</option>' +
+    '<option value="RUPTURE">RUPTURE</option>' +
+    '</select></label>' +
+    '<label>зерно<select name="grain">' +
+    '<option value="genesis">описание города</option>' +
+    '<option value="chronicle">недавняя хроника</option>' +
+    '<option value="void">пустота</option>' +
+    '</select></label>' +
+    '<button type="submit">посеять</button>' +
+    '</form>'
+  );
+}
+
 function renderPlotsTab(d) {
   const plots = d.plotlines || [];
   const note = d.conflux?.plotlines?.length
@@ -545,7 +581,11 @@ function renderPlotsTab(d) {
       )
     : '';
 
-  return note + block(`Нити города (${plots.length})`, body) + closed;
+  return (
+    note +
+    block(`Нити города (${plots.length})`, seedFormHtml() + body) +
+    closed
+  );
 }
 
 function renderConfluxTab(d) {
@@ -939,6 +979,28 @@ $('inspectTabs').addEventListener('click', (e) => {
 });
 
 $('inspectBody').addEventListener('click', async (e) => {
+  const drop = e.target.closest('[data-drop]');
+  if (drop) {
+    const plotId = drop.getAttribute('data-drop');
+    if (!confirm('Снять эту историю вместе с её хроникой? Дел на ней быть не должно.')) return;
+    drop.disabled = true;
+    try {
+      const result = await api('/api/play/drop-story', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, plotId }),
+      });
+      setBanner(`Сняли «${result.title || 'историю'}» и ${result.droppedLore || 0} записей хроники.`);
+      await refreshInspector();
+    } catch (err) {
+      drop.disabled = false;
+      $('inspectBody').insertAdjacentHTML(
+        'afterbegin',
+        `<p class="banner">${esc(err.message)}</p>`,
+      );
+    }
+    return;
+  }
   const btn = e.target.closest('[data-bless]');
   if (!btn) return;
   const processId = btn.getAttribute('data-bless');
@@ -957,6 +1019,41 @@ $('inspectBody').addEventListener('click', async (e) => {
       `<p class="banner">${esc(err.message)}</p>`,
     );
   }
+});
+
+$('inspectBody').addEventListener('submit', async (e) => {
+  const form = e.target.closest('[data-seed-form]');
+  if (!form) return;
+  e.preventDefault();
+  const gravity = form.gravity?.value || 'EPISODE';
+  const grain = form.grain?.value || 'genesis';
+  const btn = form.querySelector('button[type="submit"]');
+  if (btn) btn.disabled = true;
+  $('btnSeed').disabled = true;
+  setBanner('Сеем историю — это может занять минуту.');
+  try {
+    const result = await api('/api/play/seed', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, gravity, grain }),
+    });
+    setBanner(`Посеяли «${result.plot?.title || 'историю'}» · ${result.gravity} · ${result.grain}`);
+    await refreshInspector();
+    $('btnSeed').disabled = false;
+  } catch (err) {
+    setBanner(err.message);
+    if (btn) btn.disabled = false;
+    $('btnSeed').disabled = false;
+  }
+});
+
+$('btnSeed').addEventListener('click', async () => {
+  $('cityPanel').classList.add('hidden');
+  inspectTab = 'plots';
+  $('inspector').classList.remove('hidden');
+  await refreshInspector();
+  const form = document.querySelector('[data-seed-form]');
+  form?.querySelector('select[name="gravity"]')?.focus();
 });
 
 $('btnTick').addEventListener('click', async () => {

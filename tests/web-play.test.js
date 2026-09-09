@@ -9,6 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createWebServer } from '../src/clients/web/server.js';
+import { dropPlayStory } from '../src/game/playDev.js';
 
 const config = {
   web: { play: true, admin: false },
@@ -143,7 +144,7 @@ function makeStorage(domain, world) {
   };
 }
 
-function makeApp(calls = []) {
+function makeApp(calls = [], hooks = {}) {
   return {
     onOutbound() {},
     isGenerating: () => false,
@@ -157,15 +158,31 @@ function makeApp(calls = []) {
       calls.push({ kind: 'bless', userId, processId });
       return { ok: true, mana: 25, cost: 8 };
     },
+    forceSeedStory: async (userId, opts) => {
+      calls.push({ kind: 'seed', userId, ...opts });
+      if (hooks.forceSeedStory) return hooks.forceSeedStory(userId, opts);
+      return {
+        ok: true,
+        grain: opts.grain || 'void',
+        gravity: opts.gravity || 'EPISODE',
+        plot: { id: 'plot_new', title: 'Новая', synopsis: '', gravity: opts.gravity || 'EPISODE' },
+      };
+    },
+    dropPlayStory: async (userId, plotId) => {
+      calls.push({ kind: 'drop', userId, plotId });
+      if (hooks.dropPlayStory) return hooks.dropPlayStory(userId, plotId);
+      return dropPlayStory(hooks.domain, hooks.world, plotId, { day: WORLD_DAY });
+    },
   };
 }
 
-async function withServer(run, { calls = [] } = {}) {
+async function withServer(run, { calls = [], hooks = {}, playDev, domain: givenDomain } = {}) {
   const world = makeWorld();
-  const domain = makeDomain();
+  const domain = givenDomain || makeDomain();
+  const cfg = playDev === false ? { ...config, web: { ...config.web, playDev: false } } : config;
   const server = createWebServer({
-    config,
-    app: makeApp(calls),
+    config: cfg,
+    app: makeApp(calls, { ...hooks, domain, world }),
     runtime: {},
     storage: makeStorage(domain, world),
   });
@@ -194,6 +211,7 @@ test('страница клиента открывает справочник г
     assert.match(html, /id="btnCity"/, 'кнопка справочника на месте');
     assert.match(html, /id="cityFrame"/, 'мини-аппка встроена, а не переписана заново');
     assert.match(html, /id="btnInspect"/, 'отладочные данные — отдельной кнопкой');
+    assert.match(html, /id="btnSeed"/, 'принудительный посев — отдельной кнопкой');
   });
 });
 
@@ -233,6 +251,7 @@ test('инспектор показывает и скрытое нависшее
       ],
     );
     assert.equal(plot.depth, 1);
+    assert.equal(plot.canDrop, false, 'на нити живое дело — снимать нельзя');
   });
 });
 
@@ -260,6 +279,8 @@ test('клиент рисует концовки списком с пометк�
     const js = await res.text();
     assert.match(js, /function endingsBlock/);
     assert.match(js, /GOOD_ENDING: 'хорошая'/);
+    assert.match(js, /data-seed-form/);
+    assert.match(js, /data-drop/);
   });
 });
 
@@ -334,3 +355,84 @@ test('разговор и благословение идут через тот 
   assert.equal(calls[0].opts.channel, 'web');
   assert.equal(calls[1].processId, 'act_1');
 });
+
+test('принудительный посев принимает gravity и зерно', async () => {
+  const calls = [];
+  await withServer(
+    async ({ base }) => {
+      const res = await fetch(`${base}/api/play/seed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: 'local-user', gravity: 'SITUATION', grain: 'genesis' }),
+      });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      assert.equal(body.grain, 'genesis');
+      assert.equal(body.plot.title, 'Новая');
+    },
+    { calls },
+  );
+  assert.deepEqual(calls[0], { kind: 'seed', userId: 'local-user', gravity: 'SITUATION', grain: 'genesis' });
+});
+
+test('снятие истории без дел и отказ, если дело ещё идёт', async () => {
+  await withServer(async ({ base, domain }) => {
+    domain.plotlines.push({
+      id: 'plot_free',
+      kind: 'story',
+      title: 'Птицы у межи',
+      synopsis: 'Стая не уходит.',
+      relatedProcessIds: [],
+      chronicleIds: ['lore_birds'],
+    });
+    domain.lore.push({
+      id: 'lore_birds',
+      text: 'Стая села на межу.',
+      tags: ['chronicle'],
+      sourcePlotId: 'plot_free',
+    });
+    const blocked = await fetch(`${base}/api/play/drop-story`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: 'local-user', plotId: 'plot_well' }),
+    });
+    assert.equal(blocked.status, 400);
+    assert.equal((await blocked.json()).error, 'has_deeds');
+
+    const ok = await fetch(`${base}/api/play/drop-story`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: 'local-user', plotId: 'plot_free' }),
+    });
+    assert.equal(ok.status, 200);
+    const body = await ok.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.title, 'Птицы у межи');
+    assert.equal(
+      domain.plotlines.some((p) => p.id === 'plot_free'),
+      false,
+    );
+  });
+});
+
+test('без playDev посев и снятие не торчат', async () => {
+  await withServer(
+    async ({ base }) => {
+      const seed = await fetch(`${base}/api/play/seed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: 'local-user', grain: 'void' }),
+      });
+      assert.equal(seed.status, 404);
+      const drop = await fetch(`${base}/api/play/drop-story`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: 'local-user', plotId: 'plot_well' }),
+      });
+      assert.equal(drop.status, 404);
+    },
+    { playDev: false },
+  );
+});
+

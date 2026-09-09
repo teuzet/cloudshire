@@ -67,6 +67,9 @@ import { blessProcess, processOwnedBy } from './processes.js';
 import { spendTurnMana } from './mana.js';
 import { beginRulerTurn, endRulerTurn, worldDay } from './scheduler.js';
 import { formatBoardForSpeech, warmPlotlines, plotConfig } from './plotlines.js';
+import { plantStakedStory } from './storyteller.js';
+import { ensurePlotObligations } from './worldLoop.js';
+import { packPlaySeedGrain, dropPlayStory as applyDropPlayStory } from './playDev.js';
 import { islandDeleteCheck } from '../clients/telegram/access.js';
 import { generateIslandImage, removeIslandImage } from './islandImage.js';
 import { generateOfficerPortraits, removeOfficerPortraits } from './officerImage.js';
@@ -164,6 +167,8 @@ export class GameApp {
     this.worldTicking = false;
     /** Дневной цикл: чем разбудить мир сразу после хода правителя. */
     this.onClockReleased = null;
+    /** Принудительный посев из тестового клиента — не класть второй поверх. */
+    this.seedingUsers = new Set();
   }
 
   beginWorldTick() {
@@ -1658,6 +1663,109 @@ export class GameApp {
       mana: result.mana,
     });
     return { ok: true, process, cost: result.cost, mana: result.mana };
+  }
+
+  /**
+   * Тестовый клиент: посадить историю сейчас, тем же конвейером, что живой посев.
+   * Зерно и gravity задаёт человек, не бросок канала.
+   */
+  async forceSeedStory(userId, { gravity, grain } = {}) {
+    const uid = String(userId || '').trim();
+    if (this.isWorldTicking()) {
+      return { ok: false, error: 'ticking', message: 'сейчас идёт шаг времени' };
+    }
+    if (this.isGenerating(uid) || this.seedingUsers.has(uid)) {
+      return { ok: false, error: 'busy', message: 'город сейчас занят' };
+    }
+    const world = await this.storage.getWorld();
+    const domain = await this.storage.getDomainForUser(uid, world.id);
+    if (!domain) return { ok: false, error: 'no_domain', message: 'города ещё нет' };
+    normalizeDomain(domain);
+    const packed = packPlaySeedGrain(domain, world, {
+      grain,
+      gravity,
+      config: this.config,
+    });
+    if (!packed.ok) return packed;
+
+    this.seedingUsers.add(uid);
+    const log = getLogger().child({ userId: uid, domainId: domain.id, scope: 'play.seed' });
+    const day = worldDay(world, { config: this.config });
+    try {
+      const planted = await plantStakedStory({
+        config: this.config,
+        runtime: this.runtime,
+        domain,
+        world,
+        seedText: packed.seedText,
+        gravity: packed.gravity,
+        fromVoid: packed.fromVoid,
+        fromGenesis: packed.fromGenesis,
+        day,
+        log,
+      });
+      if (!planted?.plot) {
+        return { ok: false, error: 'plant_failed', message: 'посев не дал историю — судья никого не пропустил' };
+      }
+      await ensurePlotObligations({
+        runtime: this.runtime,
+        domain,
+        world,
+        plot: planted.plot,
+        day,
+        log,
+      });
+      await this.storage.saveDomain(domain);
+      await this.storage.saveWorld(world);
+      log.info('play.seed_planted', {
+        title: planted.plot.title,
+        gravity: planted.plot.gravity,
+        grain: packed.grain,
+      });
+      return {
+        ok: true,
+        grain: packed.grain,
+        gravity: planted.plot.gravity,
+        plot: {
+          id: planted.plot.id,
+          title: planted.plot.title,
+          synopsis: planted.plot.synopsis || '',
+          gravity: planted.plot.gravity,
+        },
+      };
+    } catch (err) {
+      log.warn('play.seed_failed', { error: err.message });
+      return { ok: false, error: 'plant_failed', message: err.message || 'посев не удался' };
+    } finally {
+      this.seedingUsers.delete(uid);
+    }
+  }
+
+  /** Тестовый клиент: снять историю и её хронику, если на ней нет дел. */
+  async dropPlayStory(userId, plotId) {
+    const uid = String(userId || '').trim();
+    const id = String(plotId || '').trim();
+    if (!id) return { ok: false, error: 'not_found', message: 'не указана история' };
+    if (this.isWorldTicking()) {
+      return { ok: false, error: 'ticking', message: 'сейчас идёт шаг времени' };
+    }
+    const world = await this.storage.getWorld();
+    const domain = await this.storage.getDomainForUser(uid, world.id);
+    if (!domain) return { ok: false, error: 'no_domain', message: 'города ещё нет' };
+    normalizeDomain(domain);
+    const day = worldDay(world, { config: this.config });
+    const result = applyDropPlayStory(domain, world, id, { day });
+    if (!result.ok) return result;
+    await this.storage.saveDomain(domain);
+    await this.storage.saveWorld(world);
+    getLogger().info('play.story_dropped', {
+      userId: uid,
+      domainId: domain.id,
+      plotId: result.plotId,
+      title: result.title,
+      droppedLore: result.droppedLore,
+    });
+    return result;
   }
 
   async getChronicle(domainId) {

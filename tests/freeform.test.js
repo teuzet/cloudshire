@@ -28,6 +28,8 @@ import {
   normalizeBrainstormCandidate,
   pickPassedBrainstormCandidate,
   parseRequireMystery,
+  GENESIS_JUDGE_EXTRA,
+  GENESIS_ARCHITECT_EXTRA,
 } from '../src/game/freeformBrainstorm.js';
 import {
   splitChronicleHiddenLayer,
@@ -272,6 +274,7 @@ test('конфиг freeform читается из YAML', () => {
   const cfg = freeformConfig(loadConfig());
   assert.equal(cfg.variantsMin, 3);
   assert.equal(cfg.variantsMax, 3);
+  assert.equal(cfg.lunaRepairRounds, 2);
   assert.deepEqual(cfg.seedAxes, ['truthArena', 'worldRelation']);
   const agents = loadConfig().agents;
   for (const id of LEGACY_FREEFORM_AGENTS) {
@@ -334,6 +337,7 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformBrainstormJudge.instructions, /PATRON/);
   assert.match(agents.freeformBrainstormJudge.instructions, /CONFLUX/);
   assert.match(agents.freeformBrainstormJudge.instructions, /BUREAUCRACY/);
+  assert.match(agents.freeformBrainstormJudge.instructions, /ничего не остаётся/);
   assert.match(agents.freeformBrainstormJudge.instructions, /Угроза или возможность/);
   assert.match(agents.freeformBrainstormJudge.instructions, /Главный персонаж — сам город/);
   assert.match(agents.freeformBrainstormJudge.instructions, /На самом деле/);
@@ -350,6 +354,14 @@ test('конфиг freeform читается из YAML', () => {
   assert.doesNotMatch(agents.freeformBrainstormJudge.instructions, /конструктор|cityBrief/);
   assert.doesNotMatch(agents.freeformBrainstormJudge.instructions, /MYSTERY_PLAUSIBLE|тайна обязательна/);
   assert.doesNotMatch(agents.freeformBrainstormJudge.instructions, /НЕТ ЗАТРАВКИ|абстрактный город-государство/);
+  assert.equal(agents.freeformBrainstormRepair.provider, 'openai');
+  assert.equal(agents.freeformBrainstormRepair.model, 'gpt-5.6-luna');
+  assert.equal(agents.freeformBrainstormRepair.maxTokens, 2500);
+  assert.deepEqual(agents.freeformBrainstormRepair.canon, ['world']);
+  assert.match(agents.freeformBrainstormRepair.instructions, /правишь уже написанные/);
+  assert.match(agents.freeformBrainstormRepair.instructions, /нет полного описания города/);
+  assert.match(agents.freeformBrainstormRepair.instructions, /emit_freeform_candidates/);
+  assert.doesNotMatch(agents.freeformBrainstormRepair.instructions, /cityBrief|конструктор/);
   const authors = freeformConfig(loadConfig()).continuationAuthors;
   assert.ok(authors.length >= 12);
   assert.equal(new Set(authors.map((a) => a.id)).size, authors.length);
@@ -1437,6 +1449,152 @@ test('пачка: второй судья не видит средний PASS и
   assert.equal(packed.winner.chronicle, 'Починка 1');
 });
 
+test('после sonnet-починки PASS < 2 — дешёвая luna без брифа, только FAIL', async () => {
+  const real = new AgentRuntime(loadConfig());
+  const calls = [];
+  const extras = [];
+  let judgeN = 0;
+  const runtime = {
+    assembleChat: (opts) => real.assembleChat(opts),
+    async run(opts) {
+      calls.push(opts.agentId);
+      extras.push({
+        agentId: opts.agentId,
+        user: String(opts.userMessages?.[0]?.content || ''),
+        extraSystem: String(opts.extraSystem || ''),
+      });
+      const tool = opts.tools?.[0];
+      if (!tool) return;
+      const user = String(opts.userMessages?.[0]?.content || '');
+      if (opts.agentId === 'freeformBrainstorm') {
+        const isRepair = /ДОРАБОТКА/.test(user);
+        await tool.handler({
+          candidates: [1, 2, 3].map((i) => ({
+            chronicle: isRepair ? `Починка ${i}` : `Хроника сапога ${i}`,
+          })),
+        });
+        return;
+      }
+      if (opts.agentId === 'freeformBrainstormRepair') {
+        const n = (user.match(/=== Кандидат/g) || []).length;
+        await tool.handler({
+          candidates: Array.from({ length: n }, (_, i) => ({ chronicle: `Луна ${i + 1}` })),
+        });
+        return;
+      }
+      if (opts.agentId === 'freeformBrainstormJudge') {
+        judgeN += 1;
+        await tool.handler({
+          reviews:
+            judgeN === 1
+              ? [
+                  { index: 1, verdict: 'FAIL', repair: 'чини 1', summary: 'дыряво' },
+                  { index: 2, verdict: 'FAIL', repair: 'чини 2', summary: 'мелко' },
+                  { index: 3, verdict: 'PASS', summary: 'держит' },
+                ]
+              : judgeN === 2
+                ? [
+                    { index: 1, verdict: 'FAIL', repair: 'ещё раз 1', summary: 'всё ещё дыряво' },
+                    { index: 2, verdict: 'FAIL', repair: 'ещё раз 2', summary: 'всё ещё мелко' },
+                  ]
+                : [
+                    { index: 1, verdict: 'PASS', summary: 'луна починила' },
+                    { index: 2, verdict: 'FAIL', repair: 'нет', summary: 'нет' },
+                  ],
+        });
+      }
+    },
+  };
+  const packed = await brainstormFreeformPack({
+    config: loadConfig(),
+    runtime,
+    seedText: 'На площади нашли чужой сапог и двор его держит.',
+    gravity: 'RUPTURE',
+    rng: () => 0,
+  });
+  assert.deepEqual(calls, [
+    'freeformBrainstorm',
+    'freeformBrainstormJudge',
+    'freeformBrainstorm',
+    'freeformBrainstormJudge',
+    'freeformBrainstormRepair',
+    'freeformBrainstormJudge',
+  ]);
+  const luna = extras.find((e) => e.agentId === 'freeformBrainstormRepair');
+  assert.ok(luna);
+  assert.match(luna.user, /GRAVITY/);
+  assert.match(luna.user, /оси:/);
+  assert.match(luna.user, /правка:/);
+  assert.doesNotMatch(luna.user, /На площади нашли чужой сапог/);
+  assert.doesNotMatch(luna.user, /Хроника сапога 3/);
+  assert.doesNotMatch(luna.user, /ОПИСАНИЕ ГОРОДА|ЗАТРАВКА/);
+  assert.doesNotMatch(luna.extraSystem, /ОПИСАНИЕ ГОРОДА|НЕТ ЗАТРАВКИ/);
+  assert.equal(packed.candidates[2].chronicle, 'Хроника сапога 3');
+  assert.equal(packed.candidates[0].chronicle, 'Луна 1');
+  assert.equal(packed.finalReviews[0].verdict, 'PASS');
+  assert.equal(packed.finalReviews[1].verdict, 'FAIL');
+  assert.equal(packed.finalReviews[2], null);
+  assert.match(packed.extraRepairPrompt, /ДОРАБОТКА/);
+  assert.match(packed.extraJudgePrompt, /Луна 1/);
+  assert.equal(packed.ok, true);
+  assert.equal(packed.winner.chronicle, 'Луна 1');
+});
+
+test('дешёвая luna не больше двух кругов, даже если PASS один', async () => {
+  const real = new AgentRuntime(loadConfig());
+  const calls = [];
+  let judgeN = 0;
+  const runtime = {
+    assembleChat: (opts) => real.assembleChat(opts),
+    async run(opts) {
+      calls.push(opts.agentId);
+      const tool = opts.tools?.[0];
+      if (!tool) return;
+      const user = String(opts.userMessages?.[0]?.content || '');
+      if (opts.agentId === 'freeformBrainstorm' || opts.agentId === 'freeformBrainstormRepair') {
+        const n = Math.max(1, (user.match(/=== Кандидат/g) || []).length || 3);
+        const prefix = opts.agentId === 'freeformBrainstormRepair' ? 'Луна' : /ДОРАБОТКА/.test(user) ? 'Починка' : 'Хроника';
+        await tool.handler({
+          candidates: Array.from({ length: n }, (_, i) => ({ chronicle: `${prefix} ${i + 1}` })),
+        });
+        return;
+      }
+      if (opts.agentId === 'freeformBrainstormJudge') {
+        judgeN += 1;
+        const failTwo = [
+          { index: 1, verdict: 'FAIL', repair: 'чини 1', summary: 'дыряво' },
+          { index: 2, verdict: 'FAIL', repair: 'чини 2', summary: 'мелко' },
+        ];
+        await tool.handler({
+          reviews:
+            judgeN === 1
+              ? [...failTwo, { index: 3, verdict: 'PASS', summary: 'держит' }]
+              : failTwo,
+        });
+      }
+    },
+  };
+  const packed = await brainstormFreeformPack({
+    config: loadConfig(),
+    runtime,
+    seedText: 'На площади нашли чужой сапог и двор его держит.',
+    gravity: 'RUPTURE',
+    rng: () => 0,
+  });
+  assert.deepEqual(calls, [
+    'freeformBrainstorm',
+    'freeformBrainstormJudge',
+    'freeformBrainstorm',
+    'freeformBrainstormJudge',
+    'freeformBrainstormRepair',
+    'freeformBrainstormJudge',
+    'freeformBrainstormRepair',
+    'freeformBrainstormJudge',
+  ]);
+  assert.equal(packed.winner.chronicle, 'Хроника 3');
+  assert.equal(calls.filter((id) => id === 'freeformBrainstormRepair').length, 2);
+});
+
 test('посев с тайной добавляет блоки архитектору и судье', async () => {
   assert.equal(parseRequireMystery(true), true);
   assert.equal(parseRequireMystery('on'), true);
@@ -1614,6 +1772,9 @@ test('посев из генезиса: архитектор видит опис
   assert.doesNotMatch(architect.extraSystem, /НЕТ ЗАТРАВКИ/);
   assert.match(judge.extraSystem, /ОПИСАНИЕ ГОРОДА/);
   assert.doesNotMatch(judge.extraSystem, /CHRONICLE не применяй/);
+  assert.match(GENESIS_ARCHITECT_EXTRA, /срез/);
+  assert.match(GENESIS_JUDGE_EXTRA, /не обязательный крючок/);
+  assert.doesNotMatch(GENESIS_JUDGE_EXTRA, /не вырастает из этого города/);
 });
 
 test('правка пропускается, если судья ничего не просит', async () => {

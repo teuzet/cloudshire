@@ -315,6 +315,44 @@ button.danger:hover { border-color: #d98080; }
   align-items: center;
 }
 
+.seed-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: flex-end;
+  margin: 0 0 0.75rem;
+}
+.seed-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.seed-form select {
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.32rem 0.5rem;
+}
+.seed-form button { padding: 0.35rem 0.75rem; font-size: 0.8rem; }
+
+.drop-btn {
+  font: inherit;
+  font-size: 0.75rem;
+  color: #e0a1a1;
+  background: rgba(109, 58, 58, 0.15);
+  border: 1px solid #6d3a3a;
+  border-radius: 999px;
+  padding: 0.22rem 0.7rem;
+  cursor: pointer;
+}
+.drop-btn:hover { border-color: #d98080; }
+.drop-btn:disabled { opacity: 0.5; cursor: default; }
+
 .bless-btn {
   font: inherit;
   font-size: 0.75rem;

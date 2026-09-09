@@ -186,8 +186,15 @@ export function enqueueSeedRequest(
 
 // ──────────────────────────── стартовые нити ────────────────────────────
 
-/** Стартовый посев генезиса: ситуация, затем эпизод. */
+/** Стартовый посев: ситуация, затем эпизод. Зёрна — одно из генезиса, одно из пустоты. */
 export const OPENING_STORY_GRAVITIES = ['SITUATION', 'EPISODE'];
+export const OPENING_STORY_GRAINS = ['genesis', 'void'];
+
+export function openingPairGrains(rng = Math.random) {
+  const pair = [...OPENING_STORY_GRAINS];
+  if (rng() < 0.5) pair.reverse();
+  return pair;
+}
 
 /** Окно появления стартовых нитей — реальные минуты после основания города. */
 export const OPENING_SEED_REAL_MINUTES = [5, 10];
@@ -222,10 +229,11 @@ export function openingSeedDelays(count, { config = null, rng = Math.random } = 
  */
 export function enqueueOpeningSeeds(domain, { day = 0, config = null, rng = Math.random } = {}) {
   const delays = openingSeedDelays(OPENING_STORY_GRAVITIES.length, { config, rng });
+  const grains = openingPairGrains(rng);
   return OPENING_STORY_GRAVITIES.map((gravity, i) =>
     enqueueSeedRequest(domain, {
       source: 'void',
-      grain: 'genesis',
+      grain: grains[i],
       gravity,
       day,
       delayDays: delays[i],

@@ -3,6 +3,8 @@
  * Лаборатория: пачка → судья. PASS сразу в пул и не чинится.
  * Если PASS уже ≥2 — правка и второй судья не запускаются.
  * Иначе чинятся только не-PASS; второй судья видит только их.
+ * Если после sonnet-починки PASS всё ещё < 2 — до двух дешёвых кругов luna
+ * (gravity, оси, текст, замечание судьи; без брифа города).
  */
 
 import { getLogger } from '../log.js';
@@ -36,7 +38,7 @@ export const CONFLICT_SOURCES = [
   },
   {
     id: 'SYSTEMIC_CRISIS',
-    hint: 'ломается устройство, на котором держится жизнь. Структура, которую чинят делом, не канцелярия и не потерянная бумага',
+    hint: 'ломается уклад, на котором держится жизнь города: договор, обычай, распределение, привычный порядок труда. Чинят делом и отношением, не канцелярией и не потерянной бумагой',
   },
   {
     id: 'SUPERNATURAL_ANOMALY',
@@ -78,7 +80,7 @@ export const MYSTERY_ARCHITECT_EXTRA = [
 
 export const MYSTERY_JUDGE_EXTRA = [
   '==== ДОПОЛНИТЕЛЬНЫЕ КРИТЕРИИ (тайна обязательна) ====',
-  '13. BUREAUCRACY — двигатель не канцелярия. FAIL, если сюжет держится на тяжбе, сверке записей, комиссии, отложенном заседании или потерянной бумаге.',
+  '13. BUREAUCRACY — двигатель не канцелярия. FAIL, только если без протоколов, сверки записей, комиссии, отложенного заседания или потерянной бумаги от сюжета ничего не остаётся. Правовой или социальный конфликт, где документ — предлог или фон, допустим.',
   '14. MYSTERY — в пакете есть настоящая тайна: странность, которую персонажи и игрок не могут сразу объяснить. Если завязка прозрачна и нечего разгадывать — FAIL.',
   '15. MYSTERY_PLAUSIBLE — разгадка в «На самом деле:» логична, конкретна и не разочаровывает. FAIL если разгадки нет, она противоречит фактам, сваливается на чудо/случай/«ну так вышло», или финал обесценивает всю странность.',
   '',
@@ -102,16 +104,17 @@ export const VOID_JUDGE_EXTRA = [
 
 export const GENESIS_ARCHITECT_EXTRA = [
   '==== ЗАТРАВКА — ОПИСАНИЕ ГОРОДА ====',
-  'Дан не случай месяца и не хроника, а устойчивое описание города: как он устроен и чем живёт.',
+  'Дан не случай месяца и не полный бриф, а срез: несколько сущностей одного вида или один аспект.',
   'Это переопределяет правило «данная затравка — причина конфликта»: конфликт не обязан следовать из одной фразы.',
-  'Возьми из описания место, уклад, напряжение или обычай и вырасти из него новую историю, которой ещё нет.',
-  'Не пересказывай генезис. Три кандидата — три разных завязки из разных сторон этого города.',
+  'Город — фон. Возьми из среза зацепку, если она есть, и напиши новую историю. Не тащи в завязку громкие места и риски острова, которых нет в этом срезе.',
+  'Не пересказывай срез. Три кандидата — три разных завязки, не три вариации одного крючка.',
 ].join('\n');
 
 export const GENESIS_JUDGE_EXTRA = [
   '==== ЗАТРАВКА — ОПИСАНИЕ ГОРОДА ====',
   'Критерий CHRONICLE не требуй как вытекание из одной строки описания.',
-  'FAIL, если история не вырастает из этого города (чужой остров, выдуманный крупный институт вместо данного) или если это пересказ описания без новой завязки.',
+  'FAIL, если история противоречит данному срезу, происходит на чужом острове, или это пересказ среза без новой завязки.',
+  'Не ставь FAIL только за то, что конфликт не вырос из конкретного места или риска города: срез — фон и материал, не обязательный крючок.',
 ].join('\n');
 
 function extraWithNote(base, note) {
@@ -140,7 +143,10 @@ function formatSeedUserBlock(seedText, fromVoid, fromGenesis = false) {
     ].join('\n');
   }
   if (fromGenesis) {
-    return ['ОПИСАНИЕ ГОРОДА (не хроника месяца)', String(seedText || '').trim() || '(пусто)'].join('\n');
+    return [
+      'ОПИСАНИЕ ГОРОДА (срез, не полный бриф и не хроника месяца)',
+      String(seedText || '').trim() || '(пусто)',
+    ].join('\n');
   }
   return ['ЗАТРАВКА', seedText].join('\n');
 }
@@ -275,7 +281,7 @@ export function rollFromBrainstormCandidate(candidate) {
   };
 }
 
-function emitCandidatesTool({ n, rolls, draft, log }) {
+function emitCandidatesTool({ n, rolls, draft, log, indices = null }) {
   return {
     name: 'emit_freeform_candidates',
     description: `Ровно ${n} кандидатов: одна следующая хроника на каждый набор осей, в том же порядке. Оси в ответе — эхо входа, не новый выбор.`,
@@ -311,7 +317,8 @@ function emitCandidatesTool({ n, rolls, draft, log }) {
       const variants = rolls
         .map((roll, i) => {
           logAxisEchoMismatch(log, i + 1, list[i], roll);
-          return normalizeBrainstormCandidate(list[i], roll, i + 1);
+          const index = Number(indices?.[i]) || i + 1;
+          return normalizeBrainstormCandidate(list[i], roll, index);
         })
         .filter(Boolean);
       if (variants.length < n) {
@@ -506,6 +513,29 @@ export async function reviewBrainstormPack({
   return { reviews, prompt };
 }
 
+function formatRepairSlot(candidate, review, index, { includeAuthor = true } = {}) {
+  const note = review || { index, verdict: 'PASS', repair: '', summary: '', issues: [] };
+  const issues = (note.issues || []).map((x) => `[${x.code}] ${x.reason}`).join('\n');
+  return [
+    formatBrainstormCandidateForPrompt(candidate, index, { includeAuthor }),
+    `вердикт: ${note.verdict}`,
+    note.summary ? `кратко: ${note.summary}` : null,
+    issues ? `замечания:\n${issues}` : null,
+    reviewNeedsRewrite(note) ? `правка:\n${note.repair}` : 'правка: без изменений',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function mergeRepairedSlots(drafts, variants) {
+  if (!variants?.length) return drafts;
+  const byIndex = new Map(variants.map((item) => [Number(item.index) || 0, item]));
+  return drafts.map((item, i) => {
+    const index = Number(item.index) || i + 1;
+    return byIndex.get(index) || item;
+  });
+}
+
 export async function repairBrainstormPack({
   runtime,
   seedText,
@@ -518,64 +548,69 @@ export async function repairBrainstormPack({
   fromVoid = false,
   fromGenesis = false,
   note = '',
+  agentId = 'freeformBrainstorm',
+  omitSeed = false,
+  onlyFailed = false,
 }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.repair' });
   const n = drafts.length;
   const g = parseFreeformGravity(gravity);
   if (!n) return { candidates: [], prompt: '' };
   const notes = (reviews || []).slice(0, n);
-  if (!notes.some(reviewNeedsRewrite)) {
+  const slots = drafts.map((candidate, i) => ({
+    candidate,
+    review: notes[i],
+    index: Number(candidate.index) || i + 1,
+  }));
+  const work = onlyFailed ? slots.filter((slot) => reviewNeedsRewrite(slot.review)) : slots;
+  if (!work.length || !work.some((slot) => reviewNeedsRewrite(slot.review))) {
     return { candidates: drafts, prompt: '' };
   }
 
-  const rolls = drafts.map((c) => rollFromBrainstormCandidate(c));
+  const rolls = work.map((slot) => rollFromBrainstormCandidate(slot.candidate));
+  const indices = work.map((slot) => slot.index);
   const draft = { variants: null };
-  const pack = drafts
-    .map((c, i) => {
-      const review = notes[i] || { index: i + 1, verdict: 'PASS', repair: '', summary: '', issues: [] };
-      const issues = (review.issues || []).map((x) => `[${x.code}] ${x.reason}`).join('\n');
-      return [
-        formatBrainstormCandidateForPrompt(c, c.index || i + 1, { includeAuthor: true }),
-        `вердикт: ${review.verdict}`,
-        review.summary ? `кратко: ${review.summary}` : null,
-        issues ? `замечания:\n${issues}` : null,
-        reviewNeedsRewrite(review) ? `правка:\n${review.repair}` : 'правка: без изменений',
-      ]
-        .filter(Boolean)
-        .join('\n');
-    })
+  const pack = work
+    .map((slot) =>
+      formatRepairSlot(slot.candidate, slot.review, slot.index, { includeAuthor: !omitSeed }),
+    )
     .join('\n\n');
 
+  const cheap = omitSeed || agentId === 'freeformBrainstormRepair';
   const runOpts = {
-    agentId: 'freeformBrainstorm',
-    tools: [emitCandidatesTool({ n, rolls, draft, log })],
+    agentId,
+    tools: [emitCandidatesTool({ n: work.length, rolls, draft, log, indices })],
     maxTurns: 3,
     toolChoice: { type: 'function', function: { name: 'emit_freeform_candidates' } },
     log,
-    scene: 'freeform_brainstorm_repair',
-    extraSystem: [
-      'Сейчас ты не придумываешь новую пачку. Ты правишь уже написанные три хроники по замечаниям судьи.',
-      'Оси и автора не меняй. Центральный механизм не подменяй, кроме случая, когда судья требует убрать новый закон мира — тогда тот же двигатель внутри уже данного порядка.',
-      'Не поднимай и не опускай Gravity риторикой. Правь угрозу или возможность в хронике и динамику, которая её зарабатывает.',
-      'Если просят обострить — конкретный конфликт и явную динамику в том же тексте, не новая посадка. Если просят ужать — вырежи орнамент, механизм оставь.',
-      'Кандидат без замечания верни без изменений. Не делай кандидатов близнецами.',
-      architectExtraSystem({ requireMystery, fromVoid, fromGenesis }),
-      String(note || '').trim(),
-    ]
-      .filter(Boolean)
-      .join('\n'),
+    scene: cheap ? 'freeform_brainstorm_luna_repair' : 'freeform_brainstorm_repair',
+    extraSystem: cheap
+      ? extraWithNote(requireMystery ? MYSTERY_ARCHITECT_EXTRA : '', '')
+      : [
+          'Сейчас ты не придумываешь новую пачку. Ты правишь уже написанные три хроники по замечаниям судьи.',
+          'Оси и автора не меняй. Центральный механизм не подменяй, кроме случая, когда судья требует убрать новый закон мира — тогда тот же двигатель внутри уже данного порядка.',
+          'Не поднимай и не опускай Gravity риторикой. Правь угрозу или возможность в хронике и динамику, которая её зарабатывает.',
+          'Если просят обострить — конкретный конфликт и явную динамику в том же тексте, не новая посадка. Если просят ужать — вырежи орнамент, механизм оставь.',
+          'Кандидат без замечания верни без изменений. Не делай кандидатов близнецами.',
+          architectExtraSystem({ requireMystery, fromVoid, fromGenesis }),
+          String(note || '').trim(),
+        ]
+          .filter(Boolean)
+          .join('\n'),
     userMessages: [
       {
         role: 'user',
         content: [
           'GRAVITY',
           formatFreeformGravityForPrompt(g, config),
-          '',
-          formatSeedUserBlock(seedText, fromVoid, fromGenesis),
+          cheap ? null : '',
+          cheap ? null : formatSeedUserBlock(seedText, fromVoid, fromGenesis),
           '',
           'ДОРАБОТКА',
           pack,
-        ].join('\n'),
+        ]
+          .filter((line) => line != null)
+          .join('\n'),
       },
     ],
   };
@@ -584,10 +619,10 @@ export async function repairBrainstormPack({
   try {
     await runtime.run(runOpts);
   } catch (err) {
-    log.warn('freeform.brainstorm.repair_failed', { error: err.message });
+    log.warn('freeform.brainstorm.repair_failed', { error: err.message, agentId });
   }
-  const candidates = draft.variants?.length >= n ? draft.variants : drafts;
-  return { candidates, prompt };
+  const variants = draft.variants?.length >= work.length ? draft.variants : [];
+  return { candidates: mergeRepairedSlots(drafts, variants), prompt };
 }
 
 export function collectBrainstormPool(drafts, firstReviews, repaired = null, secondReviews = null) {
@@ -619,6 +654,23 @@ function scatterPackReviews(slotCount, reviews) {
     if (i >= 0 && i < slotCount) out[i] = review;
   }
   return out;
+}
+
+function freezeFirstPass(originals, firstReviews, next) {
+  return (next || []).map((item, i) => (isPackPass(firstReviews?.[i]) ? originals[i] : item));
+}
+
+function mergeScatteredReviews(base, incoming) {
+  const n = Math.max(base?.length || 0, incoming?.length || 0);
+  return Array.from({ length: n }, (_, i) => (incoming?.[i] != null ? incoming[i] : base?.[i] ?? null));
+}
+
+function latestSlotReviews(firstReviews, later) {
+  return (firstReviews || []).map((first, i) => later?.[i] || first);
+}
+
+function lunaRepairRoundLimit(config) {
+  return freeformConfig(config).lunaRepairRounds;
 }
 
 const MIN_PASS_SKIP_SECOND = 2;
@@ -661,6 +713,8 @@ export async function brainstormFreeformPack({
       judgePrompt: '',
       repairPrompt: '',
       finalJudgePrompt: '',
+      extraRepairPrompt: '',
+      extraJudgePrompt: '',
     };
   }
   const judged = await reviewBrainstormPack({
@@ -694,6 +748,8 @@ export async function brainstormFreeformPack({
       judgePrompt: judged.prompt,
       repairPrompt: '',
       finalJudgePrompt: '',
+      extraRepairPrompt: '',
+      extraJudgePrompt: '',
     };
   }
   const repaired = await repairBrainstormPack({
@@ -709,9 +765,7 @@ export async function brainstormFreeformPack({
     fromGenesis,
     note,
   });
-  const candidates = (repaired.candidates || []).map((c, i) =>
-    isPackPass(judged.reviews[i]) ? drafted.candidates[i] : c,
-  );
+  let candidates = freezeFirstPass(drafted.candidates, judged.reviews, repaired.candidates);
   const retry = candidates.filter((_, i) => !isPackPass(judged.reviews[i]));
   const gated = retry.length
     ? await reviewBrainstormPack({
@@ -727,7 +781,58 @@ export async function brainstormFreeformPack({
         note,
       })
     : { reviews: [], prompt: '' };
-  const finalReviews = scatterPackReviews(candidates.length, gated.reviews);
+  let finalReviews = scatterPackReviews(candidates.length, gated.reviews);
+  const extraRepairPrompts = [];
+  const extraJudgePrompts = [];
+  const lunaMax = lunaRepairRoundLimit(config);
+  for (let round = 0; round < lunaMax; round += 1) {
+    const pool = collectBrainstormPool(drafted.candidates, judged.reviews, candidates, finalReviews);
+    if (pool.length >= MIN_PASS_SKIP_SECOND) break;
+    const slotReviews = latestSlotReviews(judged.reviews, finalReviews);
+    if (!slotReviews.some(reviewNeedsRewrite)) break;
+    const cheap = await repairBrainstormPack({
+      runtime,
+      seedText,
+      gravity: drafted.gravity,
+      drafts: candidates,
+      reviews: slotReviews,
+      config,
+      log,
+      requireMystery,
+      fromVoid,
+      fromGenesis,
+      agentId: 'freeformBrainstormRepair',
+      omitSeed: true,
+      onlyFailed: true,
+    });
+    if (!cheap.prompt) break;
+    extraRepairPrompts.push(cheap.prompt);
+    candidates = freezeFirstPass(drafted.candidates, judged.reviews, cheap.candidates);
+    const lunaRetry = candidates.filter((_, i) => reviewNeedsRewrite(slotReviews[i]));
+    const lunaGated = lunaRetry.length
+      ? await reviewBrainstormPack({
+          runtime,
+          seedText,
+          gravity: drafted.gravity,
+          candidates: lunaRetry,
+          config,
+          log,
+          requireMystery,
+          fromVoid,
+          fromGenesis,
+          note,
+        })
+      : { reviews: [], prompt: '' };
+    if (lunaGated.prompt) extraJudgePrompts.push(lunaGated.prompt);
+    finalReviews = mergeScatteredReviews(
+      finalReviews,
+      scatterPackReviews(candidates.length, lunaGated.reviews),
+    );
+    log.info('freeform.brainstorm.luna_repair', {
+      round: round + 1,
+      pass: collectBrainstormPool(drafted.candidates, judged.reviews, candidates, finalReviews).length,
+    });
+  }
   const pool = collectBrainstormPool(drafted.candidates, judged.reviews, candidates, finalReviews);
   const winner = pickFromPool(pool, rng);
   const pickedIndex = winner
@@ -746,5 +851,7 @@ export async function brainstormFreeformPack({
     judgePrompt: judged.prompt,
     repairPrompt: repaired.prompt,
     finalJudgePrompt: gated.prompt,
+    extraRepairPrompt: extraRepairPrompts.join('\n\n'),
+    extraJudgePrompt: extraJudgePrompts.join('\n\n'),
   };
 }
