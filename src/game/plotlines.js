@@ -3,6 +3,7 @@ import { parseSeedConfig } from './seedTemp.js';
 import { textsLookSame, processIsLive } from './processes.js';
 import { normalizeTruthGraph, judgeTruthGraph, parseMysteryShapes, normalizeFactList, RESOLUTION_FACT_MAX } from './mysteryGraph.js';
 import { normalizeDiscoveryLadder, normalizeHiddenPremises, judgeSuspenseCore } from './suspenseGraph.js';
+import { normalizeThreat } from './threats.js';
 
 /**
  * Сюжетные нити — ядро мира: событий вне нитей не бывает.
@@ -235,6 +236,12 @@ export function formatFreeformEndings(plotOrList) {
   return list.map((e, i) => `${i + 1}. ${e.id} [${e.kind}] ${e.text}`).join('\n');
 }
 
+/** Обязательства мира — часть карточки нити и переживают круг через хранилище. */
+function normalizeThreatList(raw, plotId) {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((t) => normalizeThreat(t, plotId)).filter(Boolean);
+}
+
 export function clampFreeformDepth(raw, fallback = 1) {
   if (raw == null || raw === '') return fallback;
   const v = Math.round(Number(raw));
@@ -316,7 +323,8 @@ function storyActState(p = {}) {
   if (type === 'story') {
     const gravity = parseFreeformGravity(p.gravity);
     const maxDepth = clampFreeformDepth(p.maxDepth, defaultFreeformMaxDepth(gravity));
-    const depth = Math.max(0, Math.round(Number(p.depth) || 0));
+    // Глубина дробная: она измеряет объём вложенной работы, а не число дел.
+    const depth = Math.max(0, Math.round((Number(p.depth) || 0) * 100) / 100);
     const failRaw = Math.round(Number(p.failCount));
     return {
       storyType: 'story',
@@ -334,6 +342,8 @@ function storyActState(p = {}) {
           : Math.max(0, Math.round(Number(p.maxFails))),
       endings: normalizeFreeformEndings(p.endings),
       hiddenPremises: normalizeHiddenPremises(p.hiddenPremises),
+      threats: normalizeThreatList(p.threats, p.id),
+      defenseCount: Math.max(0, Math.round(Number(p.defenseCount) || 0)),
     };
   }
   return { storyType: type === 'freeform' ? 'freeform' : 'default' };

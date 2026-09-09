@@ -138,7 +138,7 @@ test('благословение своего дела сдвигает исхо
   assert.equal(blessed.ok, true);
   assert.equal(process.blessed, true);
   assert.equal(process.blessedTick, 4);
-  assert.equal(process.blessCost, 30);
+  assert.equal(process.blessCost, 15, 'цена по полосе срока, не по числу месяцев');
   const again = blessProcess(process);
   assert.equal(again.ok, false);
   assert.equal(again.error, 'already_blessed');
@@ -164,17 +164,17 @@ test('благословение своего дела сдвигает исхо
 
 test('благословение без маны не ставится', () => {
   const process = action({ objectiveMonths: 3, expectedMonths: 3 });
-  const domain = { state: { mana: 20, pendingActions: [process] } };
+  const domain = { state: { mana: 10, pendingActions: [process] } };
   const denied = blessProcess(process, { tick: 1, domain });
   assert.equal(denied.ok, false);
   assert.equal(denied.error, 'no_mana');
   assert.equal(process.blessed, false);
-  assert.equal(domain.state.mana, 20);
+  assert.equal(domain.state.mana, 10);
 
-  domain.state.mana = 30;
+  domain.state.mana = 15;
   const paid = blessProcess(process, { tick: 1, domain });
   assert.equal(paid.ok, true);
-  assert.equal(paid.cost, 30);
+  assert.equal(paid.cost, 15);
   assert.equal(domain.state.mana, 0);
   assert.equal(process.blessed, true);
 });

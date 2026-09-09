@@ -43,7 +43,8 @@ import { resolveSuspenseLegacy } from './legacyResolver.js';
 import { scoreMonthStats, factsForStatJudge } from './statJudge.js';
 import { runSteward } from './steward.js';
 import { getLogger } from '../log.js';
-import { grantManaForTick } from './mana.js';
+import { accrueMana } from './mana.js';
+import { DAYS_PER_MONTH } from './gameClock.js';
 import { maybeRewriteCityGenesis } from './genesisRewrite.js';
 import { maybeRevealCanonicalUnknowns } from './unknownsReveal.js';
 import { realignFinishedOutcomes } from './plotAlign.js';
@@ -83,7 +84,8 @@ export async function resolveDomainMonth({
   normalizePlotlines(working, config);
   normalizeDomainProcesses(working, config);
   if (typeof working.population !== 'number') working.population = config.genesis.population.min;
-  grantManaForTick(working);
+  // Пока месячный путь ещё жив, день выводится из тика: приход маны непрерывный.
+  accrueMana(working, Math.max(0, Math.round(Number(world?.tickIndex) || 0)) * DAYS_PER_MONTH);
 
   const cfg = plotConfig(config);
   const chronicleAdds = [];

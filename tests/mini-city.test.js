@@ -202,7 +202,7 @@ test('мини-аппка: свои истории и участие в сопр
   assert.equal(view.mana.value, 40);
   assert.equal(view.mana.max, 100);
   const well = view.processes.find((p) => p.process?.summary === 'Осмотреть колодец');
-  assert.equal(well.process.blessCost, 30);
+  assert.equal(well.process.blessCost, 15, 'три месяца — полоса SEASON');
   assert.equal(well.process.canBless, true);
   assert.equal(well.process.detail, 'Спуститься ночью.');
   assert.equal(well.process.expectedMonths, 3);
@@ -214,7 +214,7 @@ test('мини-аппка: свои истории и участие в сопр
   assert.ok(well.process.finishChances);
   assert.equal(typeof well.process.finishChances.fail, 'number');
   assert.equal(well.temper, 'ровный, блестящий, суровый');
-  assert.equal(fight.processes[0].blessCost, 20);
+  assert.equal(fight.processes[0].blessCost, 8, 'два месяца — полоса WEEKS');
   assert.equal(fight.processes[0].canBless, true);
   assert.equal(knowledge.about, 'Помнит ли город, как лечить и читать.');
   assert.equal(view.orders[0].indefinite, false);

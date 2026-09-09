@@ -56,7 +56,12 @@ export function blessManaCost(process) {
     null,
   );
   if (band && DURATION_BANDS.includes(band)) return MANA_BLESS_BY_BAND[band];
-  const days = Number(process?.objectiveDays || process?.totalDays);
+  const months = Number(process?.objectiveMonths || process?.expectedMonths);
+  const days = Number.isFinite(Number(process?.objectiveDays || process?.totalDays))
+    ? Number(process?.objectiveDays || process?.totalDays)
+    : Number.isFinite(months) && months > 0
+      ? months * 30
+      : NaN;
   if (Number.isFinite(days) && days > 0) {
     if (days <= 3) return MANA_BLESS_BY_BAND.INSTANT;
     if (days <= 15) return MANA_BLESS_BY_BAND.DAYS;
