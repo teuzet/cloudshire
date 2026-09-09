@@ -77,20 +77,17 @@ function portraitButton(slot) {
 function processMeta(p) {
   if (!p) return '';
   const stats = p.linkedStats?.length ? p.linkedStats.join(', ') : '';
-  const left = p.monthsLeft == null ? '' : `ещё ~${p.monthsLeft} мес.`;
-  const span =
-    p.expectedMonths == null
-      ? ''
-      : p.monthsDone != null
-        ? `${p.monthsDone} из ~${p.expectedMonths} мес.`
-        : `~${p.expectedMonths} мес.`;
   const pause = p.paused ? 'на паузе' : '';
+  const left = p.remaining ? `ещё ${p.remaining}` : '';
+  const span = p.duration ? `работы на ${p.duration}` : '';
+  const hard = p.impossible ? 'невыполнимо' : p.difficulty ? `дело ${p.difficulty}` : '';
+  const pace = p.pace && p.pace !== 'обычно' ? p.pace : '';
   const blessed = p.blessed ? 'благословлено' : '';
   const chances = p.finishChances;
   const odds = chances
     ? `исход: провал ${chances.fail}% · успех ${chances.ok}% · крит ${chances.crit}%`
     : '';
-  return [pause, left, span, stats, blessed, odds].filter(Boolean).join(' · ');
+  return [pause, left, span, hard, pace, stats, blessed, odds].filter(Boolean).join(' · ');
 }
 
 function blessMarkup(p) {
@@ -247,15 +244,27 @@ function renderEvents(events) {
       const deeds = e.processes?.length
         ? e.processes
             .map((p) => {
-              const left = p.monthsLeft == null ? '' : ` · ещё ~${p.monthsLeft} мес.`;
+              const left = p.remaining ? ` · ещё ${p.remaining}` : p.paused ? ' · на паузе' : '';
               return `<p class="meta">${esc(p.summary)}${esc(left)}</p>`;
             })
             .join('')
         : '<p class="meta">Связанных дел нет.</p>';
+      // Нависшее — то, что город уже знает; сроки словом, как их говорит жрец.
+      const threats = (e.threats || [])
+        .map(
+          (t) =>
+            `<p class="threat${t.kind === 'разрешение' ? ' calm' : ''}">${esc(t.text)} — ${esc(t.remaining)}</p>`,
+        )
+        .join('');
+      const dread = e.dread && e.dread !== 'спокойно'
+        ? `<p class="meta dread">чутьё жреца: ${esc(e.dread)}</p>`
+        : '';
       return `
         <article class="card">
           <h2>${esc(e.title)}</h2>
           <p>${esc(e.synopsis)}</p>
+          ${threats}
+          ${dread}
           ${deeds}
         </article>`;
     })
@@ -263,20 +272,14 @@ function renderEvents(events) {
 }
 
 function renderOrders(list) {
-  if (!list?.length) return empty('Указов нет.');
+  if (!list?.length) return empty('Постоянного порядка в городе нет.');
   return list
     .map((o) => {
-      const term = o.indefinite
-        ? 'бессрочно'
-        : o.remainingMonths == null
-          ? ''
-          : `ещё ${o.remainingMonths} мес.`;
-      const when = o.since ? `принят ${o.since}` : '';
-      const meta = [when, term].filter(Boolean).join(' · ');
+      const when = o.since ? `заведено: ${o.since}` : '';
       return `
         <article class="card">
           <p>${esc(o.text)}</p>
-          ${meta ? `<p class="meta">${esc(meta)}</p>` : ''}
+          ${when ? `<p class="meta">${esc(when)}</p>` : ''}
         </article>`;
     })
     .join('');

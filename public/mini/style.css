@@ -98,6 +98,17 @@ h1 {
 .card p { margin: 0.3rem 0 0; line-height: 1.45; font-size: 0.92rem; }
 .card .meta { font-size: 0.8rem; color: var(--muted); margin-top: 0.4rem; }
 
+/* Нависшее выделяем рамкой, а не цветом текста: срок словом и так короткий. */
+.card .threat {
+  margin-top: 0.5rem;
+  padding-left: 0.6rem;
+  border-left: 2px solid #a8542f;
+  font-size: 0.86rem;
+}
+
+.card .threat.calm { border-left-color: #4e6d52; }
+.card .meta.dread { font-style: italic; }
+
 .stat-head {
   display: flex;
   justify-content: space-between;

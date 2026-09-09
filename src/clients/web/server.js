@@ -23,12 +23,66 @@ import { deriveOnboardingPhase, normalizeOnboardingDraft } from '../../game/onbo
 import { genesisTutorialText } from '../../game/progressBar.js';
 import { miniCityPayload } from '../../game/miniCity.js';
 import { cityRules, confluxDirective } from '../../game/cityRules.js';
+import { worldDay } from '../../game/scheduler.js';
+import { gameDateFromDay } from '../../game/gameClock.js';
+import { DIFFICULTY_SPEC, DURATION_SPEC, normalizeDifficultyBand } from '../../game/bands.js';
+import { deedDurationBand, deedRemainingBand, deedRemainingDays } from '../../game/deeds.js';
+import { paceLabel } from '../../game/deedMath.js';
+import { blessManaCost } from '../../game/mana.js';
+import { liveThreats, remainingDays as threatRemainingDays } from '../../game/threats.js';
+import { priestOrders } from '../../game/priestOrders.js';
+import { notifySettings } from '../../game/notify.js';
 import { mountFreeformLab } from './freeformLab.js';
 import {
   validateTelegramInitData,
   telegramBotToken,
 } from '../telegram/initData.js';
 import { isTelegramAllowed, closedTestReply } from '../telegram/access.js';
+
+/**
+ * Дело для инспектора: сырое поле плюс то, что считает движок.
+ * Считать полосы и цену благословения в браузере — значит завести вторую
+ * реализацию правил, которая тихо разойдётся с первой.
+ */
+function inspectProcess(process, day) {
+  if (!process) return process;
+  const active = !process.status || process.status === 'active';
+  const paused = process.status === 'paused';
+  return {
+    ...process,
+    // Инспектор — отладочный экран, поэтому здесь, в отличие от справочника
+    // игрока, дни показываем прямо: иначе нечем проверять сроки.
+    remainingLabel: active ? DURATION_SPEC[deedRemainingBand(process, day)].label : null,
+    remainingDays: active ? deedRemainingDays(process, day) : null,
+    pausedRemainingDays: paused ? Math.round(Number(process.pausedRemainingDays) || 0) : null,
+    durationLabel: DURATION_SPEC[deedDurationBand(process)].label,
+    difficultyLabel: DIFFICULTY_SPEC[normalizeDifficultyBand(process.difficulty)].label,
+    paceLabel: paceLabel(process.paceShift),
+    blessCost: blessManaCost(process),
+  };
+}
+
+/**
+ * Нить для инспектора. Здесь, в отличие от речи жреца, видно всё нависшее —
+ * включая то, о чём город ещё не знает: иначе отлаживать угрозы нечем.
+ */
+function inspectPlot(plot, day) {
+  const bare = stripPlotSecrets(plot);
+  if (!bare) return bare;
+  return {
+    ...bare,
+    threats: liveThreats(plot).map((t) => ({
+      id: t.id,
+      text: t.text,
+      band: t.band,
+      severity: t.severity,
+      outcome: t.outcome,
+      known: Boolean(t.known),
+      totalDays: t.totalDays,
+      remainingDays: threatRemainingDays(t, day),
+    })),
+  };
+}
 
 function slimLore(f) {
   if (!f) return null;
@@ -223,11 +277,21 @@ async function listPlayIslands(storage, world) {
 }
 
 /** Числа игроку видны, но рядом с ними — то же слово, которым говорит правитель. */
+/**
+ * Статы для показа. Внутри они дробные, игроку показываем целое — но точное
+ * значение отдаём рядом, иначе в инспекторе не видно, как копится дробь.
+ */
 function statsWithEpithets(stats, config) {
   return (config.stats || []).map((def) => {
     const value = Number(stats?.[def.id]);
     const v = Number.isFinite(value) ? value : 50;
-    return { id: def.id, name: def.name, value: v, epithet: statEpithet(v, config) };
+    return {
+      id: def.id,
+      name: def.name,
+      value: Math.round(v),
+      exact: Math.round(v * 100) / 100,
+      epithet: statEpithet(v, config),
+    };
   });
 }
 
@@ -384,6 +448,7 @@ export function createWebServer({ config, app, runtime, storage }) {
         conflux,
         world,
         config,
+        day: worldDay(world, { config }),
         generating: app.isGenerating(who.userId),
       });
       res.json(payload);
@@ -479,9 +544,13 @@ export function createWebServer({ config, app, runtime, storage }) {
           at: m.at || null,
         }));
         const islands = await listPlayIslands(storage, world);
+        // Одиночный город живёт днями: показывать ему месяц тика — значит
+        // показывать чужой календарь. Месячная метка остаётся для сопряжения.
+        const day = worldDay(world, { config });
         res.json({
           userId,
-          gameDate: world.gameDate,
+          gameDate: { ...(world.gameDate || {}), ...gameDateFromDay(day), day },
+          tickDate: world.gameDate || null,
           scheduler: world.scheduler || null,
           generating: app.isGenerating(userId),
           generatingProgress: app.generatingProgress.get(String(userId)) || null,
@@ -562,6 +631,7 @@ export function createWebServer({ config, app, runtime, storage }) {
 
         const lore = domain.lore || [];
         const chronicle = chronicleEntries(lore);
+        const day = worldDay(world, { config });
         const conflux = await findActiveConfluxForDomain(storage, domain.id);
         if (conflux) hydrateDomainFromConflux(domain, conflux, { mode: 'ruler' });
         const partner = conflux
@@ -571,7 +641,7 @@ export function createWebServer({ config, app, runtime, storage }) {
 
         res.json({
           userId,
-          gameDate: world.gameDate,
+          gameDate: { ...(world.gameDate || {}), ...gameDateFromDay(day), day },
           domain: {
             id: domain.id,
             name: domain.name,
@@ -593,11 +663,13 @@ export function createWebServer({ config, app, runtime, storage }) {
             faith: domain.state?.faith ?? null,
             mana: domain.state?.mana ?? 0,
             tags: (domain.tags || []).map((t) => t.tagName || t.tagId),
-            processes: domain.state?.pendingActions || [],
+            processes: (domain.state?.pendingActions || []).map((p) => inspectProcess(p, day)),
             standingRules: cityRules(domain),
             confluxDirective: confluxDirective(domain),
+            priestOrders: priestOrders(domain),
+            notify: notifySettings(domain),
             monthLog: domain.state?.monthLog || [],
-            plotlines: (domain.plotlines || []).map(stripPlotSecrets),
+            plotlines: (domain.plotlines || []).map((p) => inspectPlot(p, day)),
             closedPlotlines: (domain.closedPlotlines || []).slice(-20).map(stripPlotSecrets),
             cast: castRecords(lore),
             facts: lore

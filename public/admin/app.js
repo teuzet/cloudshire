@@ -386,30 +386,38 @@ function renderHeader() {
 }
 
 function plotCard(p) {
-  const kindLabel =
-    p.kind === 'order' ? 'указ' : p.kind === 'errand' ? 'дело' : p.kind === 'story' ? 'история' : p.kind;
+  const kindLabel = p.kind === 'errand' ? 'дело' : p.kind === 'story' ? 'история' : p.kind;
   const meta = [
     kindLabel,
     p.urgency != null ? `срочность ${p.urgency}` : null,
     p.gravity != null ? `масштаб ${p.gravity}` : null,
     p.temperature != null ? `жар ${p.temperature}` : null,
-    p.maxAgeMonths != null ? `возраст ${p.ageMonths ?? 0}/${p.maxAgeMonths}` : null,
+    p.maxDepth != null
+      ? `глубина ${Math.round((Number(p.depth) || 0) * 10) / 10}/${p.maxDepth}`
+      : null,
+    p.maxFails != null ? `провалов ${p.failCount ?? 0}/${p.maxFails}` : null,
     p.beatCount != null ? `битов ${p.beatCount}` : null,
-    p.durationMonths
-      ? `срок ${p.durationMonths} мес.`
-      : p.expiresTick != null
-        ? `до тика ${p.expiresTick}`
-        : p.kind === 'order'
-          ? 'бессрочно'
-          : null,
   ]
     .filter(Boolean)
     .join(' · ');
-  const text = p.orderText || p.synopsis || '';
+  // Нависшее целиком, включая скрытое: админка — единственное место,
+  // где счётчики угроз видно как есть.
+  const threats = (p.threats || [])
+    .filter((t) => !t.status || t.status === 'live')
+    .map(
+      (t) =>
+        `<li>${esc(t.text || '')} <span class="muted small">${esc(
+          [t.severity || t.outcome, t.known ? 'город знает' : 'скрыто', `${t.totalDays ?? '?'} дн.`]
+            .filter(Boolean)
+            .join(' · '),
+        )}</span></li>`,
+    )
+    .join('');
   return (
     `<article class="ins-card"><h4>${esc(p.title || p.id)}</h4>` +
     (meta ? `<div class="muted small">${esc(meta)}</div>` : '') +
-    (text ? `<p class="pre">${esc(text)}</p>` : '') +
+    (p.synopsis ? `<p class="pre">${esc(p.synopsis)}</p>` : '') +
+    (threats ? `<div class="muted small">нависло:</div><ul class="small">${threats}</ul>` : '') +
     (p.closeWhen ? `<p class="muted small">закроется, когда: ${esc(p.closeWhen)}</p>` : '') +
     (p.relatedStats?.length ? `<p class="muted small">статы: ${esc(p.relatedStats.join(', '))}</p>` : '') +
     `<p class="muted small">${esc(p.id)}</p></article>`
@@ -417,17 +425,20 @@ function plotCard(p) {
 }
 
 function processCard(p) {
-  const total = p.expectedMonths ?? p.durationMonths ?? '?';
-  const left = p.monthsLeft;
   const active = !p.status || p.status === 'active';
   const paused = p.status === 'paused';
+  const scheduled = p.scheduledDays ?? p.objectiveDays ?? '?';
   const clock = paused
-    ? `пауза · осталось ${left ?? '?'} из ${total} мес.`
+    ? `пауза · оставалось ${p.pausedRemainingDays ?? '?'} дн.`
     : active
-      ? `осталось ${left ?? '?'} из ${total} мес.`
-      : `${p.status}${p.resolvedTick != null ? ` · тик ${p.resolvedTick}` : ''}`;
+      ? `срок на ${p.dueDay ?? '?'} день, всего ${scheduled} дн.`
+      : `${p.status}${p.resolvedDay != null ? ` · день ${p.resolvedDay}` : ''}`;
   const meta = [
     clock,
+    [p.durationBand, p.difficulty].filter(Boolean).join('/') || null,
+    p.paceShift ? `темп ${p.paceShift > 0 ? '+1' : '-1'}` : null,
+    p.impossible ? 'невыполнимо' : null,
+    p.plotEngagement || null,
     p.linkedStats?.length ? `статы: ${p.linkedStats.join(', ')}` : null,
     p.office || null,
     p.initiative === 'ruler' ? 'сам правитель' : null,
@@ -700,10 +711,8 @@ function splitPlots(domain) {
   const is = (p, kind) => String(p?.kind || 'story') === kind;
   return {
     stories: open.filter((p) => is(p, 'story')),
-    orders: open.filter((p) => is(p, 'order')),
     errands: open.filter((p) => is(p, 'errand')),
     closedStories: closed.filter((p) => is(p, 'story') || !p.kind),
-    closedOrders: closed.filter((p) => is(p, 'order')),
   };
 }
 
@@ -720,58 +729,62 @@ function renderStories() {
   );
 }
 
+/**
+ * Постоянный порядок города. Указов-нитей больше нет: правило живёт
+ * в `domain.modifiers`, наказ на сопряжение — в состоянии, темы докладов — у жреца.
+ */
 function renderOrders() {
   const d = view.domain;
   if (!d) return empty('города ещё нет');
-  const { orders, closedOrders } = splitPlots(d);
-  const mods = d.state?.modifiers || d.modifiers || [];
-  const requests = d.state?.pendingOrderRequests || [];
+  const rules = d.modifiers || d.state?.modifiers || [];
+  const directive = d.state?.confluxDirective || null;
+  const subjects = d.state?.priestOrders || [];
   const out = [
     block(
-      `Указы (${orders.length})`,
-      orders.length ? orders.map(plotCard).join('') : empty('действующих указов нет'),
+      `Постоянный порядок (${rules.length})`,
+      rules.length
+        ? rules
+            .map(
+              (m) =>
+                `<article class="ins-card"><h4>${esc(m.text || m.summary || m.id)}</h4>` +
+                `<div class="muted small">${esc(
+                  [
+                    m.sinceLabel || (m.sinceDay != null ? `с дня ${m.sinceDay}` : null),
+                    m.by || m.initiative,
+                  ]
+                    .filter(Boolean)
+                    .join(' · '),
+                )}</div></article>`,
+            )
+            .join('')
+        : empty('порядка нет'),
+    ),
+    block(
+      'Наказ на сопряжение',
+      directive
+        ? `<article class="ins-card"><p class="pre">${esc(directive.text || '')}</p>` +
+          `<div class="muted small">${esc(
+            [directive.office, directive.sinceLabel].filter(Boolean).join(' · '),
+          )}</div></article>`
+        : empty('наказа нет'),
     ),
   ];
-  if (mods.length) {
+  if (subjects.length) {
     out.push(
       block(
-        `Постоянные следы (${mods.length})`,
-        mods
+        `Темы докладов жреца (${subjects.length})`,
+        subjects
           .map(
-            (m) =>
-              `<article class="ins-card"><h4>${esc(m.text || m.summary || m.id)}</h4>` +
+            (o) =>
+              `<article class="ins-card"><h4>${esc(o.subject || o.id)}</h4>` +
               `<div class="muted small">${esc(
-                [m.indefinite === false || m.durationMonths ? `${m.durationMonths || m.remainingMonths || '?'} мес.` : 'бессрочно', m.by || m.initiative]
-                  .filter(Boolean)
-                  .join(' · '),
+                o.lastEventNo != null ? `поминал на событии ${o.lastEventNo}` : 'ещё не поминал',
               )}</div></article>`,
           )
           .join(''),
       ),
     );
   }
-  if (requests.length) {
-    out.push(
-      block(
-        'Заявки на указы',
-        requests
-          .map((r) => {
-            const text = r.text || r.summary || r.orderText || '';
-            const meta = [r.status, r.durationMonths ? `${r.durationMonths} мес.` : null]
-              .filter(Boolean)
-              .join(' · ');
-            return (
-              `<article class="ins-card">` +
-              (meta ? `<div class="muted small">${esc(meta)}</div>` : '') +
-              (text ? `<p class="pre">${esc(text)}</p>` : empty('заявка без текста')) +
-              `</article>`
-            );
-          })
-          .join(''),
-      ),
-    );
-  }
-  if (closedOrders.length) out.push(block('Снятые указы', closedList(closedOrders, 'нет')));
   return out.join('');
 }
 

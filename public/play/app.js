@@ -8,6 +8,7 @@ let lastGenerating = false;
 let busy = false;
 let inspectTab = 'city';
 let inspectData = null;
+let lastCityDay = null;
 
 $('userId').value = userId;
 
@@ -213,8 +214,13 @@ async function refresh({ force = false } = {}) {
 
     if (state.generating) {
       setBanner(state.generatingProgress || 'Остров создаётся — правитель напишет сам, это минута-две.');
-    } else if (state.ticking) setBanner('Идёт шаг времени: правитель занят делами месяца.');
+    } else if (state.ticking) setBanner('Идёт шаг времени на сопряжении.');
     else setBanner('');
+
+    // Справочник перечитываем, когда мир реально сдвинулся на день, а не по таймеру.
+    const day = state.gameDate?.day ?? null;
+    if (cityPanelOpen() && day != null && day !== lastCityDay) reloadCityFrame();
+    lastCityDay = day;
 
     await refreshInspector();
   } catch (err) {
@@ -269,6 +275,9 @@ $('form').addEventListener('submit', async (e) => {
     busy = false;
     $('send').disabled = false;
     await refresh({ force: true });
+    // Ход правителя мог завести дело или снять его — справочник устарел даже
+    // без смены дня.
+    if (cityPanelOpen()) reloadCityFrame();
     $('text').focus();
   }
 });
@@ -304,7 +313,9 @@ function renderCityTab(d) {
         ['население', d.population],
         ['покровителя зовут', d.patronName || 'ещё не назван'],
         ['вера', d.faith != null ? d.faith : null],
-        ['мана', d.mana != null ? `${d.mana} / 100` : null],
+        // Мана дробная: показываем и целое, как видит игрок, и точное значение.
+        ['мана', d.mana != null ? `${Math.floor(d.mana)} / 100 (${Number(d.mana).toFixed(2)})` : null],
+        ['вести', d.notify ? `${d.notify.intensity} · ${(d.notify.triggers || []).join(', ')}` : null],
         ['основан на тике', d.createdTick],
         ['последний тик', d.lastTickAt],
       ]),
@@ -313,7 +324,12 @@ function renderCityTab(d) {
   out.push(
     block(
       'Статы',
-      keyVals((d.stats || []).map((s) => [s.name, `${s.value} · ${s.epithet}`])),
+      keyVals(
+        (d.stats || []).map((s) => [
+          s.name,
+          `${s.value} · ${s.epithet}${s.exact != null && s.exact !== s.value ? ` (${s.exact})` : ''}`,
+        ]),
+      ),
     ),
   );
   if (d.characters?.length) {
@@ -379,7 +395,10 @@ function plotCard(p, names = {}) {
     p.storyType === 'story' ? 'история' : p.storyType === 'freeform' ? 'сопряжение' : null,
     p.urgency != null ? `срочность ${p.urgency}` : null,
     p.gravity != null ? `масштаб ${p.gravity}` : null,
-    p.maxDepth != null ? `глубина ${p.depth ?? 0}/${p.maxDepth}` : null,
+    p.maxDepth != null
+      ? `глубина ${Math.round((Number(p.depth) || 0) * 10) / 10}/${p.maxDepth}`
+      : null,
+    p.maxFails != null ? `провалов ${p.failCount ?? 0}/${p.maxFails}` : null,
     p.isMainConflux ? 'главная нить сопряжения' : null,
     p.shared ? 'общая' : concerns.length ? 'локальная' : null,
     p.sharedReason ? `стала общей: ${p.sharedReason}` : null,
@@ -393,10 +412,25 @@ function plotCard(p, names = {}) {
   ]
     .filter(Boolean)
     .join(' · ');
+  // Нависшее целиком, вместе со скрытым: справочник игрока показывает только
+  // известное, а отлаживать сроки надо по всем счётчикам.
+  const threats = (p.threats || [])
+    .map((t) => {
+      const bits = [
+        t.outcome === 'neutral' ? 'разрешение' : t.severity || 'угроза',
+        t.known ? 'город знает' : 'скрыто',
+        `${t.remainingDays ?? '?'} из ${t.totalDays ?? '?'} дн.`,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      return `<li>${esc(t.text)} <span class="muted small">${esc(bits)}</span></li>`;
+    })
+    .join('');
   return (
     `<article class="ins-card"><h4>${esc(p.title)}</h4>` +
     `<div class="muted small">${esc(meta)}</div>` +
     (p.synopsis ? `<p class="pre">${esc(p.synopsis)}</p>` : '') +
+    (threats ? `<p class="small muted">нависло:</p><ul class="small">${threats}</ul>` : '') +
     (p.closeWhen ? `<p class="small muted">закроется, когда: ${esc(p.closeWhen)}</p>` : '') +
     (p.relatedStats?.length
       ? `<p class="small muted">статы: ${esc(p.relatedStats.join(', '))}</p>`
@@ -567,33 +601,50 @@ function renderConfluxTab(d) {
 }
 
 function renderOrdersBlocks(d) {
-  const orders = d.standingOrders || [];
-  return block(
-    `Постоянные распоряжения (${orders.length})`,
-    orders.length
-      ? `<ul>${orders
+  const rules = d.standingRules || [];
+  const directive = d.confluxDirective || null;
+  const subjects = d.priestOrders || [];
+  const out = [
+    block(
+      `Постоянный порядок (${rules.length})`,
+      rules.length
+        ? `<ul>${rules
+            .map(
+              (r) =>
+                `<li>${esc(r.text)} <span class="muted small">${esc(
+                  [r.sinceLabel || (r.sinceDay != null ? `день ${r.sinceDay}` : null), r.by]
+                    .filter(Boolean)
+                    .join(' · '),
+                )}</span></li>`,
+            )
+            .join('')}</ul>`
+        : '<p class="muted">порядка нет</p>',
+    ),
+    block(
+      'Наказ на сопряжение',
+      directive
+        ? `<p>${esc(directive.text)}</p><p class="muted small">${esc(
+            [directive.office, directive.sinceLabel].filter(Boolean).join(' · '),
+          )}</p>`
+        : '<p class="muted">наказа нет</p>',
+    ),
+  ];
+  if (subjects.length) {
+    out.push(
+      block(
+        `О чём велено докладывать (${subjects.length})`,
+        `<ul>${subjects
           .map(
             (o) =>
-              `<li>${esc(o.text)} <span class="muted small">${esc(
-                [
-                  o.indefinite === false || o.durationMonths
-                    ? o.remainingMonths != null
-                      ? `ещё ${o.remainingMonths} мес.`
-                      : `${o.durationMonths} мес.`
-                    : 'бессрочно',
-                  o.initiative === 'ruler' ? 'сам правитель' : o.by,
-                  o.declaredTick != null ? `тик ${o.declaredTick}` : null,
-                ].filter(Boolean).join(' · '),
+              `<li>${esc(o.subject)} <span class="muted small">${esc(
+                o.lastEventNo != null ? `поминал на событии ${o.lastEventNo}` : 'ещё не поминал',
               )}</span></li>`,
           )
-          .join('')}</ul>`
-      : '<p class="muted">распоряжений нет</p>',
-  );
-}
-
-function blessCostOf(p) {
-  const months = Math.max(1, Math.round(Number(p?.objectiveMonths || p?.expectedMonths || 1)));
-  return months * 10;
+          .join('')}</ul>`,
+      ),
+    );
+  }
+  return out.join('');
 }
 
 function finishGloss(p) {
@@ -612,41 +663,42 @@ function finishGloss(p) {
 }
 
 function processCard(p, opts = {}) {
-  const total = p.expectedMonths ?? p.durationMonths ?? '?';
-  const objective = p.objectiveMonths;
-  const left = p.monthsLeft;
   const active = !p.status || p.status === 'active';
   const paused = p.status === 'paused';
   const own = !p.ownerDomainId || p.ownerDomainId === opts.viewerId;
+  const scheduled = p.scheduledDays ?? p.objectiveDays ?? '?';
   const clock = paused
-    ? `пауза · осталось ${left ?? '?'} из ${total} мес.`
+    ? `пауза · оставалось ${p.pausedRemainingDays ?? '?'} дн.`
     : active
-      ? `осталось ${left ?? '?'} из ${total} мес.`
-      : `${p.status}${p.resolvedTick != null ? ` · тик ${p.resolvedTick}` : ''} · шло ${total} мес.`;
-  const pace =
-    objective && Number(objective) !== Number(total)
-      ? `оценка ${objective} мес.`
-      : objective
-        ? `оценка ${objective} мес.`
-        : null;
-  const cost = blessCostOf(p);
+      ? `осталось ${p.remainingDays ?? '?'} из ${scheduled} дн. (${p.remainingLabel || '?'})`
+      : `${p.status}${p.resolvedDay != null ? ` · день ${p.resolvedDay}` : ''} · шло ${scheduled} дн.`;
+  const work = [
+    p.durationLabel ? `срок: ${p.durationLabel}` : null,
+    p.difficultyLabel ? `сложность: ${p.difficultyLabel}` : null,
+    p.paceLabel && p.paceLabel !== 'обычно' ? `темп: ${p.paceLabel}` : null,
+    p.impossible ? 'невыполнимо' : null,
+    p.plotEngagement ? `в нити: ${p.plotEngagement}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const cost = Number.isFinite(Number(p.blessCost)) ? Number(p.blessCost) : null;
   const mana = Number(opts.mana);
   const meta = [
     clock,
-    pace,
+    work,
     finishGloss(p),
     p.blessed && active ? 'благословлено' : null,
     p.linkedStats?.length ? `статы: ${p.linkedStats.join(', ')}` : null,
     p.initiative === 'ruler' ? 'сам правитель' : null,
-    p.lastAdvanceKind ? `последний ход: ${p.lastAdvanceKind}${p.lastAdvance != null ? ` (${p.lastAdvance})` : ''}` : null,
+    p.judgeNote ? `оценка: ${p.judgeNote}` : null,
   ]
     .filter(Boolean)
     .join(' · ');
   let blessBtn = '';
-  if (active && own && opts.viewerId && !p.blessed) {
+  if (active && own && opts.viewerId && !p.blessed && cost != null) {
     blessBtn =
       Number.isFinite(mana) && mana < cost
-        ? `<span class="muted small">благословить · ${cost} маны (не хватает, есть ${mana})</span>`
+        ? `<span class="muted small">благословить · ${cost} маны (не хватает, есть ${Math.floor(mana)})</span>`
         : `<button type="button" class="bless-btn" data-bless="${esc(p.id)}">благословить · ${cost} маны</button>`;
   }
   return (
@@ -786,11 +838,39 @@ async function refreshInspector() {
 
 $('btnInspect').addEventListener('click', async () => {
   const panel = $('inspector');
+  $('cityPanel').classList.add('hidden');
   panel.classList.toggle('hidden');
   if (!panel.classList.contains('hidden')) await refreshInspector();
 });
 
 $('btnInspectClose').addEventListener('click', () => $('inspector').classList.add('hidden'));
+
+// ------------------------------------------------------------------ город
+
+/**
+ * Мини-аппка живёт в iframe со своим слотом. Перечитываем её только по делу:
+ * общий опрос состояния идёт каждые 8 секунд, и дёргать полную перезагрузку
+ * страницы так же часто — значит листать справочник рывками.
+ */
+function reloadCityFrame() {
+  const frame = $('cityFrame');
+  const src = `/mini?userId=${encodeURIComponent(userId)}#${Date.now()}`;
+  frame.setAttribute('src', src);
+}
+
+function cityPanelOpen() {
+  return !$('cityPanel').classList.contains('hidden');
+}
+
+$('btnCity').addEventListener('click', () => {
+  const panel = $('cityPanel');
+  $('inspector').classList.add('hidden');
+  panel.classList.toggle('hidden');
+  if (cityPanelOpen()) reloadCityFrame();
+});
+
+$('btnCityClose').addEventListener('click', () => $('cityPanel').classList.add('hidden'));
+$('btnCityReload').addEventListener('click', () => reloadCityFrame());
 
 $('inspectTabs').addEventListener('click', (e) => {
   const tab = e.target.closest('.tab');
@@ -828,7 +908,7 @@ $('btnTick').addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId }),
     });
-    setBanner('Шаг времени запущен: письмо о месяце придёт в чат само.');
+    setBanner('Промотали игровой месяц: что назрело, придёт в чат само.');
   } catch (err) {
     setBanner(err.message);
     $('btnTick').disabled = false;

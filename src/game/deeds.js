@@ -11,8 +11,10 @@
  */
 
 import {
+  DURATION_BANDS,
   DURATION_SPEC,
   MIN_OFFICER_DAYS,
+  durationBandOfDays,
   normalizeDifficultyBand,
   normalizeDurationBand,
   isImpossible,
@@ -106,6 +108,21 @@ export function startDeed(process, { day = 0, judged = null, rng = Math.random }
   process.officerDays = Math.max(MIN_OFFICER_DAYS, process.scheduledDays);
   normalizeDeed(process);
   return process;
+}
+
+/**
+ * Полоса срока дела. У записей, заведённых до полос, поля нет — тогда полосу
+ * восстанавливаем из дней, иначе показ и цена благословения разойдутся:
+ * цена считается по дням, а подпись брала бы полосу по умолчанию.
+ */
+export function deedDurationBand(process) {
+  const raw = String(process?.durationBand || '').trim().toUpperCase();
+  if (DURATION_BANDS.includes(raw)) return raw;
+  const days = Number(process?.objectiveDays);
+  if (Number.isFinite(days) && days > 0) return durationBandOfDays(days);
+  const months = Number(process?.objectiveMonths || process?.expectedMonths);
+  if (Number.isFinite(months) && months > 0) return durationBandOfDays(months * DAYS_PER_MONTH);
+  return normalizeDurationBand(raw);
 }
 
 export function deedElapsedDays(process, day) {

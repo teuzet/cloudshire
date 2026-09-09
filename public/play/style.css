@@ -273,6 +273,13 @@ button.danger:hover { border-color: #d98080; }
   line-height: 1.5;
 }
 
+.city-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: #12100e;
+}
+
 .ins-block { margin-bottom: 1.1rem; }
 
 .ins-block h3 {

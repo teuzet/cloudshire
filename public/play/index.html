@@ -15,8 +15,9 @@
       </div>
       <div class="when">
         <span id="gameDate" class="muted"></span>
-        <button type="button" id="btnTick" class="ghost hidden" title="Прокрутить месяц вручную">тик</button>
-        <button type="button" id="btnInspect" class="ghost" title="Все данные города">город</button>
+        <button type="button" id="btnTick" class="ghost hidden" title="Промотать игровой месяц вручную">промотать</button>
+        <button type="button" id="btnCity" class="ghost" title="Справочник города — то же, что мини-аппка в Telegram">город</button>
+        <button type="button" id="btnInspect" class="ghost" title="Все данные города, включая скрытые">данные</button>
         <button type="button" id="btnSlots" class="ghost" title="Слоты и вайп">слоты</button>
       </div>
     </header>
@@ -55,6 +56,18 @@
       <button type="submit" id="send">Сказать</button>
     </form>
   </div>
+
+  <!-- Мини-аппка целиком, а не её копия: иначе тестовый клиент разъедется с тем,
+       что видит игрок в Telegram. Слот передаётся через ?userId=. -->
+  <aside id="cityPanel" class="inspector hidden">
+    <header class="inspector-top">
+      <strong>Город</strong>
+      <span class="muted small">то же, что в Telegram</span>
+      <button type="button" id="btnCityReload" class="ghost" title="Перечитать">обновить</button>
+      <button type="button" id="btnCityClose" class="ghost" title="Закрыть">✕</button>
+    </header>
+    <iframe id="cityFrame" class="city-frame" title="Справочник города"></iframe>
+  </aside>
 
   <aside id="inspector" class="inspector hidden">
     <header class="inspector-top">

@@ -7,7 +7,7 @@
  */
 
 import { DAYS_PER_YEAR } from './gameClock.js';
-import { DURATION_BANDS, normalizeDurationBand } from './bands.js';
+import { DURATION_BANDS, durationBandOfDays, normalizeDurationBand } from './bands.js';
 
 export const MANA_MAX = 100;
 
@@ -62,14 +62,9 @@ export function blessManaCost(process) {
     : Number.isFinite(months) && months > 0
       ? months * 30
       : NaN;
-  if (Number.isFinite(days) && days > 0) {
-    if (days <= 3) return MANA_BLESS_BY_BAND.INSTANT;
-    if (days <= 15) return MANA_BLESS_BY_BAND.DAYS;
-    if (days <= 60) return MANA_BLESS_BY_BAND.WEEKS;
-    if (days <= 150) return MANA_BLESS_BY_BAND.SEASON;
-    if (days <= 360) return MANA_BLESS_BY_BAND.YEAR;
-    return MANA_BLESS_BY_BAND.YEARS;
-  }
+  // Полосу из дней берём тем же словарём, что и подписи в клиентах: иначе
+  // у старой записи цена и надпись «работы на …» разойдутся.
+  if (Number.isFinite(days) && days > 0) return MANA_BLESS_BY_BAND[durationBandOfDays(days)];
   return MANA_BLESS_BY_BAND.WEEKS;
 }
 

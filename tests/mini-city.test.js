@@ -112,7 +112,41 @@ test('мини-аппка: свои истории и участие в сопр
       },
       { id: 'off_c', office: 'chancellor', statId: 'influence', title: 'Канцлер', name: 'Орен', processId: null },
     ],
-    plotlines: [{ id: 'local', kind: 'story', title: 'Гул колодца', synopsis: 'Вода поёт.' }],
+    plotlines: [
+      {
+        id: 'local',
+        kind: 'story',
+        title: 'Гул колодца',
+        synopsis: 'Вода поёт.',
+        gravity: 'CRISIS',
+        depth: 1,
+        maxDepth: 3,
+        threats: [
+          {
+            id: 'thr_known',
+            text: 'Колодец обвалится',
+            band: 'WEEKS',
+            outcome: 'harm',
+            known: true,
+            startDay: 100,
+            totalDays: 40,
+            dueDay: 130,
+            status: 'live',
+          },
+          {
+            id: 'thr_hidden',
+            text: 'Вода уйдёт совсем',
+            band: 'SEASON',
+            outcome: 'harm',
+            known: false,
+            startDay: 100,
+            totalDays: 100,
+            dueDay: 190,
+            status: 'live',
+          },
+        ],
+      },
+    ],
     modifiers: [{ id: 'cmod_1', text: 'Ночной дозор у края', sinceLabel: 'Год 1, месяц 4' }],
     state: {
       pendingActions: [
@@ -120,10 +154,12 @@ test('мини-аппка: свои истории и участие в сопр
           id: 'act_1',
           summary: 'Осмотреть колодец',
           detail: 'Спуститься ночью.',
-          monthsLeft: 2,
-          expectedMonths: 3,
-          objectiveMonths: 3,
-          monthsDone: 1,
+          durationBand: 'SEASON',
+          difficulty: 'HARD',
+          objectiveDays: 90,
+          scheduledDays: 90,
+          startDay: 100,
+          dueDay: 190,
           status: 'active',
           linkedStats: ['knowledge'],
         },
@@ -166,17 +202,20 @@ test('мини-аппка: свои истории и участие в сопр
         id: 'act_cf',
         summary: 'Сторожить проход',
         detail: 'Дозор на мосту.',
-        monthsLeft: 1,
-        expectedMonths: 2,
-        objectiveMonths: 2,
+        durationBand: 'WEEKS',
+        difficulty: 'PLAIN',
+        objectiveDays: 40,
+        scheduledDays: 40,
+        startDay: 100,
+        dueDay: 140,
         status: 'active',
         ownerDomainId: 'd1',
         linkedStats: ['security'],
       },
     ],
   };
-  const world = { tickIndex: 5, gameDate: { year: 1, month: 6, label: 'Год 1, месяц 6', tick: 5 } };
-  const view = miniCityPayload({ domain, conflux, world, config: statsCfg });
+  const world = { dayIndex: 125, tickIndex: 5, gameDate: { year: 1, month: 6, label: 'Год 1, месяц 6', tick: 5 } };
+  const view = miniCityPayload({ domain, conflux, world, config: statsCfg, day: 125 });
   assert.equal(view.city.name, 'Саркум');
   assert.deepEqual(
     view.events.map((e) => e.title).sort(),
@@ -186,7 +225,16 @@ test('мини-аппка: свои истории и участие в сопр
   const fight = view.events.find((e) => e.title === 'Общая драка');
   assert.equal(fight.processes[0].summary, 'Сторожить проход');
   assert.equal(view.processes.length, 4);
-  assert.equal(view.processes.some((p) => p.process?.monthsLeft === 2), true);
+  assert.equal(
+    view.processes.some((p) => p.process?.remaining === 'недели'),
+    true,
+    'остаток дела — полоса словами, а не число дней',
+  );
+  assert.equal(
+    view.processes.some((p) => 'monthsLeft' in (p.process || {})),
+    false,
+    'месячных полей в справочнике больше нет',
+  );
   const knowledge = view.stats.find((s) => s.id === 'knowledge');
   assert.equal(knowledge.value, 62);
   assert.equal(knowledge.officer.name, 'Мира');
@@ -197,11 +245,13 @@ test('мини-аппка: свои истории и участие в сопр
   assert.equal(view.mana.value, 40);
   assert.equal(view.mana.max, 100);
   const well = view.processes.find((p) => p.process?.summary === 'Осмотреть колодец');
-  assert.equal(well.process.blessCost, 15, 'три месяца — полоса SEASON');
+  assert.equal(well.process.blessCost, 15, 'сезон — полоса SEASON');
   assert.equal(well.process.canBless, true);
   assert.equal(well.process.detail, 'Спуститься ночью.');
-  assert.equal(well.process.expectedMonths, 3);
-  assert.equal(well.process.monthsDone, 1);
+  assert.equal(well.process.duration, 'сезон');
+  assert.equal(well.process.difficulty, 'трудное');
+  assert.equal(well.process.pace, 'обычно');
+  assert.equal(well.process.remaining, 'недели', 'работы на сезон, но до срока осталось 65 дней');
   assert.equal(well.nature, 'осторожна и памятлива');
   assert.equal(well.ageYears, 40);
   assert.equal(well.gender, 'female');
@@ -209,12 +259,22 @@ test('мини-аппка: свои истории и участие в сопр
   assert.ok(well.process.finishChances);
   assert.equal(typeof well.process.finishChances.fail, 'number');
   assert.equal(well.temper, 'ровный, блестящий, суровый');
-  assert.equal(fight.processes[0].blessCost, 8, 'два месяца — полоса WEEKS');
+  assert.equal(fight.processes[0].blessCost, 8, 'недели — полоса WEEKS');
   assert.equal(fight.processes[0].canBless, true);
   assert.equal(knowledge.about, 'Помнит ли город, как лечить и читать.');
   assert.equal(view.orders[0].text, 'Ночной дозор у края');
   assert.match(view.orders[0].since, /Год 1, месяц 4/);
-  assert.equal(view.gameDate, 'Год 1, месяц 6');
+  assert.equal(view.gameDate, 'Год 1, месяц 5, день 6');
+
+  const well2 = view.events.find((e) => e.title === 'Гул колодца');
+  assert.deepEqual(
+    well2.threats.map((t) => t.text),
+    ['Колодец обвалится'],
+    'скрытая беда в справочник не попадает',
+  );
+  assert.equal(well2.threats[0].remaining, 'дни', 'до обвала пять дней — полоса дней');
+  assert.equal(well2.threats[0].kind, 'угроза');
+  assert.equal(typeof well2.dread, 'string', 'скрытая беда видна только как чутьё');
   assert.equal('loyalty' in (view.city || {}), false);
   assert.equal(view.city.hasImage, false);
   assert.equal(view.city.imageUrl, null);

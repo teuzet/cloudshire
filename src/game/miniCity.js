@@ -4,7 +4,17 @@ import { activeProcesses, pausedProcesses, processOwnedBy, processStatAverage, p
 import { finishChancePercents } from './rolls.js';
 import { blessManaCost, currentMana } from './mana.js';
 import { cityRules, confluxDirective } from './cityRules.js';
-import { gameDateFromTickIndex, worldDateLabel } from './tickClock.js';
+import { gameDateFromTickIndex } from './tickClock.js';
+import { gameDateFromDay } from './gameClock.js';
+import {
+  DIFFICULTY_SPEC,
+  DURATION_SPEC,
+  normalizeDifficultyBand,
+  normalizeDurationBand,
+} from './bands.js';
+import { deedDurationBand, deedRemainingBand } from './deeds.js';
+import { paceLabel } from './deedMath.js';
+import { dreadFlag, knownThreatsForSpeech } from './threats.js';
 import { chronicleEntries } from './models.js';
 import { parseCityBrief } from './cityContext.js';
 import { domainHasIslandImage, officerHasPortrait } from '../storage/r2.js';
@@ -62,7 +72,7 @@ function chronicleTab(domain, world) {
     .map((f) => ({
       id: f.id || null,
       text: clip(f.text || '', 1200),
-      date: f.gameDateLabel || gameDateLabelAtTick(world, f.tick),
+      date: factDateLabel(f, world),
       plotId: f.sourcePlotId || null,
     }))
     .filter((f) => f.text);
@@ -144,6 +154,35 @@ export function gameDateLabelAtTick(world, tick) {
   return gameDateFromTickIndex(tick).label;
 }
 
+/**
+ * Дата записи. Записи непрерывного времени знают свой день, старые — только
+ * тик; сохранённая подпись важнее обеих, иначе хроника переедет при смене модели.
+ */
+export function factDateLabel(fact, world) {
+  const saved = String(fact?.gameDateLabel || '').trim();
+  if (saved) return saved;
+  const day = Number(fact?.day);
+  if (Number.isFinite(day)) return gameDateFromDay(day).label;
+  return gameDateLabelAtTick(world, fact?.tick);
+}
+
+/**
+ * Текущая дата мира. День и месяц тика идут с одной скоростью — игровой год
+ * за реальные сутки, — поэтому одной дневной подписи хватает и на сопряжении.
+ */
+export function worldDateForView(world, day = null) {
+  const d = Number.isFinite(Number(day)) ? Number(day) : Number(world?.dayIndex) || 0;
+  return gameDateFromDay(d).label;
+}
+
+function durationWord(band) {
+  return DURATION_SPEC[normalizeDurationBand(band)].label;
+}
+
+function difficultyWord(band) {
+  return DIFFICULTY_SPEC[normalizeDifficultyBand(band)].label;
+}
+
 function cityParticipates(plot, domainId) {
   if (!plot || plot.kind !== 'story') return false;
   if (plot.isMainConflux) return true;
@@ -170,29 +209,33 @@ function ownProcesses(domain, conflux) {
   return out;
 }
 
-function slimProcess(process, config, { mana = 0, domain = null } = {}) {
+/**
+ * Дело для игрока. Как и жрецу, отдаём полосы, а не дни: точное число срока —
+ * внутренний жребий движка, и, увидев его в справочнике, игрок начнёт считать
+ * то, чего жрец не обещал.
+ */
+function slimProcess(process, config, { mana = 0, domain = null, day = 0 } = {}) {
   const names = (process.linkedStats || [])
     .map((id) => statName(config, id))
     .filter(Boolean);
-  const left = Number(process.monthsLeft);
-  const expected = Number(process.expectedMonths);
-  const objective = Number(process.objectiveMonths || process.expectedMonths);
-  const done = Number(process.monthsDone);
   const cost = blessManaCost(process);
   const active = !process.status || process.status === 'active';
+  const paused = process.status === 'paused';
   return {
     id: process.id,
     summary: clip(process.summary || 'Дело', 180),
     detail: clip(process.detail || '', 1200),
-    monthsLeft: Number.isFinite(left) ? Math.max(0, left) : null,
-    expectedMonths: Number.isFinite(expected) ? Math.max(1, Math.round(expected)) : null,
-    objectiveMonths: Number.isFinite(objective) ? Math.max(1, Math.round(objective)) : null,
-    monthsDone: Number.isFinite(done) ? Math.max(0, Math.round(done)) : null,
-    paused: process.status === 'paused',
+    // На паузе остаток не тикает: показывать «ещё недели» было бы враньём.
+    remaining: paused ? null : durationWord(deedRemainingBand(process, day)),
+    duration: durationWord(deedDurationBand(process)),
+    difficulty: difficultyWord(process.difficulty),
+    pace: paceLabel(process.paceShift),
+    impossible: Boolean(process.impossible),
+    paused,
     linkedStats: names,
     blessed: Boolean(process.blessed),
     blessCost: cost,
-    canBless: active && process.status !== 'paused' && !process.blessed && mana >= cost,
+    canBless: active && !paused && !process.blessed && mana >= cost,
     finishChances: (() => {
       const avg = domain ? processStatAverage(domain, process, config) : 50;
       return finishChancePercents(avg, processPaceRatio(process), {
@@ -208,7 +251,7 @@ function officerAgeYears(officer) {
   return Number.isFinite(n) ? Math.max(0, Math.round(n)) : null;
 }
 
-function slimOfficerSlot(officer, process, config, mana, domain) {
+function slimOfficerSlot(officer, process, config, mana, domain, day = 0) {
   const ageYears = officerAgeYears(officer);
   const gender = officer?.gender === 'female' || officer?.gender === 'male' ? officer.gender : null;
   return {
@@ -222,11 +265,11 @@ function slimOfficerSlot(officer, process, config, mana, domain) {
     temper: officer?.axes ? clip(formatAxesForSpeech(officer.axes, config), 120) : '',
     ageYears,
     gender,
-    process: process ? slimProcess(process, config, { mana, domain }) : null,
+    process: process ? slimProcess(process, config, { mana, domain, day }) : null,
   };
 }
 
-function collectEvents(domain, conflux, config, mana = 0) {
+function collectEvents(domain, conflux, config, mana = 0, day = 0) {
   const id = String(domain.id);
   const byId = new Map();
   for (const p of domain.plotlines || []) {
@@ -244,7 +287,16 @@ function collectEvents(domain, conflux, config, mana = 0) {
     return {
       title: clip(plot.title || 'История', 80),
       synopsis: clip(plot.synopsis || '', 600),
-      processes: procs.filter((pr) => related.has(String(pr.id))).map((pr) => slimProcess(pr, config, { mana, domain })),
+      // Ровно то, что знает жрец: формулировка и полоса остатка, без числа дней.
+      threats: knownThreatsForSpeech(plot, day).map((t) => ({
+        text: clip(t.text || '', 300),
+        remaining: durationWord(t.remainingBand),
+        kind: t.kind,
+      })),
+      dread: dreadFlag(plot, day),
+      processes: procs
+        .filter((pr) => related.has(String(pr.id)))
+        .map((pr) => slimProcess(pr, config, { mana, domain, day })),
     };
   });
 }
@@ -252,7 +304,14 @@ function collectEvents(domain, conflux, config, mana = 0) {
 /**
  * Справочник города для мини-аппки: без тайн, id и статов жреца.
  */
-export function miniCityPayload({ domain, conflux = null, world = null, config, generating = false } = {}) {
+export function miniCityPayload({
+  domain,
+  conflux = null,
+  world = null,
+  config,
+  generating = false,
+  day = null,
+} = {}) {
   if (!domain) {
     return {
       city: null,
@@ -265,7 +324,9 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
     };
   }
 
-  const tick = world?.tickIndex ?? world?.gameDate?.tick ?? null;
+  const today = Number.isFinite(Number(day))
+    ? Math.max(0, Math.round(Number(day)))
+    : Math.max(0, Math.round(Number(world?.dayIndex) || 0));
   const mana = currentMana(domain);
   const stats = (config?.stats || []).map((def) => {
     const value = Number(domain.stats?.[def.id]);
@@ -290,7 +351,7 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
             hasPortrait: officerHasPortrait(officer),
             portraitUrl: officer.portraitUrl || null,
             busy: Boolean(officer.processId),
-            process: proc ? slimProcess(proc, config, { mana, domain }) : null,
+            process: proc ? slimProcess(proc, config, { mana, domain, day: today }) : null,
           }
         : null,
     };
@@ -319,7 +380,7 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
       tabs: cityTabs(domain, world, config),
     },
     generating: Boolean(generating),
-    gameDate: worldDateLabel(world),
+    gameDate: worldDateForView(world, today),
     faith:
       faith == null
         ? null
@@ -335,7 +396,9 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
           },
     mana: {
       name: config.mana?.name || 'Мана',
-      value: mana,
+      // Мана копится непрерывно и дробна; показываем целое вниз, чтобы
+      // «есть 8» никогда не значило «на дело за 8 не хватает».
+      value: Math.floor(mana),
       max: 100,
       about: clip(
         config.mana?.about || 'Сила, которой ты благословляешь дела города.',
@@ -343,12 +406,12 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
       ),
     },
     stats,
-    events: collectEvents(domain, conflux, config, mana),
+    events: collectEvents(domain, conflux, config, mana, today),
     processes: (domain.officers || []).map((o) => {
       const proc = o.processId
         ? ownProcesses(domain, conflux).find((p) => p.id === o.processId)
         : null;
-      return slimOfficerSlot(o, proc, config, mana, domain);
+      return slimOfficerSlot(o, proc, config, mana, domain, today);
     }),
     orders,
   };
