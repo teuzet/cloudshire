@@ -238,6 +238,38 @@ export function decideMonthSeed({
   return attachGrain(decision, { domain, world, config, chronicle, errand, chronicleAdds, rng });
 }
 
+/**
+ * Зерно конкретного канала без броска источника.
+ *
+ * Нужно непрерывному посеву: канал выбран в момент попытки, а текст зерна
+ * собирается позже, в день появления, — иначе отложенная история противоречит
+ * тому, что успело случиться за время ожидания.
+ */
+export function grainForSource({
+  domain,
+  world,
+  config,
+  source,
+  processOutcomes = [],
+  chronicleAdds = [],
+  rng = Math.random,
+} = {}) {
+  const decision = {
+    source: SEED_SOURCES.includes(source) ? source : 'void',
+    gravity: null,
+    seedText: '',
+    fromVoid: false,
+    fromGenesis: false,
+    grain: null,
+  };
+  const chronicle = yearChronicleGrain(domain, world);
+  const errand = pickErrandGrain(processOutcomes);
+  // Канал поручения без закрытого дела пуст: падаем в пустоту, а не в тишину.
+  if (decision.source === 'errand' && !errand) decision.source = 'void';
+  if (decision.source === 'chronicle' && !chronicle.length) decision.source = 'void';
+  return attachGrain(decision, { domain, world, config, chronicle, errand, chronicleAdds, rng });
+}
+
 export function applyMonthSeedTemps(domain, events, config) {
   if (!domain) return null;
   for (const source of SEED_SOURCES) {

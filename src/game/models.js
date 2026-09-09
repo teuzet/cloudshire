@@ -448,6 +448,7 @@ export function createLoreFact({
   tags = [],
   gameDateLabel,
   tick,
+  day = null,
   author = 'system',
   importance = null,
   relatedPendingId = null,
@@ -473,6 +474,8 @@ export function createLoreFact({
     importance,
     createdAt: new Date().toISOString(),
   };
+  // Непрерывное время: записи событий помечены игровым днём, а не только тиком.
+  if (Number.isFinite(Number(day))) fact.day = Math.max(0, Math.round(Number(day)));
   if (relatedPendingId) fact.relatedPendingId = relatedPendingId;
   if (Array.isArray(relatedPlotlineIds) && relatedPlotlineIds.length) {
     fact.relatedPlotlineIds = [...new Set(relatedPlotlineIds.map(String))];

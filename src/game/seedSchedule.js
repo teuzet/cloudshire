@@ -10,6 +10,7 @@
  */
 
 import { DAYS_PER_MONTH, DAYS_PER_YEAR } from './gameClock.js';
+import { chronicleEntries } from './models.js';
 import { SEED_SOURCES, seedConfig, normalizeSeedTemp, worldSeedChance } from './seedTemp.js';
 import { liveThreats } from './threats.js';
 import { isStakedStory } from './plotlines.js';
@@ -209,7 +210,7 @@ export function checkSeedFreshness(
 
   const plots = openPlots || (domain?.plotlines || []);
   if (request?.seedFactId) {
-    const list = facts || domain?.chronicle || [];
+    const list = facts || chronicleEntries(domain?.lore);
     const fact = list.find((f) => f && String(f.id) === String(request.seedFactId));
     if (!fact) return { fresh: false, reason: 'fact_gone' };
     if (fact.sourcePlotId && plots.some((p) => String(p.id) === String(fact.sourcePlotId))) {
@@ -238,7 +239,7 @@ export function postponeSeedRequest(request, day, rng = Math.random) {
  */
 export function chronicleSince(domain, request, { limit = 12 } = {}) {
   const since = Math.round(Number(request?.requestedDay) || 0);
-  return (domain?.chronicle || [])
-    .filter((f) => Number(f?.day) >= since)
+  return chronicleEntries(domain?.lore)
+    .filter((f) => Number.isFinite(Number(f?.day)) && Number(f.day) >= since)
     .slice(-limit);
 }

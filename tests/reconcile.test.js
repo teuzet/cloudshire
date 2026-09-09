@@ -29,7 +29,7 @@ function threat(p, opts = {}) {
 }
 
 function deed(id, extra = {}) {
-  return { id, summary: extra.summary || 'арестовать', plotIds: ['p1'], status: 'active', ...extra };
+  return { id, summary: extra.summary || 'арестовать', plotlineId: 'p1', status: 'active', ...extra };
 }
 
 test('словари вердиктов различаются по типу', () => {
@@ -63,7 +63,7 @@ test('дела с другой нити в разбор не попадают', 
   const p = plot();
   const scope = reconcileScope({
     plot: p,
-    processes: [deed('proc2', { plotIds: ['other'] })],
+    processes: [deed('proc2', { plotlineId: 'other' })],
     resolvedId: 'proc1',
   });
   assert.equal(scope.needed, false);

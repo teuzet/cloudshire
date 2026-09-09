@@ -45,12 +45,13 @@ export function parseThreatVerdict(raw, fallback = 'CONTINUE') {
  * Если пусто — разбор не нужен, и вызывать модель незачем.
  */
 export function reconcileScope({ plot, processes = [], resolvedId = null } = {}) {
+  const related = new Set((plot?.relatedProcessIds || []).map(String));
   const deeds = (processes || []).filter(
     (p) =>
       p &&
       String(p.id) !== String(resolvedId) &&
       (p.status === 'active' || p.status == null) &&
-      (p.plotIds || []).includes(plot?.id),
+      (related.has(String(p.id)) || String(p.plotlineId || '') === String(plot?.id || '')),
   );
   const threats = liveThreats(plot).filter((t) => t.id !== resolvedId);
   return { deeds, threats, needed: deeds.length + threats.length > 0 };

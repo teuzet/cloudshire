@@ -11,6 +11,7 @@
 
 import { getLogger } from '../log.js';
 import { captureAgentPrompt } from './agentPrompt.js';
+import { chronicleEntries } from './models.js';
 import { dreadFlag, knownThreatsForSpeech, livesLeft } from './threats.js';
 import { remainingWork } from './deedMath.js';
 
@@ -56,17 +57,25 @@ export function decideAsk({
  * отдаём синопсис плюс хвост, а не всё подряд.
  */
 export function threadHistory(domain, plotId, { limit = THREAD_HISTORY_LIMIT, tail = THREAD_HISTORY_TAIL } = {}) {
-  const rows = (domain?.chronicle || []).filter((f) => f && String(f.sourcePlotId) === String(plotId));
+  const id = String(plotId);
+  const rows = chronicleEntries(domain?.lore).filter((f) => {
+    if (!f) return false;
+    if (String(f.sourcePlotId || '') === id) return true;
+    return (f.relatedPlotlineIds || []).some((x) => String(x) === id);
+  });
   if (rows.length <= limit) return { facts: rows, truncated: false };
   return { facts: rows.slice(-tail), truncated: true, skipped: rows.length - tail };
 }
 
 export function recentChat(domain, { limit = CHAT_WINDOW } = {}) {
-  const rows = domain?.state?.dialogue || domain?.dialogue || [];
-  return rows.slice(-limit).map((m) => ({
-    role: m.role === 'assistant' ? 'жрец' : 'покровитель',
-    text: String(m.content || m.text || '').slice(0, 600),
-  }));
+  const rows = domain?.characters?.[0]?.dialogHistory || [];
+  return rows
+    .filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
+    .slice(-limit)
+    .map((m) => ({
+      role: m.role === 'assistant' ? 'жрец' : 'покровитель',
+      text: String(m.content || m.text || '').slice(0, 600),
+    }));
 }
 
 /** Карточка нити глазами жреца: полосы и формулировки, без чисел механики. */

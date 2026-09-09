@@ -176,7 +176,7 @@ test('разбор не зовёт модель, если разбирать н�
   const runtime = fakeRuntime({});
   const res = await reconcilePlot({
     runtime,
-    domain: withDeeds(p, [{ id: 'proc1', plotIds: ['p1'], status: 'active', summary: 'казнить' }]),
+    domain: withDeeds(p, [{ id: 'proc1', plotlineId: 'p1', status: 'active', summary: 'казнить' }]),
     plot: p,
     resolved: { id: 'proc1', summary: 'казнить' },
   });
@@ -186,7 +186,7 @@ test('разбор не зовёт модель, если разбирать н�
 
 test('казнь состоялась — арест отменён по вердикту агента', async () => {
   const p = plot();
-  const arrest = { id: 'proc2', plotIds: ['p1'], status: 'active', summary: 'арестовать мздоимца' };
+  const arrest = { id: 'proc2', plotlineId: 'p1', status: 'active', summary: 'арестовать мздоимца' };
   const runtime = fakeRuntime({
     submit_reconcile: {
       deeds: [{ id: 'proc2', verdict: 'CANCEL', why: 'преступник мёртв' }],
@@ -195,7 +195,7 @@ test('казнь состоялась — арест отменён по вер�
   });
   const res = await reconcilePlot({
     runtime,
-    domain: withDeeds(p, [{ id: 'proc1', plotIds: ['p1'], status: 'active', summary: 'казнить' }, arrest]),
+    domain: withDeeds(p, [{ id: 'proc1', plotlineId: 'p1', status: 'active', summary: 'казнить' }, arrest]),
     plot: p,
     resolved: { id: 'proc1', summary: 'казнить', finish: 'ok' },
     day: 40,
@@ -207,13 +207,13 @@ test('казнь состоялась — арест отменён по вер�
 
 test('CONTINUE ничего не трогает и в отчёт не попадает', async () => {
   const p = plot();
-  const other = { id: 'proc2', plotIds: ['p1'], status: 'active', summary: 'укрепить опору' };
+  const other = { id: 'proc2', plotlineId: 'p1', status: 'active', summary: 'укрепить опору' };
   const runtime = fakeRuntime({
     submit_reconcile: { deeds: [{ id: 'proc2', verdict: 'CONTINUE' }], threats: [] },
   });
   const res = await reconcilePlot({
     runtime,
-    domain: withDeeds(p, [{ id: 'proc1', plotIds: ['p1'], status: 'active' }, other]),
+    domain: withDeeds(p, [{ id: 'proc1', plotlineId: 'p1', status: 'active' }, other]),
     plot: p,
     resolved: { id: 'proc1', summary: 'осмотреть' },
   });
@@ -229,7 +229,7 @@ test('вердикт по беде отменяет её без начислен
   });
   await reconcilePlot({
     runtime,
-    domain: withDeeds(p, [{ id: 'proc1', plotIds: ['p1'], status: 'active' }]),
+    domain: withDeeds(p, [{ id: 'proc1', plotlineId: 'p1', status: 'active' }]),
     plot: p,
     resolved: { id: 'proc1', summary: 'казнить' },
     day: 10,
@@ -241,7 +241,7 @@ test('вердикт по беде отменяет её без начислен
 test('вердикт по чужому делу или несуществующей беде игнорируется', async () => {
   const p = plot();
   attachThreat(p, createThreat({ plot: p, text: 'беда', band: 'SEASON', rng: () => 0.5 }));
-  const foreign = { id: 'procX', plotIds: ['other'], status: 'active', summary: 'чужое' };
+  const foreign = { id: 'procX', plotlineId: 'other', status: 'active', summary: 'чужое' };
   const runtime = fakeRuntime({
     submit_reconcile: {
       deeds: [{ id: 'procX', verdict: 'CANCEL' }],
@@ -250,7 +250,7 @@ test('вердикт по чужому делу или несуществующ�
   });
   const res = await reconcilePlot({
     runtime,
-    domain: { id: 'd1', state: { pendingActions: [{ id: 'proc1', plotIds: ['p1'], status: 'active' }, foreign] } },
+    domain: { id: 'd1', state: { pendingActions: [{ id: 'proc1', plotlineId: 'p1', status: 'active' }, foreign] } },
     plot: p,
     resolved: { id: 'proc1', summary: 'казнить' },
   });
@@ -260,11 +260,11 @@ test('вердикт по чужому делу или несуществующ�
 
 test('сбой разбора оставляет всё как было', async () => {
   const p = plot();
-  const other = { id: 'proc2', plotIds: ['p1'], status: 'active', summary: 'арестовать' };
+  const other = { id: 'proc2', plotlineId: 'p1', status: 'active', summary: 'арестовать' };
   const runtime = fakeRuntime({}, { throwOn: 'reconciler' });
   const res = await reconcilePlot({
     runtime,
-    domain: withDeeds(p, [{ id: 'proc1', plotIds: ['p1'], status: 'active' }, other]),
+    domain: withDeeds(p, [{ id: 'proc1', plotlineId: 'p1', status: 'active' }, other]),
     plot: p,
     resolved: { id: 'proc1', summary: 'казнить' },
   });
@@ -277,7 +277,7 @@ test('промпт разбора не отдаёт агенту чисел ме
   const t = attachThreat(p, createThreat({ plot: p, text: 'уйдёт с острова', band: 'SEASON', rng: () => 0.5 }));
   const scope = reconcileScope({
     plot: p,
-    processes: [{ id: 'proc2', plotIds: ['p1'], status: 'active', summary: 'арестовать', officerName: 'Малуша' }],
+    processes: [{ id: 'proc2', plotlineId: 'p1', status: 'active', summary: 'арестовать', officerName: 'Малуша' }],
     resolvedId: 'proc1',
   });
   const text = formatReconcilePrompt(
