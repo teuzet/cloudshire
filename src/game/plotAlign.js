@@ -1,10 +1,11 @@
 import { isStakedStory, plotsForProcess } from './plotlines.js';
+import { liveThreats } from './threats.js';
 import { getLogger } from '../log.js';
 
-export const PLOT_ENGAGEMENTS = ['DIRECT', 'RELEVANT', 'UNRELATED'];
+export const PLOT_ENGAGEMENTS = ['DIRECT', 'RELEVANT', 'DANGEROUS', 'UNRELATED'];
 
 /**
- * DIRECT / RELEVANT / UNRELATED.
+ * DIRECT / RELEVANT / DANGEROUS / UNRELATED.
  * Старый boolean: true → DIRECT, false → RELEVANT (дело на нити, но не closeWhen).
  * Пустое поле — вердикта ещё нет, это не UNRELATED.
  */
@@ -16,15 +17,18 @@ export function engagementOf(process) {
   return null;
 }
 
+/** Опасное дело тоже висит на нити: оно её двигает, только не в ту сторону. */
 export function engagementAttends(engagement) {
-  return engagement === 'DIRECT' || engagement === 'RELEVANT';
+  return engagement === 'DIRECT' || engagement === 'RELEVANT' || engagement === 'DANGEROUS';
 }
 
-export function applyEngagement(process, engagement) {
+export function applyEngagement(process, engagement, { endingId = '', threatId = '' } = {}) {
   const value = PLOT_ENGAGEMENTS.includes(engagement) ? engagement : 'UNRELATED';
   if (process) {
     process.plotEngagement = value;
     process.plotAligned = value === 'DIRECT';
+    process.endingId = value === 'DIRECT' ? String(endingId || '') : '';
+    process.threatId = value === 'RELEVANT' || value === 'DANGEROUS' ? String(threatId || '') : '';
   }
   return value;
 }
@@ -35,6 +39,14 @@ export function applyEngagement(process, engagement) {
  * На финише вызывается снова: closeWhen и цель могли измениться.
  * Ошибка агента → UNRELATED, иначе сломанный align заморозит сюжет.
  */
+/** Беды показываем формулировкой и полосой остатка: дней агенту знать не нужно. */
+function threatsBrief(plot) {
+  return liveThreats(plot)
+    .filter((t) => t.outcome !== 'neutral')
+    .map((t) => `- [${t.id}] ${t.text}`)
+    .join('\n');
+}
+
 function endingsBrief(plot) {
   const rows = Array.isArray(plot?.endings) ? plot.endings : [];
   if (!rows.length) return '';
@@ -48,7 +60,7 @@ function endingsBrief(plot) {
 export async function judgeProcessAlignment({ runtime, domain, process, plot, log: parentLog }) {
   if (!process || !isStakedStory(plot)) return null;
   const log = (parentLog || getLogger()).child({ scope: 'plot.align', plotId: plot.id });
-  const draft = { engagement: null };
+  const draft = { engagement: null, endingId: '', threatId: '' };
 
   try {
     await runtime.run({
@@ -65,13 +77,21 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
                 type: 'string',
                 enum: PLOT_ENGAGEMENTS,
                 description:
-                  'DIRECT — цель сама закрывает closeWhen. RELEVANT — естественный шаг к closeWhen. UNRELATED — даже полный успех сюжет не двигает.',
+                  'DIRECT — успех сам ставит концовку. RELEVANT — успех снимает нависшую беду. ' +
+                  'DANGEROUS — успех сам вызывает беду или плохую концовку. UNRELATED — сюжет не двигает.',
+              },
+              endingId: { type: 'string', description: 'id концовки, если relation=DIRECT.' },
+              threatId: {
+                type: 'string',
+                description: 'id беды, если relation=RELEVANT (снимает) или DANGEROUS (вызывает).',
               },
             },
           },
           handler: async (args) => {
             const rel = String(args?.relation || '').toUpperCase();
             draft.engagement = PLOT_ENGAGEMENTS.includes(rel) ? rel : 'UNRELATED';
+            draft.endingId = String(args?.endingId || '').trim();
+            draft.threatId = String(args?.threatId || '').trim();
             return { ok: true };
           },
         },
@@ -89,13 +109,15 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
             plot.closeWhen ? `Закрывается, когда: ${plot.closeWhen}` : '',
             endingsBrief(plot) ? `Концовки карточки:\n${endingsBrief(plot)}` : '',
             plot.mootWhen ? `История теряет смысл, когда: ${plot.mootWhen}` : '',
+            threatsBrief(plot) ? `Нависшие беды:\n${threatsBrief(plot)}` : 'Нависших бед в карточке нет.',
             plot.synopsis ? `Сейчас: ${plot.synopsis}` : '',
             `Дело: ${process.summary || ''}`,
             process.goal ? `Цель дела: ${process.goal}` : '',
             process.detail ? `Поручение: ${process.detail}` : '',
-            'Верни ровно DIRECT, RELEVANT или UNRELATED по цели process, не по броску.',
-            'DIRECT: успех сам закрывает историю (closeWhen / концовка карточки).',
-            'RELEVANT: естественный шаг к закрытию, сам его не ставит.',
+            'Верни один вердикт по цели process, не по броску.',
+            'DIRECT: успех сам ставит концовку карточки — укажи endingId.',
+            'RELEVANT: успех делает одну из перечисленных бед невозможной — укажи threatId.',
+            'DANGEROUS: успех сам вызывает одну из бед или плохую концовку — укажи threatId.',
             'UNRELATED: даже полный успех историю не двигает. Не ставь RELEVANT за случайную улику.',
           ]
             .filter(Boolean)
@@ -111,8 +133,11 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
     log.info('plot.align_pending', { summary: process.summary });
     return null;
   }
-  const engagement = applyEngagement(process, draft.engagement);
-  log.info('plot.align', { summary: process.summary, engagement });
+  const engagement = applyEngagement(process, draft.engagement, {
+    endingId: draft.endingId,
+    threatId: draft.threatId,
+  });
+  log.info('plot.align', { summary: process.summary, engagement, threatId: process.threatId || null });
   return engagement;
 }
 
