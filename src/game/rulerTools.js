@@ -67,6 +67,13 @@ import {
 } from './cityRules.js';
 import { applyPriestNotifyChange, notifySettings } from './notify.js';
 import {
+  MAX_PRIEST_ORDERS,
+  addPriestOrder,
+  findPriestOrder,
+  priestOrders,
+  removePriestOrder,
+} from './priestOrders.js';
+import {
   normalizeDomainProcesses,
   normalizeProcess,
   findDuplicateProcess,
@@ -1443,7 +1450,82 @@ export function buildRulerTools(domain, storage, character, ctx) {
       name: 'read_notify',
       description: 'Как сейчас настроены вести покровителю. Для вопроса «о чём ты мне пишешь».',
       parameters: { type: 'object', properties: {} },
-      handler: async () => ({ ok: true, notify: notifySettings(domain) }),
+      handler: async () => ({
+        ok: true,
+        notify: notifySettings(domain),
+        reportSubjects: priestOrders(domain).map((o) => ({ id: o.id, subject: o.subject })),
+      }),
+    },
+    {
+      name: 'add_report_subject',
+      description:
+        'Покровитель велел держать его в курсе чего-то определённого («как идут дела в порту»). ' +
+        'Это не расписание: тему ты поднимешь попутно, когда в следующий раз будешь писать о случившемся.',
+      parameters: {
+        type: 'object',
+        required: ['subject'],
+        properties: {
+          subject: {
+            type: 'string',
+            description: 'О чём докладывать, словами покровителя: «как идут дела в порту».',
+          },
+        },
+      },
+      handler: async ({ subject }) => {
+        const res = addPriestOrder(domain, { subject, day });
+        if (!res.ok && res.error === 'too_many') {
+          return {
+            ok: false,
+            error: 'too_many',
+            limit: MAX_PRIEST_ORDERS,
+            subjects: priestOrders(domain).map((o) => ({ id: o.id, subject: o.subject })),
+            hint:
+              'Больше тем ты не удержишь. Скажи покровителю, о чём уже докладываешь, ' +
+              'и спроси, что из этого снять.',
+          };
+        }
+        if (!res.ok && res.error === 'duplicate') {
+          return {
+            ok: true,
+            subject: res.order.subject,
+            hint: 'Такой наказ у тебя уже есть — просто подтверди, что помнишь о нём.',
+          };
+        }
+        if (!res.ok) return { ok: false, error: res.error };
+        await save();
+        return {
+          ok: true,
+          subject: res.order.subject,
+          hint:
+            'В речи: запомнил и будешь поминать. Не обещай срок и не называй расписания — ' +
+            'ты поднимешь тему, когда в следующий раз будешь писать о случившемся.',
+        };
+      },
+    },
+    {
+      name: 'drop_report_subject',
+      description: 'Покровитель больше не хочет слышать про эту тему. Ищи по словам наказа или по id.',
+      parameters: {
+        type: 'object',
+        properties: {
+          subject: { type: 'string', description: 'Слова наказа, как их помнит покровитель.' },
+          orderId: { type: 'string' },
+        },
+      },
+      handler: async ({ subject = '', orderId = '' }) => {
+        const found = findPriestOrder(domain, { orderId, subject });
+        if (!found) {
+          return {
+            ok: false,
+            error: 'not_found',
+            subjects: priestOrders(domain).map((o) => ({ id: o.id, subject: o.subject })),
+            hint: 'Такого наказа нет. Переспроси, что именно снять.',
+          };
+        }
+        removePriestOrder(domain, found.id);
+        await save();
+        return { ok: true, subject: found.subject, hint: 'В речи: больше про это не поминаешь.' };
+      },
     },
   ].filter(Boolean);
 }

@@ -5,7 +5,8 @@
 - **Игроки:** только Telegram (long polling — отдельный webhook URL не нужен)
 - **Админка:** веб UI + Basic auth (`ADMIN_USER` / `ADMIN_PASSWORD`)
 - **Данные:** MongoDB Atlas (`STORAGE_DRIVER=mongo`)
-- **Тик:** каждые 2 часа; `world.scheduler.nextTickAt` в Mongo переживает рестарт (один catch-up)
+- **Время:** непрерывное; `world.epochAt` в Mongo переживает рестарт, дневной цикл просыпается к сроку ближайшего задания
+- **Тик:** каждые 2 часа, только для сопряжённых пар; `world.scheduler.nextTickAt` переживает рестарт (один catch-up)
 - **Логи:** stdout платформы; usage LLM → коллекция `usage` в Mongo
 
 Рекомендуемый хост для теста: **Railway**.
@@ -74,7 +75,8 @@ LOG_LEVEL=info
 | Crash на старте / Mongo | URI, пароль URL-encoded, Network Access `0.0.0.0/0` |
 | Админка без пароля / 401 forever | `ADMIN_USER` + `ADMIN_PASSWORD` |
 | Бот молчит | `TELEGRAM_BOT_TOKEN`, логи `telegram.status` |
-| Тиков нет | `TICK_ENABLED`, логи `scheduler.*` |
+| Время стоит у одиночных городов | логи `dayScheduler.*`, `dayLoop.*`; `time.enabled` в конфиге |
+| Тиков нет у сопряжённой пары | `TICK_ENABLED`, логи `scheduler.*` |
 
 ---
 
@@ -95,15 +97,21 @@ STORAGE_DRIVER=mongo npm start
 
 Без `STORAGE_DRIVER=mongo` — локальный yaml в `./data`.
 
-## Поведение тика
+## Поведение времени
 
-- После тика: `lastTickAt`, `nextTickAt = now + interval`.
-- Рестарт: если `nextTickAt` уже прошёл — **один** catch-up тик, без пачки.
-- Пока тик идёт, Telegram отвечает системно («сейчас шаг времени…»).
-- Домены (и conflux-пары) резолвятся **параллельно**.
+- **Одиночный город.** `world.epochAt` — якорь часов; текущий день считается из
+  реального времени, поэтому рестарт хода времени не теряет. Будильник спит до
+  срока ближайшего задания, но не меньше 5 с и не больше 4 мин.
+- Ход правителя останавливает часы (предохранитель 180 с). После ответа время
+  пускается дальше и назревшее разбирается сразу.
+- **Сопряжённая пара.** После тика: `lastTickAt`, `nextTickAt = now + interval`.
+  Рестарт: если `nextTickAt` уже прошёл — **один** catch-up тик, без пачки.
+  Пока тик идёт, Telegram отвечает системно («сейчас шаг времени…»).
+- Домены (и conflux-пары) резолвятся **параллельно**, но на каждый домен —
+  один писатель.
 
 ## Админка
 
 - Просмотр доменов, хроники, процессов, плотлайнов, conflux
-- Force tick / force conflux / wipe
+- Force tick (двигает часы на игровой месяц и сразу разбирает назревшее) / force conflux / wipe
 - Без игрового веб-чата (`POST /api/chat` → 404)

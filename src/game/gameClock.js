@@ -70,6 +70,28 @@ export function realTimeOfDay(world, day, { config = null, pausedMs = 0 } = {}) 
   return epoch + Math.max(0, Number(pausedMs) || 0) + Math.round(Number(day) * realMsPerGameDay(config));
 }
 
+/**
+ * Промотать часы вперёд на игровые дни.
+ *
+ * Якорь уезжает назад, а не растёт отдельный счётчик: день по-прежнему
+ * считается из реального времени, и всё остальное — сроки дел, очередь
+ * заданий, будильник — узнаёт о скачке само, без второго календаря.
+ * Нужно ручному force_tick и плейтесту; в обычной игре не вызывается.
+ */
+export function skipGameDays(world, days, { config = null, now = Date.now() } = {}) {
+  if (!world || typeof world !== 'object') return 0;
+  startClock(world, now);
+  const jump = Math.max(0, Math.round(Number(days) || 0));
+  if (!jump) return currentDay(world, { now, config });
+  const shift = gameDaysToRealMs(jump, config);
+  // Якорь месячного планировщика не трогаем: сдвинув его, мы бы заодно
+  // объявили просроченными все пропущенные тики сопряжения.
+  world.epochAt = new Date(Date.parse(world.epochAt) - shift).toISOString();
+  const day = currentDay(world, { now, config });
+  world.dayIndex = day;
+  return day;
+}
+
 export function gameDateFromDay(dayIndex) {
   const d = Math.max(0, Math.round(Number(dayIndex) || 0));
   const year = Math.floor(d / DAYS_PER_YEAR) + 1;

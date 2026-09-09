@@ -1,26 +1,37 @@
 # Архитектура
 
-Один процесс Node: storage + игровой фасад + веб + Telegram + шедулер тиков.
+Один процесс Node: storage + игровой фасад + веб + Telegram + два будильника.
 
 ```
 src/index.js
   bootstrap.createAppContext     config, storage, AgentRuntime, GameApp
   clients/web/server.js          /play /mini /admin /freeform
-  scheduler/ticks.js             clock-aligned interval
+  scheduler/days.js              будильник по сроку ближайшего задания (одиночный город)
+  scheduler/ticks.js             clock-aligned interval (сопряжённая пара)
   clients/telegram/bot.js        polling → GameApp.handleUserMessage
 
 чат → GameApp
   нет домена → onboarding → genesis.generateDomain
-  есть домен → runRuler (тулы в rulerTools.js)
+  есть домен → runRuler (тулы в rulerTools.js); на время хода часы мира стоят
 
-тик → tick.runWorldTick
+день → dayLoop.runDayLoop         города вне стыка
+  armDomainSchedule               завести сроки: посев, угрозы, дела
+  drainDomainJobs                 разобрать назревшее (worldLoop.js)
+    process_finish → исход дела → бит нити → разбор остальных обязательств
+    threat_fire    → срабатывание угрозы или разрешение
+    seed_attempt / seed_appear → посев истории
+  herald                          весть покровителю об одном событии
+  statJudge, keepStories
+
+тик → tick.runWorldTick           только города в стыке
   матчмейкинг сопряжений
-  resolveConfluxSharedMonth      если docked
-  resolveDomainMonth             соло; на стыке skipPlotClocks
-    steward → указы → прогресс дел → часы нитей → planBeats
-    → storyteller → statJudge → keepStories
-  письмо месяца
+  resolveConfluxSharedMonth / resolveDomainMonth
+  письмо месяца (tickNews)
 ```
+
+Два будильника — не дублирование, а граница: у одиночного города календаря нет,
+у пары он общий и пока месячный. Кто кого пропускает, описано в
+[REFACTOR_CONTINUOUS_TIME.md](REFACTOR_CONTINUOUS_TIME.md) §16.
 
 Принцип: **движок считает, агент говорит.** Броски, слоты, очередь дел, отбор битов — код. Модель получает готовый факт и пишет текст.
 
@@ -48,13 +59,20 @@ src/index.js
 | `officers.js` | Четыре столпа, слоты |
 | `plotlines.js` | Модель нитей, конфиг, жребий аннотаций |
 | `plotEngine.js` | Часы, очередь дел, биты без LLM |
-| `storyteller.js` | Авторы завязки, бита, указа, тихого месяца |
+| `storyteller.js` | Авторы завязки и бита |
 | `freeform*.js` | Лаборатория свободной истории: стартер, рассказчик, судья |
-| `monthResolve.js` / `tick.js` | Оркестрация месяца / мира |
+| `gameClock.js` / `scheduler.js` | Игровые дни и очередь заданий на домен |
+| `worldLoop.js` / `dayLoop.js` | Обработчики заданий и проход мира по дням |
+| `bands.js` / `deeds.js` / `deedJudge.js` | Полосы срока и сложности, дело в днях |
+| `threats.js` / `threatSmith.js` | Скрытые обязательства нити и их автор |
+| `reconcile.js` / `reconciler.js` | Что делать с остальными делами нити после события |
+| `herald.js` / `notify.js` / `priestOrders.js` | Весть об одном событии, пуши, наказы |
+| `cityRules.js` | Постоянный порядок города и наказ на сопряжение |
+| `monthResolve.js` / `tick.js` | Оркестрация месяца / мира на стыке |
 | `conflux*.js` | Стыковка островов |
 | `annotationPool.js` / `annotationCatalog.js` | Пулы и wipe-resistant каталог |
 
-Точнее: [PLOTS.md](PLOTS.md), [GENESIS.md](GENESIS.md), [ANNOTATIONS.md](ANNOTATIONS.md), [CONFLUX.md](CONFLUX.md), [STANDING_ORDERS.md](STANDING_ORDERS.md).
+Точнее: [PLOTS.md](PLOTS.md), [GENESIS.md](GENESIS.md), [ANNOTATIONS.md](ANNOTATIONS.md), [CONFLUX.md](CONFLUX.md), [REFACTOR_CONTINUOUS_TIME.md](REFACTOR_CONTINUOUS_TIME.md).
 
 ## Агенты
 

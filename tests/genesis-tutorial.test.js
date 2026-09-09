@@ -13,13 +13,15 @@ const config = yaml.load(fs.readFileSync(path.join(root, 'config/default.yaml'),
 test('тутор генезиса — статичный текст в конфиге', () => {
   const text = genesisTutorialText(config);
   assert.ok(text.length > 200);
-  assert.match(text, /два реальных часа/);
+  assert.match(text, /четыре реальные минуты/);
   assert.match(text, /сопряжен/);
   assert.match(text, /лояльност/);
   assert.match(text, /ужас/);
   assert.match(text, /Дело/);
-  assert.match(text, /Указ/);
+  assert.match(text, /Постоянный порядок/);
   assert.match(text, /поторопить/);
+  // Про расписание писем в туторе больше не обещаем: жрец пишет по событиям.
+  assert.doesNotMatch(text, /кажд(ые|ый) два часа/);
   assert.match(text, /\/city/);
   assert.match(text, /информаци[яи] о городе/i);
   assert.doesNotMatch(text, /^\s*\d+\)/m);

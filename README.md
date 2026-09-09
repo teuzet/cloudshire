@@ -7,7 +7,7 @@
 - [Продукт](docs/PROJECT.md)
 - [Архитектура](docs/ARCHITECTURE.md)
 - [Нити и дела](docs/PLOTS.md) · [Генезис](docs/GENESIS.md) · [Аннотации](docs/ANNOTATIONS.md)
-- [Сопряжение](docs/CONFLUX.md) · [Указы](docs/STANDING_ORDERS.md)
+- [Сопряжение](docs/CONFLUX.md) · [Непрерывное время](docs/REFACTOR_CONTINUOUS_TIME.md)
 - [Деплой](docs/DEPLOY.md) · [Playtest](docs/PLAYTEST_AGENT.md)
 
 ## Быстрый старт

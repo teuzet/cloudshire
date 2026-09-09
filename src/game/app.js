@@ -65,7 +65,7 @@ import {
 } from './onboarding.js';
 import { blessProcess, processOwnedBy } from './processes.js';
 import { spendTurnMana } from './mana.js';
-import { beginRulerTurn, endRulerTurn } from './scheduler.js';
+import { beginRulerTurn, endRulerTurn, worldDay } from './scheduler.js';
 import { formatBoardForSpeech, warmPlotlines, plotConfig } from './plotlines.js';
 import { islandDeleteCheck } from '../clients/telegram/access.js';
 import { generateIslandImage, removeIslandImage } from './islandImage.js';
@@ -939,6 +939,9 @@ export class GameApp {
       config: this.config,
       runtime: this.runtime,
       world,
+      // Часы стоят на время хода, но dayIndex мог отстать от последнего прохода
+      // мира: полосы остатка считаем от того дня, в котором игрок говорит.
+      day: worldDay(world, { config: this.config }),
       conflux,
       partner,
       log,

@@ -6,6 +6,7 @@ import { startDayScheduler } from './scheduler/days.js';
 import { runWorldTick } from './game/tick.js';
 import { runDayLoop } from './game/dayLoop.js';
 import { DomainQueue } from './game/scheduler.js';
+import { DAYS_PER_MONTH, skipGameDays } from './game/gameClock.js';
 import { getLogger } from './log.js';
 
 async function main() {
@@ -49,12 +50,25 @@ async function main() {
   });
   app.onClockReleased = (reason) => days.triggerNow(reason);
 
+  /**
+   * Ручной сдвиг времени. Месячная доска сопряжения ходит тиком, одиночный
+   * город — часами: без промотки часов ему в дневном цикле нечего разбирать,
+   * и force_tick выглядел бы сломанным.
+   */
   web.set('runTick', async (reason = 'manual') => {
-    if (scheduler.triggerNow) {
-      return scheduler.triggerNow(reason);
-    }
-    const result = await doTick(reason);
-    await recordTickCompleted(storage, config);
+    const world = await storage.getWorld();
+    const day = skipGameDays(world, DAYS_PER_MONTH, { config });
+    await storage.saveWorld(world);
+    getLogger().info('tick.skip_days', { reason, days: DAYS_PER_MONTH, day });
+
+    const result = scheduler.triggerNow
+      ? await scheduler.triggerNow(reason)
+      : await (async () => {
+          const r = await doTick(reason);
+          await recordTickCompleted(storage, config);
+          return r;
+        })();
+    await days.triggerNow(reason);
     return result;
   });
   web.set('resyncScheduler', async () => {

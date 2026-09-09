@@ -13,6 +13,7 @@ import {
   worldDateLabel,
   spanBandLabel,
   humanSpan,
+  skipGameDays,
 } from '../src/game/gameClock.js';
 
 const HOUR = 60 * 60 * 1000;
@@ -59,6 +60,35 @@ test('realTimeOfDay обратна currentDay', () => {
   startClock(world, 5_000);
   const at = realTimeOfDay(world, 30, {});
   assert.equal(currentDay(world, { now: at }), 30);
+});
+
+// ─────────────────────────── ручная промотка ───────────────────────────
+
+test('промотка двигает якорь, а не заводит второй счётчик', () => {
+  const world = {};
+  startClock(world, 0);
+  const now = 40 * 60 * 1000; // 10 игровых дней
+  assert.equal(currentDay(world, { now }), 10);
+  assert.equal(skipGameDays(world, DAYS_PER_MONTH, { now }), 40);
+  assert.equal(world.dayIndex, 40);
+  // Часы после промотки идут прежним ходом: ещё день реального времени — ещё день.
+  assert.equal(currentDay(world, { now: now + 4 * 60 * 1000 }), 41);
+});
+
+test('промотка не трогает якорь месячного планировщика', () => {
+  const world = { scheduler: { epochAt: new Date(0).toISOString() } };
+  startClock(world, 0);
+  skipGameDays(world, DAYS_PER_YEAR, { now: 0 });
+  assert.equal(world.scheduler.epochAt, new Date(0).toISOString());
+  assert.equal(world.dayIndex, DAYS_PER_YEAR);
+});
+
+test('промотка на ноль дней только сообщает текущий день', () => {
+  const world = {};
+  startClock(world, 0);
+  const anchor = world.epochAt;
+  assert.equal(skipGameDays(world, 0, { now: 8 * 60 * 1000 }), 2);
+  assert.equal(world.epochAt, anchor);
 });
 
 test('календарь: 360 дней в году, 30 в месяце', () => {
