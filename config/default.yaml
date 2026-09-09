@@ -53,9 +53,10 @@ tick:
   maxActiveProcesses: 4
   # Conflux: матчмейкинг и геометрия сопряжения — только код (не LLM).
   # Approaching считается соло для доли времени; docked — конфлюкс.
+  # Цель — треть жизни города в docked.
   conflux:
     enabled: true
-    targetDockedFraction: 0.5
+    targetDockedFraction: 0.333
     minDomainAgeMonths: 6
     preferNeverMet: true
     maxNewPairsPerTick: 2

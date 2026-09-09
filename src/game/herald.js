@@ -1,0 +1,166 @@
+/**
+ * Рассказчик события. Заменяет `tickNews`.
+ *
+ * Письма месяца больше нет — есть одно событие, о котором жрец говорит сразу.
+ * Поэтому и контекст другой: не сводка за месяц, а одна запись хроники плюс
+ * нить, которая её породила.
+ *
+ * `ask` считает движок, а не настроение модели: иначе жрец будет спрашивать
+ * в каждом сообщении, и вопрос перестанет что-либо значить.
+ */
+
+import { getLogger } from '../log.js';
+import { captureAgentPrompt } from './agentPrompt.js';
+import { dreadFlag, knownThreatsForSpeech, livesLeft } from './threats.js';
+import { remainingWork } from './deedMath.js';
+
+export const OCCASIONS = ['новая история', 'дело', 'угроза', 'разрешение', 'доклад'];
+
+export const ASKS = ['нет', 'столп свободен', 'нужна помощь', 'подтверди паузу', 'можно закрыть'];
+
+/** Хроника нити ограничена сверху числом битов, но страховка нужна. */
+export const THREAD_HISTORY_LIMIT = 15;
+export const THREAD_HISTORY_TAIL = 8;
+export const CHAT_WINDOW = 10;
+
+export function parseOccasion(raw, fallback = 'дело') {
+  const key = String(raw || '').trim().toLowerCase();
+  return OCCASIONS.includes(key) ? key : fallback;
+}
+
+export function parseAsk(raw, fallback = 'нет') {
+  const key = String(raw || '').trim().toLowerCase();
+  return ASKS.includes(key) ? key : fallback;
+}
+
+/**
+ * Что жрец просит у покровителя. Ровно один вопрос, по приоритету:
+ * освободившийся столп важнее просьбы о помощи, а подтверждение паузы —
+ * важнее всего, потому что без ответа дело истлеет.
+ */
+export function decideAsk({
+  pausedAwaitingConfirmation = false,
+  plotClosable = false,
+  officerFreed = false,
+  needsHelp = false,
+} = {}) {
+  if (pausedAwaitingConfirmation) return 'подтверди паузу';
+  if (plotClosable) return 'можно закрыть';
+  if (officerFreed) return 'столп свободен';
+  if (needsHelp) return 'нужна помощь';
+  return 'нет';
+}
+
+/**
+ * Хроника нити. Обычно она короткая сама по себе, но если история разрослась,
+ * отдаём синопсис плюс хвост, а не всё подряд.
+ */
+export function threadHistory(domain, plotId, { limit = THREAD_HISTORY_LIMIT, tail = THREAD_HISTORY_TAIL } = {}) {
+  const rows = (domain?.chronicle || []).filter((f) => f && String(f.sourcePlotId) === String(plotId));
+  if (rows.length <= limit) return { facts: rows, truncated: false };
+  return { facts: rows.slice(-tail), truncated: true, skipped: rows.length - tail };
+}
+
+export function recentChat(domain, { limit = CHAT_WINDOW } = {}) {
+  const rows = domain?.state?.dialogue || domain?.dialogue || [];
+  return rows.slice(-limit).map((m) => ({
+    role: m.role === 'assistant' ? 'жрец' : 'покровитель',
+    text: String(m.content || m.text || '').slice(0, 600),
+  }));
+}
+
+/** Карточка нити глазами жреца: полосы и формулировки, без чисел механики. */
+export function threadCard(plot, day) {
+  if (!plot) return null;
+  return {
+    title: plot.title || '',
+    synopsis: plot.synopsis || '',
+    gravity: plot.gravity || null,
+    livesLeft: livesLeft(plot),
+    workLeft: remainingWork(plot),
+    knownThreats: knownThreatsForSpeech(plot, day),
+    dread: dreadFlag(plot, day),
+  };
+}
+
+export function buildHeraldContext({
+  domain,
+  plot = null,
+  fact = null,
+  occasion = 'дело',
+  ask = 'нет',
+  day = 0,
+  memory = '',
+  reportSubject = '',
+} = {}) {
+  const history = plot ? threadHistory(domain, plot.id) : { facts: [], truncated: false };
+  return {
+    occasion: parseOccasion(occasion),
+    ask: parseAsk(ask),
+    fact: fact ? { text: fact.text || '', kind: fact.kind || null } : null,
+    thread: threadCard(plot, day),
+    threadHistory: history,
+    chat: recentChat(domain),
+    memory: String(memory || '').slice(0, 1200),
+    reportSubject: String(reportSubject || '').slice(0, 200),
+  };
+}
+
+function formatThreats(rows = []) {
+  if (!rows.length) return '';
+  return rows
+    .map((t) => `- ${t.kind}: ${t.text} — срок: ${t.remainingBand}`)
+    .join('\n');
+}
+
+export function formatHeraldPrompt(ctx) {
+  const lines = [`ПОВОД: ${ctx.occasion}`];
+  if (ctx.reportSubject) lines.push(`О ЧЁМ ПРОСИЛИ ДОКЛАДЫВАТЬ: ${ctx.reportSubject}`);
+  if (ctx.fact?.text) lines.push('', 'ЧТО СЛУЧИЛОСЬ (это правда, перескажи своим голосом):', ctx.fact.text);
+  if (ctx.thread) {
+    lines.push('', `ИСТОРИЯ: «${ctx.thread.title}»`);
+    if (ctx.thread.synopsis) lines.push(`Сейчас: ${ctx.thread.synopsis}`);
+    const threats = formatThreats(ctx.thread.knownThreats);
+    if (threats) lines.push('Город знает о нависшем:', threats);
+    if (ctx.thread.dread) lines.push(`Смутное чувство: ${ctx.thread.dread}. Что именно — ты не знаешь.`);
+  }
+  if (ctx.threadHistory?.facts?.length) {
+    lines.push('', 'ЧТО БЫЛО В ЭТОЙ ИСТОРИИ ДО СЕГО ДНЯ (контекст, не пересказывай):');
+    if (ctx.threadHistory.truncated) lines.push(`(ранее было ещё ${ctx.threadHistory.skipped} записей)`);
+    for (const f of ctx.threadHistory.facts) lines.push(`- ${f.text}`);
+  }
+  if (ctx.chat?.length) {
+    lines.push('', 'ПОСЛЕДНИЙ РАЗГОВОР:');
+    for (const m of ctx.chat) lines.push(`${m.role}: ${m.text}`);
+  }
+  if (ctx.memory) lines.push('', 'ТВОЯ ПАМЯТЬ:', ctx.memory);
+  lines.push('', `ПРОСЬБА В КОНЦЕ: ${ctx.ask}`);
+  if (ctx.ask === 'нет') lines.push('Ничего не проси и не задавай вопросов. Просто расскажи.');
+  return lines.filter((l) => l != null).join('\n');
+}
+
+/**
+ * Рассказать об одном событии. Возвращает текст; хроника уже написана движком.
+ */
+export async function narrateEvent({ runtime, domain, log: parentLog, ...ctxArgs }) {
+  const log = (parentLog || getLogger()).child({ scope: 'herald', domainId: domain?.id });
+  const ctx = buildHeraldContext({ domain, ...ctxArgs });
+  const runOpts = {
+    agentId: 'herald',
+    tools: [],
+    maxTurns: 1,
+    log,
+    scene: `herald_${ctx.occasion}`,
+    domainId: domain?.id,
+    userMessages: [{ role: 'user', content: formatHeraldPrompt(ctx) }],
+  };
+  const prompt = captureAgentPrompt(runtime, runOpts);
+  try {
+    const res = await runtime.run(runOpts);
+    const text = String(res?.text || res?.content || '').trim();
+    if (text) return { text, prompt, ctx };
+  } catch (err) {
+    log.warn('herald.failed', { error: err.message });
+  }
+  return { text: ctx.fact?.text || '', prompt, ctx, fallback: true };
+}

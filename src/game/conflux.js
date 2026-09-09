@@ -420,7 +420,7 @@ export async function forceCreateConflux({
 
 /**
  * Счётчики жизни: docked = конфлюкс; approaching и соло = соло.
- * Цель ~50/50 по доле docked / (docked+solo).
+ * Цель — треть жизни в docked / (docked+solo).
  */
 export async function advanceConfluxLifetimeCounters({ storage, world }) {
   const active = await storage.listConfluxes({ status: ['approaching', 'docked'] });
@@ -454,7 +454,7 @@ export async function maybeMatchmakeConfluxes({ config, storage, world, rng = Ma
   const notes = [];
   if (cfg.enabled === false) return { notes, created: [] };
 
-  const target = Number(cfg.targetDockedFraction ?? 0.5);
+  const target = Number(cfg.targetDockedFraction ?? 1 / 3);
   const minAge = Math.max(0, Math.round(Number(cfg.minDomainAgeMonths ?? 6)));
   const maxPairs = Math.max(0, Math.round(Number(cfg.maxNewPairsPerTick ?? 2)));
   const preferNeverMet = cfg.preferNeverMet !== false;

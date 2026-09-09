@@ -303,7 +303,7 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
     flags.push([WARN, `${ageMonths} мес без конфлюкса и без активного матча`]);
   }
   if (lifeTotal >= 6) {
-    const target = (config.tick?.conflux?.targetDockedFraction ?? 0.5) * 100;
+    const target = (config.tick?.conflux?.targetDockedFraction ?? 1 / 3) * 100;
     if (Math.abs(dockedPct - target) > 25) {
       flags.push([
         WARN,
@@ -559,7 +559,7 @@ async function main() {
     const totalSolo = reports.reduce((a, r) => a + r.conflux.monthsSolo, 0);
     const totalDocked = reports.reduce((a, r) => a + r.conflux.monthsDocked, 0);
     const worldDockedPct = totalSolo + totalDocked ? (totalDocked / (totalSolo + totalDocked)) * 100 : 0;
-    const target = (config.tick?.conflux?.targetDockedFraction ?? 0.5) * 100;
+    const target = (config.tick?.conflux?.targetDockedFraction ?? 1 / 3) * 100;
     if (totalSolo + totalDocked >= 12) {
       if (Math.abs(worldDockedPct - target) > 20) {
         worldFlags.push([
