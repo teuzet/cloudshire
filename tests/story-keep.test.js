@@ -29,7 +29,6 @@ test('storyKeep сжимает синопсис и больше не имеет 
         synopsis: 'В цистерне гудит вода.',
         closeWhen: 'Найдут источник.',
       },
-      { id: 'p2', title: 'Налог', kind: 'order', synopsis: 'Собирают налог каждый сбор.' },
     ],
   };
   const runtime = mockRuntime({
@@ -39,7 +38,6 @@ test('storyKeep сжимает синопсис и больше не имеет 
         plotId: 'p1',
         synopsis: 'В цистерне гудело. Нашли ил в трубах, ночью вода стихла.',
       },
-      { plotId: 'p2', synopsis: 'Нельзя трогать указ.' },
     ],
   });
   const result = await keepStories({
@@ -51,7 +49,6 @@ test('storyKeep сжимает синопсис и больше не имеет 
   assert.equal(result.updated, 1);
   assert.equal(runtime.seen().toolNames.includes('story_surfaced'), false);
   assert.match(domain.plotlines[0].synopsis, /ил/);
-  assert.equal(domain.plotlines[1].synopsis, 'Собирают налог каждый сбор.');
 });
 
 test('confluxStoryKeep обновляет общий синопсис shared-нити', async () => {

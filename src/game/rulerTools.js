@@ -1,6 +1,9 @@
 /**
- * Тулы жреца: чтение города, дела, указы, ломастер, информатор, память.
+ * Тулы жреца: чтение города, дела, постоянный порядок, ломастер, информатор, память.
  * Вызываются из GameApp.runRuler; submit_reply собирается отдельно.
+ *
+ * Месяцев здесь нет. Дело живёт в игровых днях, а наружу отдаются полосы:
+ * жрец не знает точного срока и потому не может его пообещать.
  */
 
 import { formatCastForPrompt, applyPatronName } from './models.js';
@@ -25,21 +28,56 @@ import {
 } from './confluxBoard.js';
 import { askInformant } from './informant.js';
 import {
+  DURATION_SPEC,
+  DIFFICULTY_SPEC,
+  deedBeatsThreat,
+  normalizeDurationBand,
+  normalizeDifficultyBand,
+  remainingBand,
+} from './bands.js';
+import { paceLabel, normalizePaceShift } from './deedMath.js';
+import {
+  applyPace,
+  deedRemainingBand,
+  deedRemainingDays,
+  deedElapsedDays,
+  normalizeDeed,
+  pauseDeedClock,
+  resumeDeedClock,
+  startDeed,
+} from './deeds.js';
+import { judgeDeed } from './deedJudge.js';
+import { scheduleDeedJob, cancelDeedJobs } from './worldLoop.js';
+import {
+  dreadFlag,
+  knownThreatsForSpeech,
+  liveThreats,
+  nearestKnownDanger,
+  remainingDays as threatRemainingDays,
+} from './threats.js';
+import {
+  cityRules,
+  confluxDirective,
+  clearConfluxDirective,
+  isRuleDeed,
+  markRuleDeed,
+  parseRuleAction,
+  findRule,
+  setConfluxDirective,
+} from './cityRules.js';
+import { applyPriestNotifyChange, notifySettings } from './notify.js';
+import {
   normalizeDomainProcesses,
   normalizeProcess,
-  hasHardPatronDeadline,
   findDuplicateProcess,
   resolveLinkedStats,
   resolveActiveProcess,
   formatActiveProcessesForAgent,
   activeProcesses,
   canStartProcess,
-  processProgressFeel,
   recentlyClosedProcesses,
   reviseProcess,
-  applyObjectiveSchedule,
   processIsFresh,
-  processPaceRatio,
   blessProcess,
   processOwnedBy,
   pauseProcess,
@@ -54,11 +92,9 @@ import {
   clipPlotText,
   PLOT_TITLE_MAX,
   PLOT_SUMMARY_MAX,
-  isOrderPlot,
   isStakedStory,
   plotHasLiveProcess,
 } from './plotlines.js';
-import { queueOrderRequest, listStandingOrders } from './orders.js';
 import {
   formatOfficersForPrompt,
   findOfficer,
@@ -70,7 +106,6 @@ import {
   officerBusyAgentMessage,
   ensureOfficersFromLore,
 } from './officers.js';
-import { estimateProcessDuration } from './durationJudge.js';
 import {
   ensureErrandForProcess,
   linkProcessToPlotline,
@@ -80,38 +115,51 @@ import {
   detachProcessFromPlots,
 } from './plotEngine.js';
 import { judgeProcessAlignment, engagementOf, engagementAttends } from './plotAlign.js';
-import { setNewsSchedule } from './newsSchedule.js';
 import { writeRulerMemory, forgetRulerMemory } from './rulerMemory.js';
 import { toolFail } from '../agents/toolResult.js';
 
-function processPaceFeel(process) {
-  const ratio = processPaceRatio(process);
-  if (ratio < 0.95) return 'hurried';
-  if (ratio > 1.05) return 'careful';
-  return 'steady';
+/** Полоса срока словами — единственное, что жрец знает о времени дела. */
+function bandWord(band) {
+  return DURATION_SPEC[normalizeDurationBand(band)].label;
 }
 
+function difficultyWord(band) {
+  return DIFFICULTY_SPEC[normalizeDifficultyBand(band)].label;
+}
+
+/**
+ * Подсказка о темпе. Чисел не даём: спешка и обстоятельность — это разница
+ * в риске, а не в календаре, и жрец должен говорить именно о риске.
+ */
 function paceHint(action, note = null) {
-  const obj = action.objectiveMonths || action.expectedMonths;
-  const left = action.monthsLeft;
-  const ratio = processPaceRatio(action);
-  const why = String(note || action.durationNote || '').trim();
+  const shift = normalizePaceShift(action?.paceShift);
+  const why = String(note || action?.durationNote || '').trim();
   const reason = why ? ` ${why.replace(/\.*$/, '.')}` : '';
-  if (ratio < 0.95) {
+  const span = `Работы примерно на ${bandWord(action?.durationBand)}, дело ${difficultyWord(action?.difficulty)}.`;
+  const tail = 'Итог придёт, когда работа кончится, — не рапортуй его сейчас.';
+  if (shift < 0) {
     return (
-      `Честная оценка ${obj} мес., назначено ${action.expectedMonths} (осталось ${left}).${reason} ` +
-      'В речи ПРИМИ срок покровителя и ПРЕДУПРЕДИ: спешка повышает риск тяжёлого исхода. ' +
-      'Если настаивает — согласись, не торгуйся дальше. ' +
-      'Не рапортуй итог до письма месяца.'
+      `${span}${reason} Покровитель торопит: в речи ПРИМИ его темп и ПРЕДУПРЕДИ, ` +
+      `что спешка повышает риск тяжёлого исхода. Ещё быстрее уже нельзя. ${tail}`
     );
   }
-  if (ratio > 1.05) {
-    return (
-      `Честная оценка ${obj} мес., отвели ${action.expectedMonths}.${reason} ` +
-      'Не спорь: будут делать обстоятельнее, риск провала ниже. Не рапортуй итог до письма месяца.'
-    );
+  if (shift > 0) {
+    return `${span}${reason} Велено не спешить: не спорь, риск провала ниже. ${tail}`;
   }
-  return `Работа займёт около ${obj} мес.${reason} Не рапортуй итог до письма месяца.`;
+  return `${span}${reason} ${tail}`;
+}
+
+/** Успевает ли дело к сроку известной беды — повод жрецу поправить покровителя. */
+function threatTimingHint(plot, action, day) {
+  const soonest = nearestKnownDanger(plot, day);
+  if (!soonest) return '';
+  const left = threatRemainingDays(soonest, day);
+  if (deedBeatsThreat(deedRemainingDays(action, day), left)) return '';
+  return (
+    ` Осторожно: до «${soonest.text}» остаётся ${DURATION_SPEC[normalizeDurationBand(remainingBand(left))].label},` +
+    ` а работы тут на ${bandWord(action?.durationBand)}. Скажи прямо, что столько времени нет,` +
+    ' и предложи то, что успеет.'
+  );
 }
 
 function syncErrandFromProcess(domain, action) {
@@ -170,26 +218,29 @@ export function rulerReplyCommitError({
         'и убери из речи обещание долгого дела.',
     };
   }
-  if (commitment === 'standing_order' && !succeeded('declare_standing_order')) {
+  if (commitment === 'directive' && !succeeded('set_conflux_directive')) {
     return {
-      error: 'order_missing',
+      error: 'directive_missing',
       message:
-        'commitment=standing_order, но declare_standing_order не выполнен. Объяви порядок через tool или смени commitment.',
+        'commitment=directive, но set_conflux_directive не выполнен. Прими наказ через tool или смени commitment. ' +
+        'Постоянное правило города — это не наказ: оно заводится declare_process с rule, commitment=process.',
     };
   }
-  if (commitment === 'revoked' && !succeeded('revoke_order', 'revoke_process')) {
+  if (commitment === 'revoked' && !succeeded('revoke_process', 'set_conflux_directive')) {
     return {
       error: 'revoke_missing',
       message:
-        'commitment=revoked, но отмена не выполнена. Вызови revoke_order (указ) или revoke_process (дело), либо смени commitment.',
+        'commitment=revoked, но отмена не выполнена. Сверни дело (revoke_process), снимите наказ ' +
+        '(set_conflux_directive с clear=true) или отмените правило (declare_process с rule и ruleAction=revoke, ' +
+        'тогда commitment=process), либо смени commitment.',
     };
   }
   if (commitment === 'clarify') {
-    if (succeeded('declare_process', 'update_process', 'declare_standing_order')) {
+    if (succeeded('declare_process', 'update_process', 'set_conflux_directive')) {
       return {
         error: 'clarify_after_act',
         message:
-          'Дело или порядок уже заведены этим ходом. commitment=process или standing_order, не clarify.',
+          'Дело или наказ уже заведены этим ходом. commitment=process или directive, не clarify.',
       };
     }
     if (requestKind === 'order_impossible') {
@@ -265,8 +316,8 @@ export function submitReplyTool(turn, character) {
             'other',
           ],
           description:
-            'order_long — велел работу (стройка, суд, поход, разовое дело — declare_process); ' +
-            'постоянное правило — standing_order, не этот вид. ' +
+            'order_long — велел работу: стройку, суд, поход, разовое дело, а также объявить постоянное ' +
+            'правило (всё это declare_process). ' +
             '«Так и оставить / сами справятся» — commitment=none. ' +
             'order_impossible — велел то, чего в этом мире не бывает ' +
             '(отправить тебя за край или в пустоту, воскресить мёртвых, стереть память, космос, перенос); ' +
@@ -287,10 +338,11 @@ export function submitReplyTool(turn, character) {
         },
         commitment: {
           type: 'string',
-          enum: ['none', 'process', 'standing_order', 'revoked', 'refused', 'clarify'],
+          enum: ['none', 'process', 'directive', 'revoked', 'refused', 'clarify'],
           description:
-            'Что сделано этим ходом: process (declare_process/update_process), standing_order, ' +
-            'revoked (отменил указ или свернул дело), refused (честно отказал или отговорил), ' +
+            'Что сделано этим ходом: process (declare_process/update_process, в том числе правило через rule), ' +
+            'directive (принял наказ на сопряжение), ' +
+            'revoked (свернул дело или снял наказ), refused (честно отказал или отговорил), ' +
             'clarify (приказ есть, но воля неясна — спросил, дело ещё не заводил), ' +
             'none (действий не требовалось).',
         },
@@ -335,12 +387,16 @@ export function buildRulerTools(domain, storage, character, ctx) {
   normalizeDomainProcesses(domain, ctx.config);
 
   const world = ctx.world || null;
+  // Текущий игровой день: по нему считаются полосы остатка у дел и у нависшего.
+  const day = Number.isFinite(Number(ctx.day))
+    ? Math.max(0, Math.round(Number(ctx.day)))
+    : Math.max(0, Math.round(Number(world?.dayIndex) || 0));
 
   return [
     {
       name: 'read_domain_brief',
       description:
-        'Состояние города: население, статы (эпитеты), активные дела, указы, нити. ' +
+        'Состояние города: население, статы (эпитеты), идущие дела, постоянный порядок, нити и нависшее. ' +
         'Нужен и для «как дела», и для «что ты решил / какие приказы действуют».',
       parameters: { type: 'object', properties: {} },
       handler: async () => ({
@@ -354,89 +410,54 @@ export function buildRulerTools(domain, storage, character, ctx) {
         // Без каста правитель не знает своих же людей и додумывает за них.
         knownPeople: formatCastForPrompt(domain.lore, { limit: 20 }),
         officers: formatOfficersForPrompt(domain, ctx.config),
-        guidance:
-          'Отвечай в духе conditionFeel: качественно, без чисел и без имён статов. ' +
-          'О делах — по-человечески: что делается и сколько примерно ждать.',
-        guidancePeople:
-          'knownPeople — люди, которых город уже знает: имя, пол, ремесло и что о них известно. ' +
-          'Это правда, а не слухи. Не переспрашивай о том, что здесь написано, и не придумывай ' +
-          'им другую судьбу.',
-        standingOrders: listStandingOrders(domain, { tick: world?.tickIndex ?? null }),
-        guidanceOrders:
-          'standingOrders — действующие указы/порядки. pending=create/edit/revoke — заявка ещё не вступила, вступит с новостями месяца. ' +
-          'indefinite=true — бессрочно; durationMonths и remainingMonths — срок в игровых месяцах, если он задан. ' +
-          'Для отмены — revoke_order с этим id или кратким смыслом. Не объявляй новый указ, если он противоречит действующему: ' +
-          'сначала отмени старый или обнови его.',
         processes: activeProcesses(domain, ctx.config).map((a) => ({
           id: a.id,
           summary: a.summary,
           detail: a.detail,
           goal: a.goal || null,
-          monthsLeft: a.monthsLeft,
-          expectedMonths: a.expectedMonths,
-          objectiveMonths: a.objectiveMonths || a.expectedMonths,
-          pace: processPaceFeel(a),
+          // Полосы, не числа: точного срока жрец не знает и обещать его не может.
+          remaining: DURATION_SPEC[deedRemainingBand(a, day)].label,
+          duration: DURATION_SPEC[normalizeDurationBand(a.durationBand)].label,
+          difficulty: DIFFICULTY_SPEC[normalizeDifficultyBand(a.difficulty)].label,
+          pace: paceLabel(a.paceShift),
           linkedStats: a.linkedStats,
           initiative: a.initiative || 'patron',
-          fresh: processIsFresh(a),
-          progress: processProgressFeel(a),
+          fresh: processIsFresh(a, day),
+          // Ускорять второй раз нельзя: сказал «быстрее» — быстрее уже некуда.
+          canHurry: normalizePaceShift(a.paceShift) === 0,
+          rule: a.ruleText ? parseRuleAction(a.ruleAction) : null,
           blessed: Boolean(a.blessed),
           intel: Boolean(a.intel),
         })),
         pausedProcesses: pausedProcesses(domain, ctx.config).map((a) => ({
           id: a.id,
           summary: a.summary,
-          monthsLeft: a.monthsLeft,
+          remaining: DURATION_SPEC[deedRemainingBand(a, day)].label,
           detail: a.detail,
         })),
-        recentlyClosed: recentlyClosedProcesses(domain, world?.tickIndex),
+        recentlyClosed: recentlyClosedProcesses(domain, world?.tickIndex, { day }),
         processSlots: canStartProcess(domain, ctx.config),
         plots: (domain.plotlines || []).map((p) => ({
           id: p.id,
           title: p.title,
-          kind: p.kind === 'errand' ? 'errand' : p.kind === 'order' ? 'order' : 'story',
+          kind: p.kind === 'errand' ? 'errand' : 'story',
           hasProcess: plotHasLiveProcess(domain, p),
           shared: Boolean(p.shared || p.isMainConflux),
-          foreign: Boolean(
-            ctx.conflux &&
-              !isOrderPlot(p) &&
-              !p.isMainConflux &&
-              !plotConcerns(p, domain.id),
-          ),
+          // Нависшее, о чём город знает: формулировка и полоса остатка, без дней.
+          threats: knownThreatsForSpeech(p, day).map((t) => ({
+            kind: t.kind,
+            text: t.text,
+            remaining: DURATION_SPEC[normalizeDurationBand(t.remainingBand)].label,
+          })),
+          dread: dreadFlag(p, day),
+          foreign: Boolean(ctx.conflux && !p.isMainConflux && !plotConcerns(p, domain.id)),
         })),
+        standingRules: cityRules(domain).map((m) => ({ id: m.id, text: m.text, since: m.sinceLabel })),
+        confluxDirective: confluxDirective(domain),
         leakedTraces:
           ctx.conflux && ctx.partner
             ? leakedTracesForViewer(ctx.conflux, domain.id, [domain, ctx.partner])
             : [],
-        guidanceProcesses:
-          'processes[].progress — как дело шло в прошлом месяце: так и отвечай, если спрашивают. ' +
-          'objectiveMonths — честная оценка срока, monthsLeft — сколько ещё ждут. ' +
-          'pace=hurried — покровитель торопит, предупреди о риске; pace=careful — не спорь. ' +
-          'fresh=true — дело ещё не сдвинулось: update_process может переписать его целиком. ' +
-          'fresh=false — только дополни поручение и при нужде поменяй оставшийся срок (не меньше 1 мес.). ' +
-          'goal — одной фразой, что считается достигнутой целью; можно не заполнять. ' +
-          'blessed=true — покровитель благословил это дело: исход сдвинется на ступень вверх (провал→успех, успех→крит). ' +
-          'pausedProcesses — на паузе: прогресс жив, слот свободен, тик не идёт. Снять паузу — resume_process, если есть слот. ' +
-          'recentlyClosed[].outcome — итог [ПРОВАЛ] / [УСПЕХ] / [КРИТИЧЕСКИЙ УСПЕХ]; про них не говори «не знаю». ' +
-          'Недавно закрытое дело сановника не занимает: он свободен для нового поручения. ' +
-          'Если покровитель хочет сановника, у которого в officers/processes уже есть ИДУЩЕЕ дело — назови это дело и предложи pause_process или revoke_process, затем declare_process. ' +
-          'Для update_process / revoke_process бери id из processes[].id. ' +
-          'Если id не помнишь — передай краткий смысл дела в processId (например «университет»), система найдёт. ' +
-          'Покровитель уточняет уже идущую ту же работу (новый вопрос к тому же дознанию, другой темп) — update_process, commitment=process. Не отказывай и не заводи второе. ' +
-          'Общий храм, общий двор или общие имена — не дубль и не повод слить РАЗНЫЕ работы. ' +
-          'initiative=ruler — это дело ты завёл сам, пока покровитель молчал; на вопрос «что ты решал» называй их.',
-        guidancePlots:
-          'plots[] — живые нити, которые этот город знает как линии. kind=errand уже привязана к делу; kind=story может быть без поручения; kind=order — постоянный порядок, дело на него не заводи. ' +
-          'foreign=true — история соседа, уже раскрытая нам: дело с plotId вмешивается в неё по существу. ' +
-          'shared=true — общая история сопряжения, дело можно заводить с обеих сторон. ' +
-          'leakedTraces[] — голые факты о соседе, сюжетной карточки нет. Не называй это историей по имени. ' +
-          'Если покровитель хочет «узнать, что это» — declare_process с intel=true и chronicleId (или plotId, если карточка уже известна). ' +
-          'intel нельзя на указ и на уже раскрытую нить. Шпионы «на остров вообще» — обычное дело без intel и без plotId. ' +
-          'Приказ по известной истории без дела — declare_process с plotId этой истории. ' +
-          'plotId — нить, которую покровитель этим делом пытается решить, судя по разговору, а не соседняя из-за места или людей. ' +
-          'Закрытую не подставляй. Сомнение — commitment=clarify, не угадывай id. ' +
-          'Если declare_process вернул, что дело снято с истории — так и скажи покровителю: приказ отдан, но ты не уверен, что это поможет с той бедой. ' +
-          'Если он имел в виду ту историю — revoke_process поручение, затем declare_process с уточнённой целью и plotId. Не перевешивай старое поручение.',
       }),
     },
     !domain.state?.patronName && {
@@ -631,9 +652,9 @@ export function buildRulerTools(domain, storage, character, ctx) {
     {
       name: 'declare_process',
       description:
-        'Длительное дело: стройка, суд, поход, снабжение. Не для мгновенных постоянных приказов — declare_standing_order. ' +
+        'Дело: стройка, суд, поход, снабжение, а также объявление или отмена постоянного правила (через rule). ' +
         'Если воля ещё неясна — не вызывай, спроси покровителя (commitment=clarify). ' +
-        'Срок сам не оценивай: его посчитает отдельный оценщик. ' +
+        'Срок и трудность сам не оценивай: их посчитает отдельный оценщик. ' +
         'Отказы: too_many_processes (все сановники заняты), officer_busy (названный сановник уже ведёт другое). ' +
         'В речи — человеческая причина; предложи паузу или отмену текущего, не «доска» и не «слот».',
       parameters: {
@@ -644,23 +665,31 @@ export function buildRulerTools(domain, storage, character, ctx) {
           detail: {
             type: 'string',
             description:
-              'Если покровитель задал жёсткий срок («в этом месяце») — отрази это в detail дословно по смыслу.',
+              'Если покровитель торопит или велит не спешить — отрази это в detail дословно по смыслу.',
           },
           goal: {
             type: 'string',
             description:
               'Одной фразой: что считается достигнутой целью дела (для исхода в хронике). Не обязательно.',
           },
-          remainingMonths: {
-            type: 'number',
+          pace: {
+            type: 'string',
+            enum: ['спешка', 'обстоятельно'],
             description:
-              'Только если покровитель велел торопиться или не спешить: сколько месяцев ОСТАЛОСЬ ждать (не меньше 1). ' +
-              'Сам срок не оценивай.',
+              'Только воля покровителя к темпу, не твоя оценка. «спешка» — велел быстрее (риск выше), ' +
+              '«обстоятельно» — велел не спешить. Не назвал темпа — поле не передавай.',
           },
-          expectedMonths: {
-            type: 'number',
+          rule: {
+            type: 'string',
             description:
-              'Устарело: то же, что remainingMonths — только воля покровителя к темпу, не твоя оценка.',
+              'Формулировка ПОСТОЯННОГО правила города (запрет, закон, регулярный обряд, порядок службы). ' +
+              'Передавай, только если покровитель хочет всегдашний порядок, а не разовую работу. ' +
+              'Дело объявляет волю: успех вписывает правило в порядок города, провал — «объявили, но не приняли».',
+          },
+          ruleAction: {
+            type: 'string',
+            enum: ['declare', 'revoke'],
+            description: 'declare — ввести правило (по умолчанию), revoke — отменить уже действующее.',
           },
           linkedStats: {
             type: 'array',
@@ -713,8 +742,9 @@ export function buildRulerTools(domain, storage, character, ctx) {
       handler: async ({
         summary,
         detail,
-        remainingMonths,
-        expectedMonths,
+        pace = null,
+        rule = null,
+        ruleAction = 'declare',
         linkedStats,
         onBehalfOf = 'patron',
         characterNote,
@@ -760,18 +790,17 @@ export function buildRulerTools(domain, storage, character, ctx) {
             reason: 'duplicate',
             existingProcessId: dup.id,
             existingSummary: dup.summary,
-            monthsLeft: dup.monthsLeft,
+            remaining: bandWord(deedRemainingBand(dup, day)),
             agentMessage:
               'ОТКАЗ: похожее дело уже идёт — «' +
               dup.summary +
-              `» (id ${dup.id}, ещё ~${dup.monthsLeft} мес.). ` +
+              `» (id ${dup.id}, ждать ещё ${bandWord(deedRemainingBand(dup, day))}). ` +
               'Это НЕ нехватка слотов и НЕ общая занятость города. ' +
               'Покровитель, скорее всего, уточняет его: вызови update_process с этим id, ' +
-              'допиши новый вопрос (addDetail) и при нужде remainingMonths. commitment=process. ' +
+              'допиши новый вопрос (addDetail) и при нужде pace. commitment=process. ' +
               'Не выдумывай отговорку про «слишком много дел» и не обещай вторую такую же нить.',
           };
         }
-        const hard = hasHardPatronDeadline(summary, detail);
         const linked = resolveLinkedStats(linkedStats, ctx.config);
         if (!linked.length) {
           return toolFail(
@@ -805,14 +834,31 @@ export function buildRulerTools(domain, storage, character, ctx) {
               'Сначала поспорь и предупреди, что справится плохо. Если настаивает — повтори declare_process с insistOffPortfolio=true.',
           );
         }
-        const askedRemaining =
-          remainingMonths != null
-            ? remainingMonths
-            : expectedMonths != null
-              ? expectedMonths
-              : hard
-                ? 1
-                : null;
+        const ruleText = String(rule || '').trim();
+        const ruleKind = ruleText ? parseRuleAction(ruleAction) : null;
+        if (ruleText && ruleText.length < 3) {
+          return toolFail(
+            'rule_too_short',
+            'Формулировка постоянного правила слишком короткая. Скажи правило целиком и вызови снова.',
+          );
+        }
+        let revoking = null;
+        if (ruleKind === 'revoke') {
+          revoking = findRule(domain, { text: ruleText });
+          if (!revoking) {
+            const list = cityRules(domain);
+            return {
+              ok: false,
+              error: 'rule_not_found',
+              standingRules: list.map((m) => ({ id: m.id, text: m.text })),
+              agentMessage:
+                'Такого постоянного правила в городе нет. Возьми формулировку из списка ниже и вызови снова, ' +
+                'либо скажи покровителю, что этот порядок и так не действует.\n' +
+                (list.map((m) => `- ${m.text}`).join('\n') || '(постоянных правил нет)'),
+            };
+          }
+        }
+        const paceShift = pace === 'спешка' ? -1 : pace === 'обстоятельно' ? 1 : 0;
         const wantIntel = Boolean(intel);
         const partners = ctx.conflux && ctx.partner ? [domain, ctx.partner] : [domain];
         let targetPlot = null;
@@ -833,9 +879,6 @@ export function buildRulerTools(domain, storage, character, ctx) {
               'intel_needs_target',
               'Для intel=true нужен plotId известной нити или chronicleId просочившейся записи.',
             );
-          }
-          if (isOrderPlot(targetPlot)) {
-            return toolFail('intel_forbidden_order', 'Целенаправленная разведка указов запрещена.');
           }
           if (cityKnowsPlot(targetPlot, domain.id)) {
             return toolFail(
@@ -860,10 +903,6 @@ export function buildRulerTools(domain, storage, character, ctx) {
           summary,
           detail,
           goal: String(goal || '').trim() || null,
-          expectedMonths: 1,
-          durationMonths: 1,
-          monthsLeft: 1,
-          monthsDone: 0,
           linkedStats: [linkedStat],
           officerId: officer.id,
           office: officer.office,
@@ -872,7 +911,6 @@ export function buildRulerTools(domain, storage, character, ctx) {
           characterId: character.id,
           characterName: character.name,
           characterNote: characterNote || null,
-          hardDeadline: hard,
           status: 'active',
           initiative: 'patron',
           intel: wantIntel,
@@ -881,16 +919,29 @@ export function buildRulerTools(domain, storage, character, ctx) {
         };
         domain.state.pendingActions.push(action);
         bindOfficerProcess(domain, officer, action);
-        const estimated = await estimateProcessDuration({
-          config: ctx.config,
-          runtime: ctx.runtime,
-          domain,
-          summary,
-          detail,
-          log: ctx.log,
-        });
-        applyObjectiveSchedule(action, estimated.months, askedRemaining);
-        if (estimated.note) action.durationNote = estimated.note;
+
+        // Объявление воли — дело считанных дней и посильное; оценщик тут не нужен.
+        let judged = null;
+        if (ruleKind) {
+          markRuleDeed(action, {
+            text: ruleText,
+            action: ruleKind,
+            modifierId: revoking?.id || null,
+          });
+        } else {
+          judged = await judgeDeed({
+            runtime: ctx.runtime,
+            domain,
+            summary,
+            detail,
+            goal: action.goal || '',
+            log: ctx.log,
+          });
+          if (judged.note) action.durationNote = judged.note;
+        }
+        startDeed(action, { day, judged });
+        if (paceShift) applyPace(action, paceShift, { day });
+        scheduleDeedJob(world, domain, action);
         let plot = null;
         if (targetPlot) {
           targetPlot.relatedProcessIds = targetPlot.relatedProcessIds || [];
@@ -929,7 +980,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
             action.plotlineId = plot?.id || null;
           }
         }
-        if (ctx.conflux && plot && !isOrderPlot(plot) && !rehomed) {
+        if (ctx.conflux && plot && !rehomed) {
           action.confluxId = ctx.conflux.id;
           action.ownerDomainId = domain.id;
           if (!wantIntel && !plotConcerns(plot, domain.id) && !plot.isMainConflux) {
@@ -941,155 +992,91 @@ export function buildRulerTools(domain, storage, character, ctx) {
           }
         }
         await save();
+        const impossibleWarn = action.impossible
+          ? ' Это дело смертным не по силам: людей займут, а толку не будет. Предупреди заранее.'
+          : '';
+        const ruleWarn = ruleKind
+          ? ruleKind === 'revoke'
+            ? ' Это отмена постоянного правила: объявить недолго, но город ещё должен отвыкнуть.'
+            : ' Это объявление постоянного правила: если город его примет, оно останется в порядке города.'
+          : '';
         const hint = rehomed
           ? unrelatedAttachHint(originPlot)
-          : `В речи: принял повеление. ${paceHint(action, estimated.note)} ` +
-            'Не говори «уже строим» и не рапортуй механику; итог придёт с новостями месяца, ' +
-            'а не в этой переписке.' +
+          : `В речи: принял повеление. ${paceHint(action, judged?.note)}` +
+            ruleWarn +
+            impossibleWarn +
+            ' Не говори «уже сделали» и не рапортуй механику: весть об исходе принесёшь сам, когда работа кончится.' +
+            threatTimingHint(plot, action, day) +
             queueAttachHint(domain, plot, action);
         return {
           ok: true,
           process: action,
+          duration: bandWord(action.durationBand),
+          difficulty: difficultyWord(action.difficulty),
+          rule: ruleKind,
           rehomed,
           hint,
         };
       },
     },
     {
-      name: 'declare_standing_order',
+      name: 'set_conflux_directive',
       description:
-        'Заявка на постоянный порядок / правило (запрет, осмотр, регулярный обряд, «при каждом сопряжении делайте X»). ' +
-        'НЕ закрывает и НЕ двигает открытую живую нить (плотлайн); это закрепляет правило на будущие месяцы. ' +
-        'Если покровитель хочет сдвинуть открытую историю — используй declare_process с plotId. ' +
-        'Карточку и каденс соберёт город к новостям месяца. Не для разовой стройки, суда, похода — те через declare_process. ' +
-        'Если неясно, разовый это труд или всегдашнее правило — спроси (commitment=clarify), не выбирай сам. ' +
-        'Срок (durationMonths) ставь только если покровитель его назвал; иначе бессрочно.',
+        'Наказ на сопряжение: «при каждой стыковке делайте X». Не дело и не постоянное правило — ' +
+        'наказ ждёт следующей стыковки и тогда сам заводит поручение, забирая столп. ' +
+        'Постоянное правило города — declare_process с rule. Разовое поручение на эту встречу — обычное declare_process. ' +
+        'clear=true — снять прежний наказ.',
       parameters: {
         type: 'object',
-        required: ['text'],
         properties: {
           text: {
             type: 'string',
-            description: 'Краткая формулировка постоянного порядка',
+            description: 'Что делать при каждой стыковке. Одна ясная фраза от лица города.',
           },
-          id: {
+          office: {
             type: 'string',
-            description: 'Id существующего порядка при обновлении',
-          },
-          durationMonths: {
-            type: 'number',
             description:
-              'Сколько игровых месяцев порядок действует. Не передавай — бессрочно. ' +
-              '0 — сделать бессрочным (при правке). Ставь число только если покровитель явно назвал срок ' +
-              '(три месяца, год = 12, сезон = 3). Сам срок не выдумывай.',
+              'Должность столпа, которого наказ заберёт (treasurer/marshal/keeper/chancellor). ' +
+              'Пусто — город выберет свободного сам.',
           },
+          clear: { type: 'boolean', description: 'true — отменить действующий наказ.' },
         },
       },
-      handler: async ({ text, id, durationMonths }) => {
-        const body = String(text || '').trim().slice(0, 400);
-        if (body.length < 3) {
+      handler: async ({ text, office = null, clear = false }) => {
+        if (clear) {
+          const dropped = clearConfluxDirective(domain);
+          if (!dropped.ok) {
+            return toolFail('directive_not_found', 'Наказа на сопряжение и не было. Скажи об этом покровителю.');
+          }
+          await save();
+          return {
+            ok: true,
+            cleared: dropped.directive,
+            hint: 'В речи: наказ снят, при встрече будете решать заново. Коротко, без механики.',
+          };
+        }
+        const res = setConfluxDirective(domain, { text, office });
+        if (!res.ok) {
           return toolFail(
-            'too_short',
-            'Текст постоянного порядка слишком короткий. Сформулируй правило (≥3 символа) и вызови снова.',
+            'directive_empty',
+            'Пустой наказ. Сформулируй, что город делает при каждой стыковке, и вызови снова.',
           );
         }
-        const queued = queueOrderRequest(domain, {
-          action: id ? 'edit' : 'create',
-          text: body,
-          orderId: id || null,
-          by: character.name,
-          initiative: 'patron',
-          tick: world?.tickIndex ?? null,
-          durationMonths,
-        });
-        if (queued.error === 'order_not_found') {
-          return {
-            ok: false,
-            error: 'order_not_found',
-            standingOrders: listStandingOrders(domain),
-            agentMessage:
-              'Указ не найден. Возьми id из списка ниже и вызови declare_standing_order снова.\n' +
-              (listStandingOrders(domain).map((m) => `- ${m.id}: ${m.text}`).join('\n') || '(указов нет)'),
-          };
-        }
-        if (queued.error) {
-          return toolFail(queued.error, queued.message || 'Не удалось принять порядок.');
-        }
         await save();
-        const term = queued.request?.durationMonths;
-        const termHint =
-          term
-            ? `будут соблюдать ${term} мес., затем порядок сам спадёт. Срок в речи назови, механику нет. `
-            : queued.request?.durationSet
-              ? 'бессрочно, пока не отменят. Не назначай срок, если покровитель его не назвал. '
-              : 'как постоянный порядок без срока, начнут соблюдать. Не назначай срок, если покровитель его не назвал. ';
         return {
           ok: true,
-          created: Boolean(queued.created),
-          request: queued.request,
+          directive: res.directive,
           hint:
-            `В речи: принял порядок — ${termHint}` +
-            'Не говори «процесс». Последствия указа город увидит к концу месяца.',
-        };
-      },
-    },
-    {
-      name: 'revoke_order',
-      description:
-        'Заявка отменить действующий указ / постоянный порядок. orderId — id из read_domain_brief.standingOrders или краткий смысл указа.',
-      parameters: {
-        type: 'object',
-        required: ['orderId'],
-        properties: {
-          orderId: { type: 'string', description: 'Id (mod_… / ordreq_…) или ключевые слова указа' },
-          reason: { type: 'string' },
-        },
-      },
-      handler: async ({ orderId, reason }) => {
-        const key = String(orderId || '').trim();
-        if (!key) {
-          return toolFail('order_required', 'Передай orderId указа из read_domain_brief.standingOrders.');
-        }
-        const queued = queueOrderRequest(domain, {
-          action: 'revoke',
-          orderId: key,
-          text: key,
-          reason,
-          by: character.name,
-          initiative: 'patron',
-          tick: world?.tickIndex ?? null,
-        });
-        if (queued.error === 'order_not_found') {
-          const list = listStandingOrders(domain);
-          return {
-            ok: false,
-            error: 'order_not_found',
-            standingOrders: list,
-            agentMessage:
-              'Указ не найден. Возьми id из списка ниже и вызови revoke_order снова. ' +
-              'Не говори покровителю, что такого порядка нет, если список не пуст.\n' +
-              (list.map((m) => `- ${m.id}: ${m.text}`).join('\n') || '(указов нет)'),
-          };
-        }
-        if (queued.error) {
-          return toolFail(queued.error, queued.message || 'Не удалось отменить порядок.');
-        }
-        await save();
-        return {
-          ok: true,
-          cancelled: Boolean(queued.cancelled),
-          request: queued.request,
-          hint: queued.cancelled
-            ? 'В речи: передумал, этот порядок так и не вступил. Коротко.'
-            : 'В речи: порядок будет снят. Коротко, без механики. Город увидит это к концу месяца.',
+            'В речи: наказ принят и будет исполнен при следующей стыковке. Предупреди, что столп тогда ' +
+            'оторвётся от своего дела — прежнее встанет на паузу, и ты об этом доложишь. Разовое дело сейчас не заводи.',
         };
       },
     },
     {
       name: 'update_process',
       description:
-        'Уточнить активное длительное дело. На нулевом месяце можно переписать целиком; ' +
-        'если дело уже шло — только дополни поручение. processId — id или несколько слов из summary.',
+        'Уточнить идущее дело. Пока оно не сдвинулось (fresh=true) — можно переписать целиком; ' +
+        'дальше только дополни поручение. processId — id или несколько слов из summary.',
       parameters: {
         type: 'object',
         required: ['processId'],
@@ -1098,20 +1085,22 @@ export function buildRulerTools(domain, storage, character, ctx) {
             type: 'string',
             description: 'Id процесса (act_…) или ключевые слова из summary',
           },
-          summary: { type: 'string', description: 'На нулевом месяце заменяет название; иначе дописывается.' },
-          detail: { type: 'string', description: 'На нулевом месяце заменяет поручение; иначе дописывается.' },
+          summary: { type: 'string', description: 'Пока дело не сдвинулось — заменяет название; иначе дописывается.' },
+          detail: { type: 'string', description: 'Пока дело не сдвинулось — заменяет поручение; иначе дописывается.' },
           goal: {
             type: 'string',
-            description: 'Одной фразой: что считается достигнутой целью. Можно уточнить в любой месяц.',
+            description: 'Одной фразой: что считается достигнутой целью. Можно уточнить когда угодно.',
           },
           addDetail: {
             type: 'string',
             description: 'Дополнить поручение новой оговоркой или вопросом, не затирая старое.',
           },
-          remainingMonths: {
-            type: 'number',
+          pace: {
+            type: 'string',
+            enum: ['спешка', 'обстоятельно'],
             description:
-              'Сколько месяцев ещё ждать. Не меньше 1. Ставь, если покровитель велел торопиться или не спешить.',
+              'Воля покровителя к темпу. Сдвинуть можно один раз: если pace уже стоит, инструмент откажет, ' +
+              'и ты честно скажешь, что быстрее (или медленнее) уже некуда.',
           },
           linkedStats: { type: 'array', items: { type: 'string' } },
           characterNote: { type: 'string' },
@@ -1128,7 +1117,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
         summary,
         detail,
         addDetail,
-        remainingMonths,
+        pace = null,
         linkedStats,
         characterNote,
         goal,
@@ -1148,19 +1137,37 @@ export function buildRulerTools(domain, storage, character, ctx) {
         }
         const revised = reviseProcess(
           action,
-          { summary, detail, addDetail, remainingMonths, linkedStats, characterNote, goal },
+          { summary, detail, addDetail, linkedStats, characterNote, goal, day },
           ctx.config,
         );
-        if (revised.rewritten) {
-          const estimated = await estimateProcessDuration({
-            config: ctx.config,
+        // Переписанное дело — другая работа: срок и трудность считаются заново.
+        if (revised.rewritten && !isRuleDeed(action)) {
+          const judged = await judgeDeed({
             runtime: ctx.runtime,
             domain,
             summary: action.summary,
             detail: action.detail,
+            goal: action.goal || '',
+            log: ctx.log,
           });
-          applyObjectiveSchedule(action, estimated.months, remainingMonths);
-          if (estimated.note) action.durationNote = estimated.note;
+          startDeed(action, { day, judged });
+          if (judged.note) action.durationNote = judged.note;
+          scheduleDeedJob(world, domain, action);
+        }
+        let paceResult = null;
+        if (pace) {
+          const wanted = pace === 'спешка' ? -1 : 1;
+          paceResult = applyPace(action, wanted, { day });
+          if (!paceResult.ok) {
+            const already = paceLabel(action.paceShift);
+            return toolFail(
+              'pace_locked',
+              `Темп этого дела уже сдвинут (${already}), второй раз его не поменять. ` +
+                'В речи честно скажи: быстрее (или медленнее) уже некуда, люди и так на пределе. ' +
+                'Ничего не обещай и не заводи второе дело о том же.',
+            );
+          }
+          scheduleDeedJob(world, domain, action);
         }
         syncErrandFromProcess(domain, action);
         if (plotId) {
@@ -1209,11 +1216,14 @@ export function buildRulerTools(domain, storage, character, ctx) {
         return {
           ok: true,
           process: action,
+          pace: paceLabel(action.paceShift),
+          remaining: bandWord(deedRemainingBand(action, day)),
           rehomed,
           hint: rehomed
             ? unrelatedAttachHint(originPlot)
-            : `${mode}. ${paceHint(action)} ` +
-              'В речи не обещай, что уже сделано; итог придёт с новостями месяца.' +
+            : `${mode}. ${paceHint(action)}` +
+              ' В речи не обещай, что уже сделано: весть об исходе принесёшь сам.' +
+              threatTimingHint(plot, action, day) +
               queueAttachHint(domain, plot, action),
         };
       },
@@ -1249,8 +1259,10 @@ export function buildRulerTools(domain, storage, character, ctx) {
         }
         action.status = 'revoked';
         action.revokeReason = reason || '';
+        action.resolvedDay = day;
         action.updatedAt = new Date().toISOString();
         releaseOfficerProcess(domain, action);
+        cancelDeedJobs(world, action.id);
         const dropped = detachProcessFromPlots(domain, action, { tick: world?.tickIndex ?? null });
         await save();
         return {
@@ -1267,7 +1279,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
     {
       name: 'pause_process',
       description:
-        'Поставить дело на паузу: прогресс не теряется, тик не идёт, слот освобождается. Не отмена.',
+        'Поставить дело на паузу: проделанное не теряется, срок не идёт, столп освобождается. Не отмена.',
       parameters: {
         type: 'object',
         required: ['processId'],
@@ -1286,12 +1298,14 @@ export function buildRulerTools(domain, storage, character, ctx) {
         }
         const result = pauseProcess(action, domain);
         if (!result.ok) return { ok: false, error: result.error };
+        pauseDeedClock(action, day);
+        cancelDeedJobs(world, action.id);
         await save();
         return {
           ok: true,
           pausedId: action.id,
           summary: action.summary,
-          hint: 'Дело на паузе. В речи: работы остановили, к ним можно вернуться. Слот свободен.',
+          hint: 'Дело на паузе. В речи: работы остановили, к ним можно вернуться. Столп свободен.',
         };
       },
     },
@@ -1332,12 +1346,15 @@ export function buildRulerTools(domain, storage, character, ctx) {
                 : result.error,
           };
         }
+        resumeDeedClock(action, day);
+        scheduleDeedJob(world, domain, action);
         await save();
         return {
           ok: true,
           resumedId: action.id,
           summary: action.summary,
-          hint: 'Дело снова идёт. В речи без id.',
+          remaining: bandWord(deedRemainingBand(action, day)),
+          hint: 'Дело снова идёт, срок пошёл с того же места. В речи без id.',
         };
       },
     },
@@ -1375,51 +1392,58 @@ export function buildRulerTools(domain, storage, character, ctx) {
       },
     },
     {
-      name: 'set_news_schedule',
+      name: 'set_notify',
       description:
-        'Настроить письма о месяце покровителю. Движок сам решает, слать ли письмо. ' +
-        'Сближение островов этими настройками не глушится.',
+        'Как часто и о чём беспокоить покровителя вестями. Хроника пишется всегда и полностью — ' +
+        'это только про то, когда трогать его самого. Полную тишину ставит только он сам, руками.',
       parameters: {
         type: 'object',
         properties: {
-          months: {
-            type: 'array',
-            items: { type: 'number' },
+          intensity: {
+            type: 'string',
+            enum: ['всё', 'важное'],
             description:
-              'Месяцы года (1–12), в которые писать. Пустой массив — не писать по календарю. ' +
-              '«Каждый месяц» — [1,2,3,4,5,6,7,8,9,10,11,12]. «В 1, 4 и 8» — [1,4,8].',
+              '«всё» — говорить про каждое событие; «важное» — только про беды, концовки и новые истории. ' +
+              'Ниже «важного» ты опустить не можешь.',
           },
-          alsoOnCritical: {
-            type: 'boolean',
+          triggers: {
+            type: 'object',
             description:
-              'Писать также, если в месяце есть хроника с важностью critical — даже если месяц не в списке.',
+              'Точечные просьбы: { newStory, threatSurfaced, deedDone, deedFailed, errandDone, plotClosed, priestReport, conflux } — ' +
+              'true говорить, false молчать. О сработавшей беде ты молчать не вправе.',
           },
           detail: {
             type: 'string',
-            enum: ['full', 'brief', 'essence'],
-            description: 'full — подробный отчёт; brief — выжимка; essence — супер-кратко, только суть.',
+            enum: ['коротко', 'обычно', 'подробно'],
+            description: 'Насколько длинно рассказывать.',
           },
-          clickbait: { type: 'boolean', description: 'Кликбейтный зачин.' },
-          ask: { type: 'boolean', description: 'Заканчивать вопросом, что делать.' },
+          ask: { type: 'boolean', description: 'Заканчивать вести вопросом, что делать.' },
         },
       },
-      handler: async (args) => {
-        const patch = {};
-        if (args.months) patch.months = args.months;
-        if (args.alsoOnCritical != null) patch.alsoOnCritical = args.alsoOnCritical;
-        if (args.detail) patch.detail = args.detail;
-        if (args.clickbait != null) patch.clickbait = args.clickbait;
-        if (args.ask != null) patch.ask = args.ask;
-        const schedule = setNewsSchedule(domain, patch);
+      handler: async ({ intensity = null, triggers = null, detail = null, ask = null }) => {
+        const style = {};
+        if (detail) style.detail = detail;
+        if (ask != null) style.ask = ask;
+        const notify = applyPriestNotifyChange(domain, {
+          intensity,
+          triggers,
+          style: Object.keys(style).length ? style : null,
+        });
         await save();
         return {
           ok: true,
-          schedule,
+          notify,
           hint:
-            'В речи: как теперь будешь писать о месяце. Не называй поля движка. ' +
-            'Сближение островов всё равно доложишь, это не письмо месяца.',
+            'В речи: как теперь будешь беспокоить покровителя. Полей движка не называй. ' +
+            'Если он просил замолчать совсем — скажи, что о настоящей беде всё равно доложишь.',
         };
       },
+    },
+    {
+      name: 'read_notify',
+      description: 'Как сейчас настроены вести покровителю. Для вопроса «о чём ты мне пишешь».',
+      parameters: { type: 'object', properties: {} },
+      handler: async () => ({ ok: true, notify: notifySettings(domain) }),
     },
   ].filter(Boolean);
 }

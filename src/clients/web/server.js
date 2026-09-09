@@ -21,8 +21,8 @@ import { domainHasIslandImage, officerHasPortrait } from '../../storage/r2.js';
 import { knownPartnerLore, hydrateDomainFromConflux } from '../../game/confluxBoard.js';
 import { deriveOnboardingPhase, normalizeOnboardingDraft } from '../../game/onboarding.js';
 import { genesisTutorialText } from '../../game/progressBar.js';
-import { orderMonthsLeft } from '../../game/orders.js';
 import { miniCityPayload } from '../../game/miniCity.js';
+import { cityRules, confluxDirective } from '../../game/cityRules.js';
 import { mountFreeformLab } from './freeformLab.js';
 import {
   validateTelegramInitData,
@@ -594,10 +594,8 @@ export function createWebServer({ config, app, runtime, storage }) {
             mana: domain.state?.mana ?? 0,
             tags: (domain.tags || []).map((t) => t.tagName || t.tagId),
             processes: domain.state?.pendingActions || [],
-            standingOrders: (domain.state?.modifiers || []).map((m) => ({
-              ...m,
-              remainingMonths: orderMonthsLeft(m.expiresTick, world?.tickIndex),
-            })),
+            standingRules: cityRules(domain),
+            confluxDirective: confluxDirective(domain),
             monthLog: domain.state?.monthLog || [],
             plotlines: (domain.plotlines || []).map(stripPlotSecrets),
             closedPlotlines: (domain.closedPlotlines || []).slice(-20).map(stripPlotSecrets),

@@ -1,9 +1,11 @@
 /**
- * Месяц города на новых рельсах: событий вне нитей не бывает.
+ * Месяц ПАРЫ на сопряжении. Одиночный город живёт в `dayLoop`/`worldLoop`
+ * непрерывным временем; сюда попадают только состыкованные домены, где месяц
+ * пока остаётся единицей общей доски.
  *
  * Движок считает ход дел, часы нитей, отбор битов и окраску; рассказчик
  * пишет хронику; оценщик статов читает записи месяца и ставит след.
- * См. docs/PLOTS.md и docs/STANDING_ORDERS.md.
+ * См. docs/PLOTS.md.
  */
 
 import { newId } from './ids.js';
@@ -34,14 +36,11 @@ import {
   applyQueuedEngineProgress,
   rehomeUnrelatedOnDomain,
 } from './plotEngine.js';
-import { planOrderTicks, pickOrderOutcome, expireTimedOrders } from './orders.js';
-import { resolvePendingOrders } from './orderSmith.js';
-import { fireConfluxDockOrder } from './orderDock.js';
-import { beatPlot, tickOrder, quietMonth, keepStories, fadeQuietPlot, plantStakedStory } from './storyteller.js';
+import { beatPlot, quietMonth, keepStories, fadeQuietPlot, plantStakedStory } from './storyteller.js';
+import { confluxDirective, fireConfluxDirective } from './cityRules.js';
 import { decideMonthSeed, applyMonthSeedTemps } from './seedChannels.js';
 import { resolveSuspenseLegacy } from './legacyResolver.js';
 import { scoreMonthStats, factsForStatJudge } from './statJudge.js';
-import { runSteward } from './steward.js';
 import { getLogger } from '../log.js';
 import { accrueMana } from './mana.js';
 import { DAYS_PER_MONTH } from './gameClock.js';
@@ -92,43 +91,38 @@ export async function resolveDomainMonth({
   const mirrorAdds = [];
   const flowAdds = [];
   const budget = createStatBudget(config);
+  const day = Math.max(0, Math.round(Number(world?.tickIndex) || 0)) * DAYS_PER_MONTH;
 
-  // 0. С четвёртого тихого месяца стюард заводит дело до хода месяца.
-  // Письмо пишет tickNews по хронике, не стюард.
-  const steward = await runSteward({
-    config,
-    runtime,
-    domain: working,
-    world,
-    log,
-  });
-  if (steward?.chronicleAdds?.length) chronicleAdds.push(...steward.chronicleAdds);
-
-  // 0b. Заявки на указы: карточки до тика нитей, чтобы «начиная сейчас» могло сработать в этом месяце.
-  const orderCards = await resolvePendingOrders({
-    config,
-    runtime,
-    domain: working,
-    world,
-    log,
-  });
-  const expiredOrders = expireTimedOrders(working, world.tickIndex);
-  for (const row of expiredOrders) {
-    const title = row.plot?.title || 'порядок';
-    const rule = String(row.modifier?.text || title).trim();
-    const fact = createLoreFact({
-      id: newId('lore'),
-      text: `Срок порядка «${title}» истёк. Правило больше не действует: ${rule}`,
-      tags: ['chronicle', 'order', 'expired'],
-      gameDateLabel: world.gameDate?.label,
-      tick: world.tickIndex,
-      author: 'order-expire',
-      importance: 'minor',
-      relatedPlotlineIds: row.plot?.id ? [row.plot.id] : [],
-    });
-    working.lore = working.lore || [];
-    working.lore.push(fact);
-    chronicleAdds.push(fact);
+  // 0. Наказ на сопряжение: одна стыковка — одно поручение, не поток.
+  if (conflux?.status === 'docked' && confluxDirective(working)) {
+    const fired =
+      String(working.state?.confluxDirectiveFiredId || '') === String(conflux.id)
+        ? { ok: false, error: 'already_fired' }
+        : fireConfluxDirective(working, {
+            day,
+            partnerName: partner?.name || null,
+            plotId: (conflux.plotlines || []).find((p) => p?.isMainConflux)?.id || null,
+          });
+    if (fired.ok) {
+      working.state.confluxDirectiveFiredId = String(conflux.id);
+      const who = fired.officer ? `${fired.officer.title} ${fired.officer.name}` : 'город';
+      const paused = fired.paused ? ` Прежнее дело «${fired.paused.summary}» встало на паузу.` : '';
+      const fact = createLoreFact({
+        id: newId('lore'),
+        text: `По наказу на сопряжение ${who} взялся за дело: ${fired.process.summary}.${paused}`,
+        tags: ['chronicle', 'conflux'],
+        gameDateLabel: world.gameDate?.label,
+        tick: world.tickIndex,
+        day,
+        author: 'engine:directive',
+        importance: 'major',
+        relatedPendingId: fired.process.id,
+      });
+      working.lore = working.lore || [];
+      working.lore.push(fact);
+      chronicleAdds.push(fact);
+      log.info('month.directive_fired', { process: fired.process.summary, paused: Boolean(fired.paused) });
+    }
   }
 
   // Пик месяца: то, с чего правитель начнёт письмо. Без него развязка тонет
@@ -199,8 +193,6 @@ export async function resolveDomainMonth({
       left: `${o.monthsLeftBefore}→${o.monthsLeft}`,
       finished: o.finished,
     })),
-    orderCards: orderCards.map((r) => r.action),
-    expiredOrders: expiredOrders.length,
     budget: { world: budget.world, player: budget.player },
   });
 
@@ -308,50 +300,6 @@ export async function resolveDomainMonth({
         closePlotline(working, beat.plotId, { tick: world.tickIndex, reason: 'fallback' });
         markChroniclePlotClosed(fact, { reason: 'fallback' });
       }
-    }
-  }
-
-  // 5. Указы: расписание и сопряжение — всегда, даже сверх лимита; вероятность — только в остаток слотов.
-  const orderPlan = planOrderTicks({
-    domain: working,
-    config,
-    slotsLeft: Math.max(0, cap - used),
-    tick: world.tickIndex,
-    conflux,
-  });
-  for (const item of orderPlan) {
-    const plot = findPlotline(working, item.plotId);
-    if (!plot) continue;
-    if (item.event === 'conflux_dock') {
-      const result = await fireConfluxDockOrder({
-        config,
-        runtime,
-        domain: working,
-        world,
-        plot,
-        conflux,
-        partner,
-        log,
-      });
-      if (result?.fact) {
-        chronicleAdds.push(result.fact);
-        used += 1;
-      }
-      continue;
-    }
-    const mode = pickOrderOutcome(working, cfg);
-    const result = await tickOrder({
-      config,
-      runtime,
-      domain: working,
-      world,
-      plot,
-      mode,
-      log,
-    });
-    if (result?.fact) {
-      chronicleAdds.push(result.fact);
-      used += 1;
     }
   }
 
@@ -482,10 +430,8 @@ export async function resolveDomainMonth({
     seedSource: seedDecision.source,
     seeded: Boolean(seedDecision.source),
     seedTemps: working.state?.seedTemp || null,
-    ordersPlanned: orderPlan.length,
     kept: kept ? { updated: kept.updated } : null,
     statsScored: scored?.scored ?? 0,
-    steward: steward?.act || null,
     highlight: highlight ? `${highlight.kind}: ${highlight.title}` : null,
     budgetSpent: { world: budget.spentWorld, player: budget.spentPlayer },
     stats: working.stats,
@@ -493,5 +439,5 @@ export async function resolveDomainMonth({
 
   if (conflux) dehydrateDomainToConflux(working, conflux);
 
-  return { domain: working, chronicleAdds, mirrorAdds, flowAdds, highlight, stewardActs: steward?.act ? [steward.act] : [] };
+  return { domain: working, chronicleAdds, mirrorAdds, flowAdds, highlight, stewardActs: [] };
 }

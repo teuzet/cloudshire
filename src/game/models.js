@@ -1,6 +1,5 @@
 import { newId } from './ids.js';
 import { seedWorldNamePool, normalizeNamePool } from './names.js';
-import { normalizeOrders } from './orders.js';
 import { stampPersonAge } from './ages.js';
 import { normalizeCityEntities } from './cityEntities.js';
 import { applyClockAlignedCalendar } from './tickClock.js';
@@ -17,10 +16,8 @@ export function emptyState() {
   return {
     // Временные процессы месяца/сезона (бунт, фестиваль, осада…)
     events: [],
-    // Указы живут на plotline. Постоянный след города — в cityBrief (генезис), не здесь.
+    // Постоянный порядок города живёт в domain.modifiers (cityContext), не здесь.
     modifiers: [],
-    // Заявки правителя на создать/править/снять порядок. Карточку пишет агент в начале месяца.
-    pendingOrderRequests: [],
     pendingActions: [],
     // Короткие пометки о том, что случилось в разговорах этого месяца (dayNote).
     // Доносит день до тика и очищается после него.
@@ -46,7 +43,6 @@ export function normalizeDomain(domain) {
   } else {
     if (!Array.isArray(domain.state.events)) domain.state.events = [];
     if (!Array.isArray(domain.state.modifiers)) domain.state.modifiers = [];
-    if (!Array.isArray(domain.state.pendingOrderRequests)) domain.state.pendingOrderRequests = [];
     if (!Array.isArray(domain.state.pendingActions)) domain.state.pendingActions = [];
     if (!Array.isArray(domain.state.monthLog)) domain.state.monthLog = [];
     if (!Array.isArray(domain.state.quietPicks)) domain.state.quietPicks = [];
@@ -90,7 +86,6 @@ export function normalizeDomain(domain) {
   if (domain.cityEntities.length) domain.cityEntitiesReady = true;
   else if (typeof domain.cityEntitiesReady !== 'boolean') domain.cityEntitiesReady = false;
   ensurePatronFact(domain);
-  normalizeOrders(domain);
   normalizeCityModifiers(domain);
   // pendingActions = длительные процессы; нормализация полей — в processes.normalizeDomainProcesses
   if (Array.isArray(domain.characters)) {

@@ -1,9 +1,9 @@
 /**
  * Доска нитей и дел на конфлюксе: перевод с городов, видимость, просачивание, возврат.
- * Указы (kind: order) остаются на домене.
+ * Постоянный порядок города живёт в `domain.modifiers` и на доску не попадает.
  */
 
-import { createPlotline, isOrderPlot, clipPlotText, plotScale, PLOT_SUMMARY_MAX, PLOT_TITLE_MAX, refreshPlotAwareness } from './plotlines.js';
+import { createPlotline, clipPlotText, plotScale, PLOT_SUMMARY_MAX, PLOT_TITLE_MAX, refreshPlotAwareness } from './plotlines.js';
 import { newId } from './ids.js';
 import { createLoreFact } from './models.js';
 
@@ -18,7 +18,7 @@ function asIdList(raw) {
 }
 
 export function isSharedPlot(plot) {
-  if (!plot || isOrderPlot(plot)) return false;
+  if (!plot) return false;
   if (plot.isMainConflux) return true;
   return asIdList(plot.concernsDomainIds).length >= 2 || Boolean(plot.shared);
 }
@@ -32,7 +32,7 @@ export function plotHostId(plot) {
 }
 
 export function cityKnowsPlot(plot, domainId) {
-  if (!plot || isOrderPlot(plot)) return false;
+  if (!plot) return false;
   refreshPlotAwareness(plot);
   const id = String(domainId);
   if (plot.isMainConflux) return true;
@@ -42,7 +42,7 @@ export function cityKnowsPlot(plot, domainId) {
 }
 
 export function grantPlotAwareness(plot, domainId, conflux = null, domains = []) {
-  if (!plot || isOrderPlot(plot)) return plot;
+  if (!plot) return plot;
   refreshPlotAwareness(plot);
   const id = String(domainId);
   plot.plotAwareness[id] = true;
@@ -115,7 +115,6 @@ export function maybeGrantAwarenessFromKnownLore(conflux, domains = []) {
   normalizeConfluxBoard(conflux);
   let granted = 0;
   for (const plot of conflux.plotlines || []) {
-    if (isOrderPlot(plot)) continue;
     for (const domain of domains) {
       if (cityKnowsPlot(plot, domain.id)) continue;
       if (!allPlotChroniclesKnown(plot, conflux, domain.id)) continue;
@@ -141,7 +140,7 @@ export function activeNonIntelOwners(plot, conflux) {
 
 /** Derived: два города реально действуют в нити (не разведка). */
 export function isContested(plot, conflux) {
-  if (!plot || isOrderPlot(plot)) return false;
+  if (!plot) return false;
   return activeNonIntelOwners(plot, conflux).length >= 2;
 }
 
@@ -150,16 +149,14 @@ export function contestedPlots(conflux) {
 }
 
 export function confluxMonthPlots(conflux) {
-  return (conflux?.plotlines || []).filter((p) => {
-    if (isOrderPlot(p)) return false;
-    return Boolean(p.isMainConflux) || isContested(p, conflux);
-  });
+  return (conflux?.plotlines || []).filter(
+    (p) => Boolean(p.isMainConflux) || isContested(p, conflux),
+  );
 }
 
 export function nativePlotsForMonth(conflux, domainId) {
   const id = String(domainId);
   return (conflux?.plotlines || []).filter((p) => {
-    if (isOrderPlot(p)) return false;
     if (p.isMainConflux) return false;
     if (isContested(p, conflux)) return false;
     return plotHostId(p) === id;
@@ -204,7 +201,7 @@ export function leakedTracesForViewer(conflux, viewerId, domains = []) {
     const plot =
       findPlotByChronicleId(conflux, fact.leakedFromId || fact.id, domains) ||
       ((conflux.plotlines || []).find((p) => p.id === fact.sourcePlotId) || null);
-    if (!plot || isOrderPlot(plot) || cityKnowsPlot(plot, viewerId)) continue;
+    if (!plot || cityKnowsPlot(plot, viewerId)) continue;
     const key = `${plot.id}:${fact.id}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -301,7 +298,7 @@ export function averageAwareness(conflux) {
 }
 
 export function sharePlotWithDomain(plot, domainId, { reason = 'process', conflux = null, domains = [] } = {}) {
-  if (!plot || isOrderPlot(plot)) return plot;
+  if (!plot) return plot;
   const id = String(domainId);
   plot.concernsDomainIds = asIdList(plot.concernsDomainIds);
   if (!plot.concernsDomainIds.includes(id)) plot.concernsDomainIds.push(id);
@@ -317,7 +314,7 @@ export function sharePlotWithDomain(plot, domainId, { reason = 'process', conflu
  * Голая хроника соседу: без карточки сюжета. Полное знание — только если известны все записи нити.
  */
 export function maybeLeakChronicle({ plot, fact, conflux, viewerId, viewerDomain = null, domains = [], rng = Math.random } = {}) {
-  if (!plot || !fact || isOrderPlot(plot)) return false;
+  if (!plot || !fact) return false;
   if (conflux?.status !== 'docked') return false;
   if (cityKnowsPlot(plot, viewerId)) return false;
   const chance = leakChanceFromImportance(plotScale(plot), averageAwareness(conflux));
@@ -354,7 +351,7 @@ export function maybeLeakChronicle({ plot, fact, conflux, viewerId, viewerDomain
 
 /** Совместимость: бросок «просочится ли что-то», без шаринга карточки. */
 export function maybeLeakPlot(plot, conflux, otherDomainId, rng = Math.random) {
-  if (!plot || isOrderPlot(plot)) return false;
+  if (!plot) return false;
   if (conflux?.status !== 'docked') return false;
   if (cityKnowsPlot(plot, otherDomainId)) return false;
   const chance = leakChanceFromImportance(plotScale(plot), averageAwareness(conflux));
@@ -362,7 +359,7 @@ export function maybeLeakPlot(plot, conflux, otherDomainId, rng = Math.random) {
 }
 
 export function stampPlotOnConflux(plot, conflux, domainId) {
-  if (!plot || isOrderPlot(plot)) return plot;
+  if (!plot) return plot;
   plot.confluxId = conflux.id;
   plot.hostDomainId = plot.hostDomainId || String(domainId);
   plot.concernsDomainIds = asIdList(plot.concernsDomainIds);
@@ -472,7 +469,7 @@ export function revealKnownLore({ conflux, viewerId, partner, rng = Math.random 
 }
 
 export function plotVisibleToRuler(plot, domainId, conflux) {
-  if (!plot || isOrderPlot(plot)) return false;
+  if (!plot) return false;
   void conflux;
   return cityKnowsPlot(plot, domainId);
 }
@@ -500,20 +497,18 @@ export function processesOwnedBy(conflux, domainId) {
 }
 
 /**
- * Собрать рабочую доску на домене: указы остаются, нити конфлюкса — теми же объектами.
+ * Собрать рабочую доску на домене: нити конфлюкса приходят теми же объектами.
  */
 export function hydrateDomainFromConflux(domain, conflux, { mode = 'month' } = {}) {
   if (!domain || !conflux) return domain;
   normalizeConfluxBoard(conflux);
   const closedIds = new Set((conflux.closedPlotlines || []).map((p) => p?.id).filter(Boolean));
-  const orders = (domain.plotlines || []).filter((p) => isOrderPlot(p));
   const extra = (
     mode === 'ruler'
       ? (conflux.plotlines || []).filter((p) => plotVisibleToRuler(p, domain.id, conflux))
       : localPlotsForMonth(conflux, domain.id)
   ).filter((p) => p && !closedIds.has(p.id));
-  const seenPlots = new Set(orders.map((p) => p.id));
-  domain.plotlines = [...orders, ...extra.filter((p) => !seenPlots.has(p.id))];
+  domain.plotlines = [...extra];
 
   const extraProcIds = new Set();
   for (const p of extra) {
@@ -527,10 +522,7 @@ export function hydrateDomainFromConflux(domain, conflux, { mode = 'month' } = {
   const local = (domain.state.pendingActions || []).filter((pr) => !pr.confluxId);
   const seen = new Set(local.map((pr) => pr.id));
   domain.state.pendingActions = [...local, ...borrowed.filter((pr) => !seen.has(pr.id))];
-  domain.closedPlotlines = [
-    ...(domain.closedPlotlines || []).filter((p) => isOrderPlot(p)),
-    ...(conflux.closedPlotlines || []),
-  ];
+  domain.closedPlotlines = [...(conflux.closedPlotlines || [])];
   return domain;
 }
 
@@ -538,38 +530,30 @@ export function stampNewBoardItems(domain, conflux) {
   if (!domain || !conflux) return;
   const existing = new Set((conflux.plotlines || []).map((p) => p.id));
   for (const p of domain.plotlines || []) {
-    if (isOrderPlot(p)) continue;
     if (!p.confluxId && !existing.has(p.id)) stampPlotOnConflux(p, conflux, domain.id);
   }
   for (const pr of domain.state?.pendingActions || []) {
     const plot = (domain.plotlines || []).find((p) => asIdList(p.relatedProcessIds).includes(String(pr.id)));
-    if (plot && isOrderPlot(plot)) continue;
-    if (pr.confluxId || (plot && !isOrderPlot(plot))) {
+    if (pr.confluxId || plot) {
       stampProcessOnConflux(pr, conflux, domain.id);
     }
   }
 }
 
-/** Забрать нити/дела обратно на конфлюкс; на домене остаются только указы. */
+/** Забрать нити и дела обратно на конфлюкс: доска домена на время стыковки пуста. */
 export function dehydrateDomainToConflux(domain, conflux) {
   if (!domain || !conflux) return;
   normalizeConfluxBoard(conflux);
   stampNewBoardItems(domain, conflux);
 
-  const orders = [];
-  const movedPlots = [];
-  for (const p of domain.plotlines || []) {
-    if (isOrderPlot(p)) orders.push(p);
-    else movedPlots.push(p);
-  }
-  domain.plotlines = orders;
+  const movedPlots = [...(domain.plotlines || [])];
+  domain.plotlines = [];
 
   const closedById = new Map();
   for (const p of conflux.closedPlotlines || []) {
     if (p?.id) closedById.set(p.id, p);
   }
   for (const p of domain.closedPlotlines || []) {
-    if (isOrderPlot(p)) continue;
     if (!p?.id) continue;
     closedById.set(p.id, p);
   }
@@ -588,35 +572,26 @@ export function dehydrateDomainToConflux(domain, conflux) {
   conflux.plotlines = [...plotById.values()];
 
   moveDomainProcessesToConflux(domain, conflux);
-  domain.closedPlotlines = (domain.closedPlotlines || []).filter((p) => isOrderPlot(p));
+  domain.closedPlotlines = [];
 }
 
 export function takeDomainBoardIntoConflux(domain, conflux) {
   normalizeConfluxBoard(conflux);
-  const keepPlots = [];
   const existingPlotIds = new Set((conflux.plotlines || []).map((p) => p.id));
   for (const p of domain.plotlines || []) {
-    if (isOrderPlot(p)) {
-      keepPlots.push(p);
-      continue;
-    }
     stampPlotOnConflux(p, conflux, domain.id);
     if (!existingPlotIds.has(p.id)) {
       conflux.plotlines.push(p);
       existingPlotIds.add(p.id);
     }
   }
-  domain.plotlines = keepPlots;
+  domain.plotlines = [];
 
-  const keepClosed = [];
   for (const p of domain.closedPlotlines || []) {
-    if (isOrderPlot(p)) keepClosed.push(p);
-    else {
-      p.confluxId = conflux.id;
-      if (!conflux.closedPlotlines.some((x) => x.id === p.id)) conflux.closedPlotlines.push(p);
-    }
+    p.confluxId = conflux.id;
+    if (!conflux.closedPlotlines.some((x) => x.id === p.id)) conflux.closedPlotlines.push(p);
   }
-  domain.closedPlotlines = keepClosed;
+  domain.closedPlotlines = [];
 
   moveDomainProcessesToConflux(domain, conflux);
 }

@@ -5,7 +5,6 @@ import {
   findPlotline,
   closePlotline,
   plotHasActiveProcess,
-  isOrderPlot,
   attachChronicleToPlotlines,
 } from './plotlines.js';
 import {
@@ -30,7 +29,7 @@ import { scoreMonthStats, factsForStatJudge } from './statJudge.js';
 import { realignFinishedOutcomes } from './plotAlign.js';
 
 function storyPlots(conflux) {
-  return (conflux?.plotlines || []).filter((p) => p && !isOrderPlot(p));
+  return (conflux?.plotlines || []).filter(Boolean);
 }
 
 function boardFromPlots(conflux, domains, plots) {

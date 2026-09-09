@@ -50,8 +50,13 @@ function threat(p, opts = {}) {
   return t;
 }
 
-function domain(extra = {}) {
-  return { id: 'd1', chronicle: [], state: { dialogue: [] }, ...extra };
+/** Домен как в игре: хроника — теги в lore, разговор — dialogHistory жреца. */
+function domain({ chronicle = [], dialogue = [] } = {}) {
+  return {
+    id: 'd1',
+    lore: chronicle.map((f) => ({ tags: ['chronicle'], ...f })),
+    characters: [{ id: 'priest', dialogHistory: dialogue }],
+  };
 }
 
 test('поводы и просьбы — закрытые словари', () => {
@@ -81,10 +86,12 @@ test('хроника нити берётся только по своей нит
       { id: 'f1', text: 'своё', sourcePlotId: 'p1' },
       { id: 'f2', text: 'чужое', sourcePlotId: 'p2' },
       { id: 'f3', text: 'ничьё' },
+      { id: 'f4', text: 'своё, но через связь', relatedPlotlineIds: ['p1'] },
+      { id: 'f5', text: 'не хроника', tags: ['fact'], sourcePlotId: 'p1' },
     ],
   });
   const res = threadHistory(d, 'p1');
-  assert.deepEqual(res.facts.map((f) => f.id), ['f1']);
+  assert.deepEqual(res.facts.map((f) => f.id), ['f1', 'f4']);
   assert.equal(res.truncated, false);
 });
 
@@ -105,12 +112,10 @@ test('разросшаяся нить урезается до хвоста', () 
 
 test('в контекст идёт короткий хвост разговора', () => {
   const d = domain({
-    state: {
-      dialogue: Array.from({ length: 30 }, (_, i) => ({
-        role: i % 2 ? 'assistant' : 'user',
-        content: `реплика ${i}`,
-      })),
-    },
+    dialogue: Array.from({ length: 30 }, (_, i) => ({
+      role: i % 2 ? 'assistant' : 'user',
+      content: `реплика ${i}`,
+    })),
   });
   const chat = recentChat(d);
   assert.equal(chat.length, 10);
@@ -152,7 +157,7 @@ test('промпт несёт повод, событие, нить и одну �
   threat(p, { total: 12, text: 'обвал северного крыла' });
   const d = domain({
     chronicle: [{ id: 'f1', text: 'подпорки поставлены', sourcePlotId: 'p1' }],
-    state: { dialogue: [{ role: 'user', content: 'что там со столбом?' }] },
+    dialogue: [{ role: 'user', content: 'что там со столбом?' }],
   });
   const ctx = buildHeraldContext({
     domain: d,

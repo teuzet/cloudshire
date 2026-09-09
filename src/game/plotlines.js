@@ -28,7 +28,7 @@ function clamp100(n, fallback = 0) {
 }
 
 export function ensurePlotStatBudget(plot, config = null) {
-  if (!plot || plot.kind === 'order' || plot.kind === 'errand') return plot;
+  if (!plot || plot.kind === 'errand') return plot;
   const budget = gravityStatBudget(plot.gravity);
   if (!plot.stats || typeof plot.stats !== 'object') plot.stats = {};
   if (!Number.isFinite(Number(plot.stats.budget))) plot.stats.budget = budget;
@@ -38,7 +38,7 @@ export function ensurePlotStatBudget(plot, config = null) {
 
 /** Сила хроники истории. Стартовая доля remaining не ест. */
 export function plotStatForce(plot, { opening = false, config = null } = {}) {
-  if (!plot || plot.kind === 'order' || plot.kind === 'errand') return 0;
+  if (!plot || plot.kind === 'errand') return 0;
   ensurePlotStatBudget(plot, config);
   const share = Number(config?.tick?.plot?.stats?.beatShare ?? 0.25);
   const openingShare = Number(config?.tick?.plot?.stats?.openingShare ?? 0.25);
@@ -66,7 +66,7 @@ export const PLOT_ENDING_MAX = 600;
 export const PLOT_TITLE_MAX = 120;
 export { clipText as clipPlotText };
 
-export const PLOT_KINDS = ['story', 'errand', 'order'];
+export const PLOT_KINDS = ['story', 'errand'];
 export const STORY_TYPES = ['story', 'freeform', 'default'];
 /** @deprecated трёхтакт удалён; оставлено, чтобы старые импорты не падали. */
 export const THREE_ACT_TYPES = [];
@@ -349,10 +349,6 @@ function storyActState(p = {}) {
   return { storyType: type === 'freeform' ? 'freeform' : 'default' };
 }
 
-export function isOrderPlot(plot) {
-  return plot?.kind === 'order';
-}
-
 /** Бинарная осведомлённость города о нити как о полной линии. */
 export function refreshPlotAwareness(plot) {
   if (!plot || typeof plot !== 'object') return plot;
@@ -385,41 +381,6 @@ function normalizePlotAwarenessMap(plot) {
     }
   }
   return next;
-}
-
-function clampChance(n, fallback = 0.2) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return fallback;
-  return Math.max(0, Math.min(1, v));
-}
-
-function orderCadence(p, config = null) {
-  const fallback = Number(config?.tick?.plot?.orders?.defaultChance ?? 0.2);
-  const fireOn = p?.fireOn === 'conflux_dock' ? 'conflux_dock' : null;
-  const every = Math.round(Number(p?.scheduleEveryMonths));
-  const scheduled = !fireOn && Number.isInteger(every) && every >= 1 && every <= 12;
-  const due = Number(p?.nextDueTick);
-  const lastFired = p?.lastFiredConfluxId ? String(p.lastFiredConfluxId) : null;
-  return {
-    modifierId: p?.modifierId ? String(p.modifierId) : null,
-    orderText: String(p?.orderText || '').trim(),
-    fireOn,
-    lastFiredConfluxId: fireOn ? lastFired : null,
-    // Регулярность, вероятность и сопряжение взаимоисключающи.
-    fireChance: fireOn || scheduled ? 0 : clampChance(p?.fireChance, Number.isFinite(fallback) ? fallback : 0.2),
-    scheduleEveryMonths: scheduled ? every : null,
-    nextDueTick: fireOn ? null : Number.isInteger(due) ? due : null,
-    durationMonths: (() => {
-      const n = Math.round(Number(p?.durationMonths));
-      return Number.isInteger(n) && n >= 1 ? Math.min(36, n) : null;
-    })(),
-    expiresTick: (() => {
-      const n = Math.round(Number(p?.durationMonths));
-      if (!(Number.isInteger(n) && n >= 1) || p?.expiresTick == null || p.expiresTick === '') return null;
-      const exp = Number(p.expiresTick);
-      return Number.isInteger(exp) ? exp : null;
-    })(),
-  };
 }
 
 export function plotConfig(config) {
@@ -578,9 +539,6 @@ export function plotConfig(config) {
           }))
           .filter((r) => r.role)
       : [],
-    orders: {
-      defaultChance: Math.max(0, Math.min(1, Number(p.orders?.defaultChance ?? 0.2))),
-    },
     acts: {
       maxEscalations: Math.max(1, Math.round(Number(p.acts?.maxEscalations ?? 3))),
       worsenMin: Number(p.acts?.worsenMin ?? 1.1),
@@ -655,7 +613,6 @@ function applyPlotShape(p, config = null) {
   } else {
     p.closeWhen = clipText(p.closeWhen, PLOT_HOOK_MAX);
   }
-  if (p.kind === 'order') Object.assign(p, orderCadence(p, config));
   return p;
 }
 
@@ -700,15 +657,6 @@ export function createPlotline({
   concernsDomainIds = [],
   shared = false,
   isMainConflux = false,
-  modifierId = null,
-  orderText = '',
-  fireChance = null,
-  scheduleEveryMonths = null,
-  nextDueTick = null,
-  fireOn = null,
-  lastFiredConfluxId = null,
-  durationMonths = null,
-  expiresTick = null,
   storyType = null,
   urgency = null,
   gravity = null,
@@ -733,7 +681,7 @@ export function createPlotline({
       storyType === 'suspense');
   const plot = {
     id: newId('plot'),
-    title: clipText(title || (resolvedKind === 'order' ? 'Порядок' : 'Сюжет'), PLOT_TITLE_MAX),
+    title: clipText(title || 'Сюжет', PLOT_TITLE_MAX),
     synopsis: clipText(synopsis || summary, PLOT_SUMMARY_MAX),
     closeWhen:
       staked || Array.isArray(closeWhen)
@@ -765,12 +713,6 @@ export function createPlotline({
     createdTick: tick,
     lastBeatTick: null,
     beatCount: 0,
-    ...(resolvedKind === 'order'
-      ? orderCadence(
-          { modifierId, orderText, fireChance, scheduleEveryMonths, nextDueTick, fireOn, lastFiredConfluxId, durationMonths, expiresTick },
-          config,
-        )
-      : {}),
     ...storyActState({
       storyType,
       urgency,
@@ -827,7 +769,6 @@ export function isOverdue(plotline) {
  * упоминаний нет (температура остыла). Иначе срок просто ждёт.
  */
 export function plotCanFade(domain, plot, cfg) {
-  if (isOrderPlot(plot)) return false;
   if (isStakedStory(plot) || isFreeformPlot(plot)) return false;
   if (!isOverdue(plot)) return false;
   if (plotHasLiveProcess(domain, plot)) return false;
@@ -839,13 +780,11 @@ export function countOpen(domain) {
   const list = domain?.plotlines || [];
   const stories = list.filter((p) => p.kind === 'story').length;
   const errands = list.filter((p) => p.kind === 'errand').length;
-  const orders = list.filter((p) => p.kind === 'order').length;
   return {
-    // Доска историй: errand и указы слот не занимают.
+    // Доска историй: поручения слот не занимают.
     total: stories,
     stories,
     errands,
-    orders,
     all: list.length,
   };
 }
@@ -971,19 +910,6 @@ function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } =
     sharedReason: plot.sharedReason || null,
     plotAwareness: normalizePlotAwarenessMap(plot),
     ...storyActState(plot),
-    ...(plot.kind === 'order'
-      ? {
-          modifierId: plot.modifierId || null,
-          fireChance: plot.fireChance,
-          scheduleEveryMonths: plot.scheduleEveryMonths ?? null,
-          nextDueTick: plot.nextDueTick ?? null,
-          fireOn: plot.fireOn || null,
-          lastFiredConfluxId: plot.lastFiredConfluxId || null,
-          durationMonths: plot.durationMonths ?? null,
-          expiresTick: plot.expiresTick ?? null,
-          orderText: plot.orderText || '',
-        }
-      : {}),
     status: 'closed',
     createdTick: plot.createdTick ?? null,
     lastBeatTick: plot.lastBeatTick ?? null,
@@ -1044,7 +970,6 @@ export function reopenClosedPlotline(domain, closedOrId) {
     lastBeatTick: closed.lastBeatTick == null ? null : Number(closed.lastBeatTick),
     beatCount: Math.max(0, Math.round(Number(closed.beatCount) || 0)),
     ...storyActState(closed),
-    ...(closed.kind === 'order' ? orderCadence(closed) : {}),
   };
   stripStalePlotFields(plot);
   domain.plotlines = domain.plotlines || [];
@@ -1063,7 +988,6 @@ export function advancePlotClocks(domain, cfg) {
   normalizePlotlines(domain);
   const decay = cfg?.temperature?.decayPerTick ?? 8;
   for (const p of domain.plotlines) {
-    if (p.kind === 'order') continue;
     p.ageMonths += 1;
     void decay;
   }
@@ -1867,13 +1791,8 @@ export function formatBoardForPrompt(domain) {
       const stats = p.relatedStats.length ? ` | в игре: ${p.relatedStats.join('+')}` : '';
       const liveIds = liveRelatedProcessIds(domain, p);
       const proc = liveIds.length ? ` | дела: ${liveIds.join(', ')}` : '';
-      const kindLabel = p.kind === 'errand' ? '(дело)' : p.kind === 'order' ? '(порядок)' : '';
-      const term =
-        p.kind === 'order'
-          ? p.durationMonths
-            ? `срок=${p.durationMonths}мес.${p.expiresTick != null ? ` до тика ${p.expiresTick}` : ''}`
-            : 'бессрочно'
-          : `возраст=${p.ageMonths}/${p.maxAgeMonths}`;
+      const kindLabel = p.kind === 'errand' ? '(дело)' : '';
+      const term = `возраст=${p.ageMonths}/${p.maxAgeMonths}`;
       const meters = isStakedStory(p)
         ? `urgency=${p.urgency} gravity=${p.gravity} depth=${p.depth ?? 0}/${p.maxDepth ?? '—'} тип=story`
         : `T=${p.temperature} тип=${p.storyType || 'default'}`;
@@ -1904,29 +1823,22 @@ export function formatBoardForSpeech(domain, { statsFeel = null, max = 8, viewer
       const foreign =
         Boolean(p.confluxId) &&
         !p.isMainConflux &&
-        !isOrderPlot(p) &&
         (p.concernsDomainIds || []).length > 0 &&
         !(p.concernsDomainIds || []).includes(viewer);
       const kind = p.kind === 'errand'
         ? 'поручение'
-        : p.kind === 'order'
-          ? 'порядок'
-          : p.isMainConflux
-            ? 'сопряжение'
-            : p.shared && viewerKnows
-              ? 'общая история'
-              : foreign && viewerKnows
-                ? 'история соседа'
-                : 'история';
+        : p.isMainConflux
+          ? 'сопряжение'
+          : p.shared && viewerKnows
+            ? 'общая история'
+            : foreign && viewerKnows
+              ? 'история соседа'
+              : 'история';
       const duty = plotHasLiveProcess(domain, p)
         ? 'дело уже идёт'
-        : p.kind === 'order'
-          ? p.durationMonths
-            ? `действует ${p.durationMonths} мес.`
-            : 'действует бессрочно'
-          : p.kind === 'errand'
-            ? 'дела нет'
-            : 'поручения ещё нет';
+        : p.kind === 'errand'
+          ? 'дела нет'
+          : 'поручения ещё нет';
       const syn = clipText(p.synopsis || 'только началось', 180);
       const toward =
         p.kind === 'story' && p.closeWhen ? ` К чему идёт: ${clipText(p.closeWhen, 120)}.` : '';

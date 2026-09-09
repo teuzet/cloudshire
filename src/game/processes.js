@@ -112,7 +112,14 @@ function appendText(old, extra) {
   return `${a} ${b}`;
 }
 
-export function processIsFresh(action) {
+/**
+ * Дело ещё не сдвинулось — можно переписать целиком.
+ * В непрерывном времени это «сегодня и начали»; месяцы остаются для старых записей.
+ */
+export function processIsFresh(action, day = null) {
+  if (Number.isFinite(Number(day)) && Number.isFinite(Number(action?.startDay))) {
+    return Math.round(Number(day)) <= Math.round(Number(action.startDay));
+  }
   return Math.max(0, Number(action?.monthsDone) || 0) === 0;
 }
 
@@ -227,11 +234,11 @@ export function applyObjectiveSchedule(action, objectiveMonths, remainingMonths 
  */
 export function reviseProcess(
   action,
-  { summary, detail, addDetail, remainingMonths, linkedStats, characterNote, goal } = {},
+  { summary, detail, addDetail, remainingMonths, linkedStats, characterNote, goal, day = null } = {},
   config = null,
 ) {
   normalizeProcess(action, config);
-  const fresh = processIsFresh(action);
+  const fresh = processIsFresh(action, day);
   if (fresh) {
     if (summary) action.summary = String(summary).trim();
     if (detail) action.detail = String(detail).trim();
@@ -481,11 +488,20 @@ function closedProcessOutcome(process) {
 }
 
 /** Недавно закрытые дела: правитель должен помнить итог, а не «не знаю». */
-export function recentlyClosedProcesses(domain, currentTick, { withinTicks = 2 } = {}) {
+export function recentlyClosedProcesses(
+  domain,
+  currentTick,
+  { withinTicks = 2, day = null, withinDays = 45 } = {},
+) {
   const tick = Number(currentTick);
+  const today = Number(day);
   return (domain.state?.pendingActions || [])
     .filter((a) => a.status && a.status !== 'active')
     .filter((a) => {
+      const closedDay = Number(a.resolvedDay);
+      if (Number.isFinite(today) && Number.isFinite(closedDay)) {
+        return today - closedDay <= withinDays;
+      }
       if (!Number.isFinite(tick)) return false;
       const closed = Number(a.resolvedTick);
       return Number.isFinite(closed) && tick - closed <= withinTicks;

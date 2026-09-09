@@ -237,6 +237,16 @@ export function knownThreatsForSpeech(plot, day) {
     .sort((a, b) => remainingDays(findThreat(plot, a.id), day) - remainingDays(findThreat(plot, b.id), day));
 }
 
+/** Ближайшая известная беда (без нейтральных разрешений) — движку, с днями. */
+export function nearestKnownDanger(plot, day) {
+  let best = null;
+  for (const t of liveThreats(plot)) {
+    if (!t.known || t.outcome === 'neutral') continue;
+    if (!best || remainingDays(t, day) < remainingDays(best, day)) best = t;
+  }
+  return best;
+}
+
 // ──────────────────────────── срабатывание ────────────────────────────
 
 /**

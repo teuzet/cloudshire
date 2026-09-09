@@ -8,7 +8,6 @@
  *   storyBeat     — default: поручения, старые нити, зеркала (агент как был)
  *   suspenseBeat  — бит саспенса
  *   mysteryBeat   — бит тайны (граф только у этого агента)
- *   orderBeat     — тик постоянного порядка
  *   storyKeep     — синопсис локальных нитей по свежей хронике
  *   confluxStoryKeep — синопсис общих нитей сопряжения
  *   fillerNews    — быт, когда сюжета не было
@@ -56,10 +55,8 @@ import {
 } from './suspenseSeed.js';
 import { normalizeDiscoveryLadder, normalizeHiddenPremises, hiddenPremisesBudget } from './suspenseGraph.js';
 import { sharedPlots } from './confluxBoard.js';
-import { pickOrderOutcome, markOrderFired } from './orders.js';
 import { TINT_LABELS, pickRollStat, rollTint, formatFinishForPrompt } from './rolls.js';
 import { offerNames, formatOfferedNamesForPrompt, bindCharacterNames, takeNameAtRandom, seedWorldNamePool } from './names.js';
-import { assignPlotStakes } from './plotStakes.js';
 import { formatActMoveForPrompt } from './storyActs.js';
 import { brainstormFreeformPack } from './freeformBrainstorm.js';
 import { assembleFreeformLabStory } from './freeformAssemble.js';
@@ -546,7 +543,6 @@ async function seedSuspensePlot({
         axes: card.axes,
         annotationId: card.id,
       });
-      await assignPlotStakes({ runtime, domain, plot, world, log });
 
       const fact = pushChronicle(domain, {
         text: asked.entry,
@@ -879,7 +875,6 @@ async function seedMysteryPlot({
       axes: card.axes,
       annotationId: card.id,
     });
-    await assignPlotStakes({ runtime, domain, plot, world, log });
 
     const fact = pushChronicle(domain, {
       text: asked.entry,
@@ -1990,239 +1985,6 @@ function statValue(domain, statId) {
   return Number.isFinite(v) ? v : 50;
 }
 
-/**
- * Тик постоянного порядка. Формат (история | хроника) уже брошен движком.
- * Историю пишем как обычный story; хронику — на нити указа. Синопсис указа не трогаем.
- */
-export async function tickOrder({
-  config,
-  runtime,
-  domain,
-  world,
-  plot,
-  mode,
-  event = null,
-  log: parentLog,
-}) {
-  if (!plot || plot.kind !== 'order') return null;
-  const log = (parentLog || getLogger()).child({ scope: 'storyteller.order', domainId: domain.id });
-  const cfg = plotConfig(config);
-  const resolvedMode = mode === 'story' || mode === 'chronicle' ? mode : pickOrderOutcome(domain, cfg);
-  const maxChars = chronicleMaxChars(config);
-  const statIds = (config.stats || []).map((s) => s.id).join(', ');
-  const draft = { data: null };
-
-  const statId = pickRollStat(plot.relatedStats, Math.random, cfg.roll);
-  const tintRoll = rollTint(statValue(domain, statId), Math.random, cfg.roll);
-  const tint = tintRoll.tint;
-  const ruler = rulerName(domain);
-  const prior = priorPlotChronicle(domain, plot);
-  const toolName = resolvedMode === 'story' ? 'submit_order_story' : 'submit_order_chronicle';
-
-  const chronicleFields = {
-    entry: {
-      type: 'string',
-      description: `Что случилось в этом месяце из-за этого порядка, до ${maxChars} символов. Сухой факт.`,
-    },
-    relatedStats: {
-      type: 'array',
-      items: { type: 'string' },
-      description: `Каких сторон жизни касается, 1–3 из: ${statIds}. Первый — главный.`,
-    },
-    newCharacters: CHARACTERS_SCHEMA,
-  };
-
-  const tools =
-    resolvedMode === 'story'
-      ? [
-          {
-            name: 'submit_order_story',
-            description: 'Завязка обычной истории, которая выросла из этого постоянного порядка.',
-            parameters: {
-              type: 'object',
-              required: ['title', 'synopsis', 'closeWhen', 'maxAgeMonths', 'relatedStats', 'entry'],
-              properties: {
-                title: { type: 'string', description: 'Название, 1–4 слова' },
-                synopsis: {
-                  type: 'string',
-                  description: `Как сейчас обстоят дела, до ${PLOT_SUMMARY_MAX} символов. Только сжатие уже установленного, без прогноза.`,
-                },
-                closeWhen: {
-                  type: 'string',
-                  description: `Что должно произойти, чтобы эту историю закрыть. До ${PLOT_HOOK_MAX} символов.`,
-                },
-                maxAgeMonths: {
-                  type: 'number',
-                  description: 'Сколько месяцев история живёт без внимания (1–12).',
-                },
-                ...chronicleFields,
-              },
-            },
-            handler: async (args) => {
-              if (!String(args.title || '').trim() || !String(args.entry || '').trim() || !String(args.synopsis || '').trim()) {
-                return toolFail('empty', 'Нужны название, синопсис и запись хроники.');
-              }
-              draft.data = args;
-              return { ok: true };
-            },
-          },
-        ]
-      : [
-          {
-            name: 'submit_order_chronicle',
-            description: 'Запись хроники о том, как в этом месяце жил постоянный порядок.',
-            parameters: {
-              type: 'object',
-              required: ['entry'],
-              properties: chronicleFields,
-            },
-            handler: async (args) => {
-              if (!String(args.entry || '').trim()) return toolFail('empty', 'Нужна запись хроники.');
-              draft.data = args;
-              return { ok: true };
-            },
-          },
-        ];
-
-  const rule = plot.orderText || plot.title;
-
-  await runtime.run({
-    agentId: 'orderBeat',
-    tools,
-    maxTurns: 3,
-    toolChoice: { type: 'function', function: { name: toolName } },
-    log,
-    scene: resolvedMode === 'story' ? 'order_story' : 'order_chronicle',
-    domainId: domain.id,
-    extraSystem: [
-      extraCity(domain, [
-        ruler ? `Правитель города — ${ruler}. Этого человека в newCharacters не заводи.` : null,
-        `Известные люди города:\n${formatCastForPrompt(domain.lore, { limit: 12 })}`,
-      ]),
-    ]
-      .filter(Boolean)
-      .join('\n\n'),
-    userMessages: [
-      {
-        role: 'user',
-        content: [
-          `Постоянный порядок «${plot.title}» (${world.gameDate.label}).`,
-          `Правило: ${rule}`,
-          `Как устроен: ${plot.synopsis || 'только объявлен'}`,
-          plot.closeWhen ? `Порядок снимут, когда: ${plot.closeWhen}` : null,
-          prior.length ? `\nУже писали про этот порядок:\n${prior.join('\n')}` : null,
-          event?.kind === 'conflux_dock'
-            ? [
-                '',
-                'Сейчас сопряжение с соседним островом. Этот порядок срабатывает на сопряжении, не по календарю.',
-                event.partnerName ? `Соседний остров: «${event.partnerName}».` : null,
-                event.processSummary
-                  ? `Город уже начал дело: «${event.processSummary}». Хроника — что отправили и зачем, сухим фактом.`
-                  : 'Напиши, как город исполнил это правило на этой встрече.',
-              ]
-                .filter(Boolean)
-                .join(' ')
-            : null,
-          '',
-          `ИСХОД ЭТОГО МЕСЯЦА (решено броском, не спорь): ${TINT_LABELS[tint]}.`,
-          resolvedMode === 'story'
-            ? [
-                'Формат уже решён: заведи ОБЫЧНУЮ историю, которая выросла из этого порядка.',
-                'Это не продолжение карточки указа и не новое правило. Конкретный случай: бунт из-за налога, ложный избранный, саботаж осмотра.',
-                'Первая запись — что увидели в этом месяце. Синопсис — сжатие уже установленного у ЭТОЙ истории, не у указа.',
-                'Карточку самого порядка не переписывай.',
-                'Вызови submit_order_story.',
-              ].join(' ')
-            : [
-                'Формат уже решён: одна запись хроники на нити этого порядка, без новой истории.',
-                event?.kind === 'conflux_dock'
-                  ? 'Это исполнение постоянного правила на сопряжении. Не заводи отдельную интригу и не пиши завязку новой истории.'
-                  : 'Покажи, как правило отозвалось в жизни города в этом месяце. Не развивай интригу к развязке.',
-                'Карточку порядка не переписывай.',
-                'Вызови submit_order_chronicle.',
-              ].join(' '),
-        ]
-          .filter(Boolean)
-          .join('\n'),
-      },
-    ],
-  });
-
-  if (!draft.data) {
-    log.warn('storyteller.order_failed', { plotId: plot.id, mode: resolvedMode });
-    const fact = pushChronicle(domain, {
-      text: `Порядок «${plot.title}» снова дал о себе знать.`,
-      importance: 'minor',
-      world,
-      plotIds: [plot.id],
-      author: 'storyteller:order-fallback',
-    });
-    markOrderFired(plot, world.tickIndex, { confluxId: event?.confluxId });
-    return { fact, plot, mode: 'chronicle', spawned: null };
-  }
-
-  const d = draft.data;
-  let spawned = null;
-  let fact = null;
-
-  if (resolvedMode === 'story') {
-    const reason = judgePlotSeed(domain, d);
-    if (!reason) {
-      spawned = createPlotline({
-        title: d.title,
-        synopsis: d.synopsis,
-        closeWhen: d.closeWhen,
-        relatedStats: d.relatedStats,
-        maxAgeMonths: d.maxAgeMonths,
-        temperature: cfg.temperature.initial,
-        tick: world.tickIndex,
-        relatedPlotlineIds: [plot.id],
-        config,
-      });
-      domain.plotlines.push(spawned);
-      if (!plot.relatedPlotlineIds.includes(spawned.id)) plot.relatedPlotlineIds.push(spawned.id);
-      fact = pushChronicle(domain, {
-        text: d.entry,
-        importance: plotScale(spawned) >= 70 ? 'major' : 'minor',
-        world,
-        plotIds: [spawned.id],
-        author: 'storyteller:order-story',
-      });
-    } else {
-      log.info('storyteller.order_story_rejected', { reason, title: d.title });
-    }
-  }
-
-  if (!fact) {
-    fact = pushChronicle(domain, {
-      text: d.entry,
-      importance: 'minor',
-      world,
-      plotIds: [plot.id],
-      author: 'storyteller:order',
-    });
-  }
-
-  const plotIdForCast = spawned?.id || plot.id;
-  registerCharacters(domain, d.newCharacters, { world, plotId: plotIdForCast, author: 'storyteller:order' });
-  if (Array.isArray(d.relatedStats) && d.relatedStats.length) {
-    const allowed = new Set((config.stats || []).map((s) => s.id));
-    const next = d.relatedStats.map(String).filter((id) => allowed.has(id));
-    if (next.length && !spawned) plot.relatedStats = next;
-  }
-  markOrderFired(plot, world.tickIndex, { confluxId: event?.confluxId });
-
-  log.info('storyteller.order', {
-    plotId: plot.id,
-    title: plot.title,
-    mode: spawned ? 'story' : 'chronicle',
-    spawnedId: spawned?.id || null,
-    tint,
-    textPreview: truncate(d.entry, 160),
-  });
-  return { fact, plot, mode: spawned ? 'story' : 'chronicle', spawned };
-}
-
 /** Забытую нить закрываем без развязки: игроку она была не нужна. */
 export function fadeQuietPlot({ domain, plot, world }) {
   const fact = pushChronicle(domain, {
@@ -2587,7 +2349,7 @@ async function runStoryKeep({
   let updated = 0;
   for (const item of draft.plots || []) {
     const plot = findPlotline(board, item.plotId);
-    if (!plot || plot.kind === 'order') continue;
+    if (!plot) continue;
     const next = clipPlotText(item.synopsis, PLOT_SUMMARY_MAX);
     if (!next) continue;
     plot.synopsis = next;
@@ -2608,7 +2370,7 @@ export async function keepStories({
   log: parentLog,
 }) {
   const requested = Array.isArray(onlyPlots) ? onlyPlots : null;
-  const plots = (requested || domain.plotlines || []).filter((p) => p && p.kind !== 'order');
+  const plots = (requested || domain.plotlines || []).filter(Boolean);
   if (!plots.length) return null;
   const keepIds = new Set(plots.map((p) => p.id));
   chronicleAdds = (chronicleAdds || []).filter((f) =>

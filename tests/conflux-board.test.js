@@ -14,7 +14,7 @@ import {
   isSharedPlot,
   chronicleReceiversForBeat,
 } from '../src/game/confluxBoard.js';
-import { createPlotline, isOrderPlot, isThreeActPlot, normalizePlotlines, closePlotline, formatBoardForSpeech, releaseInactiveProcessesFromOpenPlots } from '../src/game/plotlines.js';
+import { createPlotline, isThreeActPlot, normalizePlotlines, closePlotline, formatBoardForSpeech, releaseInactiveProcessesFromOpenPlots } from '../src/game/plotlines.js';
 
 function domain(id, extra = {}) {
   return {
@@ -46,16 +46,16 @@ function conflux(extra = {}) {
   };
 }
 
-test('указы остаются на городе, истории уходят на конфлюкс', () => {
+test('вся доска уходит на конфлюкс, постоянный порядок остаётся правилом города', () => {
   const story = createPlotline({ title: 'Спор у колодца', kind: 'story' });
-  const order = createPlotline({ title: 'Налог', kind: 'order' });
   const proc = { id: 'act_1', summary: 'Чинить колодец', status: 'active' };
   story.relatedProcessIds = ['act_1'];
-  const a = domain('a', { plotlines: [story, order], processes: [proc] });
+  const a = domain('a', { plotlines: [story], processes: [proc] });
+  a.modifiers = [{ id: 'cmod_1', text: 'Налог вдвое' }];
   const c = conflux();
   takeDomainBoardIntoConflux(a, c);
-  assert.equal(a.plotlines.length, 1);
-  assert.equal(a.plotlines[0].kind, 'order');
+  assert.equal(a.plotlines.length, 0);
+  assert.equal(a.modifiers.length, 1, 'правила города на доску не уезжают');
   assert.equal(c.plotlines.length, 1);
   assert.equal(c.plotlines[0].title, 'Спор у колодца');
   assert.equal(c.processes.length, 1);
@@ -118,7 +118,7 @@ test('гидратация правителя не показывает чужу
   hydrateDomainFromConflux(a, c, { mode: 'ruler' });
   assert.equal(a.plotlines.some((p) => p.id === plot.id), false);
   dehydrateDomainToConflux(a, c);
-  assert.equal(a.plotlines.every(isOrderPlot), true);
+  assert.equal(a.plotlines.length, 0);
   assert.equal(c.plotlines.length, 1);
 });
 
@@ -149,13 +149,12 @@ test('главная нить стыка задевает оба города', 
   assert.deepEqual(main.concernsDomainIds.sort(), ['a', 'b']);
 });
 
-test('расстыковка: shared копируется обоим, чужие дела отрезаны; указы не трогаем', async () => {
+test('расстыковка: shared копируется обоим, чужие дела отрезаны', async () => {
   const shared = createPlotline({ title: 'Общая драка', kind: 'story' });
   shared.concernsDomainIds = ['a', 'b'];
   shared.shared = true;
   shared.relatedProcessIds = ['act_a', 'act_b'];
-  const order = createPlotline({ title: 'Налог', kind: 'order' });
-  const a = domain('a', { plotlines: [order] });
+  const a = domain('a');
   const b = domain('b');
   const c = conflux();
   c.plotlines = [shared];
@@ -164,7 +163,6 @@ test('расстыковка: shared копируется обоим, чужие
     { id: 'act_b', ownerDomainId: 'b', status: 'active', confluxId: c.id },
   ];
   await returnBoardsOnUndock(c, new Map([['a', a], ['b', b]]));
-  assert.equal(a.plotlines.filter((p) => p.kind === 'order').length, 1);
   assert.equal(a.plotlines.filter((p) => p.title === 'Общая драка').length, 1);
   assert.equal(b.plotlines.filter((p) => p.title === 'Общая драка').length, 1);
   assert.equal(a.state.pendingActions.map((p) => p.id).join(), 'act_a');

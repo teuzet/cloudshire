@@ -25,11 +25,12 @@ import {
 } from '../src/game/seedSchedule.js';
 import { createThreat, attachThreat, defendThreat } from '../src/game/threats.js';
 
-function domain(extra = {}) {
+/** Хроника домена — записи с тегом chronicle в lore. */
+function domain({ chronicle = [], ...extra } = {}) {
   return {
     id: 'd1',
     plotlines: [],
-    chronicle: [],
+    lore: chronicle.map((f) => ({ tags: ['chronicle'], ...f })),
     state: {},
     ...extra,
   };

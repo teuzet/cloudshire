@@ -135,9 +135,8 @@ export function normalizeCityModifier(raw) {
 export function normalizeCityModifiers(domain) {
   if (!domain || typeof domain !== 'object') return domain;
   const fromField = Array.isArray(domain.modifiers) ? domain.modifiers : [];
-  const leftover = (domain.state?.modifiers || []).filter(
-    (m) => m && m.kind !== 'order' && String(m.text || '').trim(),
-  );
+  // Старые миры держали постоянное в state.modifiers; забираем оттуда один раз.
+  const leftover = (domain.state?.modifiers || []).filter((m) => m && String(m.text || '').trim());
   const merged = [...fromField, ...leftover].map(normalizeCityModifier).filter(Boolean);
   const seen = new Set();
   domain.modifiers = [];

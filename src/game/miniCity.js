@@ -3,7 +3,7 @@ import { plotConcerns } from './confluxBoard.js';
 import { activeProcesses, pausedProcesses, processOwnedBy, processStatAverage, processPaceRatio } from './processes.js';
 import { finishChancePercents } from './rolls.js';
 import { blessManaCost, currentMana } from './mana.js';
-import { listStandingOrders } from './orders.js';
+import { cityRules, confluxDirective } from './cityRules.js';
 import { gameDateFromTickIndex, worldDateLabel } from './tickClock.js';
 import { chronicleEntries } from './models.js';
 import { parseCityBrief } from './cityContext.js';
@@ -300,14 +300,15 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
     ? Math.max(0, Math.min(100, Math.round(faithRaw)))
     : null;
 
-  const orders = listStandingOrders(domain, { tick })
-    .filter((o) => o.pending !== 'create')
-    .map((o) => ({
-      text: clip(o.text || '', 400),
-      since: gameDateLabelAtTick(world, o.declaredTick),
-      remainingMonths: o.indefinite ? null : o.remainingMonths,
-      indefinite: Boolean(o.indefinite),
-    }));
+  // Постоянный порядок города плюс наказ на сопряжение — одним списком.
+  const directive = confluxDirective(domain);
+  const orders = [
+    ...cityRules(domain).map((m) => ({
+      text: clip(m.text || '', 400),
+      since: m.sinceLabel || gameDateLabelAtTick(world, m.sinceTick),
+    })),
+    ...(directive ? [{ text: `При каждом сопряжении: ${clip(directive.text, 360)}`, since: null }] : []),
+  ];
 
   return {
     city: {

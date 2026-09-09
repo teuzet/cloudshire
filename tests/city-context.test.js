@@ -27,16 +27,17 @@ test('агентам только бриф; старые дописки в пр�
   assert.match(leftover, /Нижний ярус/);
 });
 
-test('без брифа — запасной description; указы в state.modifiers не попадают в дописки', () => {
+test('без брифа — запасной description; старый порядок из state.modifiers переезжает в правила', () => {
   const domain = {
     description: 'Старое описание.',
-    state: { modifiers: [{ id: 'mod_1', kind: 'order', text: 'Налоги вдвое' }] },
+    state: { modifiers: [{ id: 'mod_1', text: 'Налоги вдвое' }] },
     modifiers: [],
   };
   normalizeCityModifiers(domain);
-  assert.equal(domain.modifiers.length, 0);
+  assert.equal(domain.modifiers.length, 1);
+  assert.equal(domain.modifiers[0].text, 'Налоги вдвое');
   assert.equal(formatCityForAgents(domain), 'Старое описание.');
-  assert.equal(formatCityModifiersForPrompt(domain), '');
+  assert.match(formatCityModifiersForPrompt(domain), /Налоги вдвое/);
 });
 
 test('канонические неизвестности живут в брифе отдельным блоком и не отрезаются с хвоста', () => {

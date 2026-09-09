@@ -2,7 +2,8 @@ import { newId } from './ids.js';
 import { createLoreFact, formatCastForPrompt, chronicleEntries, formatChroniclePriestMark } from './models.js';
 import { formatFullChronicleForPrompt, formatFactsForPrompt } from './memory.js';
 import { findActiveConfluxForDomain, monthsUntilDock } from './conflux.js';
-import { attachFactToPlotlines, isOrderPlot } from './plotlines.js';
+import { attachFactToPlotlines } from './plotlines.js';
+import { cityRules } from './cityRules.js';
 import { dehydrateDomainToConflux, hydrateDomainFromConflux, plotVisibleToRuler } from './confluxBoard.js';
 import { formatTruthGraphForPrompt } from './mysteryGraph.js';
 import { formatLadderForPrompt } from './suspenseGraph.js';
@@ -25,11 +26,11 @@ function visibleLoreForDomain(lore, domainId) {
 export function storiesForLoremaster(domain, conflux = null) {
   const byId = new Map();
   for (const p of domain?.plotlines || []) {
-    if (p && !isOrderPlot(p)) byId.set(p.id, p);
+    if (p) byId.set(p.id, p);
   }
   if (conflux) {
     for (const p of conflux.plotlines || []) {
-      if (!p || isOrderPlot(p)) continue;
+      if (!p) continue;
       if (plotVisibleToRuler(p, domain.id, conflux)) {
         if (!byId.has(p.id)) byId.set(p.id, p);
       }
@@ -241,7 +242,7 @@ export async function askLoremaster({
           // Каст — такой же источник, как хроника: там живут судьбы названных людей.
           knownPeople: formatCastForPrompt(visible, { limit: 30 }),
           // Без состояния лормастер противоречит сам себе («переписи нет», пока процесс идёт).
-          standingOrders: (working.state?.modifiers || []).map((m) => m.text),
+          standingRules: cityRules(working).map((m) => m.text),
           currentEvents: (working.state?.events || []).map((e) =>
             typeof e === 'string' ? e : e?.text,
           ),

@@ -63,10 +63,7 @@ test('фокус на саспенсе показывает hiddenPremises це�
 test('resolve: только открытая история с доски или видимая с конфлюкса', () => {
   const domain = {
     id: 'a',
-    plotlines: [
-      { id: 'ord', title: 'Налог', kind: 'order', synopsis: 'Собирают налог.' },
-      { id: 'loc', title: 'Гул', kind: 'story', synopsis: 'Гудит вода.' },
-    ],
+    plotlines: [{ id: 'loc', title: 'Гул', kind: 'story', synopsis: 'Гудит вода.' }],
     closedPlotlines: [{ id: 'dead', kind: 'story', synopsis: 'Уже разгадали.', status: 'closed' }],
   };
   const conflux = {
@@ -81,12 +78,10 @@ test('resolve: только открытая история с доски или
     ],
   };
   const list = storiesForLoremaster(domain, conflux);
-  assert.equal(list.some((p) => p.id === 'ord'), false);
   assert.equal(list.some((p) => p.id === 'loc'), true);
   assert.equal(list.some((p) => p.id === 'main'), true);
   assert.equal(resolveLoremasterStory(domain, 'loc', conflux)?.id, 'loc');
   assert.equal(resolveLoremasterStory(domain, 'main', conflux)?.id, 'main');
-  assert.equal(resolveLoremasterStory(domain, 'ord', conflux), null);
   assert.equal(resolveLoremasterStory(domain, 'dead', conflux), null);
   assert.equal(resolveLoremasterStory(domain, 'nope', conflux), null);
 });

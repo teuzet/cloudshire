@@ -10,9 +10,11 @@ import {
   canStartProcess,
   findDuplicateProcess,
   resolveLinkedStats,
-  applyObjectiveSchedule,
 } from './processes.js';
-import { estimateProcessDuration } from './durationJudge.js';
+import { judgeDeed } from './deedJudge.js';
+import { startDeed, deedRemainingBand } from './deeds.js';
+import { scheduleDeedJob } from './worldLoop.js';
+import { DURATION_SPEC } from './bands.js';
 import { formatBoardForPrompt, isStakedStory, plotHasLiveProcess } from './plotlines.js';
 import { ensureErrandForProcess, linkProcessToPlotline, rehomeUnrelatedProcess } from './plotEngine.js';
 import { judgeProcessAlignment, engagementOf } from './plotAlign.js';
@@ -32,7 +34,7 @@ export function countTrailingUnansweredNews(dialogHistory = []) {
   for (let i = dialogHistory.length - 1; i >= 0; i -= 1) {
     const m = dialogHistory[i];
     if (m.role === 'user') break;
-    if (m.role === 'assistant' && m.kind === 'tick_news') n += 1;
+    if (m.role === 'assistant' && (m.kind === 'event' || m.kind === 'tick_news')) n += 1;
   }
   return n;
 }
@@ -42,7 +44,22 @@ export function stewardConfig(config) {
   return {
     loseAfterLetters: Math.max(1, Math.round(Number(s.loseAfterLetters) ?? 2)),
     afterSilentMonths: Math.max(1, Math.round(Number(s.afterSilentMonths) ?? 3)),
+    // Чаще этого сановники сами не берутся: иначе они завалят доску без покровителя.
+    cooldownDays: Math.max(1, Math.round(Number(s.cooldownDays) ?? 30)),
   };
+}
+
+/** Не чаще раза в cooldownDays: молчание покровителя не должно рождать поток дел. */
+export function stewardOffCooldown(domain, day, config) {
+  const last = Number(domain?.state?.lastStewardDay);
+  if (!Number.isFinite(last)) return true;
+  return Math.round(Number(day) || 0) - last >= stewardConfig(config).cooldownDays;
+}
+
+export function markStewardRan(domain, day) {
+  if (!domain.state || typeof domain.state !== 'object') domain.state = {};
+  domain.state.lastStewardDay = Math.round(Number(day) || 0);
+  return domain;
 }
 
 export function shouldRunSteward(domain, config) {
@@ -52,7 +69,7 @@ export function shouldRunSteward(domain, config) {
   return { ok: silent >= cfg.afterSilentMonths, silent };
 }
 
-/** Одно письмо на полосу молчания: «куда ты делся», даже если окно в три месяца уже проскочили. */
+/** Одно письмо на полосу молчания: «куда ты делся», даже если порог давно проскочили. */
 export function shouldAskPatronPresence(domain, config) {
   const cfg = stewardConfig(config);
   const character = domain?.characters?.[0];
@@ -86,7 +103,7 @@ function rememberFact(domain, { text, world, officer, chronicleAdds }) {
   return fact;
 }
 
-async function applyProcess(domain, args, { config, runtime, world, officer, log, chronicleAdds }) {
+async function applyProcess(domain, args, { config, runtime, world, officer, day = 0, log, chronicleAdds }) {
   const slots = canStartProcess(domain, config);
   if (!slots.ok || !officer) {
     return { error: 'too_many_processes', message: 'Все сановники заняты.' };
@@ -110,10 +127,6 @@ async function applyProcess(domain, args, { config, runtime, world, officer, log
     summary,
     detail,
     goal: String(args.goal || '').trim() || null,
-    expectedMonths: 1,
-    durationMonths: 1,
-    monthsLeft: 1,
-    monthsDone: 0,
     linkedStats: [linkedStat],
     officerId: officer.id,
     office: officer.office,
@@ -122,7 +135,6 @@ async function applyProcess(domain, args, { config, runtime, world, officer, log
     characterId: officer.id,
     characterName: officer.name,
     characterNote: args.note || null,
-    hardDeadline: false,
     status: 'active',
     initiative: 'officer',
     createdAt: new Date().toISOString(),
@@ -131,15 +143,17 @@ async function applyProcess(domain, args, { config, runtime, world, officer, log
   domain.state.pendingActions = domain.state.pendingActions || [];
   domain.state.pendingActions.push(action);
   bindOfficerProcess(domain, officer, action);
-  const estimated = await estimateProcessDuration({
-    config,
+  const judged = await judgeDeed({
     runtime,
     domain,
     summary,
     detail,
+    goal: action.goal || '',
     log,
   });
-  applyObjectiveSchedule(action, estimated.months);
+  if (judged.note) action.durationNote = judged.note;
+  startDeed(action, { day, judged });
+  scheduleDeedJob(world, domain, action);
   let plot = args.plotId ? linkProcessToPlotline(domain, action.id, String(args.plotId)) : null;
   if (!plot) {
     plot = ensureErrandForProcess(domain, action, {
@@ -169,10 +183,18 @@ async function applyProcess(domain, args, { config, runtime, world, officer, log
 }
 
 /**
- * Ход сановника в начале месяца, если покровитель молчит.
+ * Ход сановника, когда покровитель давно молчит. Когда и кем — решает движок.
  * @returns {{ silent: number, act: object|null, chronicleAdds: object[] }}
  */
-export async function runOfficerAct({ config, runtime, domain, world, log: parentLog, rng = Math.random }) {
+export async function runOfficerAct({
+  config,
+  runtime,
+  domain,
+  world,
+  day = 0,
+  log: parentLog,
+  rng = Math.random,
+}) {
   const gate = shouldRunSteward(domain, config);
   if (!gate.ok) return { silent: gate.silent, act: null, chronicleAdds: [] };
 
@@ -221,6 +243,7 @@ export async function runOfficerAct({ config, runtime, domain, world, log: paren
             runtime,
             world,
             officer,
+            day,
             log,
             chronicleAdds,
           });
@@ -244,7 +267,7 @@ export async function runOfficerAct({ config, runtime, domain, world, log: paren
     .map((e) => `- ${e.gameDateLabel || '?'}: ${e.text}`)
     .join('\n');
   const processes = activeProcesses(domain, config)
-    .map((p) => `- ${p.summary} (ещё ~${p.monthsLeft} мес.)`)
+    .map((p) => `- ${p.summary} (ждать ещё: ${DURATION_SPEC[deedRemainingBand(p, day)].label})`)
     .join('\n');
   const openStories = (domain.plotlines || []).filter(
     (p) => p.kind === 'story' && !plotHasLiveProcess(domain, p),
@@ -268,13 +291,13 @@ export async function runOfficerAct({ config, runtime, domain, world, log: paren
       {
         role: 'user',
         content: [
-          `Покровитель молчит уже ${gate.silent} месяца.`,
+          `Покровитель не отвечает уже ${gate.silent} вестей подряд.`,
           `Движок выбрал сановника: ${officer.title} ${officer.name} (${officer.office}, стат ${officer.statId}).`,
           officer.nature ? `Характер: ${officer.nature}` : '',
           officeStrategy(officer, config) ? `Стратегия должности: ${officeStrategy(officer, config)}` : '',
           'Заведи ОДНО дело в рамках своего класса на ОДНУ открытую историю без поручения (включая сопряжение).',
           'Если история требует чужого умения — всё равно делай её ты, linkedStats от характера задачи (чужое дело).',
-          'Не заводи указы. Не возобновляй паузы. Не резюмируй от жреца.',
+          'Не объявляй постоянных правил. Не возобновляй паузы. Не резюмируй от жреца.',
           'Если не за что браться — action=none.',
           openStories.length
             ? `Истории без поручения:\n${openStories

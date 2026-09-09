@@ -112,18 +112,8 @@ test('мини-аппка: свои истории и участие в сопр
       },
       { id: 'off_c', office: 'chancellor', statId: 'influence', title: 'Канцлер', name: 'Орен', processId: null },
     ],
-    plotlines: [
-      { id: 'local', kind: 'story', title: 'Гул колодца', synopsis: 'Вода поёт.' },
-      {
-        id: 'ord_1',
-        kind: 'order',
-        title: 'Ночной дозор',
-        orderText: 'Ночной дозор у края',
-        createdTick: 3,
-        durationMonths: 4,
-        expiresTick: 7,
-      },
-    ],
+    plotlines: [{ id: 'local', kind: 'story', title: 'Гул колодца', synopsis: 'Вода поёт.' }],
+    modifiers: [{ id: 'cmod_1', text: 'Ночной дозор у края', sinceLabel: 'Год 1, месяц 4' }],
     state: {
       pendingActions: [
         {
@@ -222,8 +212,7 @@ test('мини-аппка: свои истории и участие в сопр
   assert.equal(fight.processes[0].blessCost, 8, 'два месяца — полоса WEEKS');
   assert.equal(fight.processes[0].canBless, true);
   assert.equal(knowledge.about, 'Помнит ли город, как лечить и читать.');
-  assert.equal(view.orders[0].indefinite, false);
-  assert.equal(view.orders[0].remainingMonths, 2);
+  assert.equal(view.orders[0].text, 'Ночной дозор у края');
   assert.match(view.orders[0].since, /Год 1, месяц 4/);
   assert.equal(view.gameDate, 'Год 1, месяц 6');
   assert.equal('loyalty' in (view.city || {}), false);
