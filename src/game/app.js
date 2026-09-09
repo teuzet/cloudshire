@@ -83,6 +83,7 @@ import {
   shouldRulerAskPatron,
   markRulerAsked,
 } from './rulerMemory.js';
+import { resolveReply, formatReplyForPrompt, rememberPush } from './replyContext.js';
 import {
   shouldAskPatronPresence,
   markPatronPresenceAsked,
@@ -189,6 +190,16 @@ export class GameApp {
     }
   }
 
+  /** Запомнить, о чём был отправленный пуш: реплай должен разрешаться в объект. */
+  async recordPushMessage(domainId, entry) {
+    const domain = await this.storage.getDomain(domainId);
+    if (!domain) return null;
+    const saved = rememberPush(domain, entry);
+    if (!saved) return null;
+    await this.storage.saveDomain(domain);
+    return saved;
+  }
+
   async getStatus() {
     const world = await this.storage.getWorld();
     const domains = await this.storage.listDomains();
@@ -217,7 +228,7 @@ export class GameApp {
     return this.generatingUsers.has(String(userId));
   }
 
-  async handleUserMessage(userId, text, { channel = 'web', bootstrap = false } = {}) {
+  async handleUserMessage(userId, text, { channel = 'web', bootstrap = false, replyTo = null } = {}) {
     const uid = String(userId);
     const log = getLogger().child({ userId: uid, channel, scope: 'chat' });
     if (this.busyUsers.has(uid)) {
@@ -273,7 +284,7 @@ export class GameApp {
       }
 
       try {
-        return await this.runRuler(domain, text, { channel, log, world });
+        return await this.runRuler(domain, text, { channel, log, world, replyTo });
       } catch (err) {
         log.error('ruler.turn_failed', { error: err.message, stack: err.stack });
         return await this.persistRulerSystemFail(domain, text, { channel, log });
@@ -813,7 +824,7 @@ export class GameApp {
       .join('\n');
   }
 
-  async runRuler(domain, text, { channel, log: parentLog, world: worldArg = null }) {
+  async runRuler(domain, text, { channel, log: parentLog, world: worldArg = null, replyTo = null }) {
     const log = (parentLog || getLogger()).child({
       scope: 'ruler',
       domainId: domain.id,
@@ -912,6 +923,11 @@ export class GameApp {
       .filter(Boolean)
       .join('\n');
 
+    // Реплай — отдельный блок перед репликой: склеенный с ней, он уводит
+    // жреца отвечать на цитату вместо самого вопроса.
+    const quotedBlock = formatReplyForPrompt(resolveReply(domain, replyTo));
+    const turnText = quotedBlock ? `${quotedBlock}\n\n${text}` : text;
+
     const turn = { okTools: new Set(), reply: null, meta: null };
     const baseTools = buildRulerTools(domain, this.storage, character, {
       config: this.config,
@@ -952,7 +968,7 @@ export class GameApp {
       try {
         result = await this.runtime.run({
           agentId: 'ruler',
-          userMessages: [...history, { role: 'user', content: text }],
+          userMessages: [...history, { role: 'user', content: turnText }],
           tools,
           extraSystem,
           maxTurns: 10,
@@ -968,7 +984,7 @@ export class GameApp {
             agentId: 'ruler',
             userMessages: [
               ...history,
-              { role: 'user', content: text },
+              { role: 'user', content: turnText },
               {
                 role: 'user',
                 content:

@@ -9,6 +9,7 @@ import {
 } from './access.js';
 import { formatIslandPlotlines, formatIslandStats } from './views.js';
 import { miniAppUrl, miniAppMenuText } from './initData.js';
+import { replyFromTelegram } from '../../game/replyContext.js';
 
 const TG_MAX = 4096;
 
@@ -43,9 +44,12 @@ function toOnboardingTelegramHtml(text) {
 
 async function sendChunks(bot, chatId, text, { html = false } = {}) {
   const opts = html ? { parse_mode: 'HTML' } : undefined;
+  let last = null;
   for (const chunk of splitTelegramMessage(html ? toOnboardingTelegramHtml(text) : text)) {
-    await bot.sendMessage(chatId, chunk, opts);
+    last = await bot.sendMessage(chatId, chunk, opts);
   }
+  // Реплаят игроки в последнее сообщение серии — его id и запоминаем.
+  return last?.message_id ?? null;
 }
 
 /** @typedef {{ chatId: number|string, messageIds: number[] }} HoldRef */
@@ -245,7 +249,22 @@ export function startTelegramBot({ config, app, storage, runTick }) {
 
   void loadPersistedChats();
 
-  app.onOutbound(async ({ userId, message, channel, photoPath, photoBuffer, photoUrl, edit, kind, agent }) => {
+  app.onOutbound(async ({
+    userId,
+    message,
+    channel,
+    photoPath,
+    photoBuffer,
+    photoUrl,
+    edit,
+    kind,
+    agent,
+    domainId,
+    chronicleId,
+    plotId,
+    threatId,
+    processId,
+  }) => {
     if (channel && channel !== 'telegram') return;
     const chatId = chatByUser.get(String(userId));
     if (!chatId) {
@@ -296,7 +315,14 @@ export function startTelegramBot({ config, app, storage, runTick }) {
         await bot.sendPhoto(chatId, photo);
         return;
       }
-      if (message) await sendChunks(bot, chatId, message, { html });
+      if (message) {
+        const messageId = await sendChunks(bot, chatId, message, { html });
+        if (messageId && domainId && (chronicleId || plotId)) {
+          await app
+            .recordPushMessage(domainId, { messageId, chatId, chronicleId, plotId, threatId, processId, kind })
+            .catch((err) => console.warn('[telegram] push map failed:', err.message));
+        }
+      }
     } catch (err) {
       console.error('[telegram] outbound failed:', err.message);
       if ((photoUrl || photoPath || photoBuffer) && message) {
@@ -435,6 +461,7 @@ export function startTelegramBot({ config, app, storage, runTick }) {
       const result = await app.handleUserMessage(userId, payload, {
         channel: 'telegram',
         bootstrap,
+        replyTo: replyFromTelegram(msg),
       });
       await deleteRememberedHolds(bot, holds, userId);
       if (result.reply) {

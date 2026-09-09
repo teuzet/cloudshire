@@ -5,6 +5,8 @@ import { finishChancePercents } from './rolls.js';
 import { blessManaCost, currentMana } from './mana.js';
 import { listStandingOrders } from './orders.js';
 import { gameDateFromTickIndex, worldDateLabel } from './tickClock.js';
+import { chronicleEntries } from './models.js';
+import { parseCityBrief } from './cityContext.js';
 import { domainHasIslandImage, officerHasPortrait } from '../storage/r2.js';
 import { formatAxesForSpeech } from './officers.js';
 
@@ -47,6 +49,94 @@ export function cityDescriptionSections(domain, config) {
     .filter(Boolean);
   if (fromAspects.length) return fromAspects;
   return sectionsFromMarkdown(domain?.description);
+}
+
+const CHRONICLE_LIMIT = 200;
+const PEOPLE_LIMIT = 120;
+
+/** Хроника отдаётся целиком: сюда уходит всё, что не пробилось пушем. */
+function chronicleTab(domain, world) {
+  const entries = chronicleEntries(domain?.lore)
+    .slice(-CHRONICLE_LIMIT)
+    .reverse()
+    .map((f) => ({
+      id: f.id || null,
+      text: clip(f.text || '', 1200),
+      date: f.gameDateLabel || gameDateLabelAtTick(world, f.tick),
+      plotId: f.sourcePlotId || null,
+    }))
+    .filter((f) => f.text);
+  return { id: 'chronicle', title: 'Хроника', entries };
+}
+
+/** Каст города: сановники впереди, остальные — как их знает лор. */
+function peopleTab(domain) {
+  const seen = new Set();
+  const people = [];
+  for (const officer of domain?.officers || []) {
+    if (!officer?.name) continue;
+    seen.add(officer.name);
+    people.push({
+      name: officer.name,
+      role: officer.title || officer.office || null,
+      about: clip(officer.nature || '', 400),
+      officer: true,
+      dead: false,
+    });
+  }
+  for (const entry of domain?.lore || []) {
+    if (!(entry?.tags || []).includes('character')) continue;
+    const name = String(entry.name || '').trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    if (people.length >= PEOPLE_LIMIT) break;
+    people.push({
+      name,
+      role: entry.role || null,
+      about: clip(entry.about || entry.text || '', 400),
+      ageYears: Number.isFinite(Number(entry.ageYears)) ? Number(entry.ageYears) : null,
+      officer: false,
+      dead: entry.status === 'dead',
+    });
+  }
+  return { id: 'people', title: 'Люди', people };
+}
+
+function briefTab(domain) {
+  const { body, unknowns } = parseCityBrief(domain?.cityBrief || '');
+  const sections = [];
+  if (body) sections.push({ id: 'brief-body', title: 'Как есть сейчас', text: clip(body, DESC_SECTION_MAX) });
+  if (unknowns.length) {
+    sections.push({
+      id: 'brief-unknowns',
+      title: 'Неизвестно',
+      text: unknowns.map((u) => `— ${u}`).join('\n'),
+    });
+  }
+  const modifiers = (domain?.modifiers || [])
+    .map((m) => String(m?.text || '').trim())
+    .filter(Boolean);
+  if (modifiers.length) {
+    sections.push({
+      id: 'brief-modifiers',
+      title: 'Постоянные изменения',
+      text: clip(modifiers.map((t) => `— ${t}`).join('\n'), DESC_SECTION_MAX),
+    });
+  }
+  return { id: 'brief', title: 'Бриф', sections };
+}
+
+/**
+ * Раздел «город» — меню из вкладок, а не одна простыня описания.
+ * Пустые вкладки не отдаём: в мини-аппке нечего листать вслепую.
+ */
+export function cityTabs(domain, world, config) {
+  return [
+    { id: 'description', title: 'Описание', sections: cityDescriptionSections(domain, config) },
+    briefTab(domain),
+    chronicleTab(domain, world),
+    peopleTab(domain),
+  ].filter((tab) => (tab.sections?.length || tab.entries?.length || tab.people?.length) > 0);
 }
 
 export function gameDateLabelAtTick(world, tick) {
@@ -225,6 +315,7 @@ export function miniCityPayload({ domain, conflux = null, world = null, config, 
       hasImage: domainHasIslandImage(domain),
       imageUrl: domain.imageUrl || null,
       sections: cityDescriptionSections(domain, config),
+      tabs: cityTabs(domain, world, config),
     },
     generating: Boolean(generating),
     gameDate: worldDateLabel(world),

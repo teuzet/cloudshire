@@ -1,7 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { miniCityPayload, gameDateLabelAtTick, cityDescriptionSections } from '../src/game/miniCity.js';
+import {
+  miniCityPayload,
+  gameDateLabelAtTick,
+  cityDescriptionSections,
+  cityTabs,
+} from '../src/game/miniCity.js';
 import { validateTelegramInitData, miniAppUrl } from '../src/clients/telegram/initData.js';
 import { createWebServer } from '../src/clients/web/server.js';
 
@@ -291,4 +296,57 @@ test('GET /mini и /mini/ отдают страницу без редирект�
   } finally {
     await new Promise((resolve, reject) => http.close((err) => (err ? reject(err) : resolve())));
   }
+});
+
+test('раздел «Город» — меню из вкладок, а не одна простыня', () => {
+  const domain = {
+    id: 'd1',
+    name: 'Ствол',
+    description: '## Облик\n\nГород на дереве.',
+    cityBrief: 'Город держится на одном стволе.\nНеизвестно (канон):\n- кто прорубил нижние мостки',
+    modifiers: [{ text: 'подать удвоена' }],
+    officers: [{ id: 'o1', office: 'treasurer', title: 'Казначей', name: 'Малуша', nature: 'суха и точна' }],
+    lore: [
+      { id: 'f1', tags: ['chronicle'], text: 'Мостки просели', gameDateLabel: 'Год 1, месяц 3, день 4' },
+      { id: 'f2', tags: ['chronicle'], text: 'Досмотрщика нашли мёртвым', tick: 5 },
+      { id: 'l1', tags: ['character'], name: 'Ваш', role: 'плотник', about: 'первый мосточник', ageYears: 61 },
+      { id: 'l2', tags: ['fact'], text: 'это не человек и не хроника' },
+    ],
+  };
+  const tabs = cityTabs(domain, { tickIndex: 5 }, {});
+  assert.deepEqual(tabs.map((t) => t.id), ['description', 'brief', 'chronicle', 'people']);
+
+  const brief = tabs.find((t) => t.id === 'brief');
+  assert.deepEqual(brief.sections.map((s) => s.id), ['brief-body', 'brief-unknowns', 'brief-modifiers']);
+  assert.match(brief.sections[1].text, /нижние мостки/);
+  assert.match(brief.sections[2].text, /подать удвоена/);
+
+  const chronicle = tabs.find((t) => t.id === 'chronicle');
+  assert.deepEqual(chronicle.entries.map((f) => f.id), ['f2', 'f1'], 'свежее сверху');
+  assert.equal(chronicle.entries[1].date, 'Год 1, месяц 3, день 4');
+  assert.ok(chronicle.entries[0].date, 'дата выводится из тика, если метки нет');
+
+  const people = tabs.find((t) => t.id === 'people');
+  assert.deepEqual(people.people.map((p) => p.name), ['Малуша', 'Ваш'], 'сановники впереди');
+  assert.equal(people.people[0].officer, true);
+  assert.equal(people.people[1].ageYears, 61);
+});
+
+test('пустые вкладки в меню не показываем', () => {
+  const tabs = cityTabs({ id: 'd1', name: 'Пусто' }, {}, {});
+  assert.deepEqual(tabs, []);
+});
+
+test('сановник не дублируется человеком из лора с тем же именем', () => {
+  const tabs = cityTabs(
+    {
+      id: 'd1',
+      officers: [{ id: 'o1', name: 'Малуша', title: 'Казначей' }],
+      lore: [{ id: 'l1', tags: ['character'], name: 'Малуша', role: 'счётчица' }],
+    },
+    {},
+    {},
+  );
+  const people = tabs.find((t) => t.id === 'people');
+  assert.deepEqual(people.people.map((p) => p.role), ['Казначей']);
 });

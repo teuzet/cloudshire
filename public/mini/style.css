@@ -216,6 +216,30 @@ h1 {
 
 .tab.on { color: var(--accent); background: rgba(228, 201, 138, 0.12); }
 
+/* Вкладки внутри раздела «Город»: описание, бриф, хроника, люди. */
+.subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0 0 0.7rem;
+}
+
+.subtab {
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+}
+
+.subtab.on {
+  color: var(--accent);
+  border-color: rgba(228, 201, 138, 0.45);
+  background: rgba(228, 201, 138, 0.12);
+}
+
 .bless-btn {
   font: inherit;
   font-size: 0.85rem;

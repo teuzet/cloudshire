@@ -17,6 +17,7 @@ const sheetBody = document.getElementById('sheetBody');
 
 let state = null;
 let tab = 'stats';
+let cityTab = 'description';
 let openOfficerId = null;
 
 function previewUserId() {
@@ -281,9 +282,7 @@ function renderOrders(list) {
     .join('');
 }
 
-function renderCity(city) {
-  const sections = city?.sections || [];
-  if (!sections.length) return empty('Описания города пока нет.');
+function renderSections(sections) {
   return sections
     .map((s) => {
       const paras = String(s.text || '')
@@ -299,6 +298,57 @@ function renderCity(city) {
         </article>`;
     })
     .join('');
+}
+
+function renderChronicle(entries) {
+  if (!entries.length) return empty('Хроника пока пуста.');
+  return entries
+    .map(
+      (f) => `
+        <article class="card lore">
+          ${f.date ? `<p class="meta">${esc(f.date)}</p>` : ''}
+          <p>${esc(f.text)}</p>
+        </article>`,
+    )
+    .join('');
+}
+
+function renderPeople(people) {
+  if (!people.length) return empty('Город пока безымянен.');
+  return people
+    .map((p) => {
+      const meta = [p.role, p.ageYears ? `${p.ageYears} лет` : '', p.dead ? 'мёртв' : '']
+        .filter(Boolean)
+        .join(' · ');
+      return `
+        <article class="card lore">
+          <h2>${esc(p.name)}</h2>
+          ${meta ? `<p class="meta">${esc(meta)}</p>` : ''}
+          ${p.about ? `<p>${esc(p.about)}</p>` : ''}
+        </article>`;
+    })
+    .join('');
+}
+
+function renderCity(city) {
+  const tabs = city?.tabs || [];
+  if (!tabs.length) {
+    const sections = city?.sections || [];
+    return sections.length ? renderSections(sections) : empty('Описания города пока нет.');
+  }
+  const active = tabs.find((t) => t.id === cityTab) || tabs[0];
+  const nav = tabs
+    .map(
+      (t) =>
+        `<button type="button" class="subtab${t.id === active.id ? ' on' : ''}" data-city-tab="${esc(t.id)}">${esc(t.title)}</button>`,
+    )
+    .join('');
+  const body = active.entries
+    ? renderChronicle(active.entries)
+    : active.people
+      ? renderPeople(active.people)
+      : renderSections(active.sections || []);
+  return `<nav class="subtabs">${nav}</nav>${body}`;
 }
 
 function render() {
@@ -390,6 +440,13 @@ document.getElementById('tabs').addEventListener('click', (e) => {
   tab = btn.dataset.tab;
   closeSheet();
   for (const b of document.querySelectorAll('.tab')) b.classList.toggle('on', b === btn);
+  render();
+});
+
+panel.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-city-tab]');
+  if (!btn) return;
+  cityTab = btn.dataset.cityTab;
   render();
 });
 
