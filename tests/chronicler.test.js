@@ -1,0 +1,278 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  CHRONICLE_ENTRY_MAX,
+  deedConsequenceLines,
+  fallbackDeedEntry,
+  formatDeedPrompt,
+  formatThreatPrompt,
+  endingText,
+  plotChronicleTail,
+  writeChronicle,
+} from '../src/game/chronicler.js';
+
+const silentLog = {
+  child: () => silentLog,
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  debug: () => {},
+};
+
+function plot(extra = {}) {
+  return {
+    id: 'p1',
+    kind: 'story',
+    title: 'Гулкая лестница',
+    synopsis: 'ступени гудят после шагов, причина неизвестна',
+    gravity: 'CRISIS',
+    depth: 0,
+    maxDepth: 2,
+    failCount: 0,
+    maxFails: 2,
+    threats: [],
+    ...extra,
+  };
+}
+
+function domain(extra = {}) {
+  return {
+    id: 'd1',
+    name: 'Варшена',
+    lore: [],
+    officers: [{ id: 'o1', office: 'chancellor', title: 'Канцлер', name: 'Жален' }],
+    ...extra,
+  };
+}
+
+const deed = {
+  id: 'proc1',
+  summary: 'Осмотреть гулкую лестницу',
+  detail: 'Вскрыть ступени в Срединном поясе и посмотреть, отчего гул',
+  goal: 'Узнать причину гула',
+  officerId: 'o1',
+  office: 'chancellor',
+};
+
+// ─────────────────────────── последствия делом ───────────────────────────
+
+test('дело на сбор сведений не даёт права писать, что вопрос решён', () => {
+  const lines = deedConsequenceLines({
+    plot: plot(),
+    applied: { alignment: 'DIRECT', finish: 'ok' },
+    closed: false,
+  }).join('\n');
+  assert.match(lines, /не решила/, 'иначе агент допишет ремонт, которого не было');
+  assert.match(lines, /не пиши, что вопрос закрыт/i);
+  assert.match(lines, /История не закрыта/);
+});
+
+test('закрывшее историю дело получает право на развязку', () => {
+  const lines = deedConsequenceLines({
+    plot: plot({ depth: 2 }),
+    applied: { alignment: 'DIRECT', finish: 'crit' },
+    closed: true,
+  }).join('\n');
+  assert.match(lines, /развязка/);
+  assert.doesNotMatch(lines, /История не закрыта/);
+});
+
+test('снятая беда идёт в запись предотвращённой, а не случившейся', () => {
+  const lines = deedConsequenceLines({
+    plot: plot(),
+    applied: { alignment: 'RELEVANT', finish: 'ok' },
+    threat: { id: 't1', text: 'Известковая пыль забьёт водосборный сток' },
+  }).join('\n');
+  assert.match(lines, /Нависшее снято/);
+  assert.match(lines, /как случившуюся не пиши/);
+});
+
+test('UNRELATED-делу прямо запрещают двигать историю', () => {
+  const lines = deedConsequenceLines({
+    plot: plot(),
+    applied: { alignment: 'UNRELATED', finish: 'ok' },
+  }).join('\n');
+  assert.match(lines, /Историю это не двигает/);
+});
+
+test('дело без истории — просто исполненное поручение', () => {
+  const lines = deedConsequenceLines({ plot: null, applied: { alignment: 'UNRELATED', finish: 'ok' } });
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /ни с какой городской историей не связана/);
+});
+
+test('история на последней жизни запрещает облегчение', () => {
+  const lines = deedConsequenceLines({
+    plot: plot({ failCount: 2, maxFails: 2 }),
+    applied: { alignment: 'RELEVANT', finish: 'fail' },
+  }).join('\n');
+  assert.match(lines, /на последнем/);
+});
+
+// ──────────────────────────────── промпты ────────────────────────────────
+
+test('промпт дела несёт исход, исполнителя и хвост хроники', () => {
+  const p = plot();
+  const text = formatDeedPrompt({
+    domain: domain(),
+    plot: p,
+    process: deed,
+    applied: { alignment: 'DIRECT', finish: 'ok' },
+    chronicleTail: ['осенью ступени начали гудеть'],
+    dateLabel: 'Год 1, месяц 5, день 18',
+  });
+  assert.match(text, /Канцлер Жален/, 'без исполнителя запись обезличена');
+  assert.match(text, /УСПЕХ/);
+  assert.match(text, /Узнать причину гула/);
+  assert.match(text, /осенью ступени начали гудеть/);
+  assert.match(text, /в запись не выноси/, 'название истории служебное');
+  assert.match(text, /Год 1, месяц 5, день 18/);
+});
+
+test('промпт беды требует прошедшего времени', () => {
+  const text = formatThreatPrompt({
+    plot: plot(),
+    threat: { text: 'Известковая пыль забьёт водосборный сток, и дождь смоет посевы' },
+    kind: 'threat',
+    severity: 'УЩЕРБ',
+  });
+  assert.match(text, /В БУДУЩЕМ ВРЕМЕНИ/);
+  assert.match(text, /как случившееся, в прошедшем времени/);
+  assert.match(text, /забьёт водосборный сток/, 'предсказание отдаём как есть');
+  assert.match(text, /История не закрыта/);
+});
+
+test('развязка берётся из заготовленных концовок, а не из пустого ending.text', () => {
+  const p = plot({
+    depth: 2,
+    endings: [
+      { id: 'e_good', kind: 'GOOD_ENDING', text: 'ход расчистили, лестница смолкла' },
+      { id: 'e_bad', kind: 'BAD_ENDING', text: 'марш обвалился вместе с людьми' },
+    ],
+  });
+  const ending = { kind: 'GOOD_ENDING', text: '', endingId: 'e_good', processId: 'proc1' };
+  assert.equal(endingText(p, ending), 'ход расчистили, лестница смолкла');
+  assert.equal(endingText(p, { kind: 'GOOD_ENDING', text: '', endingId: null }), null);
+
+  const text = formatDeedPrompt({
+    domain: domain(),
+    plot: p,
+    process: deed,
+    applied: { alignment: 'DIRECT', finish: 'crit' },
+    closed: true,
+    ending,
+  });
+  assert.match(text, /Развязка истории.*лестница смолкла/);
+});
+
+test('незакрытой истории развязку не показывают', () => {
+  const text = formatDeedPrompt({
+    domain: domain(),
+    plot: plot({ endings: [{ id: 'e_good', kind: 'GOOD_ENDING', text: 'лестница смолкла' }] }),
+    process: deed,
+    applied: { alignment: 'DIRECT', finish: 'ok' },
+    closed: false,
+    ending: { kind: 'GOOD_ENDING', text: '', endingId: 'e_good' },
+  });
+  assert.doesNotMatch(text, /Развязка истории/);
+});
+
+test('разрешение — не победа и не крушение', () => {
+  const text = formatThreatPrompt({
+    plot: plot(),
+    threat: { text: 'Осевшее крыло огородят и забудут о нём' },
+    kind: 'resolution',
+    closed: true,
+  });
+  assert.match(text, /выдохлась сама/);
+  assert.match(text, /без победы и без крушения/);
+});
+
+// ──────────────────────────── запасная запись ────────────────────────────
+
+test('запасная запись не называет ни дела, ни истории', () => {
+  const ok = fallbackDeedEntry(deed, 'ok');
+  const bad = fallbackDeedEntry(deed, 'fail');
+  for (const text of [ok, bad]) {
+    assert.doesNotMatch(text, /«|»/, 'кавычки с названием — метагейм');
+    assert.doesNotMatch(text, /Осмотреть гулкую лестницу/);
+  }
+  assert.match(ok, /Узнать причину гула/);
+  assert.match(bad, /не удалось/);
+});
+
+// ───────────────────────────── хвост хроники ─────────────────────────────
+
+test('хвост берётся только по своей истории и только из хроники', () => {
+  const d = domain({
+    lore: [
+      { id: 'f1', text: 'своё', tags: ['chronicle'], sourcePlotId: 'p1' },
+      { id: 'f2', text: 'чужое', tags: ['chronicle'], sourcePlotId: 'p2' },
+      { id: 'f3', text: 'через связь', tags: ['chronicle'], relatedPlotlineIds: ['p1'] },
+      { id: 'f4', text: 'служебное', tags: ['fact'], sourcePlotId: 'p1' },
+    ],
+  });
+  assert.deepEqual(plotChronicleTail(d, 'p1'), ['своё', 'через связь']);
+  assert.deepEqual(plotChronicleTail(d, null), []);
+});
+
+test('хвост урезается до последних записей', () => {
+  const d = domain({
+    lore: Array.from({ length: 20 }, (_, i) => ({
+      id: `f${i}`,
+      text: `запись ${i}`,
+      tags: ['chronicle'],
+      sourcePlotId: 'p1',
+    })),
+  });
+  const tail = plotChronicleTail(d, 'p1', 3);
+  assert.deepEqual(tail, ['запись 17', 'запись 18', 'запись 19']);
+});
+
+// ─────────────────────────────── сам вызов ───────────────────────────────
+
+test('хронист возвращает запись и режет её по пределу', async () => {
+  const calls = [];
+  const runtime = {
+    run: async (opts) => {
+      calls.push(opts);
+      await opts.tools[0].handler({ entry: 'Ж'.repeat(CHRONICLE_ENTRY_MAX + 50) });
+      return {};
+    },
+  };
+  const res = await writeChronicle({
+    runtime,
+    domain: domain(),
+    occasion: 'дело',
+    prompt: 'что случилось',
+    log: silentLog,
+  });
+  assert.equal(res.text.length, CHRONICLE_ENTRY_MAX);
+  assert.equal(calls[0].agentId, 'chronicler');
+  assert.equal(calls[0].scene, 'chronicle_дело');
+  assert.match(calls[0].extraSystem, /Варшена/);
+});
+
+test('пустой ответ модели не выдаётся за запись', async () => {
+  const runtime = {
+    run: async (opts) => {
+      const res = await opts.tools[0].handler({ entry: '   ' });
+      assert.equal(res.ok, undefined, 'пустую запись инструмент не принимает');
+      return {};
+    },
+  };
+  assert.equal(
+    await writeChronicle({ runtime, domain: domain(), prompt: 'что случилось', log: silentLog }),
+    null,
+    'решать, чем закрыть дыру, — не работа хрониста',
+  );
+});
+
+test('упавшая модель не рушит ход', async () => {
+  const runtime = {
+    run: async () => {
+      throw new Error('модель отвалилась');
+    },
+  };
+  assert.equal(await writeChronicle({ runtime, domain: domain(), prompt: 'что', log: silentLog }), null);
+});

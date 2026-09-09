@@ -1030,7 +1030,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
       name: 'set_conflux_directive',
       description:
         'Наказ на сопряжение: «при каждой стыковке делайте X». Не дело и не постоянное правило — ' +
-        'наказ ждёт следующей стыковки и тогда сам заводит поручение, забирая столп. ' +
+        'наказ ждёт следующей стыковки и тогда сам заводит поручение, забирая сановника. ' +
         'Постоянное правило города — declare_process с rule. Разовое поручение на эту встречу — обычное declare_process. ' +
         'clear=true — снять прежний наказ.',
       parameters: {
@@ -1043,7 +1043,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
           office: {
             type: 'string',
             description:
-              'Должность столпа, которого наказ заберёт (treasurer/marshal/keeper/chancellor). ' +
+              'Должность сановника, которого наказ заберёт (treasurer/marshal/keeper/chancellor). ' +
               'Пусто — город выберет свободного сам.',
           },
           clear: { type: 'boolean', description: 'true — отменить действующий наказ.' },
@@ -1074,7 +1074,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
           ok: true,
           directive: res.directive,
           hint:
-            'В речи: наказ принят и будет исполнен при следующей стыковке. Предупреди, что столп тогда ' +
+            'В речи: наказ принят и будет исполнен при следующей стыковке. Предупреди, что сановник тогда ' +
             'оторвётся от своего дела — прежнее встанет на паузу, и ты об этом доложишь. Разовое дело сейчас не заводи.',
         };
       },
@@ -1286,7 +1286,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
     {
       name: 'pause_process',
       description:
-        'Поставить дело на паузу: проделанное не теряется, срок не идёт, столп освобождается. Не отмена.',
+        'Поставить дело на паузу: проделанное не теряется, срок не идёт, сановник освобождается. Не отмена.',
       parameters: {
         type: 'object',
         required: ['processId'],
@@ -1312,7 +1312,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
           ok: true,
           pausedId: action.id,
           summary: action.summary,
-          hint: 'Дело на паузе. В речи: работы остановили, к ним можно вернуться. Столп свободен.',
+          hint: 'Дело на паузе. В речи: работы остановили, к ним можно вернуться. Сановник свободен.',
         };
       },
     },

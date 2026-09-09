@@ -13,6 +13,7 @@ import {
 } from './processes.js';
 import { judgeDeed } from './deedJudge.js';
 import { startDeed, deedRemainingBand } from './deeds.js';
+import { gameDateFromDay } from './gameClock.js';
 import { scheduleDeedJob } from './worldLoop.js';
 import { DURATION_SPEC } from './bands.js';
 import { formatBoardForPrompt, isStakedStory, plotHasLiveProcess } from './plotlines.js';
@@ -88,22 +89,31 @@ export function clearPatronPresenceAsked(domain) {
   if (domain?.state) domain.state.patronPresenceAsked = false;
 }
 
-function rememberFact(domain, { text, world, officer, chronicleAdds }) {
+/**
+ * След того, что сановник взялся за дело сам.
+ *
+ * Это не событие города, а служебная отметка: начало дела игрок и так видит в
+ * списке дел, а в летописи такая строка называет дело по имени и палит
+ * метагейм. Поэтому запись техническая — без тега `chronicle` и скрытая,
+ * так что ни хроника, ни жрец её не видят.
+ */
+function rememberOfficerInitiative(domain, { text, world, officer, day = 0 }) {
   domain.lore = domain.lore || [];
   const fact = createLoreFact({
     id: newId('lore'),
     text,
-    tags: ['chronicle', 'fact', 'officer'],
-    gameDateLabel: world?.gameDate?.label || null,
+    tags: ['fact', 'officer', 'initiative'],
+    gameDateLabel: gameDateFromDay(day).label,
     tick: world?.tickIndex ?? null,
+    day,
     author: `officer:${officer?.office || 'unknown'}`,
+    secret: true,
   });
   domain.lore.push(fact);
-  if (chronicleAdds) chronicleAdds.push(fact);
   return fact;
 }
 
-async function applyProcess(domain, args, { config, runtime, world, officer, day = 0, log, chronicleAdds }) {
+async function applyProcess(domain, args, { config, runtime, world, officer, day = 0, log }) {
   const slots = canStartProcess(domain, config);
   if (!slots.ok || !officer) {
     return { error: 'too_many_processes', message: 'Все сановники заняты.' };
@@ -173,10 +183,10 @@ async function applyProcess(domain, args, { config, runtime, world, officer, day
       action.plotlineId = plot?.id || null;
     }
   }
-  rememberFact(domain, {
+  rememberOfficerInitiative(domain, {
     world,
     officer,
-    chronicleAdds,
+    day,
     text: `${officer.title} ${officer.name} сам взялся за дело: ${summary}.`,
   });
   return { action, plot };
@@ -184,7 +194,7 @@ async function applyProcess(domain, args, { config, runtime, world, officer, day
 
 /**
  * Ход сановника, когда покровитель давно молчит. Когда и кем — решает движок.
- * @returns {{ silent: number, act: object|null, chronicleAdds: object[] }}
+ * @returns {{ silent: number, act: object|null }}
  */
 export async function runOfficerAct({
   config,
@@ -196,12 +206,11 @@ export async function runOfficerAct({
   rng = Math.random,
 }) {
   const gate = shouldRunSteward(domain, config);
-  if (!gate.ok) return { silent: gate.silent, act: null, chronicleAdds: [] };
+  if (!gate.ok) return { silent: gate.silent, act: null };
 
   const officer = pickRandomFreeOfficer(domain, rng);
-  if (!officer) return { silent: gate.silent, act: null, chronicleAdds: [] };
+  if (!officer) return { silent: gate.silent, act: null };
 
-  const chronicleAdds = [];
   const log = (parentLog || getLogger()).child({ scope: 'officerAct', domainId: domain.id });
   const statIds = (config.stats || []).map((s) => s.id).join(', ');
   const draft = { data: null };
@@ -245,7 +254,6 @@ export async function runOfficerAct({
             officer,
             day,
             log,
-            chronicleAdds,
           });
           if (applied.error) return toolFail(applied.error, applied.message);
           draft.data = {
@@ -333,7 +341,7 @@ export async function runOfficerAct({
     act: draft.data ? `${draft.data.kind}:${draft.data.summary || 'none'}` : 'no_tool',
     preview: truncate(draft.data?.summary || '', 120),
   });
-  return { silent: gate.silent, act: draft.data, chronicleAdds };
+  return { silent: gate.silent, act: draft.data };
 }
 
 export const runSteward = runOfficerAct;

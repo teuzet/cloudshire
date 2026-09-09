@@ -398,6 +398,51 @@ function renderCityTab(d) {
   return out.join('');
 }
 
+const ENDING_KIND_LABEL = {
+  GOOD_ENDING: 'хорошая',
+  NEUTRAL_ENDING: 'никакая',
+  BAD_ENDING: 'плохая',
+};
+
+/**
+ * Концовки — список вариантов, а не одна строка.
+ *
+ * `closeWhen` у нити со ставками — это все её концовки сразу. Склеенные через
+ * запятую они читались как один длинный исход, и понять, что чем кончится,
+ * было нельзя.
+ */
+function endingsBlock(p) {
+  const list = (p.endings || []).filter((e) => e && e.text);
+  const closed = p.ending && typeof p.ending === 'object' ? p.ending : null;
+  const happened = closed?.text
+    ? `<p class="small">случилось: <b>${esc(ENDING_KIND_LABEL[closed.kind] || closed.kind || '?')}</b> — ${esc(closed.text)}</p>`
+    : closed?.kind
+      ? `<p class="small">случилось: <b>${esc(ENDING_KIND_LABEL[closed.kind] || closed.kind)}</b></p>`
+      : '';
+
+  if (list.length) {
+    const rows = list
+      .map((e) => {
+        const hit = closed?.endingId && closed.endingId === e.id;
+        const label = ENDING_KIND_LABEL[e.kind] || e.kind || '?';
+        return (
+          `<li${hit ? ' class="hit"' : ''}>` +
+          `<span class="muted small">${esc(label)}${hit ? ' · случилась' : ''}</span> ${esc(e.text)}</li>`
+        );
+      })
+      .join('');
+    return `${happened}<p class="small muted">чем может кончиться:</p><ul class="small endings">${rows}</ul>`;
+  }
+
+  const closeWhen = Array.isArray(p.closeWhen) ? p.closeWhen.filter(Boolean) : p.closeWhen ? [p.closeWhen] : [];
+  if (!closeWhen.length) return happened;
+  if (closeWhen.length === 1) {
+    return `${happened}<p class="small muted">закроется, когда: ${esc(closeWhen[0])}</p>`;
+  }
+  const rows = closeWhen.map((t) => `<li>${esc(t)}</li>`).join('');
+  return `${happened}<p class="small muted">закроется, когда:</p><ul class="small endings">${rows}</ul>`;
+}
+
 function plotCard(p, names = {}) {
   const concerns = (p.concernsDomainIds || [])
     .map((id) => names[id] || id)
@@ -444,7 +489,7 @@ function plotCard(p, names = {}) {
     `<div class="muted small">${esc(meta)}</div>` +
     (p.synopsis ? `<p class="pre">${esc(p.synopsis)}</p>` : '') +
     (threats ? `<p class="small muted">нависло:</p><ul class="small">${threats}</ul>` : '') +
-    (p.closeWhen ? `<p class="small muted">закроется, когда: ${esc(p.closeWhen)}</p>` : '') +
+    endingsBlock(p) +
     (p.relatedStats?.length
       ? `<p class="small muted">статы: ${esc(p.relatedStats.join(', '))}</p>`
       : '') +

@@ -303,6 +303,9 @@ button.danger:hover { border-color: #d98080; }
 .ins-card.dim { opacity: 0.5; }
 .ins-card h4 { margin: 0 0 0.2rem; font-size: 0.9rem; }
 .ins-card p { margin: 0.35rem 0 0; }
+.ins-card ul { margin: 0.2rem 0 0; padding-left: 1.1rem; }
+.endings li { margin-bottom: 0.2rem; }
+.endings li.hit { font-weight: 600; }
 .pre { white-space: pre-wrap; }
 
 .row-actions {

@@ -144,7 +144,7 @@ export function applyRuleDeed(domain, process, { finish = 'ok', day = 0, rng = M
 // ─────────────────────────── наказ на сопряжение ───────────────────────────
 
 /**
- * Единственный наказ, у которого есть внешний триггер. Он называет столп,
+ * Единственный наказ, у которого есть внешний триггер. Он называет сановника,
  * который заберёт, — иначе на стыковке пришлось бы или ломать лимит слотов,
  * или молча ничего не делать.
  */
@@ -168,7 +168,7 @@ export function clearConfluxDirective(domain) {
 }
 
 /**
- * Наказ сработал: заводим обычное дело и, если названный столп занят,
+ * Наказ сработал: заводим обычное дело и, если названный сановник занят,
  * прерываем его паузой. Пауза от наказа не истлевает молча — о ней доложено.
  */
 export function fireConfluxDirective(
@@ -197,7 +197,7 @@ export function fireConfluxDirective(
     busy.status = 'paused';
     busy.pausedDay = Math.round(Number(day) || 0);
     busy.pausedBy = 'order';
-    busy.pauseReason = 'столп забран наказом на сопряжение';
+    busy.pauseReason = 'сановник забран наказом на сопряжение';
     pauseDeedClock(busy, day);
     releaseOfficerProcess(domain, busy);
     paused = busy;

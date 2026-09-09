@@ -14,7 +14,7 @@ import {
   PLOT_ENDING_MAX,
   PLOT_HOOK_MAX,
 } from '../src/game/plotlines.js';
-import { advanceWorldMonths, normalizeFinish, freeformConfig, openStoryTitlesLine, formatFreeformGravityForPrompt, formatFreeformChronicleSeed, formatBrainstormCandidateForPrompt, parseFreeformGravity, parseFreeformUrgency, FREEFORM_GRAVITY, clampFreeformCountdown, createFreeformPlot, sampleFreeformMaxDepth, advanceFreeformDepth, formatFreeformDepth, plotCardForPrompt, applyFreeformProgress, freeformTickDecision, autotickCloseKind, rollFreeformCountdown, maxFailsForGravity } from '../src/game/freeform.js';
+import { appendChronicle, advanceWorldMonths, normalizeFinish, freeformConfig, openStoryTitlesLine, formatFreeformGravityForPrompt, formatFreeformChronicleSeed, formatBrainstormCandidateForPrompt, parseFreeformGravity, parseFreeformUrgency, FREEFORM_GRAVITY, clampFreeformCountdown, createFreeformPlot, sampleFreeformMaxDepth, advanceFreeformDepth, formatFreeformDepth, plotCardForPrompt, applyFreeformProgress, freeformTickDecision, autotickCloseKind, rollFreeformCountdown, maxFailsForGravity } from '../src/game/freeform.js';
 import { parseFreeformPick, formatFreeformVariants, formatFreeformCardJudgeCase, formatFreeformCardJudgeRepair, parseFreeformPackReview, FREEFORM_PACK_JUDGE_CODES } from '../src/game/freeformJudge.js';
 import { normalizeSeedBlank, pickFreeformSeedAxes, pickFreeformSeedAxisPairs, formatFreeformSeedAxesForPrompt, formatFreeformSeedAxisPairsForPrompt } from '../src/game/freeformArchitect.js';
 import { listLegalBeatDynamics, pickFreeformBeatDynamics, formatBeatDynamicsForPrompt } from '../src/game/freeformDynamics.js';
@@ -241,6 +241,25 @@ test('исход дела и сдвиг календаря', () => {
   const date = advanceWorldMonths(world, 2);
   assert.equal(world.tickIndex, 16);
   assert.equal(date.label, 'Год 2, месяц 5');
+});
+
+test('запись посева датируется днём, а лаборатория остаётся на месяце', () => {
+  const world = { tickIndex: 7, gameDate: { year: 1, month: 8, label: 'Год 1, месяц 8' } };
+  const domain = { id: 'd1', lore: [], plotlines: [{ id: 'p1', chronicleIds: [] }] };
+
+  const dated = appendChronicle(domain, world, {
+    text: 'В Срединном поясе загудели каменные ступени.',
+    plotId: 'p1',
+    author: 'freeform:seed',
+    day: 232,
+  });
+  assert.equal(dated.day, 232);
+  assert.equal(dated.gameDateLabel, 'Год 1, месяц 8, день 23', 'иначе в летописи строка без дня');
+  assert.deepEqual(domain.plotlines[0].chronicleIds, [dated.id]);
+
+  const undated = appendChronicle(domain, world, { text: 'Лабораторная запись.', author: 'lab:errand' });
+  assert.equal(undated.day, undefined, 'пустой день не должен становиться первым днём года');
+  assert.equal(undated.gameDateLabel, 'Год 1, месяц 8');
 });
 
 test('судья выбирает номер варианта с 1', () => {

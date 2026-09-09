@@ -20,6 +20,7 @@ src/index.js
     process_finish → исход дела → бит нити → разбор остальных обязательств
     threat_fire    → срабатывание угрозы или разрешение
     seed_attempt / seed_appear → посев истории
+  chronicler                      запись летописи о случившемся (в обработчике)
   herald                          весть покровителю об одном событии
   statJudge, keepStories
 
@@ -66,6 +67,7 @@ src/index.js
 | `bands.js` / `deeds.js` / `deedJudge.js` | Полосы срока и сложности, дело в днях |
 | `threats.js` / `threatSmith.js` | Скрытые обязательства нити и их автор |
 | `reconcile.js` / `reconciler.js` | Что делать с остальными делами нити после события |
+| `chronicler.js` | Запись летописи о случившемся: без названий дел и историй |
 | `herald.js` / `notify.js` / `priestOrders.js` | Весть об одном событии, пуши, наказы |
 | `cityRules.js` | Постоянный порядок города и наказ на сопряжение |
 | `monthResolve.js` / `tick.js` | Оркестрация месяца / мира на стыке |

@@ -94,6 +94,21 @@ const silentLog = {
 /** Рантайм, который никогда не зовут: проверяем, что движок считает сам. */
 const noRuntime = null;
 
+/**
+ * Рантайм с одним живым агентом — хронистом. Остальные вызовы (автор угроз,
+ * разбор) молча ничего не возвращают: движок обязан обойтись без них.
+ */
+function chronicleRuntime(text, calls = []) {
+  return {
+    run: async (opts) => {
+      if (opts.agentId !== 'chronicler') return {};
+      calls.push(opts.userMessages[0].content);
+      await opts.tools[0].handler({ entry: text });
+      return {};
+    },
+  };
+}
+
 // ───────────────────────────── запись хроники ─────────────────────────────
 
 test('запись события помечена игровым днём и нитью', () => {
@@ -300,6 +315,79 @@ test('DANGEROUS-крит роняет беду немедленно', async () =
   assert.equal(res.outcome.finish, 'crit');
   assert.equal(findThreat(plot, threat.id).status, 'fired');
   assert.equal(plot.failCount, 1);
+});
+
+test('запись о деле пишет хронист, а не шаблон движка', async () => {
+  const plot = makePlot();
+  const domain = makeDomain({ plots: [plot] });
+  const world = makeWorld();
+  attachDeed(domain, plot, { plotEngagement: 'DIRECT', difficulty: 'PLAIN', goal: 'найти причину гула' });
+  const calls = [];
+  await resolveDeedEvent({
+    config,
+    runtime: chronicleRuntime('Ступени вскрыли и нашли старый водоотводный ход.', calls),
+    domain,
+    world,
+    day: 130,
+    processId: 'proc1',
+    rng: () => 0.5,
+    log: silentLog,
+  });
+  assert.equal(domain.lore[0].text, 'Ступени вскрыли и нашли старый водоотводный ход.');
+  assert.equal(domain.lore[0].author, 'engine:deed');
+  assert.equal(calls.length, 1, 'хрониста зовут ровно один раз на событие');
+  assert.match(calls[0], /найти причину гула/);
+  assert.match(calls[0], /не пиши, что вопрос закрыт/i, 'глубина ещё не набрана');
+});
+
+test('запись о деле не называет дело по имени, даже если модель молчит', async () => {
+  const plot = makePlot();
+  const domain = makeDomain({ plots: [plot] });
+  const world = makeWorld();
+  attachDeed(domain, plot, {
+    plotEngagement: 'DIRECT',
+    difficulty: 'PLAIN',
+    summary: 'Свести спорящих о воде',
+    goal: 'помирить гряд-ников и лес-ников',
+  });
+  await resolveDeedEvent({
+    config,
+    runtime: noRuntime,
+    domain,
+    world,
+    day: 130,
+    processId: 'proc1',
+    rng: () => 0.5,
+    log: silentLog,
+  });
+  const text = domain.lore[0].text;
+  assert.doesNotMatch(text, /Свести спорящих о воде/, 'название дела — метагейм');
+  assert.doesNotMatch(text, /«|»/);
+  assert.match(text, /помирить гряд-ников/);
+});
+
+test('сработавшая беда ложится в хронику прошедшим временем', async () => {
+  const plot = makePlot();
+  const domain = makeDomain({ plots: [plot] });
+  const world = makeWorld();
+  const threat = attachThreat(
+    plot,
+    createThreat({ plot, text: 'Пыль забьёт водосборный сток', band: 'WEEKS', day: 100, rng: () => 0.5 }),
+  );
+  const calls = [];
+  await fireThreatEvent({
+    runtime: chronicleRuntime('Водосборный сток у западных каменоломен забило известковой пылью.', calls),
+    domain,
+    world,
+    day: 140,
+    plotId: plot.id,
+    threatId: threat.id,
+    rng: () => 0.5,
+    log: silentLog,
+  });
+  assert.equal(domain.lore[0].text, 'Водосборный сток у западных каменоломен забило известковой пылью.');
+  assert.match(calls[0], /В БУДУЩЕМ ВРЕМЕНИ/);
+  assert.match(calls[0], /Пыль забьёт водосборный сток/);
 });
 
 test('дело, которого нет или которое не идёт, пропускается', async () => {

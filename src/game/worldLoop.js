@@ -46,6 +46,13 @@ import {
   normalizePlotThreats,
 } from './threats.js';
 import { replenishPlotThreats } from './threatSmith.js';
+import {
+  fallbackDeedEntry,
+  formatDeedPrompt,
+  formatThreatPrompt,
+  plotChronicleTail,
+  writeChronicle,
+} from './chronicler.js';
 import { reconcilePlot } from './reconciler.js';
 import { expirePauses } from './reconcile.js';
 import {
@@ -169,9 +176,6 @@ export function closePlotWithJobs(domain, world, plot, { day = 0, reason = '', f
 
 // ───────────────────────────── исход дела ─────────────────────────────
 
-const FINISH_WORD = { fail: 'провалом', ok: 'успехом', crit: 'полным успехом' };
-
-
 function findProcess(domain, processId) {
   return (domain?.state?.pendingActions || []).find((a) => String(a.id) === String(processId)) || null;
 }
@@ -210,8 +214,33 @@ export async function resolveDeedEvent({
   // глубину истории, а в постоянные изменения города.
   const rule = applyRuleDeed(domain, process, { finish: rolled.finish, day, rng });
 
+  // Запись хроники пишет хронист, а не движок: шаблон «дело кончилось успехом»
+  // и был тем метагеймом, который жрец потом честно пересказывал.
+  // Порядок города говорит сам за себя — там текст уже предметный.
+  let text = rule?.text || null;
+  if (!text) {
+    const written = await writeChronicle({
+      runtime,
+      domain,
+      occasion: 'дело',
+      prompt: formatDeedPrompt({
+        domain,
+        plot,
+        process,
+        applied,
+        threat: plot ? findThreat(plot, applied.threatId) : null,
+        closed: Boolean(applied.closes),
+        ending: plot?.ending || null,
+        chronicleTail: plotChronicleTail(domain, plot?.id),
+        dateLabel: gameDateFromDay(day).label,
+      }),
+      log,
+    });
+    text = written?.text || fallbackDeedEntry(process, rolled.finish);
+  }
+
   const fact = appendEventFact(domain, world, {
-    text: rule?.text || `Дело «${process.summary}» кончилось ${FINISH_WORD[rolled.finish] || 'успехом'}.`,
+    text,
     plotId: plot?.id || null,
     processId: process.id,
     day,
@@ -277,11 +306,31 @@ export async function fireThreatEvent({
   const threat = findThreat(plot, threatId);
   if (!threat || threat.status !== 'live') return { skipped: 'threat_not_live' };
 
+  const tail = plotChronicleTail(domain, plot.id);
   const res = fireThreat(plot, threat, { day });
   if (!res.ok) return { skipped: res.reason };
 
+  // Текст угрозы написан в будущем времени: это предсказание, которое движок
+  // держал до срока. В летопись оно должно лечь уже случившимся.
+  const occasion = res.kind === 'resolution' ? 'разрешение' : 'угроза';
+  const written = await writeChronicle({
+    runtime,
+    domain,
+    occasion,
+    prompt: formatThreatPrompt({
+      plot,
+      threat,
+      kind: res.kind,
+      closed: Boolean(res.closes),
+      severity: res.severity,
+      chronicleTail: tail,
+      dateLabel: gameDateFromDay(day).label,
+    }),
+    log,
+  });
+
   const fact = appendEventFact(domain, world, {
-    text: threat.text || `В истории «${plot.title}» случилось то, чего боялись.`,
+    text: written?.text || threat.text || 'В городе случилось то, чего боялись.',
     plotId: plot.id,
     day,
     author: res.kind === 'resolution' ? 'engine:resolution' : 'engine:threat',
@@ -314,7 +363,7 @@ export async function fireThreatEvent({
     fact,
     plot: closed || plot,
     plotId: plot.id,
-    occasion: res.kind === 'resolution' ? 'разрешение' : 'угроза',
+    occasion,
     closed: Boolean(closed),
     severity: res.severity,
   };
@@ -412,6 +461,7 @@ export async function seedAppearEvent({
     gravity: grain.gravity,
     fromVoid: grain.fromVoid,
     fromGenesis: grain.fromGenesis,
+    day,
     log,
   });
   dropSeedRequest(domain, request.id);
@@ -422,10 +472,7 @@ export async function seedAppearEvent({
 
   const plot = planted.plot;
   if (request.seedFactId) plot.seedFactId = request.seedFactId;
-  if (planted.fact) {
-    planted.fact.day = day;
-    planted.fact.sourcePlotId = plot.id;
-  }
+  if (planted.fact) planted.fact.sourcePlotId = plot.id;
   await ensurePlotObligations({ runtime, domain, world, plot, day, rng, log });
 
   log.info('loop.seed_planted', { title: plot.title, gravity: plot.gravity, source: request.source });

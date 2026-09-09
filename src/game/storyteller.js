@@ -42,9 +42,14 @@ import {
   judgePlotSeed,
   pickStoryType,
   isThreeActPlot,
+  isStakedStory,
   plotBeatAgentId,
   plotScale,
   allowSequelAfter,
+  formatCloseWhen,
+  formatFreeformEndings,
+  defaultFreeformMaxDepth,
+  maxFailsForGravity,
   PLOT_SUMMARY_MAX,
   PLOT_HOOK_MAX,
 } from './plotlines.js';
@@ -960,6 +965,7 @@ export async function plantStakedStory({
   gravity,
   fromVoid = false,
   fromGenesis = false,
+  day = null,
   log,
 }) {
   const drafted = await brainstormFreeformPack({
@@ -997,6 +1003,7 @@ export async function plantStakedStory({
         text: chronicleText,
         plotId: plot.id,
         author: 'freeform:seed',
+        day,
       })
     : null;
   await refreshFreeformEndings({ runtime, domain, plot, log });
@@ -2185,7 +2192,44 @@ export async function quietMonth({ config, runtime, domain, world, log: parentLo
 }
 
 /**
- * Конец месяца: обновить синопсисы по свежей хронике.
+ * Карточка нити для reducer'а синопсиса.
+ *
+ * У нити со ставками `closeWhen` — это ВСЕ её концовки: и хорошая, и никакая,
+ * и плохая. Отдавать их строкой под заголовком «успешный исход» нельзя:
+ * reducer читал склеенный список как уже случившееся и переписывал синопсис
+ * развязкой, хотя дело было всего лишь про осмотр. Поэтому здесь исходы
+ * названы возможными, а рядом стоит, сколько истории ещё осталось.
+ */
+export function formatKeepPlotBlock(plot, freshLines = []) {
+  const staked = isStakedStory(plot);
+  const lines = [`id ${plot.id} — «${plot.title}»`, `Сейчас: ${plot.synopsis || 'только началась'}`];
+
+  if (staked) {
+    const endings = formatFreeformEndings(plot);
+    if (endings) {
+      lines.push('ВОЗМОЖНЫЕ ИСХОДЫ (варианты будущего, ни один ещё не наступил):', endings);
+    }
+    const depth = Math.round((Number(plot.depth) || 0) * 100) / 100;
+    const maxDepth = Number(plot.maxDepth) || defaultFreeformMaxDepth(plot.gravity);
+    const fails = Math.max(0, Math.round(Number(plot.failCount) || 0));
+    const maxFails = plot.maxFails == null ? maxFailsForGravity(plot.gravity) : Number(plot.maxFails);
+    lines.push(
+      plot.status === 'closed'
+        ? 'История ЗАКРЫТА: её развязка уже в свежих записях.'
+        : `История ОТКРЫТА и не разрешена: пройдено ${depth} из ${maxDepth}, промахов ${fails} из ${maxFails}.`,
+    );
+  } else {
+    const close = formatCloseWhen(plot);
+    if (close && close !== '—') lines.push(`Успешный исход: ${close}`);
+    if (plot.mootWhen) lines.push(`Теряет смысл, когда: ${plot.mootWhen}`);
+  }
+
+  lines.push(freshLines.length ? `Свежие записи:\n${freshLines.join('\n')}` : 'Свежих записей у неё нет.');
+  return lines.join('\n');
+}
+
+/**
+ * Обновить синопсисы по свежей хронике.
  * Reducer: ничего нового не придумывает. Ставки и интерес — не его работа.
  */
 async function runStoryKeep({
@@ -2257,20 +2301,7 @@ async function runStoryKeep({
     if (!linked) otherLines.push(line);
   }
 
-  const plotBlocks = plots
-    .map((p) => {
-      const fresh = byPlot.get(p.id) || [];
-      return [
-        `id ${p.id} — «${p.title}»`,
-        `Сейчас: ${p.synopsis || 'только началась'}`,
-        p.closeWhen ? `Успешный исход: ${p.closeWhen}` : null,
-        p.mootWhen ? `Теряет смысл, когда: ${p.mootWhen}` : null,
-        fresh.length ? `В этом месяце:\n${fresh.join('\n')}` : 'В этом месяце своей записи не было.',
-      ]
-        .filter(Boolean)
-        .join('\n');
-    })
-    .join('\n\n');
+  const plotBlocks = plots.map((p) => formatKeepPlotBlock(p, byPlot.get(p.id) || [])).join('\n\n');
 
   await runtime.run({
     agentId,
@@ -2292,6 +2323,8 @@ async function runStoryKeep({
           'Если уместно, одной фразой назови, что остаётся нерешённым — только если это уже следует из самой истории.',
           'Не пиши, куда история может пойти. Не прогнозируй сюжет.',
           'Для тайны: не раскрывай скрытый канон, если его ещё нет в хронике. Не достраивай разгадку из догадок.',
+          'ВОЗМОЖНЫЕ ИСХОДЫ — это варианты будущего. Пока история помечена открытой, ни один не наступил:',
+          'не пиши в синопсисе, что вопрос решён, беда ушла или город успокоился.',
           'Развязка из хроники (нашли, умер, под стражей, в бегах) должна остаться в синопсисе.',
           'Если у истории не было новой записи и картина не сдвинулась — не включай её.',
           'Новую хронику не пиши. Вызови submit_story_keep.',

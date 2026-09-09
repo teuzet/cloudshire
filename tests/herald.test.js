@@ -71,7 +71,11 @@ test('поводы и просьбы — закрытые словари', () =>
 test('просьбу считает движок, а не настроение модели', () => {
   assert.equal(decideAsk({}), 'нет');
   assert.equal(decideAsk({ needsHelp: true }), 'нужна помощь');
-  assert.equal(decideAsk({ officerFreed: true, needsHelp: true }), 'столп свободен');
+  assert.equal(
+    decideAsk({ officerFreed: true, needsHelp: true }),
+    'сановник свободен',
+    '«столп» — слово движка, вслух его говорить нельзя',
+  );
   assert.equal(decideAsk({ plotClosable: true, officerFreed: true }), 'можно закрыть');
   assert.equal(
     decideAsk({ pausedAwaitingConfirmation: true, plotClosable: true }),
@@ -164,7 +168,7 @@ test('промпт несёт повод, событие, нить и одну �
     plot: p,
     fact: { text: 'каменщики закрепили опору' },
     occasion: 'дело',
-    ask: 'столп свободен',
+    ask: 'сановник свободен',
     day: 0,
     memory: 'покровитель не любит длинных писем',
   });
@@ -176,7 +180,8 @@ test('промпт несёт повод, событие, нить и одну �
   assert.match(text, /подпорки поставлены/);
   assert.match(text, /покровитель: что там со столбом\?/);
   assert.match(text, /покровитель не любит длинных писем/);
-  assert.match(text, /ПРОСЬБА В КОНЦЕ: столп свободен/);
+  assert.match(text, /ПРОСЬБА В КОНЦЕ: сановник свободен/);
+  assert.match(text, /ЗАПИСЬ ЛЕТОПИСИ/, 'жрец пересказывает запись, а не отчитывается о деле');
 });
 
 test('без просьбы жрецу прямо запрещают спрашивать', () => {

@@ -17,7 +17,7 @@ import { remainingWork } from './deedMath.js';
 
 export const OCCASIONS = ['новая история', 'дело', 'угроза', 'разрешение', 'доклад'];
 
-export const ASKS = ['нет', 'столп свободен', 'нужна помощь', 'подтверди паузу', 'можно закрыть'];
+export const ASKS = ['нет', 'сановник свободен', 'нужна помощь', 'подтверди паузу', 'можно закрыть'];
 
 /** Хроника нити ограничена сверху числом битов, но страховка нужна. */
 export const THREAD_HISTORY_LIMIT = 15;
@@ -36,8 +36,11 @@ export function parseAsk(raw, fallback = 'нет') {
 
 /**
  * Что жрец просит у покровителя. Ровно один вопрос, по приоритету:
- * освободившийся столп важнее просьбы о помощи, а подтверждение паузы —
+ * освободившийся сановник важнее просьбы о помощи, а подтверждение паузы —
  * важнее всего, потому что без ответа дело истлеет.
+ *
+ * «Столп» — слово движка про слот сановника. Вслух его говорить нельзя:
+ * игрок слышит внутренний термин и понимает, что ему пересказывают таблицу.
  */
 export function decideAsk({
   pausedAwaitingConfirmation = false,
@@ -47,7 +50,7 @@ export function decideAsk({
 } = {}) {
   if (pausedAwaitingConfirmation) return 'подтверди паузу';
   if (plotClosable) return 'можно закрыть';
-  if (officerFreed) return 'столп свободен';
+  if (officerFreed) return 'сановник свободен';
   if (needsHelp) return 'нужна помощь';
   return 'нет';
 }
@@ -125,7 +128,13 @@ function formatThreats(rows = []) {
 export function formatHeraldPrompt(ctx) {
   const lines = [`ПОВОД: ${ctx.occasion}`];
   if (ctx.reportSubject) lines.push(`О ЧЁМ ПРОСИЛИ ДОКЛАДЫВАТЬ: ${ctx.reportSubject}`);
-  if (ctx.fact?.text) lines.push('', 'ЧТО СЛУЧИЛОСЬ (это правда, перескажи своим голосом):', ctx.fact.text);
+  if (ctx.fact?.text) {
+    lines.push(
+      '',
+      'ЗАПИСЬ ЛЕТОПИСИ (это правда, и это единственное, о чём ты говоришь):',
+      ctx.fact.text,
+    );
+  }
   if (ctx.thread) {
     lines.push('', `ИСТОРИЯ: «${ctx.thread.title}»`);
     if (ctx.thread.synopsis) lines.push(`Сейчас: ${ctx.thread.synopsis}`);

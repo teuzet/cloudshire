@@ -67,6 +67,16 @@ function makeDomain() {
         depth: 1,
         maxDepth: 3,
         relatedProcessIds: ['act_1'],
+        endings: [
+          { id: 'end_good', kind: 'GOOD_ENDING', text: 'Сруб держит, вода снова чистая' },
+          { id: 'end_neutral', kind: 'NEUTRAL_ENDING', text: 'Колодец забросили и роют новый' },
+          { id: 'end_bad', kind: 'BAD_ENDING', text: 'Колодец обрушился вместе с водовозами' },
+        ],
+        closeWhen: [
+          'Сруб держит, вода снова чистая',
+          'Колодец забросили и роют новый',
+          'Колодец обрушился вместе с водовозами',
+        ],
         threats: [
           {
             id: 'thr_known',
@@ -223,6 +233,33 @@ test('инспектор показывает и скрытое нависшее
       ],
     );
     assert.equal(plot.depth, 1);
+  });
+});
+
+test('концовки приходят разобранными, а не одной строкой closeWhen', async () => {
+  await withServer(async ({ base }) => {
+    const data = await get(base, '/api/play/inspect?userId=local-user');
+    const plot = data.domain.plotlines[0];
+    // closeWhen у нити со ставками — это все её концовки сразу; склеенный
+    // в строку он читался как один длинный исход и ничего не объяснял.
+    assert.deepEqual(
+      plot.endings.map((e) => [e.kind, e.text]),
+      [
+        ['GOOD_ENDING', 'Сруб держит, вода снова чистая'],
+        ['NEUTRAL_ENDING', 'Колодец забросили и роют новый'],
+        ['BAD_ENDING', 'Колодец обрушился вместе с водовозами'],
+      ],
+    );
+  });
+});
+
+test('клиент рисует концовки списком с пометкой рода', async () => {
+  await withServer(async ({ base }) => {
+    const res = await fetch(`${base}/play/app.js`);
+    assert.equal(res.status, 200);
+    const js = await res.text();
+    assert.match(js, /function endingsBlock/);
+    assert.match(js, /GOOD_ENDING: 'хорошая'/);
   });
 });
 

@@ -385,6 +385,48 @@ function renderHeader() {
   setImage(domain);
 }
 
+const ENDING_KIND_LABEL = {
+  GOOD_ENDING: 'хорошая',
+  NEUTRAL_ENDING: 'никакая',
+  BAD_ENDING: 'плохая',
+};
+
+/**
+ * Концовки нити списком. `closeWhen` у нити со ставками — это все её концовки
+ * сразу, и склеенные в строку они читались как один длинный исход.
+ */
+function endingsBlock(p) {
+  const list = (p.endings || []).filter((e) => e && e.text);
+  const closed = p.ending && typeof p.ending === 'object' ? p.ending : null;
+  const happened = closed
+    ? `<p class="small">случилось: <b>${esc(ENDING_KIND_LABEL[closed.kind] || closed.kind || '?')}</b>${
+        closed.text ? ` — ${esc(closed.text)}` : ''
+      }</p>`
+    : '';
+
+  if (list.length) {
+    const rows = list
+      .map((e) => {
+        const hit = closed?.endingId && closed.endingId === e.id;
+        const label = ENDING_KIND_LABEL[e.kind] || e.kind || '?';
+        return (
+          `<li${hit ? ' class="hit"' : ''}>` +
+          `<span class="muted small">${esc(label)}${hit ? ' · случилась' : ''}</span> ${esc(e.text)}</li>`
+        );
+      })
+      .join('');
+    return `${happened}<div class="muted small">чем может кончиться:</div><ul class="small endings">${rows}</ul>`;
+  }
+
+  const closeWhen = Array.isArray(p.closeWhen) ? p.closeWhen.filter(Boolean) : p.closeWhen ? [p.closeWhen] : [];
+  if (!closeWhen.length) return happened;
+  if (closeWhen.length === 1) {
+    return `${happened}<p class="muted small">закроется, когда: ${esc(closeWhen[0])}</p>`;
+  }
+  const rows = closeWhen.map((t) => `<li>${esc(t)}</li>`).join('');
+  return `${happened}<div class="muted small">закроется, когда:</div><ul class="small endings">${rows}</ul>`;
+}
+
 function plotCard(p) {
   const kindLabel = p.kind === 'errand' ? 'дело' : p.kind === 'story' ? 'история' : p.kind;
   const meta = [
@@ -418,7 +460,7 @@ function plotCard(p) {
     (meta ? `<div class="muted small">${esc(meta)}</div>` : '') +
     (p.synopsis ? `<p class="pre">${esc(p.synopsis)}</p>` : '') +
     (threats ? `<div class="muted small">нависло:</div><ul class="small">${threats}</ul>` : '') +
-    (p.closeWhen ? `<p class="muted small">закроется, когда: ${esc(p.closeWhen)}</p>` : '') +
+    endingsBlock(p) +
     (p.relatedStats?.length ? `<p class="muted small">статы: ${esc(p.relatedStats.join(', '))}</p>` : '') +
     `<p class="muted small">${esc(p.id)}</p></article>`
   );

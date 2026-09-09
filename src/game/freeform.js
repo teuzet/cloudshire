@@ -26,6 +26,7 @@ import {
 } from './plotlines.js';
 import { createLoreFact, chronicleEntries } from './models.js';
 import { gameDateFromTickIndex, worldDateLabel } from './tickClock.js';
+import { gameDateFromDay } from './gameClock.js';
 import { formatCityForAgents } from './cityContext.js';
 import { formatOfficersCastHint } from './officers.js';
 import { normalizeBeatDynamics } from './freeformDynamics.js';
@@ -403,13 +404,25 @@ export function advanceWorldMonths(world, months = 1) {
   return date;
 }
 
-export function appendChronicle(domain, world, { text, plotId = null, author, importance = 'major', tags = ['chronicle'] }) {
+/**
+ * `day` — день посева. Без него запись датируется месяцем, и в летописи
+ * появляется строка без дня рядом со строками, у которых день есть.
+ * Лаборатория `/freeform` дня не знает и остаётся на месячной метке.
+ */
+export function appendChronicle(
+  domain,
+  world,
+  { text, plotId = null, author, importance = 'major', tags = ['chronicle'], day = null },
+) {
+  // `Number(null)` — это ноль, поэтому пустой день проверяется до приведения.
+  const dated = day != null && day !== '' && Number.isFinite(Number(day));
   const fact = createLoreFact({
     id: newId('lore'),
     text: clipPlotText(text, 1200),
     tags,
-    gameDateLabel: worldDateLabel(world),
+    gameDateLabel: dated ? gameDateFromDay(Number(day)).label : worldDateLabel(world),
     tick: world.tickIndex,
+    day: dated ? Math.round(Number(day)) : null,
     author,
     importance,
     relatedPlotlineIds: plotId ? [plotId] : null,
