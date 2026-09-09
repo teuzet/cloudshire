@@ -300,6 +300,19 @@ function keyVals(pairs) {
   return `<div class="kvs">${rows}</div>`;
 }
 
+/**
+ * Настройки вестей одной строкой. `triggers` — объект флагов, а не список:
+ * инспектор показывает состояние домена как есть, не переупаковывая его.
+ */
+function notifyLine(notify) {
+  if (!notify) return null;
+  const raw = notify.triggers;
+  const on = Array.isArray(raw)
+    ? raw
+    : Object.keys(raw || {}).filter((k) => raw[k]);
+  return `${notify.intensity || '?'} · ${on.length ? on.join(', ') : 'ничего'}`;
+}
+
 function renderCityTab(d) {
   const out = [];
   out.push(
@@ -315,7 +328,7 @@ function renderCityTab(d) {
         ['вера', d.faith != null ? d.faith : null],
         // Мана дробная: показываем и целое, как видит игрок, и точное значение.
         ['мана', d.mana != null ? `${Math.floor(d.mana)} / 100 (${Number(d.mana).toFixed(2)})` : null],
-        ['вести', d.notify ? `${d.notify.intensity} · ${(d.notify.triggers || []).join(', ')}` : null],
+        ['вести', notifyLine(d.notify)],
         ['основан на тике', d.createdTick],
         ['последний тик', d.lastTickAt],
       ]),

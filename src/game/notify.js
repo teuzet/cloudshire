@@ -117,7 +117,17 @@ export function applyPriestNotifyChange(domain, { intensity = null, triggers = n
   const notify = notifySettings(domain);
   if (intensity) {
     const next = parseIntensity(intensity, notify.intensity);
-    notify.intensity = next === 'сводка' ? 'важное' : next;
+    const capped = next === 'сводка' ? 'важное' : next;
+    if (capped !== notify.intensity) {
+      notify.intensity = capped;
+      // Пресет накатываем заново. `normalizeNotify` материализует все флаги
+      // явными булями, и после первого же прохода пресет из интенсивности
+      // больше не выводится — без этого «пиши мне про всё» меняло бы подпись
+      // громкости, не включая ни одного нового повода.
+      const preset = TRIGGERS_BY_INTENSITY[capped] || [];
+      for (const t of NOTIFY_TRIGGERS) notify.triggers[t] = preset.includes(t);
+      for (const t of PROTECTED_TRIGGERS) notify.triggers[t] = true;
+    }
   }
   if (triggers && typeof triggers === 'object') {
     for (const [key, value] of Object.entries(triggers)) {

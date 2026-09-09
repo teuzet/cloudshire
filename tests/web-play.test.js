@@ -236,6 +236,9 @@ test('порядок города, наказ на сопряжение и те�
       ['как идут дела в порту'],
     );
     assert.equal(typeof data.domain.notify.intensity, 'string');
+    // Клиент однажды принял это за список и упал на .join — форму фиксируем.
+    assert.equal(Array.isArray(data.domain.notify.triggers), false);
+    assert.equal(data.domain.notify.triggers.threatFired, true);
     assert.equal('standingOrders' in data.domain, false, 'указов больше нет');
   });
 });

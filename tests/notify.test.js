@@ -83,6 +83,31 @@ test('жрец может включить подробности и пригл�
   assert.equal(n.style.detail, 'коротко');
 });
 
+test('смена громкости накатывает пресет, а не только меняет подпись', () => {
+  const d = domain();
+  assert.equal(notifySettings(d).triggers.errandDone, false, 'мелочь по умолчанию молчит');
+
+  applyPriestNotifyChange(d, { intensity: 'всё' });
+  const loud = notifySettings(d);
+  assert.equal(loud.intensity, 'всё');
+  assert.equal(loud.triggers.errandDone, true, '«пиши мне про всё» обязано включить мелочь');
+
+  applyPriestNotifyChange(d, { intensity: 'важное' });
+  const back = notifySettings(d);
+  assert.equal(back.intensity, 'важное');
+  assert.equal(back.triggers.errandDone, false, 'обратно — снова молчит');
+  assert.equal(back.triggers.deedDone, true, 'важное не выключает исход своего дела');
+});
+
+test('точечная правка в том же вызове сильнее пресета громкости', () => {
+  const d = domain();
+  applyPriestNotifyChange(d, { intensity: 'всё', triggers: { errandDone: false } });
+  const n = notifySettings(d);
+  assert.equal(n.intensity, 'всё');
+  assert.equal(n.triggers.errandDone, false, 'явная просьба важнее пресета');
+  assert.equal(n.triggers.newStory, true);
+});
+
 test('жрец не может увести игрока в тишину', () => {
   const d = domain();
   applyPriestNotifyChange(d, { intensity: 'сводка', triggers: { threatFired: false } });
