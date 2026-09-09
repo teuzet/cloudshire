@@ -1,43 +1,53 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  REPORT_CADENCES,
-  CADENCE_DAYS,
   MAX_PRIEST_ORDERS,
-  parseCadence,
+  REPORT_EVENT_GAP,
   priestOrders,
+  eventNo,
+  countEvent,
   addPriestOrder,
   removePriestOrder,
-  dueReports,
+  findPriestOrder,
+  orderTouchedBy,
+  reportGap,
+  pickReportSubject,
   markReported,
   formatPriestOrders,
 } from '../src/game/priestOrders.js';
-import { DAYS_PER_MONTH } from '../src/game/gameClock.js';
 
 function domain() {
   return { id: 'd1', state: {} };
 }
 
-test('каденция — enum, а не произвольное число дней', () => {
-  assert.deepEqual(REPORT_CADENCES, ['месяц', 'сезон', 'год']);
-  assert.equal(parseCadence('СЕЗОН'), 'сезон');
-  assert.equal(parseCadence('каждый час'), 'месяц', 'мусор падает на самую редкую разумную');
-  assert.equal(CADENCE_DAYS['месяц'], DAYS_PER_MONTH);
-  assert.equal(CADENCE_DAYS['год'], 360);
-});
+/** Наказ, о котором только что докладывали: дальше он должен помолчать. */
+function fresh(d, subject) {
+  const { order } = addPriestOrder(d, { subject, day: 0 });
+  markReported(d, order, { day: 0 });
+  return order;
+}
 
-test('наказ ставится со сроком первого доклада', () => {
+test('наказ — тема без расписания', () => {
   const d = domain();
-  const res = addPriestOrder(d, { subject: 'как идут дела в порту', cadence: 'сезон', day: 100 });
+  const res = addPriestOrder(d, { subject: 'как идут дела в порту', day: 100 });
   assert.equal(res.ok, true);
-  assert.equal(res.order.everyDays, 90);
-  assert.equal(res.order.nextDay, 190);
+  assert.equal(res.order.subject, 'как идут дела в порту');
+  assert.equal(res.order.sinceDay, 100);
   assert.equal(res.order.lastDay, null);
+  assert.equal(res.order.lastEventNo, null);
+  assert.equal('everyDays' in res.order, false, 'каденции у наказа нет');
+  assert.equal('nextDay' in res.order, false, 'срока следующего доклада тоже');
   assert.equal(priestOrders(d).length, 1);
 });
 
-test('пустой наказ не принимается', () => {
-  assert.equal(addPriestOrder(domain(), { subject: '   ' }).error, 'empty_subject');
+test('пустой наказ не принимается, повторный — тоже', () => {
+  const d = domain();
+  assert.equal(addPriestOrder(d, { subject: '   ' }).error, 'empty_subject');
+  assert.equal(addPriestOrder(d, { subject: 'порт' }).ok, true);
+  const dup = addPriestOrder(d, { subject: 'ПОРТ' });
+  assert.equal(dup.ok, false);
+  assert.equal(dup.error, 'duplicate');
+  assert.equal(priestOrders(d).length, 1);
 });
 
 test('больше трёх наказов не берём — это уже поток докладов', () => {
@@ -51,42 +61,72 @@ test('больше трёх наказов не берём — это уже п�
   assert.equal(res.limit, MAX_PRIEST_ORDERS);
 });
 
-test('наказ снимается по id', () => {
+test('наказ снимается по id и ищется по тексту', () => {
   const d = domain();
-  const { order } = addPriestOrder(d, { subject: 'порт', day: 0 });
+  const { order } = addPriestOrder(d, { subject: 'дела в порту', day: 0 });
+  assert.equal(findPriestOrder(d, { orderId: order.id })?.id, order.id);
+  assert.equal(findPriestOrder(d, { subject: 'порт' })?.id, order.id);
+  assert.equal(findPriestOrder(d, { subject: 'рудник' }), null);
   assert.equal(removePriestOrder(d, order.id).ok, true);
   assert.equal(priestOrders(d).length, 0);
   assert.equal(removePriestOrder(d, order.id).error, 'not_found');
 });
 
-test('доклад созревает по своему дню и переносится вперёд', () => {
+test('первый же доклад можно отдать сразу: свежая тема не ждёт', () => {
   const d = domain();
-  const { order } = addPriestOrder(d, { subject: 'порт', cadence: 'месяц', day: 0 });
-  assert.deepEqual(dueReports(d, 29), []);
-  assert.deepEqual(dueReports(d, 30).map((o) => o.id), [order.id]);
-  markReported(order, 30);
-  assert.equal(order.lastDay, 30);
-  assert.equal(order.nextDay, 60);
-  assert.deepEqual(dueReports(d, 45), []);
+  const { order } = addPriestOrder(d, { subject: 'порт', day: 0 });
+  assert.equal(reportGap(d, order), Infinity);
+  assert.equal(pickReportSubject(d, { texts: ['о чём-то своём'] })?.id, order.id);
 });
 
-test('чаще раза в игровой месяц наказ не срабатывает', () => {
-  const order = { id: 'r1', subject: 'порт', cadence: 'месяц', everyDays: 1, nextDay: 0 };
-  markReported(order, 100);
-  assert.equal(order.nextDay, 100 + DAYS_PER_MONTH);
+test('после доклада тема молчит, пока не пройдут другие события', () => {
+  const d = domain();
+  const order = fresh(d, 'порт');
+  assert.equal(pickReportSubject(d), null, 'сразу второй раз — нет');
+  for (let i = 0; i < REPORT_EVENT_GAP - 1; i += 1) countEvent(d);
+  assert.equal(pickReportSubject(d), null, 'зазор ещё не выдержан');
+  countEvent(d);
+  assert.equal(pickReportSubject(d)?.id, order.id);
 });
 
-test('просроченный доклад не копит долги', () => {
+test('задетая событием тема идёт первой, иначе — самая забытая', () => {
   const d = domain();
-  const { order } = addPriestOrder(d, { subject: 'порт', cadence: 'месяц', day: 0 });
-  markReported(order, 200);
-  assert.equal(order.nextDay, 230, 'следующий срок считается от факта, не от плана');
-  assert.deepEqual(dueReports(d, 210), []);
+  const port = fresh(d, 'дела в порту');
+  const mine = fresh(d, 'что на рудниках');
+  // Рудник забыт дольше: о порте докладывали позже, уже после нескольких событий.
+  for (let i = 0; i < REPORT_EVENT_GAP; i += 1) countEvent(d);
+  markReported(d, port, { day: 1 });
+  for (let i = 0; i < REPORT_EVENT_GAP; i += 1) countEvent(d);
+  assert.ok(reportGap(d, mine) > reportGap(d, port));
+  assert.equal(pickReportSubject(d)?.id, mine.id, 'без повода — самая забытая');
+  assert.equal(
+    pickReportSubject(d, { texts: ['в порту сгорел лоток досмотрщика'] })?.id,
+    port.id,
+    'повод перебивает забытость',
+  );
+});
+
+test('короткие и служебные слова темой не считаются', () => {
+  const order = { subject: 'как идут дела в порту' };
+  assert.equal(orderTouchedBy(order, ['в городе идут дела']), false, 'не по стоп-словам');
+  assert.equal(orderTouchedBy(order, ['у порту прибыло']), true);
+  assert.equal(orderTouchedBy(order, []), false);
+});
+
+test('доклад двигает счётчик события, а не календарь', () => {
+  const d = domain();
+  const { order } = addPriestOrder(d, { subject: 'порт', day: 0 });
+  countEvent(d);
+  countEvent(d);
+  markReported(d, order, { day: 42 });
+  assert.equal(order.lastDay, 42);
+  assert.equal(order.lastEventNo, eventNo(d));
+  assert.equal(order.times, 1);
 });
 
 test('наказы читаются для промпта', () => {
   const d = domain();
-  addPriestOrder(d, { subject: 'как идут дела в порту', cadence: 'сезон', day: 0 });
-  assert.equal(formatPriestOrders(d), '- как идут дела в порту (раз в сезон)');
+  addPriestOrder(d, { subject: 'как идут дела в порту', day: 0 });
+  assert.equal(formatPriestOrders(d), '- как идут дела в порту');
   assert.equal(formatPriestOrders(domain()), '');
 });

@@ -64,6 +64,8 @@ import {
   BRIEF_FREEFORM_MAX,
 } from './onboarding.js';
 import { blessProcess, processOwnedBy } from './processes.js';
+import { spendTurnMana } from './mana.js';
+import { beginRulerTurn, endRulerTurn } from './scheduler.js';
 import { formatBoardForSpeech, warmPlotlines, plotConfig } from './plotlines.js';
 import { islandDeleteCheck } from '../clients/telegram/access.js';
 import { generateIslandImage, removeIslandImage } from './islandImage.js';
@@ -160,6 +162,8 @@ export class GameApp {
     this.generatingProgress = new Map();
     /** Пока идёт world tick — чат с доменом отвечает системно. */
     this.worldTicking = false;
+    /** Дневной цикл: чем разбудить мир сразу после хода правителя. */
+    this.onClockReleased = null;
   }
 
   beginWorldTick() {
@@ -833,6 +837,8 @@ export class GameApp {
     const world = worldArg || (await this.storage.getWorld());
     log.info('ruler.turn', { text: truncate(text, 400) });
     normalizeDomain(domain);
+    // Пока жрец думает, время города стоит: иначе ответ будет про мир, которого уже нет.
+    await this.holdWorldClock();
     const conflux = await findActiveConfluxForDomain(this.storage, domain.id);
     let partner = null;
     if (conflux) {
@@ -1041,10 +1047,13 @@ export class GameApp {
         }
       }
       if (askNow) markRulerAsked(fresh, world);
+      // Мана — лимитер разговора. Ход с инструментами дороже: он двигает мир.
+      const spent = spendTurnMana(fresh, { usedTools: turn.okTools.size > 0 });
       await this.persistDialog(fresh, 'user', text);
       await this.persistDialog(fresh, 'assistant', reply, { meta: turn.meta });
 
       log.info('ruler.reply', {
+        mana: spent.ok ? spent.mana : 'empty',
         replyPreview: truncate(reply, 400),
         touchedPlots: [...warmed, ...warmedConflux].map((w) => `${w.id}:${w.from}→${w.to}`),
         dayNote: turn.meta?.dayNote || null,
@@ -1067,6 +1076,31 @@ export class GameApp {
     } finally {
       clearTimeout(holdTimer);
       await holdTask;
+      await this.releaseWorldClock();
+    }
+  }
+
+  /** Остановить время мира на ход правителя. */
+  async holdWorldClock() {
+    const world = await this.storage.getWorld();
+    beginRulerTurn(world);
+    await this.storage.saveWorld(world);
+  }
+
+  /**
+   * Пустить время дальше и сразу разобрать назревшее: дело на считанные дни,
+   * заведённое в разговоре, должно кончиться сразу после него, а не через час.
+   */
+  async releaseWorldClock() {
+    const world = await this.storage.getWorld();
+    endRulerTurn(world);
+    await this.storage.saveWorld(world);
+    if (this.onClockReleased) {
+      try {
+        await this.onClockReleased('ruler_turn');
+      } catch (err) {
+        getLogger().warn('clock.release_failed', { error: err.message });
+      }
     }
   }
 

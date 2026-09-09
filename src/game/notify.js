@@ -37,7 +37,17 @@ export const PROTECTED_TRIGGERS = ['threatFired'];
 
 const TRIGGERS_BY_INTENSITY = {
   'всё': NOTIFY_TRIGGERS,
-  'важное': ['newStory', 'threatSurfaced', 'threatFired', 'deedFailed', 'plotClosed', 'priestReport', 'conflux'],
+  // Исход дела покровитель ждёт: он сам его завёл. Молчим только про мелкие поручения.
+  'важное': [
+    'newStory',
+    'threatSurfaced',
+    'threatFired',
+    'deedDone',
+    'deedFailed',
+    'plotClosed',
+    'priestReport',
+    'conflux',
+  ],
   'сводка': ['threatFired', 'plotClosed'],
 };
 

@@ -34,14 +34,27 @@ test('бюджет по enum: 5 / 10 / 15 / 20', () => {
   assert.equal(garbage.stats.budget, 10);
 });
 
-test('три эскалации по 25% списывают 15, remaining остаётся 5', () => {
+test('промежуточные события едят бюджет, но не весь: под концовку заперт порог', () => {
   const plot = createPlotline({ title: 'Гул', kind: 'story', storyType: 'story', gravity: 'RUPTURE' });
   ensurePlotStatBudget(plot, cfg);
   for (let i = 0; i < 3; i += 1) {
-    const force = plotStatForce(plot, { opening: false, config: cfg });
-    assert.equal(force, 5);
+    assert.equal(plotStatForce(plot, { config: cfg }), 5, `беда ${i + 1}`);
   }
-  assert.equal(plot.stats.remaining, 5);
+  assert.equal(plot.stats.remaining, 5, 'порог концовки не отдаём');
+  assert.equal(plotStatForce(plot, { config: cfg }), 0, 'сверх порога промежуточным не достаётся');
+});
+
+test('кривая концовки выходит сама: чисто 20, один провал 15, два 10', () => {
+  const payout = (fails) => {
+    const plot = createPlotline({ title: 'Гул', kind: 'story', storyType: 'story', gravity: 'RUPTURE' });
+    ensurePlotStatBudget(plot, cfg);
+    for (let i = 0; i < fails; i += 1) plotStatForce(plot, { config: cfg });
+    return plotStatForce(plot, { ending: true, config: cfg });
+  };
+  assert.equal(payout(0), 20);
+  assert.equal(payout(1), 15);
+  assert.equal(payout(2), 10);
+  assert.equal(payout(3), 5, 'три беды — и на финал остаётся только порог');
 });
 
 test('финиш дела на 6 месяцев: сумма модулей = 6; crit без минусов', () => {

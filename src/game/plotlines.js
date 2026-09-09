@@ -27,26 +27,54 @@ function clamp100(n, fallback = 0) {
   return Math.max(0, Math.min(100, Math.round(v)));
 }
 
+/**
+ * Доля бюджета, которую промежуточным событиям не отдают ни при каких условиях:
+ * иначе история успевает раздать всё по дороге, и концовка ничего не решает.
+ */
+export const PLOT_ENDING_FLOOR_SHARE = 0.25;
+
 export function ensurePlotStatBudget(plot, config = null) {
   if (!plot || plot.kind === 'errand') return plot;
   const budget = gravityStatBudget(plot.gravity);
   if (!plot.stats || typeof plot.stats !== 'object') plot.stats = {};
   if (!Number.isFinite(Number(plot.stats.budget))) plot.stats.budget = budget;
   if (!Number.isFinite(Number(plot.stats.remaining))) plot.stats.remaining = plot.stats.budget;
+  if (!Number.isFinite(Number(plot.stats.interimSpent))) plot.stats.interimSpent = 0;
   return plot;
 }
 
-/** Сила хроники истории. Стартовая доля remaining не ест. */
-export function plotStatForce(plot, { opening = false, config = null } = {}) {
+function endingFloor(plot, config) {
+  const share = Number(config?.tick?.plot?.stats?.endingFloorShare ?? PLOT_ENDING_FLOOR_SHARE);
+  return Math.max(0, Math.round((Number(plot.stats?.budget) || 0) * share));
+}
+
+/**
+ * Сила хроники истории.
+ *
+ * Стартовая запись бюджет не ест: завязка обязана двинуть статы, иначе новая
+ * история незаметна. Дальше бюджет один на всю жизнь истории: каждое
+ * промежуточное событие откусывает свою долю, а концовка получает остаток.
+ * Отсюда кривая выходит сама — RUPTURE закрытый чисто стоит все 20, с одним
+ * провалом 15, с двумя 10, — и её не нужно нигде задавать числом.
+ */
+export function plotStatForce(plot, { opening = false, ending = false, config = null } = {}) {
   if (!plot || plot.kind === 'errand') return 0;
   ensurePlotStatBudget(plot, config);
-  const share = Number(config?.tick?.plot?.stats?.beatShare ?? 0.25);
-  const openingShare = Number(config?.tick?.plot?.stats?.openingShare ?? 0.25);
   const B = Number(plot.stats?.budget) || 0;
-  const force = Math.max(0, Math.round(B * (opening ? openingShare : share)));
-  if (!opening && plot.stats) {
-    plot.stats.remaining = Math.max(0, Number(plot.stats.remaining || 0) - force);
+  if (opening) {
+    const openingShare = Number(config?.tick?.plot?.stats?.openingShare ?? 0.25);
+    return Math.max(0, Math.round(B * openingShare));
   }
+  if (ending) {
+    const force = Math.max(0, Number(plot.stats.remaining) || 0);
+    plot.stats.remaining = 0;
+    return force;
+  }
+  const left = Math.max(0, (Number(plot.stats.remaining) || 0) - endingFloor(plot, config));
+  const share = Number(config?.tick?.plot?.stats?.beatShare ?? 0.25);
+  const force = Math.min(left, Math.max(0, Math.round(B * share)));
+  plot.stats.interimSpent = (Number(plot.stats.interimSpent) || 0) + force;
+  plot.stats.remaining = Math.max(0, (Number(plot.stats.remaining) || 0) - force);
   return force;
 }
 
@@ -429,6 +457,7 @@ export function plotConfig(config) {
     stats: {
       openingShare: Number(stats.openingShare ?? 0.25),
       beatShare: Number(stats.beatShare ?? 0.25),
+      endingFloorShare: Number(stats.endingFloorShare ?? PLOT_ENDING_FLOOR_SHARE),
       playerBudget: Math.max(1, Number(stats.playerBudget ?? 6)),
       worldBudget: Math.max(1, Number(stats.worldBudget ?? 8)),
       finaleFactor: Number(stats.finaleFactor ?? 2),

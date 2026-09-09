@@ -190,7 +190,14 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
     }
   }
 
-  const playing = domains.filter((d) => !d.status || d.status === 'playing');
+  // Месяц остался единицей только для общей доски пары. Одиночный город живёт
+  // непрерывным временем в dayLoop, и месячный проход по нему был бы вторым
+  // писателем: те же дела разрешились бы дважды.
+  const playing = domains.filter(
+    (d) =>
+      (!d.status || d.status === 'playing') &&
+      active.some((c) => (c.domainIds || []).includes(d.id)),
+  );
   for (const domain of playing) {
     normalizeDomain(domain);
     const live = byId.get(domain.id) || domain;

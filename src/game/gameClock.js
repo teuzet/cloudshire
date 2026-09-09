@@ -34,7 +34,9 @@ export function realMsToGameDays(ms, config) {
 }
 
 function epochMs(world) {
-  const raw = world?.epochAt;
+  // Мир, заведённый месячным путём, уже держит якорь в scheduler: игровой год
+  // начинается с начала реальных суток. Второй якорь развёл бы календари.
+  const raw = world?.epochAt || world?.scheduler?.epochAt;
   if (!raw) return null;
   const t = Date.parse(raw);
   return Number.isFinite(t) ? t : null;
@@ -43,7 +45,9 @@ function epochMs(world) {
 /** Завести часы нового мира. Идемпотентно: существующий якорь не трогаем. */
 export function startClock(world, now = Date.now()) {
   if (!world || typeof world !== 'object') return world;
-  if (!world.epochAt) world.epochAt = new Date(now).toISOString();
+  if (!world.epochAt) {
+    world.epochAt = world.scheduler?.epochAt || new Date(now).toISOString();
+  }
   if (!Number.isFinite(Number(world.dayIndex))) world.dayIndex = 0;
   return world;
 }

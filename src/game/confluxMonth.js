@@ -25,7 +25,7 @@ import {
 import { beatSharedPlot } from './confluxBeat.js';
 import { fadeQuietPlot, keepSharedStories } from './storyteller.js';
 import { markChroniclePlotClosed, createLoreFact } from './models.js';
-import { scoreMonthStats, factsForStatJudge } from './statJudge.js';
+import { scoreChronicleStats, factsForStatJudge } from './statJudge.js';
 import { realignFinishedOutcomes } from './plotAlign.js';
 
 function storyPlots(conflux) {
@@ -216,7 +216,7 @@ export async function resolveConfluxSharedMonth({
     const adds = addsByDomain.get(domain.id) || [];
     const toScore = factsForStatJudge(adds);
     if (!toScore.length) continue;
-    await scoreMonthStats({
+    await scoreChronicleStats({
       config,
       runtime,
       domain,

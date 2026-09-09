@@ -40,7 +40,7 @@ import { beatPlot, quietMonth, keepStories, fadeQuietPlot, plantStakedStory } fr
 import { confluxDirective, fireConfluxDirective } from './cityRules.js';
 import { decideMonthSeed, applyMonthSeedTemps } from './seedChannels.js';
 import { resolveSuspenseLegacy } from './legacyResolver.js';
-import { scoreMonthStats, factsForStatJudge } from './statJudge.js';
+import { scoreChronicleStats, factsForStatJudge } from './statJudge.js';
 import { getLogger } from '../log.js';
 import { accrueMana } from './mana.js';
 import { DAYS_PER_MONTH } from './gameClock.js';
@@ -362,7 +362,7 @@ export async function resolveDomainMonth({
   // 8. Оценщик статов: только события. Тихий месяц без сюжета — не зовём.
   const toScore = factsForStatJudge(chronicleAdds);
   const scored = toScore.length
-    ? await scoreMonthStats({
+    ? await scoreChronicleStats({
         config,
         runtime,
         domain: working,

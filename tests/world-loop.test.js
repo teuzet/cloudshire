@@ -10,7 +10,7 @@ import {
   fireThreatEvent,
   seedAttemptEvent,
   seedAppearEvent,
-  priestReportEvent,
+  attachReport,
   drainDomainJobs,
   armDomainSchedule,
   scheduleDeedJob,
@@ -533,23 +533,30 @@ test('заявка старше полутора лет выбрасываетс
 
 // ───────────────────────────── доклад ─────────────────────────────
 
-test('доклад по наказу переставляет себя на следующий срок', () => {
+test('доклад по наказу едет попутно с событием, а не по расписанию', () => {
   const domain = makeDomain();
-  const world = makeWorld();
-  const { order } = addPriestOrder(domain, { subject: 'как идут дела в порту', cadence: 'месяц', day: 100 });
-  const res = priestReportEvent({ domain, world, day: 130, orderId: order.id });
-  assert.equal(res.occasion, 'доклад');
-  assert.equal(res.reportSubject, 'как идут дела в порту');
-  assert.equal(order.nextDay, 160);
-  assert.equal(jobList(world).filter((j) => j.kind === 'priest_report').length, 1);
+  const { order } = addPriestOrder(domain, { subject: 'как идут дела в порту', day: 100 });
+  const event = { occasion: 'дело', fact: { text: 'каменщики закрепили опору' } };
+  attachReport(domain, event, { day: 130 });
+  assert.equal(event.reportSubject, 'как идут дела в порту');
+  assert.equal(event.reportOrderId, order.id);
+  assert.equal(order.lastDay, 130);
+  assert.equal(
+    jobList(domain.world || { jobs: [] }).length,
+    0,
+    'наказ не заводит собственных заданий: срока у него нет',
+  );
 });
 
-test('доклад до срока не идёт', () => {
+test('второе событие подряд ту же тему не поднимает', () => {
   const domain = makeDomain();
-  const world = makeWorld();
-  const { order } = addPriestOrder(domain, { subject: 'порт', cadence: 'год', day: 100 });
-  const res = priestReportEvent({ domain, world, day: 130, orderId: order.id });
-  assert.equal(res.skipped, 'not_due');
+  addPriestOrder(domain, { subject: 'порт', day: 100 });
+  const first = { occasion: 'дело', fact: { text: 'первое' } };
+  const second = { occasion: 'дело', fact: { text: 'второе' } };
+  attachReport(domain, first, { day: 130 });
+  attachReport(domain, second, { day: 131 });
+  assert.equal(first.reportSubject, 'порт');
+  assert.equal(second.reportSubject, undefined);
 });
 
 // ───────────────────────────── слив событий ─────────────────────────────

@@ -1,9 +1,10 @@
 /**
  * Оценщик статов. Рассказчики пишут, что случилось; этот агент читает
- * записи месяца и ставит, какие стороны города задеты. Величину считает движок.
+ * записи хроники и ставит, какие стороны города задеты. Величину считает движок.
  */
 
 import { findPlotline, plotStatForce } from './plotlines.js';
+import { worldDateLabel } from './gameClock.js';
 import { resolveStatDeltas } from './plotEngine.js';
 import { applyStatDeltasToDomain, statEpithet } from './stats.js';
 import { getLogger, truncate } from '../log.js';
@@ -26,6 +27,24 @@ function plotForFact(domain, fact) {
     if (open) return open;
   }
   return null;
+}
+
+/** Концовка приходит уже закрытой нитью, но бюджет надо списать с неё же. */
+function closedPlotForFact(domain, fact) {
+  const ids = fact?.relatedPlotlineIds || [];
+  return (domain?.closedPlotlines || []).find((p) => ids.includes(p.id)) || null;
+}
+
+/**
+ * Бюджет errand-дела: пропорционален объёму работы, а не числу месяцев.
+ * Полгода возни столпа не должны стоить столько же, сколько закрытая CRISIS.
+ */
+export function deedStatBudget(process, config = null) {
+  if (!process) return 1;
+  const perDay = Number(config?.tick?.officerStatPerDay ?? 0.02);
+  const days = Math.max(1, Number(process.objectiveDays) || 0);
+  const cap = Math.max(1, Number(config?.tick?.officerStatCap ?? 8));
+  return Math.max(1, Math.min(cap, Math.round(days * perDay)));
 }
 
 export function factsForStatJudge(chronicleAdds = []) {
@@ -61,17 +80,17 @@ function polarityOf(fact) {
 }
 
 function absBudgetForFact(domain, fact, config) {
-  if (/order/i.test(String(fact?.author || ''))) return 0;
   if (fact?.author === 'storyteller:quiet') return 0;
+  // Правило города — не подвиг: постоянный порядок сам статов не даёт.
+  if (fact?.author === 'engine:rule') return 0;
   if (fact?.processFinish) {
     const proc = (domain.state?.pendingActions || []).find((a) => a.id === fact.relatedPendingId);
-    const months = Math.max(1, Number(proc?.expectedMonths || proc?.durationMonths || 1));
-    return months * (Number(config?.tick?.officerStatPerMonth) || 1);
+    return deedStatBudget(proc, config);
   }
-  const plot = plotForFact(domain, fact);
-  if (!plot || plot.kind === 'order' || plot.kind === 'errand') return 0;
-  const opening = /start/i.test(String(fact.author || ''));
-  return plotStatForce(plot, { opening, config });
+  const plot = plotForFact(domain, fact) || closedPlotForFact(domain, fact);
+  if (!plot || plot.kind === 'errand') return 0;
+  const opening = /start|seed/i.test(String(fact.author || ''));
+  return plotStatForce(plot, { opening, ending: Boolean(fact.plotClosed), config });
 }
 
 function statsBrief(domain, config) {
@@ -103,14 +122,14 @@ function entryKind(fact, domain) {
     (fact.relatedPlotlineIds || []).includes(p.id),
   );
   if (closed) return `история «${closed.title}» (кончилась)`;
-  return 'запись месяца';
+  return 'запись хроники';
 }
 
 /**
  * Проставить след в статах каждой новой записи хроники.
  * @returns {{ scored: number, catastrophe: { title: string, text: string } | null }}
  */
-export async function scoreMonthStats({
+export async function scoreChronicleStats({
   config,
   runtime,
   domain,
@@ -131,7 +150,7 @@ export async function scoreMonthStats({
     {
       name: 'submit_stat_marks',
       description:
-        'След каждой записи месяца в жизни города. Направление и грубая сила — ты, величину посчитает система.',
+        'След каждой записи хроники в жизни города. Направление и грубая сила — ты, величину посчитает система.',
       parameters: {
         type: 'object',
         required: ['entries'],
@@ -199,7 +218,8 @@ export async function scoreMonthStats({
       {
         role: 'user',
         content: [
-          `Месяц ${world.gameDate.label}. Проставь след каждой записи в сторонах жизни города.`,
+          `Сейчас ${world?.gameDate?.label || worldDateLabel(world)}.` +
+            ' Проставь след каждой записи в сторонах жизни города.',
           'Оценивай только то, что явно следует из текста: вещи, люди, исход.',
           'Направление и грубую силу называй ты. Насколько сдвинуть — решит система, не ты.',
           'Каждая запись задевает хотя бы одну сторону.',
@@ -211,7 +231,7 @@ export async function scoreMonthStats({
           'Сейчас в городе:',
           statsBrief(domain, config),
           '',
-          'Записи этого месяца:',
+          'Записи:',
           listing,
           '',
           'Вызови submit_stat_marks.',

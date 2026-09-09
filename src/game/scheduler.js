@@ -12,7 +12,6 @@ export const JOB_KINDS = [
   'process_finish',
   'seed_attempt',
   'seed_appear',
-  'priest_report',
   'conflux_beat',
 ];
 

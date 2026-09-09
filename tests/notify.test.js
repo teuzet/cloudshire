@@ -40,8 +40,8 @@ test('дефолт включает важное и глушит мелочь', 
   assert.equal(n.intensity, 'важное');
   assert.equal(n.triggers.threatFired, true);
   assert.equal(n.triggers.newStory, true);
-  assert.equal(n.triggers.deedDone, false, 'успех дела — не повод для пуша по умолчанию');
-  assert.equal(n.triggers.errandDone, false);
+  assert.equal(n.triggers.deedDone, true, 'исход дела покровитель завёл сам — молчать нельзя');
+  assert.equal(n.triggers.errandDone, false, 'мелкое поручение по умолчанию глушим');
 });
 
 test('интенсивность задаёт набор триггеров, но явные значения сильнее', () => {
@@ -100,7 +100,7 @@ test('жрец не трогает тихие часы', () => {
 
 test('выключенный триггер молчит', () => {
   const d = domain();
-  const res = shouldPush(d, { trigger: 'deedDone', day: 100 });
+  const res = shouldPush(d, { trigger: 'errandDone', day: 100 });
   assert.equal(res.push, false);
   assert.equal(res.reason, 'trigger_off');
 });

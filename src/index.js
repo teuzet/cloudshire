@@ -2,7 +2,10 @@ import { createAppContext } from './bootstrap.js';
 import { createWebServer } from './clients/web/server.js';
 import { startTelegramBot } from './clients/telegram/bot.js';
 import { startTickScheduler, recordTickCompleted } from './scheduler/ticks.js';
+import { startDayScheduler } from './scheduler/days.js';
 import { runWorldTick } from './game/tick.js';
+import { runDayLoop } from './game/dayLoop.js';
+import { DomainQueue } from './game/scheduler.js';
 import { getLogger } from './log.js';
 
 async function main() {
@@ -28,6 +31,23 @@ async function main() {
     storage,
     onTick: ({ reason }) => doTick(reason),
   });
+
+  // Один писатель на город: событие мира и ход правителя не пишут домен разом.
+  const domainQueue = new DomainQueue();
+  const days = startDayScheduler({
+    config,
+    storage,
+    onDay: ({ reason }) =>
+      runDayLoop({
+        config,
+        runtime,
+        storage,
+        app,
+        queue: domainQueue,
+        log: getLogger().child({ scope: 'dayLoop', reason }),
+      }),
+  });
+  app.onClockReleased = (reason) => days.triggerNow(reason);
 
   web.set('runTick', async (reason = 'manual') => {
     if (scheduler.triggerNow) {
@@ -67,6 +87,7 @@ async function main() {
   const shutdown = async () => {
     log.info('session.shutdown');
     scheduler.stop();
+    days.stop();
     await telegram.stop?.();
     server.close();
     await storage.close();

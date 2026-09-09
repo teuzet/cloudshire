@@ -62,7 +62,7 @@ import { applyMonthSeedTemps, grainForSource } from './seedChannels.js';
 import { applyRuleDeed } from './cityRules.js';
 import { plantStakedStory } from './storyteller.js';
 import { accrueMana } from './mana.js';
-import { dueReports, markReported } from './priestOrders.js';
+import { countEvent, markReported, pickReportSubject } from './priestOrders.js';
 import { decideAsk } from './herald.js';
 import { getLogger } from '../log.js';
 
@@ -437,18 +437,22 @@ export async function seedAppearEvent({
 
 // ──────────────────────────────── доклад ────────────────────────────────
 
-export function priestReportEvent({ domain, world, day = 0, orderId = null } = {}) {
-  const due = dueReports(domain, day);
-  const order = orderId ? due.find((o) => o.id === orderId) : due[0];
-  if (!order) return { skipped: 'not_due' };
-  markReported(order, day);
-  scheduleJob(world, {
-    domainId: domain.id,
-    kind: 'priest_report',
-    dueDay: order.nextDay,
-    payload: { orderId: order.id },
+/**
+ * Наказ жреца едет попутно с событием, а не по расписанию: расписание
+ * приходилось бы угадывать, и любой промах игрок читает как поломку.
+ * Здесь событие уже есть — к нему и добавляется строка о теме наказа.
+ */
+export function attachReport(domain, event, { day = 0 } = {}) {
+  if (!event || event.occasion === 'доклад') return event;
+  countEvent(domain);
+  const order = pickReportSubject(domain, {
+    texts: [event.fact?.text, event.plot?.title, event.plot?.synopsis],
   });
-  return { occasion: 'доклад', reportSubject: order.subject, orderId: order.id };
+  if (!order) return event;
+  markReported(domain, order, { day });
+  event.reportSubject = order.subject;
+  event.reportOrderId = order.id;
+  return event;
 }
 
 // ──────────────────────────── один шаг домена ────────────────────────────
@@ -466,9 +470,6 @@ const HANDLERS = {
   },
   async seed_appear(ctx, job) {
     return seedAppearEvent({ ...ctx, requestId: job.payload?.requestId });
-  },
-  async priest_report(ctx, job) {
-    return priestReportEvent({ ...ctx, orderId: job.payload?.orderId });
   },
 };
 

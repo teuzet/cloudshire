@@ -16,6 +16,7 @@
  */
 
 import { newId } from './ids.js';
+import { worldDateLabel } from './gameClock.js';
 import {
   createLoreFact,
   createCharacterRecord,
@@ -2384,7 +2385,10 @@ export async function keepStories({
     plots,
     chronicleAdds,
     extraSystem: `Город «${domain.name}».`,
-    userLead: [`Конец месяца ${world.gameDate.label}. Обнови карточки открытых историй этого города.`],
+    userLead: [
+      `Сейчас ${world?.gameDate?.label || worldDateLabel(world)}.` +
+        ' Обнови карточки открытых историй этого города.',
+    ],
     runtime,
     world,
     log,
