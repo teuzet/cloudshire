@@ -431,7 +431,8 @@ function endingsBlock(p) {
         );
       })
       .join('');
-    return `${happened}<p class="small muted">чем может кончиться:</p><ul class="small endings">${rows}</ul>`;
+    const head = closed ? 'чем могло кончиться:' : 'чем может кончиться:';
+    return `${happened}<p class="small muted">${head}</p><ul class="small endings">${rows}</ul>`;
   }
 
   const closeWhen = Array.isArray(p.closeWhen) ? p.closeWhen.filter(Boolean) : p.closeWhen ? [p.closeWhen] : [];
