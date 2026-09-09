@@ -9,7 +9,7 @@
  * генераторы событий, а история без угрозы событий не производит.
  */
 
-import { DAYS_PER_MONTH, DAYS_PER_YEAR } from './gameClock.js';
+import { DAYS_PER_MONTH, DAYS_PER_YEAR, realMsToGameDays } from './gameClock.js';
 import { chronicleEntries } from './models.js';
 import { SEED_SOURCES, seedConfig, normalizeSeedTemp, worldSeedChance } from './seedTemp.js';
 import { liveThreats } from './threats.js';
@@ -155,7 +155,17 @@ export function seedQueue(domain) {
  */
 export function enqueueSeedRequest(
   domain,
-  { source = 'void', seedFactId = null, sourceProcessId = null, sourceOrderId = null, day = 0, delayDays = null, rng = Math.random } = {},
+  {
+    source = 'void',
+    seedFactId = null,
+    sourceProcessId = null,
+    sourceOrderId = null,
+    grain = null,
+    gravity = null,
+    day = 0,
+    delayDays = null,
+    rng = Math.random,
+  } = {},
 ) {
   const delay = delayDays == null ? rollSeedDelay(rng) : Math.max(0, Math.round(delayDays));
   const req = {
@@ -164,12 +174,64 @@ export function enqueueSeedRequest(
     seedFactId: seedFactId || null,
     sourceProcessId: sourceProcessId || null,
     sourceOrderId: sourceOrderId || null,
+    grain: grain || null,
+    gravity: gravity || null,
     requestedDay: Math.round(Number(day) || 0),
     appearDay: Math.round(Number(day) || 0) + delay,
     postponed: 0,
   };
   seedQueue(domain).push(req);
   return req;
+}
+
+// ──────────────────────────── стартовые нити ────────────────────────────
+
+/** Стартовый посев генезиса: ситуация, затем эпизод. */
+export const OPENING_STORY_GRAVITIES = ['SITUATION', 'EPISODE'];
+
+/** Окно появления стартовых нитей — реальные минуты после основания города. */
+export const OPENING_SEED_REAL_MINUTES = [5, 10];
+
+/**
+ * Дни появления стартовых нитей: каждой свой отрезок окна, и все дни разные.
+ * Совпади они — обе вести пришли бы одним шагом цикла и слиплись в одну,
+ * а именно так стартовые истории и оставались до этого незамеченными.
+ */
+export function openingSeedDelays(count, { config = null, rng = Math.random } = {}) {
+  const n = Math.max(0, Math.round(Number(count) || 0));
+  if (!n) return [];
+  const [from, to] = OPENING_SEED_REAL_MINUTES;
+  const slot = (to - from) / n;
+  const days = [];
+  let prev = 0;
+  for (let i = 0; i < n; i += 1) {
+    const minutes = from + slot * (i + rng());
+    const day = Math.max(1, Math.round(realMsToGameDays(minutes * 60000, config)));
+    prev = Math.max(day, prev + 1);
+    days.push(prev);
+  }
+  return days;
+}
+
+/**
+ * Стартовые нити ставятся заявками, а не сажаются на месте.
+ *
+ * Посадка на месте молчала: событие «новая история» рождается только при
+ * появлении заявки, поэтому про свои же первые две истории город не
+ * рассказывал вовсе, и игрок узнавал о них лишь когда срабатывала угроза.
+ */
+export function enqueueOpeningSeeds(domain, { day = 0, config = null, rng = Math.random } = {}) {
+  const delays = openingSeedDelays(OPENING_STORY_GRAVITIES.length, { config, rng });
+  return OPENING_STORY_GRAVITIES.map((gravity, i) =>
+    enqueueSeedRequest(domain, {
+      source: 'void',
+      grain: 'genesis',
+      gravity,
+      day,
+      delayDays: delays[i],
+      rng,
+    }),
+  );
 }
 
 export function dueSeedRequests(domain, day) {

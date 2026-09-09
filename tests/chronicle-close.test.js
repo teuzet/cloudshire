@@ -9,6 +9,16 @@ import {
 } from '../src/game/models.js';
 import { formatFullChronicleForPrompt } from '../src/game/memory.js';
 
+test('день записи не подставляется нулём, когда его не передали', () => {
+  const base = { id: 'lore_x', text: 'Что-то случилось.', tags: ['chronicle'] };
+  assert.equal('day' in createLoreFact(base), false, 'иначе запись врёт, что она первого дня');
+  assert.equal('day' in createLoreFact({ ...base, day: null }), false);
+  assert.equal('day' in createLoreFact({ ...base, day: '' }), false);
+  assert.equal(createLoreFact({ ...base, day: 0 }).day, 0, 'настоящий нулевой день сохраняем');
+  assert.equal(createLoreFact({ ...base, day: 287 }).day, 287);
+  assert.equal(createLoreFact({ ...base, day: '287' }).day, 287);
+});
+
 test('закрывающая хроника получает жреческую пометку', () => {
   const fact = createLoreFact({
     id: 'lore_close',

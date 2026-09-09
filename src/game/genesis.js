@@ -14,7 +14,8 @@ import {
   inferRulerGender,
 } from './models.js';
 import { formatPlayerBrief, substituteCityName } from './onboarding.js';
-import { seedOpeningPlots } from './storyteller.js';
+import { enqueueOpeningSeeds } from './seedSchedule.js';
+import { scheduleJob, worldDay } from './scheduler.js';
 import { ensureCityEntities } from './cityEntities.js';
 import {
   clipCityText,
@@ -786,8 +787,18 @@ export async function generateDomain({
   await onProgress?.('якоря города');
   await ensureCityEntities({ domain, config, runtime, log });
   await storage.saveDomain(domain);
-  await onProgress?.('первые истории');
-  await seedOpeningPlots({ config, runtime, domain, world, storage, log });
+  // Стартовые нити не сажаются здесь: они появятся сами через несколько минут
+  // обычным посевом, и потому будут рассказаны, а не окажутся в городе молча.
+  const openingDay = worldDay(world, { config });
+  for (const request of enqueueOpeningSeeds(domain, { day: openingDay, config })) {
+    scheduleJob(world, {
+      domainId: domain.id,
+      kind: 'seed_appear',
+      dueDay: request.appearDay,
+      payload: { requestId: request.id, source: request.source },
+    });
+  }
+  await storage.saveWorld(world);
   await storage.saveDomain(domain);
   log.info('genesis.saved', {
     domainId: domain.id,
@@ -799,7 +810,7 @@ export async function generateDomain({
     aspectChars: Object.fromEntries(
       Object.entries(aspects).map(([k, v]) => [k, String(v).length]),
     ),
-    openingPlots: (domain.plotlines || []).map((p) => p.title),
+    openingSeedDays: (domain.state?.seedQueue || []).map((r) => r.appearDay),
     cityEntities: (domain.cityEntities || []).length,
   });
   return domain;

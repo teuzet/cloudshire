@@ -470,7 +470,11 @@ export function createLoreFact({
     createdAt: new Date().toISOString(),
   };
   // Непрерывное время: записи событий помечены игровым днём, а не только тиком.
-  if (Number.isFinite(Number(day))) fact.day = Math.max(0, Math.round(Number(day)));
+  // `Number(null)` — это ноль, поэтому пустой день проверяется до приведения:
+  // иначе запись без дня объявляла бы себя первым днём первого года.
+  if (day != null && day !== '' && Number.isFinite(Number(day))) {
+    fact.day = Math.max(0, Math.round(Number(day)));
+  }
   if (relatedPendingId) fact.relatedPendingId = relatedPendingId;
   if (Array.isArray(relatedPlotlineIds) && relatedPlotlineIds.length) {
     fact.relatedPlotlineIds = [...new Set(relatedPlotlineIds.map(String))];

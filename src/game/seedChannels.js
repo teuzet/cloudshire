@@ -144,6 +144,24 @@ export function voidGrainPack(domain, { config, rng = Math.random } = {}) {
   return { grain: 'void', fromVoid: true, fromGenesis: false, seedText: '' };
 }
 
+/**
+ * Зерно стартовой нити: описание города и заранее назначенная gravity.
+ * Бросок канала здесь не нужен — обе стартовые истории родом из описания,
+ * и порядок их тяжести задан заранее. `null`, если описания нет.
+ */
+export function openingGrain(domain, { gravity = null } = {}) {
+  const seedText = cityGenesisSeedText(domain);
+  if (!seedText) return null;
+  return {
+    source: 'void',
+    gravity: gravity || null,
+    seedText,
+    fromVoid: false,
+    fromGenesis: true,
+    grain: 'genesis',
+  };
+}
+
 function pickWinner(wants, rng) {
   if (wants.includes('errand')) return 'errand';
   if (!wants.length) return null;

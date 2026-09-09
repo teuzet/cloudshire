@@ -58,7 +58,7 @@ import {
   checkSeedFreshness,
   postponeSeedRequest,
 } from './seedSchedule.js';
-import { applyMonthSeedTemps, grainForSource } from './seedChannels.js';
+import { applyMonthSeedTemps, grainForSource, openingGrain } from './seedChannels.js';
 import { applyRuleDeed } from './cityRules.js';
 import { plantStakedStory } from './storyteller.js';
 import { accrueMana } from './mana.js';
@@ -400,7 +400,9 @@ export async function seedAppearEvent({
 
   // Текст зерна собирается сейчас, а не в момент постановки заявки:
   // за задержку мир успел измениться, и старый текст противоречил бы хронике.
-  const grain = grainForSource({ domain, world, config, source: request.source, rng });
+  const grain =
+    (request.grain === 'genesis' && openingGrain(domain, { gravity: request.gravity })) ||
+    grainForSource({ domain, world, config, source: request.source, rng });
   const planted = await plantStakedStory({
     config,
     runtime,
