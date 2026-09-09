@@ -173,7 +173,7 @@ test('событие рассказывается глашатаем и уход
   assert.match(app.pushed[0].message, /опору закрепили/);
 });
 
-test('заглушённое уведомление не отменяет событие: в диалоге запись есть', async () => {
+test('со снятой глушилкой отключённый повод всё равно доходит, но помечен', async () => {
   const domain = makeDomain();
   const notify = notifySettings(domain);
   notify.triggers.deedDone = false;
@@ -188,10 +188,10 @@ test('заглушённое уведомление не отменяет соб
     event: { occasion: 'дело', plotId: 'p1', fact: { id: 'f1', text: 'опора закреплена' } },
     log: silentLog,
   });
-  assert.equal(res.pushed, false);
-  assert.equal(res.reason, 'trigger_off');
+  assert.equal(res.pushed, true);
+  assert.equal(res.wouldMute, 'trigger_off', 'вердикт сохранён, чтобы измерить поток');
   assert.equal(app.said.length, 1, 'в разговоре запись остаётся');
-  assert.equal(app.pushed.length, 0, 'телефон молчит');
+  assert.equal(app.pushed.length, 1, 'телефон звонит');
 });
 
 test('сработавшую беду не глушит ни зазор, ни выключенный триггер', async () => {
@@ -211,8 +211,10 @@ test('сработавшую беду не глушит ни зазор, ни в
     log: silentLog,
   });
   assert.equal(notifySettings(domain).triggers.threatFired, true, 'триггер защищён');
-  assert.equal(res.pushed, false, 'но зазор между пушами всё ещё держит');
+  assert.equal(res.pushed, true);
+  assert.equal(res.wouldMute, 'min_gap', 'зазор бы держал, но глушилка снята');
   assert.equal(app.said.length, 1);
+  assert.equal(app.pushed.length, 1);
 });
 
 test('всплывшую беду жрец рассказывает без записи в хронике', async () => {

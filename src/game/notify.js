@@ -3,7 +3,8 @@
  *
  * Тик был не только календарём, но и батчером: письмо месяца склеивало до трёх
  * событий в одно сообщение. Без тика это свойство надо восстановить явно,
- * иначе непрерывное время превращается в поток пушей.
+ * иначе непрерывное время превращается в поток пушей. Пока же глушилка снята
+ * (`PUSH_THROTTLE_ON`) — сперва измеряем поток, потом подрезаем.
  *
  * Инвариант: настройки управляют только пушами. Хроника пишется всегда
  * и полностью — то, что не дошло уведомлением, игрок найдёт в мини-аппке.
@@ -153,19 +154,37 @@ function inQuietHours(notify, now = new Date()) {
 }
 
 /**
- * Отправлять ли пуш. `false` не отменяет событие: хроника уже написана,
- * просто телефон молчит.
+ * Глушилка выключена намеренно. Зазоры и пресеты подбирались до того, как
+ * поток событий непрерывного времени вообще увидели, поэтому сейчас важнее
+ * измерить настоящий поток, чем подрезать неизвестное число.
  */
-export function shouldPush(domain, { trigger, day = 0, now = new Date(), force = false } = {}) {
+export const PUSH_THROTTLE_ON = false;
+
+/** Вердикт глушилки — считается всегда, применяется только при `PUSH_THROTTLE_ON`. */
+export function pushVerdict(domain, { trigger, day = 0, now = new Date() } = {}) {
   const notify = notifySettings(domain);
-  if (force) return { push: true, reason: 'force' };
-  if (!notify.triggers[trigger]) return { push: false, reason: 'trigger_off' };
-  if (inQuietHours(notify, now)) return { push: false, reason: 'quiet_hours' };
+  if (!notify.triggers[trigger]) return 'trigger_off';
+  if (inQuietHours(notify, now)) return 'quiet_hours';
   const last = Number(notify.lastPushDay);
   if (Number.isFinite(last) && Math.round(Number(day) || 0) - last < minGapDays(notify)) {
-    return { push: false, reason: 'min_gap' };
+    return 'min_gap';
   }
-  return { push: true, reason: 'ok' };
+  return 'ok';
+}
+
+/**
+ * Отправлять ли пуш. `false` не отменяет событие: хроника уже написана,
+ * просто телефон молчит. `wouldMute` называет повод, по которому включённая
+ * глушилка это событие бы съела.
+ */
+export function shouldPush(domain, { trigger, day = 0, now = new Date(), force = false } = {}) {
+  if (force) return { push: true, reason: 'force', wouldMute: null };
+  const verdict = pushVerdict(domain, { trigger, day, now });
+  if (!PUSH_THROTTLE_ON) {
+    return { push: true, reason: 'ok', wouldMute: verdict === 'ok' ? null : verdict };
+  }
+  if (verdict !== 'ok') return { push: false, reason: verdict, wouldMute: verdict };
+  return { push: true, reason: 'ok', wouldMute: null };
 }
 
 export function markPushed(domain, day) {

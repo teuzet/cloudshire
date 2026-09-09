@@ -112,8 +112,8 @@ export async function deliverEvent({
       processId: event.outcome?.processId || null,
     });
   }
-  log.info('dayLoop.said', { trigger, occasion: event.occasion });
-  return { text, pushed: true };
+  log.info('dayLoop.said', { trigger, occasion: event.occasion, day, wouldMute: gate.wouldMute });
+  return { text, pushed: true, wouldMute: gate.wouldMute || null };
 }
 
 /**

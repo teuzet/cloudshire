@@ -4,12 +4,14 @@ import {
   NOTIFY_TRIGGERS,
   PROTECTED_TRIGGERS,
   MIN_GAP_BY_INTENSITY,
+  PUSH_THROTTLE_ON,
   parseIntensity,
   defaultNotify,
   normalizeNotify,
   notifySettings,
   minGapDays,
   applyPriestNotifyChange,
+  pushVerdict,
   shouldPush,
   markPushed,
 } from '../src/game/notify.js';
@@ -123,39 +125,63 @@ test('жрец не трогает тихие часы', () => {
   assert.equal(notifySettings(d).quiet.fromHour, 23);
 });
 
-test('выключенный триггер молчит', () => {
+test('выключенный триггер даёт вердикт trigger_off', () => {
   const d = domain();
-  const res = shouldPush(d, { trigger: 'errandDone', day: 100 });
-  assert.equal(res.push, false);
-  assert.equal(res.reason, 'trigger_off');
+  assert.equal(pushVerdict(d, { trigger: 'errandDone', day: 100 }), 'trigger_off');
 });
 
-test('в тихие часы через полночь не будим', () => {
+test('в тихие часы через полночь вердикт quiet_hours', () => {
   const d = domain();
   d.state.notify = normalizeNotify({ quiet: { fromHour: 23, toHour: 8 } });
-  assert.equal(shouldPush(d, { trigger: 'threatFired', day: 100, now: at(2) }).reason, 'quiet_hours');
-  assert.equal(shouldPush(d, { trigger: 'threatFired', day: 100, now: at(23) }).reason, 'quiet_hours');
-  assert.equal(shouldPush(d, { trigger: 'threatFired', day: 100, now: at(12) }).push, true);
+  assert.equal(pushVerdict(d, { trigger: 'threatFired', day: 100, now: at(2) }), 'quiet_hours');
+  assert.equal(pushVerdict(d, { trigger: 'threatFired', day: 100, now: at(23) }), 'quiet_hours');
+  assert.equal(pushVerdict(d, { trigger: 'threatFired', day: 100, now: at(12) }), 'ok');
 });
 
-test('зазор разрежает поток пушей', () => {
+test('зазор виден в вердикте', () => {
   const d = domain();
   markPushed(d, 100);
-  assert.equal(shouldPush(d, { trigger: 'newStory', day: 104, now: at(12) }).reason, 'min_gap');
-  assert.equal(shouldPush(d, { trigger: 'newStory', day: 108, now: at(12) }).push, true);
+  assert.equal(pushVerdict(d, { trigger: 'newStory', day: 104, now: at(12) }), 'min_gap');
+  assert.equal(pushVerdict(d, { trigger: 'newStory', day: 108, now: at(12) }), 'ok');
 });
 
-test('force пробивает и зазор, и тихие часы', () => {
-  const d = domain();
-  d.state.notify = normalizeNotify({ quiet: { fromHour: 0, toHour: 23 } });
-  markPushed(d, 100);
-  assert.equal(shouldPush(d, { trigger: 'deedDone', day: 100, now: at(3), force: true }).push, true);
-});
-
-test('интенсивность «всё» пропускает почти сразу', () => {
+test('интенсивность «всё» сокращает зазор', () => {
   const d = domain();
   d.state.notify = normalizeNotify({ intensity: 'всё' });
   markPushed(d, 100);
-  assert.equal(shouldPush(d, { trigger: 'deedDone', day: 101, now: at(12) }).reason, 'min_gap');
-  assert.equal(shouldPush(d, { trigger: 'deedDone', day: 102, now: at(12) }).push, true);
+  assert.equal(pushVerdict(d, { trigger: 'deedDone', day: 101, now: at(12) }), 'min_gap');
+  assert.equal(pushVerdict(d, { trigger: 'deedDone', day: 102, now: at(12) }), 'ok');
+});
+
+test('снятая глушилка пропускает всё, но называет съеденный повод', () => {
+  assert.equal(PUSH_THROTTLE_ON, false, 'сейчас мерим поток, а не режем его');
+  const d = domain();
+  markPushed(d, 100);
+
+  const gap = shouldPush(d, { trigger: 'newStory', day: 101, now: at(12) });
+  assert.equal(gap.push, true);
+  assert.equal(gap.wouldMute, 'min_gap');
+
+  const off = shouldPush(d, { trigger: 'errandDone', day: 200, now: at(12) });
+  assert.equal(off.push, true);
+  assert.equal(off.wouldMute, 'trigger_off');
+
+  const clean = shouldPush(d, { trigger: 'newStory', day: 200, now: at(12) });
+  assert.equal(clean.push, true);
+  assert.equal(clean.wouldMute, null, 'без причины глушить wouldMute пустой');
+
+  const night = domain();
+  night.state.notify = normalizeNotify({ quiet: { fromHour: 23, toHour: 8 } });
+  const quiet = shouldPush(night, { trigger: 'threatFired', day: 200, now: at(3) });
+  assert.equal(quiet.push, true, 'даже тихие часы больше не держат');
+  assert.equal(quiet.wouldMute, 'quiet_hours');
+});
+
+test('force пробивает всё и ничего не помечает', () => {
+  const d = domain();
+  d.state.notify = normalizeNotify({ quiet: { fromHour: 0, toHour: 23 } });
+  markPushed(d, 100);
+  const res = shouldPush(d, { trigger: 'deedDone', day: 100, now: at(3), force: true });
+  assert.equal(res.push, true);
+  assert.equal(res.wouldMute, null);
 });
