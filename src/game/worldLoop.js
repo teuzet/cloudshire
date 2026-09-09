@@ -59,6 +59,7 @@ import {
   postponeSeedRequest,
 } from './seedSchedule.js';
 import { applyMonthSeedTemps, grainForSource } from './seedChannels.js';
+import { applyRuleDeed } from './cityRules.js';
 import { plantStakedStory } from './storyteller.js';
 import { accrueMana } from './mana.js';
 import { dueReports, markReported } from './priestOrders.js';
@@ -205,12 +206,16 @@ export async function resolveDeedEvent({
     ? applyDeedToPlot({ plot, process, finish: rolled.finish, day, rng })
     : { alignment: alignmentOf(process) || 'UNRELATED', closes: false, depthGain: 0 };
 
+  // Постоянный порядок — тоже обычное дело, только его след ложится не в
+  // глубину истории, а в постоянные изменения города.
+  const rule = applyRuleDeed(domain, process, { finish: rolled.finish, day, rng });
+
   const fact = appendEventFact(domain, world, {
-    text: `Дело «${process.summary}» кончилось ${FINISH_WORD[rolled.finish] || 'успехом'}.`,
+    text: rule?.text || `Дело «${process.summary}» кончилось ${FINISH_WORD[rolled.finish] || 'успехом'}.`,
     plotId: plot?.id || null,
     processId: process.id,
     day,
-    author: 'engine:deed',
+    author: rule ? 'engine:rule' : 'engine:deed',
     finish: rolled.finish,
   });
 
@@ -244,6 +249,7 @@ export async function resolveDeedEvent({
     occasion: 'дело',
     outcome,
     applied,
+    rule,
     closed: Boolean(closed),
     officerFreed: Boolean(process.officerId),
   };

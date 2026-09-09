@@ -18,6 +18,7 @@ import {
 } from '../src/game/worldLoop.js';
 import { createThreat, attachThreat, liveThreats, findThreat } from '../src/game/threats.js';
 import { startDeed } from '../src/game/deeds.js';
+import { cityRules, markRuleDeed } from '../src/game/cityRules.js';
 import { addPriestOrder } from '../src/game/priestOrders.js';
 import { seedQueue, enqueueSeedRequest } from '../src/game/seedSchedule.js';
 import { jobList, dueJobs } from '../src/game/scheduler.js';
@@ -312,6 +313,33 @@ test('дело, которого нет или которое не идёт, п�
   const paused = await resolveDeedEvent({ config, domain, world, day: 130, processId: p.id, log: silentLog });
   assert.equal(paused.skipped, 'not_active:paused');
   assert.equal(domain.lore.length, 0, 'запись о паузе не пишется');
+});
+
+test('дело о постоянном порядке кладёт след в изменения города, а не в глубину', async () => {
+  const domain = makeDomain();
+  const world = makeWorld();
+  const process = markRuleDeed(
+    startDeed({ id: 'proc1', summary: 'объявить удвоенную подать', status: 'active', linkedStats: ['prosperity'] }, {
+      day: 100,
+      judged: { durationBand: 'DAYS', difficulty: 'PLAIN', objectiveDays: 10 },
+    }),
+    { text: 'Подать удвоена' },
+  );
+  domain.state.pendingActions.push(process);
+  const res = await resolveDeedEvent({
+    config,
+    runtime: noRuntime,
+    domain,
+    world,
+    day: 110,
+    processId: 'proc1',
+    rng: () => 0.5,
+    log: silentLog,
+  });
+  assert.equal(res.rule.applied, true);
+  assert.equal(cityRules(domain)[0].text, 'Подать удвоена');
+  assert.match(domain.lore[0].text, /Подать удвоена/);
+  assert.equal(domain.lore[0].author, 'engine:rule');
 });
 
 // ───────────────────────────── угроза сработала ─────────────────────────────
