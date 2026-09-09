@@ -262,14 +262,6 @@ function renderEvents(events) {
             })
             .join('')
         : '<p class="meta">Связанных дел нет.</p>';
-      const threats = (e.threats || [])
-        .map(
-          (t) =>
-            `<p class="threat${t.kind === 'разрешение' ? ' calm' : ''}">${esc(t.text)} — ${esc(
-              waitText(t.remainingDays, t.remainingReal),
-            )}</p>`,
-        )
-        .join('');
       const dread = e.dread && e.dread !== 'спокойно'
         ? `<p class="meta dread">чутьё жреца: ${esc(e.dread)}</p>`
         : '';
@@ -277,7 +269,6 @@ function renderEvents(events) {
         <article class="card">
           <h2>${esc(e.title)}</h2>
           <p>${esc(e.synopsis)}</p>
-          ${threats}
           ${dread}
           ${deeds}
         </article>`;

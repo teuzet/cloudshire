@@ -265,14 +265,7 @@ test('мини-аппка: свои истории и участие в сопр
   assert.equal(view.gameDate, 'Год 1, месяц 5, день 6');
 
   const well2 = view.events.find((e) => e.title === 'Гул колодца');
-  assert.deepEqual(
-    well2.threats.map((t) => t.text),
-    ['Колодец обвалится'],
-    'скрытая беда в справочник не попадает',
-  );
-  assert.equal(well2.threats[0].remainingDays, 5);
-  assert.equal(well2.threats[0].remainingReal, '~20 мин', 'известная беда идёт со сроком');
-  assert.equal(well2.threats[0].kind, 'угроза');
+  assert.equal(well2.threats, undefined, 'конкретные угрозы в справочник не кладём');
   assert.equal(typeof well2.dread, 'string', 'скрытая беда видна только как чутьё');
   assert.equal('loyalty' in (view.city || {}), false);
   assert.equal(view.city.hasImage, false);
@@ -341,6 +334,8 @@ test('GET /mini и /mini/ отдают страницу без редирект�
     const script = await js.text();
     assert.match(script, /data-open-officer/);
     assert.match(script, /function openOfficerSheet/);
+    assert.doesNotMatch(script, /class="threat"/);
+    assert.match(script, /ещё \$\{waitText\(p\.remainingDays/);
   } finally {
     await new Promise((resolve, reject) => http.close((err) => (err ? reject(err) : resolve())));
   }

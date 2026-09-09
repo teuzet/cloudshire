@@ -14,12 +14,7 @@ import {
 } from './bands.js';
 import { deedDurationBand, deedRemainingBand, deedRemainingDays } from './deeds.js';
 import { paceLabel } from './deedMath.js';
-import {
-  dreadFlag,
-  findThreat,
-  knownThreatsForSpeech,
-  remainingDays as threatRemainingDays,
-} from './threats.js';
+import { dreadFlag } from './threats.js';
 import { chronicleEntries } from './models.js';
 import { parseCityBrief } from './cityContext.js';
 import { domainHasIslandImage, officerHasPortrait } from '../storage/r2.js';
@@ -296,19 +291,8 @@ function collectEvents(domain, conflux, config, mana = 0, day = 0) {
     return {
       title: clip(plot.title || 'История', 80),
       synopsis: clip(plot.synopsis || '', 600),
-      // Что город знает, то и показываем — со сроком. Известная беда через
-      // двадцать реальных минут это ровно тот повод остаться в игре,
-      // ради которого игрок и смотрит справочник.
-      threats: knownThreatsForSpeech(plot, day).map((t) => {
-        const left = threatRemainingDays(findThreat(plot, t.id), day);
-        return {
-          text: clip(t.text || '', 300),
-          remainingDays: left,
-          remainingReal: realWaitLabel(left, config),
-          remaining: durationWord(t.remainingBand),
-          kind: t.kind,
-        };
-      }),
+      // Конкретные угрозы со сроком в справочник не кладём: таймер — у дел.
+      // Скрытое и нависшее город чувствует только чутьём жреца.
       dread: dreadFlag(plot, day),
       processes: procs
         .filter((pr) => related.has(String(pr.id)))

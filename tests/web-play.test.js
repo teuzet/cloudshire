@@ -310,7 +310,7 @@ test('справочник города открывается по слоту, 
       ['description', 'brief', 'chronicle', 'people'],
     );
     const well = view.events.find((e) => e.title === 'Гул колодца');
-    assert.deepEqual(well.threats.map((t) => t.text), ['Колодец обвалится']);
+    assert.equal(well.threats, undefined);
     assert.equal(well.processes[0].remaining, 'дни');
     assert.equal(view.orders[0].text, 'Ночной дозор у края');
     assert.match(view.orders[1].text, /Не пускать чужих/);
