@@ -35,6 +35,13 @@ export const PLOT_ENDING_FLOOR_SHARE = 0.25;
 
 export function ensurePlotStatBudget(plot, config = null) {
   if (!plot || plot.kind === 'errand') return plot;
+  if (plot.isMainConflux && plot.crystallized === false) {
+    if (!plot.stats || typeof plot.stats !== 'object') plot.stats = {};
+    plot.stats.budget = 0;
+    plot.stats.remaining = 0;
+    plot.stats.interimSpent = Number.isFinite(Number(plot.stats.interimSpent)) ? plot.stats.interimSpent : 0;
+    return plot;
+  }
   const budget = gravityStatBudget(plot.gravity);
   if (!plot.stats || typeof plot.stats !== 'object') plot.stats = {};
   if (!Number.isFinite(Number(plot.stats.budget))) plot.stats.budget = budget;

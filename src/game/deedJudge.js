@@ -18,9 +18,27 @@ import {
   MIN_OFFICER_DAYS,
 } from './bands.js';
 
-export async function judgeDeed({ runtime, domain, summary, detail = '', goal = '', log: parentLog, rng = Math.random }) {
+const OPPOSED_STATS = ['prosperity', 'security', 'knowledge', 'influence'];
+
+function normalizeOpposedStat(raw) {
+  const key = String(raw || '').trim().toLowerCase();
+  if (!key || key === 'null' || key === 'none') return null;
+  return OPPOSED_STATS.includes(key) ? key : null;
+}
+
+export async function judgeDeed({
+  runtime,
+  domain,
+  summary,
+  detail = '',
+  goal = '',
+  remainingWindowBand = '',
+  crossIsland = false,
+  log: parentLog,
+  rng = Math.random,
+}) {
   const log = (parentLog || getLogger()).child({ scope: 'deed.judge' });
-  const draft = { duration: null, difficulty: null, note: '' };
+  const draft = { duration: null, difficulty: null, note: '', opposedStat: null };
   const runOpts = {
     agentId: 'deedJudge',
     tools: [
@@ -35,12 +53,19 @@ export async function judgeDeed({ runtime, domain, summary, detail = '', goal = 
             duration: { type: 'string', enum: [...DURATION_BANDS] },
             difficulty: { type: 'string', enum: [...DIFFICULTY_BANDS] },
             note: { type: 'string', description: 'Одна бытовая фраза без механики.' },
+            opposedStat: {
+              type: 'string',
+              enum: [...OPPOSED_STATS, 'none'],
+              description:
+                'Какой стат соседа противостоит делу (security/prosperity/knowledge/influence). Нет противодействия — none. Чисел статов не знаешь и не проси.',
+            },
           },
         },
         handler: async (args) => {
           draft.duration = normalizeDurationBand(args?.duration, null);
           draft.difficulty = normalizeDifficultyBand(args?.difficulty, null);
           draft.note = String(args?.note || '').trim().slice(0, 300);
+          draft.opposedStat = normalizeOpposedStat(args?.opposedStat);
           return { ok: true };
         },
       },
@@ -57,6 +82,12 @@ export async function judgeDeed({ runtime, domain, summary, detail = '', goal = 
           `Поручение: ${summary}`,
           goal ? `Цель: ${goal}` : '',
           detail ? `Подробности: ${detail}` : '',
+          remainingWindowBand
+            ? `До расхождения островов осталось примерно: ${remainingWindowBand}. Если работа длиннее окна — бери более короткую полосу или это не успеть.`
+            : '',
+          crossIsland
+            ? 'Дело через проход: назови opposedStat — какой стат соседа ему противостоит. Чисел не знаешь.'
+            : '',
         ]
           .filter(Boolean)
           .join('\n'),
@@ -82,6 +113,7 @@ export async function judgeDeed({ runtime, domain, summary, detail = '', goal = 
     officerDays: Math.max(MIN_OFFICER_DAYS, objectiveDays),
     impossible: isImpossible(difficulty),
     note: draft.note,
+    opposedStat: draft.opposedStat,
     prompt,
     fallback: !draft.duration || !draft.difficulty,
   };

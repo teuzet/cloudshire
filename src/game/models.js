@@ -72,6 +72,24 @@ export function normalizeDomain(domain) {
   if (!domain.confluxPartners || typeof domain.confluxPartners !== 'object') {
     domain.confluxPartners = {};
   }
+  if (!Number.isFinite(Number(domain.createdDay))) {
+    domain.createdDay = Number.isInteger(domain.createdTick) ? domain.createdTick * 30 : 0;
+  }
+  if (typeof domain.nextConfluxNotBefore !== 'string') domain.nextConfluxNotBefore = domain.nextConfluxNotBefore || null;
+  if (typeof domain.proxyText !== 'string') {
+    domain.proxyText = domain.proxyText || domain.state?.confluxDirective?.text || '';
+  }
+  if (!domain.statFloors || typeof domain.statFloors !== 'object') domain.statFloors = {};
+  if (!domain.statCaps || typeof domain.statCaps !== 'object') domain.statCaps = {};
+  if (!domain.activity || typeof domain.activity !== 'object') {
+    domain.activity = {
+      activeMsSolo: 0,
+      activeMsDocked: 0,
+      hoursUtc: Array(24).fill(0),
+      samples: 0,
+      lastTurnAt: null,
+    };
+  }
   if (typeof domain.imagePath !== 'string') domain.imagePath = domain.imagePath || null;
   if (typeof domain.imageUrl !== 'string') domain.imageUrl = domain.imageUrl || null;
   if (typeof domain.imageKey !== 'string') domain.imageKey = domain.imageKey || null;

@@ -2,16 +2,31 @@ import { newId } from './ids.js';
 import { createLoreFact, normalizeDomain } from './models.js';
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
+import { gameDateFromDay, realWaitLabel, worldDateLabel } from './gameClock.js';
+import { scheduleJob, cancelJobs } from './scheduler.js';
+import {
+  confluxConfig,
+  hoursToGameDays,
+  daysUntilDock,
+  pairPrimaryId,
+  pickPrepDelayHours,
+  confluxDue,
+  stampNextConflux,
+  domainActivityForSchedule,
+} from './confluxTime.js';
+import { notifySettings } from './notify.js';
 import {
   normalizeConfluxBoard,
   takeDomainBoardIntoConflux,
-  createMainConfluxPlot,
-  pushInternalChronicle,
+  createEmptyContainer,
   approachingAnnounceText,
-  approachMonthText,
   returnBoardsOnUndock,
 } from './confluxBoard.js';
 import { decideUndockContinuation } from './undockContinuation.js';
+import { writePairChronicle, confluxEvent } from './confluxCanon.js';
+import { releaseOfficerProcess } from './officers.js';
+import { ensurePassage } from './passage.js';
+import { applyUndockTrace } from './confluxTrace.js';
 
 /** Ширина прохода: ГСЧ выбирает kind; LLM только описывает. control — можно ли закрыть. */
 export const CONTACT_KINDS = {
@@ -151,7 +166,7 @@ export function assertsIslandsParted(body) {
 }
 
 function confluxCfg(config) {
-  return config?.tick?.conflux || {};
+  return confluxConfig(config);
 }
 
 function randIntInclusive(min, max, rng = Math.random) {
@@ -239,15 +254,19 @@ function recordPartnerDock(a, b) {
  */
 export function createConfluxRecord({
   domainIds,
-  etaMonths,
   world,
   type = 'docking',
-  durationMonths = 8,
   rematch = false,
+  prepStartDay = 0,
+  dockStartDay = 0,
+  dockEndDay = 0,
+  etaMonths = null,
+  durationMonths = null,
 }) {
-  const eta = Math.max(1, Math.min(24, Math.round(Number(etaMonths) || 3)));
-  const dur = Math.max(1, Math.min(12, Math.round(Number(durationMonths) || 8)));
   const tick = world.tickIndex || 0;
+  const prep = Math.max(0, Math.round(Number(prepStartDay) || 0));
+  const dock = Math.max(prep, Math.round(Number(dockStartDay) || prep));
+  const end = Math.max(dock + 1, Math.round(Number(dockEndDay) || dock + 1));
   return {
     id: newId('conflux'),
     worldId: world.id,
@@ -255,12 +274,21 @@ export function createConfluxRecord({
     type,
     status: 'approaching',
     createdTick: tick,
-    etaMonths: eta,
-    dockAtTick: tick + eta,
-    durationMonths: dur,
+    createdDay: prep,
+    prepStartDay: prep,
+    dockStartDay: dock,
+    dockEndDay: end,
+    etaMonths: etaMonths != null ? Math.round(Number(etaMonths)) : Math.max(1, Math.round((dock - prep) / 30)),
+    dockAtTick: tick + Math.max(1, Math.round((dock - prep) / 30)),
+    durationMonths: durationMonths != null ? Math.round(Number(durationMonths)) : Math.max(1, Math.round((end - dock) / 30)),
     monthsDocked: 0,
     rematch: Boolean(rematch),
     contact: null,
+    passage: { text: '', state: 'open', contact: null, relief: null },
+    container: null,
+    containerPlotId: null,
+    plotRefs: [],
+    touches: [],
     sharedLore: [],
     sharedState: { events: [] },
     awareness: Object.fromEntries(domainIds.map((id) => [String(id), 0])),
@@ -276,48 +304,56 @@ export function createConfluxRecord({
 }
 
 export function monthsUntilDock(conflux, world) {
+  if (conflux?.dockStartDay != null && world?.dayIndex != null) {
+    return Math.max(0, Math.ceil(daysUntilDock(conflux, world.dayIndex) / 30));
+  }
   const at = conflux.dockAtTick ?? (conflux.createdTick || 0) + (conflux.etaMonths || 1);
   return Math.max(0, at - (world.tickIndex || 0));
 }
 
-/** Забрать нити (кроме указов), завести главную нить стыка, записать канон сближения. */
+export function schedulePairJobs(world, conflux, { contactAtFraction = 0.2 } = {}) {
+  if (!world || !conflux) return [];
+  const primary = pairPrimaryId(conflux);
+  const payload = { confluxId: conflux.id };
+  cancelJobs(world, (j) => String(j.payload?.confluxId || '') === String(conflux.id));
+  const jobs = [
+    scheduleJob(world, { domainId: primary, kind: 'conflux_dock', dueDay: conflux.dockStartDay, payload }),
+    scheduleJob(world, { domainId: primary, kind: 'conflux_undock', dueDay: conflux.dockEndDay, payload }),
+  ];
+  const span = Math.max(1, Number(conflux.dockEndDay) - Number(conflux.dockStartDay));
+  const contactDay = Number(conflux.dockStartDay) + Math.round(span * contactAtFraction);
+  jobs.push(
+    scheduleJob(world, { domainId: primary, kind: 'conflux_contact', dueDay: contactDay, payload }),
+  );
+  return jobs;
+}
+
+/** Нити остаются у хозяина. Контейнер заводится только при стыковке. */
 export function beginConfluxOwnership({ a, b, conflux, world, config }) {
   normalizeConfluxBoard(conflux);
   takeDomainBoardIntoConflux(a, conflux);
   takeDomainBoardIntoConflux(b, conflux);
-  const main = createMainConfluxPlot({ a, b, conflux, world, config });
-  conflux.plotlines.push(main);
-  conflux.mainPlotId = main.id;
 
-  const remaining = monthsUntilDock(conflux, world);
-  const textA = approachingAnnounceText(a, b, remaining, conflux.rematch);
-  const textB = approachingAnnounceText(b, a, remaining, conflux.rematch);
-  const tags = conflux.rematch
-    ? ['approaching', 'seed', 'rematch']
-    : ['approaching', 'seed'];
-  const fa = pushPublicChronicle(a, world, textA, conflux, tags);
-  const fb = pushPublicChronicle(b, world, textB, conflux, tags);
-  mirrorToShared(conflux, fa);
-  void fb;
-  pushInternalChronicle(conflux, {
-    text: textA,
-    world,
-    plotIds: [main.id],
-    tags,
-    author: 'conflux',
-  });
-  return { main, textA, textB };
+  const remainingDays = daysUntilDock(conflux, world?.dayIndex ?? conflux.prepStartDay);
+  const wait = realWaitLabel(remainingDays, config);
+  const textA = approachingAnnounceText(a, b, wait, conflux.rematch);
+  const textB = approachingAnnounceText(b, a, wait, conflux.rematch);
+  const tags = conflux.rematch ? ['approaching', 'seed', 'rematch'] : ['approaching', 'seed'];
+  pushPublicChronicle(a, world, textA, conflux, tags);
+  pushPublicChronicle(b, world, textB, conflux, tags);
+  return { main: null, textA, textB };
 }
 
 function pushPublicChronicle(domain, world, text, conflux, extraTags = []) {
+  const day = Number.isFinite(Number(world?.dayIndex)) ? Math.round(Number(world.dayIndex)) : null;
   const fact = createLoreFact({
     id: newId('lore'),
     text,
     tags: ['chronicle', 'conflux', `conflux:${conflux.id}`, 'shared', ...extraTags],
-    gameDateLabel: world.gameDate.label,
+    gameDateLabel: day != null ? gameDateFromDay(day).label : worldDateLabel(world) || world?.gameDate?.label,
     tick: world.tickIndex,
+    day,
     author: 'conflux',
-    // Сближение чужого острова — важнейшее событие для города, не фон.
     importance: 'critical',
   });
   domain.lore = domain.lore || [];
@@ -330,20 +366,31 @@ function mirrorToShared(conflux, fact) {
   conflux.sharedLore.push({ ...fact });
 }
 
-function approachingSeedTexts(a, b, remaining, rematch) {
-  const rematchNote = rematch
-    ? ' Это повторный конфлюкс: острова уже сходились раньше.'
-    : '';
-  return {
-    textA:
-      `На горизонте всё яснее виден чужой летающий остров — город «${b.name}» с одной стороны ` +
-      `и «${a.name}» с другой сближаются. Стыковка уже неизбежна; по приметам — примерно через ${remaining} мес.` +
-      rematchNote,
-    textB:
-      `На горизонте всё яснее виден чужой летающий остров — город «${a.name}» сближается с «${b.name}». ` +
-      `Стыковка уже неизбежна; по приметам — примерно через ${remaining} мес.` +
-      rematchNote,
-  };
+function pairWindow({ a, b, world, config, now = Date.now() }) {
+  const cfg = confluxConfig(config);
+  const day = Math.max(0, Math.round(Number(world?.dayIndex) || 0));
+  const delayHours = pickPrepDelayHours({
+    activityA: domainActivityForSchedule(a),
+    activityB: domainActivityForSchedule(b),
+    quietA: notifySettings(a).quiet,
+    quietB: notifySettings(b).quiet,
+    prepHours: cfg.prepHours,
+    dockHours: cfg.dockHours,
+    slackHours: cfg.scheduleSlackHours,
+    samplesMin: cfg.activitySamplesMin,
+  });
+  const prepStartDay = day + hoursToGameDays(delayHours, config);
+  const dockStartDay = prepStartDay + hoursToGameDays(cfg.prepHours, config);
+  const dockEndDay = dockStartDay + hoursToGameDays(cfg.dockHours, config);
+  void now;
+  return { prepStartDay, dockStartDay, dockEndDay };
+}
+
+function domainAgeDays(domain, day) {
+  if (Number.isFinite(Number(domain?.createdDay))) {
+    return Math.max(0, Math.round(Number(day) || 0) - Math.round(Number(domain.createdDay)));
+  }
+  return Math.max(0, Math.round(Number(day) || 0) - Number(domain?.createdTick || 0) * 30);
 }
 
 /**
@@ -382,13 +429,16 @@ export async function forceCreateConflux({
     }
   }
 
+  const cfg = confluxConfig(config || storage.config);
   const rematch = timesMet(a, b) > 0;
+  const window = pairWindow({ a, b, world, config: config || storage.config });
   const conflux = createConfluxRecord({
     domainIds: [a.id, b.id],
-    etaMonths,
-    durationMonths,
     world,
     rematch,
+    ...window,
+    etaMonths,
+    durationMonths,
   });
 
   const { textA, textB } = beginConfluxOwnership({
@@ -398,6 +448,8 @@ export async function forceCreateConflux({
     world,
     config: config || storage.config,
   });
+  schedulePairJobs(world, conflux, { contactAtFraction: cfg.contactSeedAtFraction });
+  await storage.saveWorld(world);
 
   await storage.saveDomain(a);
   await storage.saveDomain(b);
@@ -445,20 +497,18 @@ export async function advanceConfluxLifetimeCounters({ storage, world }) {
 }
 
 /**
- * Авто-матчмейкинг: не трогает домены младше minDomainAgeMonths;
- * предпочитает недобранных по docked-доле и пары, которые ещё не встречались.
+ * Авто-матчмейкинг: частота cadenceHours, окно в активные часы пары.
  */
-export async function maybeMatchmakeConfluxes({ config, storage, world, rng = Math.random }) {
+export async function maybeMatchmakeConfluxes({ config, storage, world, rng = Math.random, now = Date.now() }) {
   const cfg = confluxCfg(config);
   const log = getLogger().child({ scope: 'conflux.match' });
   const notes = [];
   if (cfg.enabled === false) return { notes, created: [] };
 
-  const target = Number(cfg.targetDockedFraction ?? 1 / 3);
-  const minAge = Math.max(0, Math.round(Number(cfg.minDomainAgeMonths ?? 6)));
-  const maxPairs = Math.max(0, Math.round(Number(cfg.maxNewPairsPerTick ?? 2)));
+  const minAge = cfg.minDomainAgeDays;
+  const maxPairs = cfg.maxNewPairsPerDay;
   const preferNeverMet = cfg.preferNeverMet !== false;
-  const tick = world.tickIndex || 0;
+  const day = Math.round(Number(world.dayIndex) || 0);
 
   if (maxPairs <= 0) return { notes, created: [] };
 
@@ -478,24 +528,12 @@ export async function maybeMatchmakeConfluxes({ config, storage, world, rng = Ma
 
   const eligible = domains.filter((d) => {
     if (busy.has(d.id)) return false;
-    const age = tick - Number(d.createdTick || 0);
-    return age >= minAge;
+    if (!confluxDue(d, now)) return false;
+    return domainAgeDays(d, day) >= minAge;
   });
 
-  /** Кто сильнее «должен» в docked: дефицит относительно target. */
-  function needScore(d) {
-    const frac = dockedFraction(d);
-    return target - frac;
-  }
-
-  const needy = eligible.filter((d) => needScore(d) > 0.02);
-  const pool = needy.length >= 2 ? needy : eligible;
+  const pool = eligible;
   if (pool.length < 2) return { notes, created: [] };
-
-  const etaMin = Number(cfg.etaMonths?.min ?? 3);
-  const etaMax = Number(cfg.etaMonths?.max ?? 3);
-  const durMin = Number(cfg.durationMonths?.min ?? 6);
-  const durMax = Number(cfg.durationMonths?.max ?? 12);
 
   const created = [];
   const used = new Set();
@@ -504,14 +542,13 @@ export async function maybeMatchmakeConfluxes({ config, storage, world, rng = Ma
     const free = pool.filter((d) => !used.has(d.id) && !busy.has(d.id));
     if (free.length < 2) break;
 
-    /** @type {{ a: object, b: object, score: number, met: number }[]} */
     const candidates = [];
     for (let i = 0; i < free.length; i++) {
       for (let j = i + 1; j < free.length; j++) {
         const a = free[i];
         const b = free[j];
         const met = timesMet(a, b);
-        let score = needScore(a) + needScore(b) + rng() * 0.15;
+        let score = rng() * 0.15;
         if (preferNeverMet) {
           if (met === 0) score += 2;
           else score -= 1 + Math.min(3, met) * 0.5;
@@ -523,15 +560,12 @@ export async function maybeMatchmakeConfluxes({ config, storage, world, rng = Ma
     candidates.sort((x, y) => y.score - x.score);
     const pick = candidates[0];
     const rematch = pick.met > 0;
-    const etaMonths = randIntInclusive(etaMin, etaMax, rng);
-    const durationMonths = randIntInclusive(durMin, durMax, rng);
-
+    const window = pairWindow({ a: pick.a, b: pick.b, world, config, now });
     const conflux = createConfluxRecord({
       domainIds: [pick.a.id, pick.b.id],
-      etaMonths,
-      durationMonths,
       world,
       rematch,
+      ...window,
     });
     const { textA, textB } = beginConfluxOwnership({
       a: pick.a,
@@ -540,6 +574,7 @@ export async function maybeMatchmakeConfluxes({ config, storage, world, rng = Ma
       world,
       config,
     });
+    schedulePairJobs(world, conflux, { contactAtFraction: cfg.contactSeedAtFraction });
 
     await storage.saveDomain(pick.a);
     await storage.saveDomain(pick.b);
@@ -555,8 +590,8 @@ export async function maybeMatchmakeConfluxes({ config, storage, world, rng = Ma
       phase: 'matchmake',
       domains: [pick.a.name, pick.b.name],
       rematch,
-      etaMonths,
-      durationMonths,
+      etaMonths: conflux.etaMonths,
+      durationMonths: conflux.durationMonths,
       announce: {
         [pick.a.id]: textA,
         [pick.b.id]: textB,
@@ -566,31 +601,160 @@ export async function maybeMatchmakeConfluxes({ config, storage, world, rng = Ma
       id: conflux.id,
       domains: [pick.a.name, pick.b.name],
       rematch,
-      etaMonths,
-      durationMonths,
-      scores: { a: needScore(pick.a), b: needScore(pick.b) },
+      prepStartDay: conflux.prepStartDay,
+      dockStartDay: conflux.dockStartDay,
+      dockEndDay: conflux.dockEndDay,
     });
   }
 
+  if (created.length) await storage.saveWorld(world);
   return { notes, created };
 }
 
 export function confluxSummary(c, world, domainsById = {}) {
   const names = (c.domainIds || []).map((id) => domainsById[id]?.name || id);
+  const remainingDock = world?.dayIndex != null ? daysUntilDock(c, world.dayIndex) : null;
   return {
     id: c.id,
     status: c.status,
     type: c.type,
     domainIds: c.domainIds,
     domainNames: names,
+    prepStartDay: c.prepStartDay ?? null,
+    dockStartDay: c.dockStartDay ?? null,
+    dockEndDay: c.dockEndDay ?? null,
+    remainingDockDays: remainingDock,
     etaMonths: c.etaMonths,
     dockAtTick: c.dockAtTick,
     monthsUntilDock: world ? monthsUntilDock(c, world) : null,
     durationMonths: c.durationMonths,
     monthsDocked: c.monthsDocked || 0,
     rematch: Boolean(c.rematch),
+    passage: c.passage || null,
     contact: hydrateContact(c.contact),
   };
+}
+
+export function abortCrossIslandDeeds(domain, { day, reason = 'undock' } = {}) {
+  const aborted = [];
+  for (const p of domain.state?.pendingActions || []) {
+    if (!p.crossIsland && !p.targetDomainId) continue;
+    if (p.status && p.status !== 'active' && p.status !== 'paused') continue;
+    p.status = 'resolved';
+    p.finishKind = 'abort';
+    p.abortReason = reason;
+    p.resolvedDay = Math.round(Number(day) || 0);
+    if (!p.abortOutcome) p.abortOutcome = 'вернуться домой с тем, что успели';
+    releaseOfficerProcess(domain, p);
+    aborted.push(p);
+  }
+  return aborted;
+}
+
+/** Стыковка: проход, пустой контейнер, канон. */
+export async function dockConfluxNow({
+  config,
+  runtime,
+  conflux,
+  domains,
+  world,
+  day = 0,
+  log: parentLog,
+}) {
+  const log = parentLog || getLogger().child({ scope: 'conflux.dock' });
+  if (!conflux || conflux.status === 'docked') return { conflux, skipped: 'already_docked' };
+  const pair = (domains || []).filter(Boolean);
+  if (pair.length < 2) return { conflux, skipped: 'no_pair' };
+
+  const contact = await generateContact({ config, runtime, conflux, domains: pair, world, log });
+  conflux.status = 'docked';
+  conflux.contact = contact;
+  conflux.dockedDay = Math.round(Number(day) || 0);
+  conflux.dockedTick = world.tickIndex;
+  conflux.passage = {
+    text: String(contact.description || '').trim(),
+    state: 'open',
+    contact,
+    relief: contact.relief || null,
+    heldByProcessId: null,
+  };
+  ensurePassage(conflux);
+  const container = createEmptyContainer({ a: pair[0], b: pair[1], conflux, world, config });
+  conflux.container = container;
+  conflux.containerPlotId = container.id;
+  conflux.mainPlotId = container.id;
+  recordPartnerDock(pair[0], pair[1]);
+
+  const text = contact.description;
+  await writePairChronicle({
+    runtime,
+    world,
+    conflux,
+    domains: pair,
+    event: confluxEvent({
+      kind: 'dock',
+      day,
+      textHint: text,
+    }),
+    log,
+  });
+  return { conflux, contact, container };
+}
+
+/** Расстыковка: след, обрыв дел через проход, сановники возвращаются. */
+export async function undockConfluxNow({
+  runtime,
+  conflux,
+  domains,
+  world,
+  day = 0,
+  config = null,
+  log: parentLog,
+  rng = Math.random,
+}) {
+  const log = parentLog || getLogger().child({ scope: 'conflux.undock' });
+  if (!conflux || conflux.status === 'ended') return { conflux, skipped: 'already_ended' };
+  const pair = (domains || []).filter(Boolean);
+  conflux.status = 'ended';
+  conflux.endedDay = Math.round(Number(day) || 0);
+  conflux.endedTick = world?.tickIndex;
+
+  for (const d of pair) abortCrossIslandDeeds(d, { day, reason: 'undock' });
+
+  if (pair.length >= 2) {
+    applyUndockTrace({ a: pair[0], b: pair[1], conflux, world, day, rng });
+    stampNextConflux(pair[0], { config, rng });
+    stampNextConflux(pair[1], { config, rng });
+  }
+
+  const byId = new Map(pair.map((d) => [d.id, d]));
+  await returnBoardsOnUndock(conflux, byId, {
+    decideContinuation: async ({ plot, domainId, domain }) =>
+      decideUndockContinuation({
+        runtime,
+        plot,
+        domain,
+        partner: pair.find((x) => x.id !== domainId) || null,
+        world,
+        log,
+      }),
+  });
+
+  await writePairChronicle({
+    runtime,
+    world,
+    conflux,
+    domains: pair,
+    event: confluxEvent({
+      kind: 'undock',
+      day,
+      textHint: pair.length >= 2
+        ? `Острова «${pair[0].name}» и «${pair[1].name}» разошлись в небе.`
+        : 'Острова разошлись в небе; пути между ними больше нет.',
+    }),
+    log,
+  });
+  return { conflux };
 }
 
 function trackChronicleAdd(map, domainId, fact) {
@@ -615,242 +779,15 @@ export async function processConfluxApproachingPhase({
   storage,
   world,
 }) {
-  const log = getLogger().child({ scope: 'conflux.tick' });
-  const list = await storage.listConfluxes({ status: ['approaching', 'docked'] });
-  const dockedDomainIds = new Set();
-  const dockedConfluxes = [];
-  const chronicleAddsByDomain = new Map();
-  const notes = [];
-
-  for (const conflux of list) {
-    if (conflux.status === 'docked') {
-      for (const id of conflux.domainIds || []) dockedDomainIds.add(id);
-      dockedConfluxes.push(conflux);
-      continue;
-    }
-    if (conflux.status !== 'approaching') continue;
-
-    const domains = [];
-    for (const id of conflux.domainIds || []) {
-      const d = await storage.getDomain(id);
-      if (!d) throw new Error(`Conflux ${conflux.id}: domain ${id} missing`);
-      normalizeDomain(d);
-      domains.push(d);
-    }
-
-    const remaining = monthsUntilDock(conflux, world);
-
-    if (remaining > 0) {
-      // Seed already written on create (matchmake / force) — skip duplicate same tick.
-      if (Number(conflux.createdTick) === Number(world.tickIndex)) {
-        notes.push({
-          confluxId: conflux.id,
-          phase: 'approaching',
-          monthsUntilDock: remaining,
-          seededThisTick: true,
-        });
-        continue;
-      }
-      const [a, b] = domains;
-      const textA = approachMonthText(b.name, remaining, conflux.rematch);
-      const textB = approachMonthText(a.name, remaining, conflux.rematch);
-      const fa = pushPublicChronicle(a, world, textA, conflux, [
-        'approaching',
-        ...(conflux.rematch ? ['rematch'] : []),
-      ]);
-      const fb = pushPublicChronicle(b, world, textB, conflux, [
-        'approaching',
-        ...(conflux.rematch ? ['rematch'] : []),
-      ]);
-      mirrorToShared(conflux, fa);
-      trackChronicleAdd(chronicleAddsByDomain, a.id, fa);
-      trackChronicleAdd(chronicleAddsByDomain, b.id, fb);
-      if (conflux.mainPlotId) {
-        pushInternalChronicle(conflux, {
-          text: textA,
-          world,
-          plotIds: [conflux.mainPlotId],
-          tags: ['approaching'],
-        });
-      }
-      await storage.saveDomain(a);
-      await storage.saveDomain(b);
-      await storage.saveConflux(conflux);
-      notes.push({
-        confluxId: conflux.id,
-        phase: 'approaching',
-        monthsUntilDock: remaining,
-        photoSoon: remaining === 1,
-      });
-      log.info('conflux.prelude', { id: conflux.id, remaining, photoSoon: remaining === 1 });
-      continue;
-    }
-
-    // Dock now — pair resolve runs this same tick
-    const contact = await generateContact({ config, runtime, conflux, domains, world, log });
-    conflux.status = 'docked';
-    conflux.contact = contact;
-    conflux.monthsDocked = 0;
-    conflux.dockedTick = world.tickIndex;
-
-    if (domains.length >= 2) {
-      recordPartnerDock(domains[0], domains[1]);
-    }
-
-    let contactText = contact.description;
-    if (conflux.rematch && !/повторн/i.test(contactText)) {
-      contactText =
-        `${contactText} Это повторный конфлюкс: острова «${domains[0].name}» и «${domains[1].name}» уже сходились раньше.`;
-    }
-
-    let sharedOnce = false;
-    for (const d of domains) {
-      const f = createLoreFact({
-        id: newId('lore'),
-        text: contactText,
-        tags: [
-          'chronicle',
-          'conflux',
-          `conflux:${conflux.id}`,
-          'shared',
-          'docked',
-          'contact',
-          ...(conflux.rematch ? ['rematch'] : []),
-        ],
-        gameDateLabel: world.gameDate.label,
-        tick: world.tickIndex,
-        author: 'conflux-resolver',
-        importance: 'critical',
-      });
-      d.lore = d.lore || [];
-      d.lore.push(f);
-      if (!sharedOnce) {
-        mirrorToShared(conflux, f);
-        sharedOnce = true;
-      }
-      trackChronicleAdd(chronicleAddsByDomain, d.id, f);
-      dockedDomainIds.add(d.id);
-      await storage.saveDomain(d);
-    }
-    if (conflux.mainPlotId) {
-      pushInternalChronicle(conflux, {
-        text: contactText,
-        world,
-        plotIds: [conflux.mainPlotId],
-        tags: ['docked', 'contact'],
-        author: 'conflux-resolver',
-      });
-    }
-    await storage.saveConflux(conflux);
-    dockedConfluxes.push(conflux);
-    notes.push({
-      confluxId: conflux.id,
-      phase: 'docked',
-      contact: contactText,
-      rematch: Boolean(conflux.rematch),
-      contactKind: contact.kind,
-    });
-    log.info('conflux.docked', {
-      id: conflux.id,
-      kind: contact.kind,
-      rematch: Boolean(conflux.rematch),
-      contact: contactText?.slice(0, 160),
-    });
-  }
-
-  return { dockedDomainIds, dockedConfluxes, chronicleAddsByDomain, notes };
+  void config;
+  void runtime;
+  void storage;
+  void world;
+  return { dockedDomainIds: new Set(), dockedConfluxes: [], chronicleAddsByDomain: new Map(), notes: [] };
 }
 
-/**
- * After pair resolve: count docked months and end when duration elapses.
- * Undock chronicle is returned so tick news can include it the same month.
- *
- * @returns {{ notes: object[], undockAddsByDomain: Map<string, object[]> }}
- */
-export async function advanceDockedConfluxes({ storage, runtime, world }, dockedConfluxes) {
-  const log = getLogger().child({ scope: 'conflux.tick' });
-  const notes = [];
-  const undockAddsByDomain = new Map();
-
-  for (const stub of dockedConfluxes || []) {
-    const conflux = (await storage.getConflux(stub.id)) || stub;
-    if (conflux.status !== 'docked') continue;
-
-    conflux.monthsDocked = Number(conflux.monthsDocked || 0) + 1;
-    if (conflux.monthsDocked >= Number(conflux.durationMonths || 8)) {
-      conflux.status = 'ended';
-      conflux.endedTick = world.tickIndex;
-
-      const domains = [];
-      for (const id of conflux.domainIds || []) {
-        const d = await storage.getDomain(id);
-        if (d) domains.push(d);
-      }
-      const endText =
-        domains.length >= 2
-          ? await generateUndockChronicle({ runtime, conflux, domains, world, log })
-          : 'Острова разошлись в небе; пути между ними больше нет.';
-
-      let sharedOnce = false;
-      for (const d of domains) {
-        const f = createLoreFact({
-          id: newId('lore'),
-          text: endText,
-          tags: ['chronicle', 'conflux', `conflux:${conflux.id}`, 'shared', 'ended', 'undock'],
-          gameDateLabel: world.gameDate.label,
-          tick: world.tickIndex,
-          author: 'conflux-resolver',
-          importance: 'critical',
-        });
-        d.lore = d.lore || [];
-        d.lore.push(f);
-        if (!sharedOnce) {
-          mirrorToShared(conflux, f);
-          sharedOnce = true;
-        }
-        if (!undockAddsByDomain.has(d.id)) undockAddsByDomain.set(d.id, []);
-        undockAddsByDomain.get(d.id).push(f);
-      }
-      if (conflux.mainPlotId) {
-        pushInternalChronicle(conflux, {
-          text: endText,
-          world,
-          plotIds: [conflux.mainPlotId],
-          tags: ['ended', 'undock'],
-          author: 'conflux-resolver',
-        });
-      }
-      const byId = new Map(domains.map((d) => [d.id, d]));
-      await returnBoardsOnUndock(conflux, byId, {
-        decideContinuation: async ({ plot, domainId, domain }) =>
-          decideUndockContinuation({
-            runtime,
-            plot,
-            domain,
-            partner: domains.find((x) => x.id !== domainId) || null,
-            world,
-            log,
-          }),
-      });
-      for (const d of byId.values()) {
-        await storage.saveDomain(d);
-      }
-      notes.push({
-        confluxId: conflux.id,
-        phase: 'ended',
-        monthsDocked: conflux.monthsDocked,
-        text: endText,
-      });
-      log.info('conflux.ended', {
-        id: conflux.id,
-        monthsDocked: conflux.monthsDocked,
-        textPreview: endText.slice(0, 160),
-      });
-    }
-    await storage.saveConflux(conflux);
-  }
-
-  return { notes, undockAddsByDomain };
+export async function advanceDockedConfluxes() {
+  return { notes: [], undockAddsByDomain: new Map() };
 }
 
 /** Active docked conflux containing this domain, or null. */

@@ -34,6 +34,8 @@ import {
   normalizeDurationBand,
   normalizeDifficultyBand,
   remainingBand,
+  durationBandIndex,
+  difficultyBandIndex,
 } from './bands.js';
 import { paceLabel, normalizePaceShift } from './deedMath.js';
 import {
@@ -65,7 +67,10 @@ import {
   findRule,
   setConfluxDirective,
 } from './cityRules.js';
-import { applyPriestNotifyChange, notifySettings } from './notify.js';
+import { applyPriestNotifyChange, notifySettings, setQuietHours } from './notify.js';
+import { applyCrossIslandJudged, remainingWindowBand } from './deedConflux.js';
+import { maybeCrystallizeFromTouch } from './confluxJobs.js';
+import { holdPassageShut } from './passage.js';
 import {
   MAX_PRIEST_ORDERS,
   addPriestOrder,
@@ -384,8 +389,9 @@ export function buildRulerTools(domain, storage, character, ctx) {
     if (ctx.conflux) {
       dehydrateDomainToConflux(domain, ctx.conflux);
       await storage.saveDomain(domain);
+      if (ctx.partner) await storage.saveDomain(ctx.partner);
       await storage.saveConflux(ctx.conflux);
-      hydrateDomainFromConflux(domain, ctx.conflux, { mode: 'ruler' });
+      hydrateDomainFromConflux(domain, ctx.conflux, { mode: 'ruler', partner: ctx.partner });
       return;
     }
     await storage.saveDomain(domain);
@@ -744,6 +750,19 @@ export function buildRulerTools(domain, storage, character, ctx) {
               'true — целенаправленно разведать конкретный чужой сюжет (нужен plotId или chronicleId). ' +
               'Не для вмешательства и не для «пошлите шпионов на остров вообще».',
           },
+          secret: {
+            type: 'boolean',
+            description:
+              'true — дело скрыто от соседнего города до разрешения. Не для обычных поручений в своём городе.',
+          },
+          guardPassage: {
+            type: 'boolean',
+            description: 'true — дело держит проход (дорого: сезон и не легче HARD). Не предлагай это сам.',
+          },
+          abortOutcome: {
+            type: 'string',
+            description: 'Что будет, если острова разойдутся до конца дела. Для дел через проход обязательно по смыслу.',
+          },
         },
       },
       handler: async ({
@@ -758,6 +777,9 @@ export function buildRulerTools(domain, storage, character, ctx) {
         plotId,
         chronicleId,
         intel = false,
+        secret = false,
+        guardPassage = false,
+        abortOutcome = null,
         goal,
         office = null,
         randomOfficer = false,
@@ -921,6 +943,10 @@ export function buildRulerTools(domain, storage, character, ctx) {
           status: 'active',
           initiative: 'patron',
           intel: wantIntel,
+          secret: Boolean(secret) && Boolean(ctx.conflux),
+          secretForDomainId: secret && ctx.conflux ? domain.id : null,
+          passageGuard: Boolean(guardPassage) && ctx.conflux?.status === 'docked',
+          abortOutcome: abortOutcome ? String(abortOutcome).trim() : null,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -942,13 +968,73 @@ export function buildRulerTools(domain, storage, character, ctx) {
             summary,
             detail,
             goal: action.goal || '',
+            remainingWindowBand:
+              ctx.conflux?.status === 'docked' ? remainingWindowBand(ctx.conflux, day) : '',
+            crossIsland: ctx.conflux?.status === 'docked',
             log: ctx.log,
           });
           if (judged.note) action.durationNote = judged.note;
+          if (action.passageGuard) {
+            if (durationBandIndex(judged.durationBand) < durationBandIndex('SEASON')) {
+              judged.durationBand = 'SEASON';
+            }
+            if (difficultyBandIndex(judged.difficulty) < difficultyBandIndex('HARD')) {
+              judged.difficulty = 'HARD';
+            }
+          }
+          if (ctx.conflux?.status === 'docked') {
+            const towardPartner =
+              Boolean(wantIntel) ||
+              Boolean(action.secret) ||
+              Boolean(action.passageGuard) ||
+              Boolean(targetPlot?.isMainConflux) ||
+              (targetPlot && ctx.partner && (targetPlot.concernsDomainIds || []).includes(ctx.partner.id));
+            if (towardPartner) {
+              action.opposedStat = judged.opposedStat || null;
+              const applied = applyCrossIslandJudged(judged, {
+                process: action,
+                actor: domain,
+                target: ctx.partner,
+                conflux: ctx.conflux,
+                day,
+                config: ctx.config,
+              });
+              if (applied.error === 'window') {
+                domain.state.pendingActions = (domain.state.pendingActions || []).filter((p) => p.id !== action.id);
+                releaseOfficerProcess(domain, action);
+                return toolFail('window', applied.message);
+              }
+              judged = applied.judged;
+            }
+          }
         }
         startDeed(action, { day, judged });
         if (paceShift) applyPace(action, paceShift, { day });
         scheduleDeedJob(world, domain, action);
+        if (action.crossIsland && ctx.conflux) {
+          await maybeCrystallizeFromTouch({
+            runtime: ctx.runtime,
+            conflux: ctx.conflux,
+            domains: [domain, ctx.partner].filter(Boolean),
+            world,
+            day,
+            log: ctx.log,
+            touch: {
+              day,
+              domainId: domain.id,
+              kind: action.secret ? 'secret_deed' : action.passageGuard ? 'passage_guard' : 'deed',
+              deedId: action.id,
+            },
+          });
+        }
+        if (action.passageGuard && ctx.conflux) {
+          await holdPassageShut({
+            runtime: ctx.runtime,
+            conflux: ctx.conflux,
+            process: action,
+            log: ctx.log,
+          });
+        }
         let plot = null;
         if (targetPlot) {
           targetPlot.relatedProcessIds = targetPlot.relatedProcessIds || [];
@@ -1444,6 +1530,25 @@ export function buildRulerTools(domain, storage, character, ctx) {
             'В речи: как теперь будешь беспокоить покровителя. Полей движка не называй. ' +
             'Если он просил замолчать совсем — скажи, что о настоящей беде всё равно доложишь.',
         };
+      },
+    },
+    {
+      name: 'set_quiet_hours',
+      description:
+        'Тихие часы покровителя: в это время сопряжение по возможности не назначают и телефон молчит. ' +
+        'fromHour и toHour — часы 0–23 в зоне tz (IANA, например Europe/Moscow).',
+      parameters: {
+        type: 'object',
+        properties: {
+          fromHour: { type: 'number' },
+          toHour: { type: 'number' },
+          tz: { type: 'string' },
+        },
+      },
+      handler: async ({ fromHour = null, toHour = null, tz = null }) => {
+        const quiet = setQuietHours(domain, { fromHour, toHour, tz });
+        await save();
+        return { ok: true, quiet, hint: 'В речи: в какие часы не беспокоить. Без механики.' };
       },
     },
     {

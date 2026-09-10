@@ -2,7 +2,8 @@
  * Город для агентов: компактный cityBrief.
  * Постоянный след города — в брифе (cityGenesisRewrite).
  * Канонические неизвестности — блок «Неизвестно (канон):» в том же тексте.
- * Старые modifiers не отдаём в промпт. Указы живут на plotline.
+ * Дописки (modifiers) клеятся в хвост: они дополняют бриф, пока компактор
+ * не свернёт их в текст. Указы живут на plotline.
  */
 
 import { newId } from './ids.js';
@@ -175,11 +176,14 @@ export function formatCityModifiersForPrompt(domain) {
   return `Постоянные изменения города:\n${lines.join('\n')}`;
 }
 
-/** То, что видят агенты вместо полного генезиса: только бриф. */
+/** То, что видят агенты вместо полного генезиса: бриф и дописки. */
 export function formatCityForAgents(domain) {
   const raw = String(domain?.cityBrief || '').trim();
-  if (raw) return formatCityBrief(parseCityBrief(raw));
-  return String(domain?.description || '').trim() || '(описание пусто)';
+  const brief = raw
+    ? formatCityBrief(parseCityBrief(raw))
+    : String(domain?.description || '').trim() || '(описание пусто)';
+  const mods = formatCityModifiersForPrompt(domain);
+  return mods ? `${brief}\n\n${mods}` : brief;
 }
 
 /** Зерно посева из генезиса: бриф, иначе сжатое описание. Пустая строка, если города ещё нет. */

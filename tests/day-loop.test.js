@@ -389,7 +389,7 @@ test('зависший ход снимается предохранителем,
   assert.equal(world.turnStartedAt, null);
 });
 
-test('сопряжённый город месячного пути не теряет', async () => {
+test('сопряжённый город идёт тем же дневным движком', async () => {
   const domain = makeDomain();
   const world = makeWorld();
   const storage = storageOf([domain], world);
@@ -404,8 +404,9 @@ test('сопряжённый город месячного пути не тер�
     now: 0,
     log: silentLog,
   });
-  assert.equal(res.results[0].skipped, 'conflux');
-  assert.equal(res.results[0].confluxId, 'cf1');
+  assert.equal(res.results[0].skipped, undefined);
+  assert.equal(res.results[0].domainId, 'd1');
+  assert.ok('events' in res.results[0]);
 });
 
 // ─────────────────────────── будильник ───────────────────────────

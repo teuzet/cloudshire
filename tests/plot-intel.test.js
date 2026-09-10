@@ -215,7 +215,7 @@ test('хозяин тикает uncontested native; contested — на доск�
   assert.deepEqual(confluxMonthPlots(c).map((p) => p.title), ['Драка']);
 });
 
-test('расстыковка не отдаёт нераскрытую нить; keep=false — без финала', async () => {
+test('расстыковка не отдаёт нераскрытую нить; общая остаётся у хозяина', async () => {
   const hidden = createPlotline({ title: 'Секрет', kind: 'story' });
   hidden.hostDomainId = 'a';
   hidden.concernsDomainIds = ['a'];
@@ -226,14 +226,15 @@ test('расстыковка не отдаёт нераскрытую нить; 
   known.concernsDomainIds = ['a', 'b'];
   known.shared = true;
   known.plotAwareness = { a: true, b: true };
-  const a = domain('a');
+  const a = domain('a', { plotlines: [hidden, known] });
   const b = domain('b');
-  const c = conflux({ plotlines: [hidden, known] });
+  const c = conflux();
   await returnBoardsOnUndock(c, new Map([['a', a], ['b', b]]), {
     decideContinuation: async ({ plot, domainId }) => plot.title === 'Мост' && domainId === 'b',
   });
-  assert.equal(a.plotlines.some((p) => p.title === 'Секрет'), false);
+  assert.equal(a.plotlines.some((p) => p.title === 'Секрет'), true);
   assert.equal(b.plotlines.some((p) => p.title === 'Секрет'), false);
-  assert.equal(a.plotlines.some((p) => p.title === 'Мост'), false);
-  assert.equal(b.plotlines.some((p) => p.title === 'Мост'), true);
+  assert.equal(a.plotlines.some((p) => p.title === 'Мост'), true);
+  assert.equal(b.plotlines.some((p) => p.title === 'Мост'), false);
+  assert.deepEqual(a.plotlines.find((p) => p.title === 'Мост').concernsDomainIds, ['a']);
 });

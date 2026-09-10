@@ -71,13 +71,27 @@ import { plantStakedStory } from './storyteller.js';
 import { accrueMana } from './mana.js';
 import { countEvent, markReported, pickReportSubject } from './priestOrders.js';
 import { decideAsk } from './herald.js';
+import { writePairChronicle, confluxEvent } from './confluxCanon.js';
+import { secretRevealTexts } from './deedConflux.js';
+import { releasePassageHold } from './passage.js';
 import { getLogger } from '../log.js';
 
 /** Запись хроники события. День обязателен: по нему живёт вся новая механика. */
 export function appendEventFact(
   domain,
   world,
-  { text, plotId = null, processId = null, day = 0, author = 'engine', importance = 'major', tags = ['chronicle'], finish = null },
+  {
+    text,
+    plotId = null,
+    processId = null,
+    day = 0,
+    author = 'engine',
+    importance = 'major',
+    tags = ['chronicle'],
+    finish = null,
+    secret = false,
+    secretForDomainId = null,
+  },
 ) {
   const fact = createLoreFact({
     id: newId('lore'),
@@ -92,6 +106,8 @@ export function appendEventFact(
     relatedPlotlineIds: plotId ? [plotId] : null,
     sourcePlotId: plotId || null,
     processFinish: finish || null,
+    secret: Boolean(secret),
+    secretForDomainId: secretForDomainId || null,
   });
   domain.lore = Array.isArray(domain.lore) ? domain.lore : [];
   domain.lore.push(fact);
@@ -193,6 +209,9 @@ export async function resolveDeedEvent({
   processId,
   rng = Math.random,
   log: parentLog,
+  conflux = null,
+  partner = null,
+  storage = null,
 } = {}) {
   const log = (parentLog || getLogger()).child({ scope: 'loop.deed', domainId: domain?.id, processId });
   const process = findProcess(domain, processId);
@@ -246,7 +265,40 @@ export async function resolveDeedEvent({
     day,
     author: rule ? 'engine:rule' : 'engine:deed',
     finish: rolled.finish,
+    secret: Boolean(process.secret),
+    secretForDomainId: process.secret ? domain.id : null,
   });
+
+  let secretVictim = null;
+  if (process.secret) {
+    process.secretRevealed = true;
+    const reveal = secretRevealTexts(process, rolled.finish);
+    if (partner) {
+      const victimFacts = await writePairChronicle({
+        runtime,
+        world,
+        conflux,
+        domains: [partner],
+        event: confluxEvent({
+          kind: reveal.ok ? 'sabotage_hidden' : 'sabotage_caught',
+          day,
+          actorDomainId: domain.id,
+          targetDomainId: partner.id,
+          outcome: reveal.ok ? 'secret_ok' : 'secret_fail',
+          plotId: plot?.id || null,
+          deed: { summary: process.summary },
+          textHint: reveal.victim,
+        }),
+        log,
+      });
+      secretVictim = victimFacts[0] || { domainId: partner.id, fact: { text: reveal.victim } };
+      if (storage) await storage.saveDomain(partner);
+    }
+  }
+  if (process.passageGuard && conflux) {
+    await releasePassageHold({ runtime, conflux, processId: process.id, log });
+    if (storage) await storage.saveConflux(conflux);
+  }
 
   let closed = null;
   if (plot && applied.closes) {
@@ -281,6 +333,7 @@ export async function resolveDeedEvent({
     rule,
     closed: Boolean(closed),
     officerFreed: Boolean(process.officerId),
+    secretVictim,
   };
 }
 
@@ -536,6 +589,9 @@ export async function drainDomainJobs({
   rng = Math.random,
   limit = 24,
   log: parentLog,
+  conflux = null,
+  partner = null,
+  storage = null,
 } = {}) {
   const log = (parentLog || getLogger()).child({ scope: 'loop', domainId: domain?.id });
   normalizeDomainProcesses(domain, config);
@@ -555,7 +611,10 @@ export async function drainDomainJobs({
       continue;
     }
     try {
-      const result = await handler({ config, runtime, domain, world, day, rng, log }, job);
+      const result = await handler(
+        { config, runtime, domain, world, day, rng, log, conflux, partner, storage },
+        job,
+      );
       completeJob(job, result?.skipped || 'ok');
       if (result && !result.skipped) events.push(result);
     } catch (err) {

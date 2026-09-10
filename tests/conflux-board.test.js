@@ -46,7 +46,7 @@ function conflux(extra = {}) {
   };
 }
 
-test('вся доска уходит на конфлюкс, постоянный порядок остаётся правилом города', () => {
+test('нити остаются у хозяина, на конфлюксе — ссылки; правила города не уезжают', () => {
   const story = createPlotline({ title: 'Спор у колодца', kind: 'story' });
   const proc = { id: 'act_1', summary: 'Чинить колодец', status: 'active' };
   story.relatedProcessIds = ['act_1'];
@@ -54,13 +54,13 @@ test('вся доска уходит на конфлюкс, постоянный
   a.modifiers = [{ id: 'cmod_1', text: 'Налог вдвое' }];
   const c = conflux();
   takeDomainBoardIntoConflux(a, c);
-  assert.equal(a.plotlines.length, 0);
+  assert.equal(a.plotlines.length, 1, 'нить не уезжает с домена');
   assert.equal(a.modifiers.length, 1, 'правила города на доску не уезжают');
-  assert.equal(c.plotlines.length, 1);
-  assert.equal(c.plotlines[0].title, 'Спор у колодца');
-  assert.equal(c.processes.length, 1);
-  assert.equal(c.processes[0].ownerDomainId, 'a');
-  assert.deepEqual(c.plotlines[0].concernsDomainIds, ['a']);
+  assert.equal(c.plotRefs.length, 1);
+  assert.equal(c.plotRefs[0].plotId, story.id);
+  assert.equal(c.plotRefs[0].hostDomainId, 'a');
+  assert.equal(story.confluxId, c.id);
+  assert.deepEqual(story.concernsDomainIds, ['a']);
 });
 
 test('дело на чужой не-shared нити делает её shared', () => {
@@ -149,24 +149,23 @@ test('главная нить стыка задевает оба города', 
   assert.deepEqual(main.concernsDomainIds.sort(), ['a', 'b']);
 });
 
-test('расстыковка: shared копируется обоим, чужие дела отрезаны', async () => {
+test('расстыковка: общая нить остаётся у хозяина, второй город уходит из concerns', async () => {
   const shared = createPlotline({ title: 'Общая драка', kind: 'story' });
   shared.concernsDomainIds = ['a', 'b'];
+  shared.hostDomainId = 'a';
   shared.shared = true;
-  shared.relatedProcessIds = ['act_a', 'act_b'];
-  const a = domain('a');
+  shared.confluxId = 'conflux_1';
+  const a = domain('a', { plotlines: [shared] });
   const b = domain('b');
   const c = conflux();
-  c.plotlines = [shared];
-  c.processes = [
-    { id: 'act_a', ownerDomainId: 'a', status: 'active', confluxId: c.id },
-    { id: 'act_b', ownerDomainId: 'b', status: 'active', confluxId: c.id },
-  ];
-  await returnBoardsOnUndock(c, new Map([['a', a], ['b', b]]));
+  await returnBoardsOnUndock(c, new Map([['a', a], ['b', b]]), {
+    decideContinuation: async () => true,
+  });
   assert.equal(a.plotlines.filter((p) => p.title === 'Общая драка').length, 1);
-  assert.equal(b.plotlines.filter((p) => p.title === 'Общая драка').length, 1);
-  assert.equal(a.state.pendingActions.map((p) => p.id).join(), 'act_a');
-  assert.equal(b.state.pendingActions.map((p) => p.id).join(), 'act_b');
+  assert.equal(b.plotlines.filter((p) => p.title === 'Общая драка').length, 0);
+  assert.deepEqual(a.plotlines[0].concernsDomainIds, ['a']);
+  assert.equal(a.plotlines[0].shared, false);
+  assert.equal(a.plotlines[0].confluxId, null);
 });
 
 test('сообщение о старте конфлюкса — отдельный шаблон, не письмо месяца', () => {
@@ -204,7 +203,7 @@ test('до стыковки хроника нити не идёт в чужой 
   );
 });
 
-test('городская история на доске сопряжения остаётся story и держит скрытые посылки', () => {
+test('городская история при регистрации ссылки остаётся story и держит скрытые посылки', () => {
   const plot = createPlotline({
     title: 'Седьмая капля',
     kind: 'story',
@@ -217,19 +216,18 @@ test('городская история на доске сопряжения о�
   const a = domain('a', { plotlines: [plot] });
   const c = conflux({ status: 'approaching' });
   takeDomainBoardIntoConflux(a, c);
-  const live = c.plotlines[0];
-  assert.equal(live, plot);
-  assert.equal(isThreeActPlot(live), false);
-  assert.equal(live.storyType, 'story');
-  assert.equal(live.hiddenPremises.length, 1);
-  normalizePlotlines(c);
-  assert.equal(c.plotlines[0], live);
-  assert.equal(live.storyType, 'story');
-  assert.equal(live.hiddenPremises[0], 'Седьмой удар открывает лишний сток.');
-  assert.equal(live.mootWhen.includes('обряд'), true);
+  assert.equal(a.plotlines[0], plot);
+  assert.equal(c.plotRefs[0].plotId, plot.id);
+  assert.equal(isThreeActPlot(plot), false);
+  assert.equal(plot.storyType, 'story');
+  assert.equal(plot.hiddenPremises.length, 1);
+  normalizePlotlines(a);
+  assert.equal(plot.storyType, 'story');
+  assert.equal(plot.hiddenPremises[0], 'Седьмой удар открывает лишний сток.');
+  assert.equal(plot.mootWhen.includes('обряд'), true);
 });
 
-test('закрытие на гидратированной доске не оставляет открытую копию', () => {
+test('закрытие на наложенном виде снимает оверлей, нить остаётся у хозяина', () => {
   const plot = createPlotline({
     title: 'Седьмая капля',
     kind: 'story',
@@ -237,17 +235,16 @@ test('закрытие на гидратированной доске не ос�
     depth: 1,
     hostDomainId: 'a',
   });
-  const a = domain('a');
+  const a = domain('a', { plotlines: [plot] });
   const c = conflux({ status: 'approaching' });
-  c.plotlines = [plot];
   plot.confluxId = c.id;
   plot.hostDomainId = 'a';
   hydrateDomainFromConflux(a, c, { mode: 'month' });
   assert.equal(a.plotlines[0], plot);
   closePlotline(a, plot.id, { tick: 21, reason: 'успех' });
   dehydrateDomainToConflux(a, c);
-  assert.equal(c.plotlines.some((p) => p.id === plot.id), false);
-  assert.equal(c.closedPlotlines.filter((p) => p.id === plot.id).length, 1);
+  assert.equal(a.closedPlotlines.filter((p) => p.id === plot.id).length, 1);
+  assert.equal(a.plotlines.some((p) => p.id === plot.id), false);
 });
 
 test('речь правителя не отдаёт заголовок нити в кавычках', () => {
@@ -263,26 +260,21 @@ test('речь правителя не отдаёт заголовок нити 
   assert.equal(speech.includes('седьмому удару'), true);
 });
 
-test('перенос забирает resolved дело закрытой нити', () => {
+test('регистрация не забирает resolved дело с домена', () => {
   const closed = createPlotline({ title: 'Мост', kind: 'errand' });
   closed.status = 'closed';
   closed.relatedProcessIds = ['act_done'];
-  const a = domain('a', {
-    processes: [{ id: 'act_done', summary: 'Мост', status: 'resolved', plotlineId: closed.id }],
-  });
+  const proc = { id: 'act_done', summary: 'Мост', status: 'resolved', plotlineId: closed.id };
+  const a = domain('a', { processes: [proc] });
   a.plotlines = [];
   a.closedPlotlines = [closed];
   const c = conflux();
   takeDomainBoardIntoConflux(a, c);
-  assert.equal(a.state.pendingActions.length, 0);
-  assert.equal(c.closedPlotlines.some((p) => p.id === closed.id), true);
-  assert.equal(c.processes.length, 1);
-  assert.equal(c.processes[0].id, 'act_done');
-  assert.equal(c.processes[0].confluxId, c.id);
-  assert.equal(c.processes[0].ownerDomainId, 'a');
+  assert.equal(a.state.pendingActions.length, 1, 'дело остаётся у хозяина');
+  assert.equal(a.closedPlotlines.some((p) => p.id === closed.id), true);
 });
 
-test('dehydrate подбирает сироту, чья нить уже на конфлюксе', () => {
+test('dehydrate не переносит сироту на конфлюкс — дело остаётся на домене', () => {
   const closed = createPlotline({ title: 'Мост', kind: 'errand' });
   closed.status = 'closed';
   closed.relatedProcessIds = ['act_done'];
@@ -292,9 +284,8 @@ test('dehydrate подбирает сироту, чья нить уже на к�
     processes: [{ id: 'act_done', summary: 'Мост', status: 'resolved', plotlineId: closed.id }],
   });
   dehydrateDomainToConflux(a, c);
-  assert.equal(a.state.pendingActions.length, 0);
-  assert.equal(c.processes.some((p) => p.id === 'act_done'), true);
-  assert.equal(c.processes[0].confluxId, c.id);
+  assert.equal(a.state.pendingActions.length, 1);
+  assert.equal((c.processes || []).some((p) => p.id === 'act_done'), false);
 });
 
 test('dehydrate не снимает законченный id: это после битов, в конце тика', () => {

@@ -13,6 +13,10 @@ export const JOB_KINDS = [
   'seed_attempt',
   'seed_appear',
   'conflux_beat',
+  'conflux_dock',
+  'conflux_undock',
+  'conflux_contact',
+  'conflux_transfer',
 ];
 
 export const JOB_STATES = ['pending', 'running', 'done', 'failed'];

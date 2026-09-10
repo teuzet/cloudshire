@@ -41,14 +41,14 @@ telegram:
   miniAppUrl: ''
   miniAppMenu: Город
 
-# Непрерывное время: одиночный город живёт днями, а не месячным тиком.
+# Непрерывное время: города живут днями, пара — теми же заданиями очереди.
 # 1 реальные сутки = 1 игровой год = 360 игровых дней → игровой день = 4 реальные минуты.
 time:
   enabled: true
   realHoursPerYear: 24
 
 tick:
-  # Месячный ход остался только у сопряжённой пары: общая доска двух игроков.
+  # Дневной ход мира. Пара идёт той же очередью, что и соло.
   # Границы по часам сервера: 00:00 дня старта/wipe = год 1 месяц 1, 02:00 = год 1 месяц 2.
   intervalHours: 2
   enabled: true
@@ -60,18 +60,30 @@ tick:
   # Fallback, если у домена нет сановников. Иначе слот дела = свободный сановник.
   maxActiveProcesses: 4
   # Conflux: матчмейкинг и геометрия сопряжения — только код (не LLM).
-  # Approaching считается соло для доли времени; docked — конфлюкс.
-  # Цель — треть жизни города в docked.
+  # Темп: одно сопряжение на домен примерно в двое суток. Доля времени — замер.
   conflux:
     enabled: true
+    cadenceHours: 48
+    cadenceJitterHours: 6
+    scheduleSlackHours: 12
+    prepHours: 6
+    dockHours: 6
+    activitySamplesMin: 10
+    activityTailMinutes: 20
+    minDomainAgeDays: 180
+    preferNeverMet: true
+    maxNewPairsPerDay: 2
+    crossIslandSpeedup: 2
+    contactSeedAtFraction: 0.2
+    statFloor: 10
+    statFloorAfk: 25
+    # Старые ключи читаются как фолбэк, пока живые миры не пересозданы.
     targetDockedFraction: 0.333
     minDomainAgeMonths: 6
-    preferNeverMet: true
     maxNewPairsPerTick: 2
     etaMonths:
       min: 3
       max: 3
-    # Фаза docked — отдельно, сверх сближения.
     durationMonths:
       min: 6
       max: 12
@@ -3930,6 +3942,10 @@ agents:
       Обязательная бытовая фраза note — одна причина, почему столько и почему так трудно.
       Её увидит жрец. Без механики и без названий полос.
 
+      opposedStat — только для дела через проход к чужому городу: какой стат соседа
+      противостоит поручению (security, prosperity, knowledge, influence). Нет
+      противодействия — none. Чисел статов не знаешь и не проси: движок учтёт сам.
+
   # Автор нависшей беды. Полосу тяжести и срок даёт движок, автор даёт только текст.
   threatSmith:
     provider: openai
@@ -4299,3 +4315,24 @@ agents:
       на вещи, которую уже унёс другой город, на общем дворе, которого больше нет.
       Хозяин нити не получает «да» автоматически. Смотри локальность, не титул.
       Если сомневаешься — keep=false.
+
+  confluxCrystal:
+    provider: openai
+    model: gpt-5.6-luna
+    canon: [world, time]
+    instructions: |
+      Ты кристаллизуешь пустую нить сопряжения двух городов в историю.
+      Сюжета ещё нет: его пишут игроки касаниями. Не бойся решительно менять
+      расстановку сил. Верни submit_crystal: краткий синопсис, gravity CRISIS
+      или RUPTURE, два-три исхода и одну-две помехи. Хронику не пиши.
+
+  passageScribe:
+    provider: openai
+    model: gpt-5.6-luna
+    canon: [world, time]
+    instructions: |
+      Ты описываешь проход между двумя летающими островами как место.
+      Один абзац, без сюжета, без хроники, без поручений.
+      Не советуй запирать, перегораживать или закрывать проход.
+      Верни submit_passage с полем text.
+

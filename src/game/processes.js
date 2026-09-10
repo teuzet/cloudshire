@@ -73,6 +73,17 @@ export function normalizeProcess(action, config = null) {
   else action.office = action.office || null;
   action.blessed = Boolean(action.blessed);
   action.intel = Boolean(action.intel);
+  action.secret = Boolean(action.secret);
+  if (action.secretForDomainId) action.secretForDomainId = String(action.secretForDomainId);
+  else action.secretForDomainId = action.secret ? String(action.ownerDomainId || '') || null : null;
+  action.secretRevealed = Boolean(action.secretRevealed);
+  action.crossIsland = Boolean(action.crossIsland);
+  if (action.targetDomainId) action.targetDomainId = String(action.targetDomainId);
+  else action.targetDomainId = action.targetDomainId || null;
+  if (action.abortOutcome) action.abortOutcome = String(action.abortOutcome);
+  if (action.opposedStat) action.opposedStat = String(action.opposedStat);
+  else action.opposedStat = action.opposedStat || null;
+  action.passageGuard = Boolean(action.passageGuard);
   if (action.sourceOrderId) action.sourceOrderId = String(action.sourceOrderId);
   else action.sourceOrderId = null;
   action.slotless = Boolean(action.slotless) || Boolean(action.sourceOrderId);
@@ -134,6 +145,16 @@ export function processOwnedBy(process, domainId) {
   if (!process || !domainId) return false;
   if (process.ownerDomainId) return String(process.ownerDomainId) === String(domainId);
   return true;
+}
+
+/** Секретное дело скрыто от чужого города, пока не разрешилось. */
+export function processVisibleToViewer(process, viewerDomainId) {
+  if (!process) return false;
+  if (!process.secret || process.secretRevealed) return true;
+  if (!viewerDomainId) return processOwnedBy(process, process.ownerDomainId);
+  if (processOwnedBy(process, viewerDomainId)) return true;
+  if (process.secretForDomainId) return String(process.secretForDomainId) === String(viewerDomainId);
+  return false;
 }
 
 /**

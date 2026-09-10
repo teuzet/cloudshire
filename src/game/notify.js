@@ -11,6 +11,7 @@
  */
 
 import { DAYS_PER_MONTH } from './gameClock.js';
+import { hourInTimeZone } from './activity.js';
 
 export const NOTIFY_INTENSITIES = ['всё', 'важное', 'сводка'];
 
@@ -144,13 +145,27 @@ export function applyPriestNotifyChange(domain, { intensity = null, triggers = n
   return domain.state.notify;
 }
 
-function inQuietHours(notify, now = new Date()) {
-  const { fromHour, toHour } = notify?.quiet || {};
+export function inQuietHours(notify, now = new Date()) {
+  const { fromHour, toHour, tz } = notify?.quiet || {};
   if (fromHour == null || toHour == null) return false;
-  const hour = now.getHours();
+  const hour = hourInTimeZone(now, tz);
   if (fromHour === toHour) return false;
   if (fromHour < toHour) return hour >= fromHour && hour < toHour;
   return hour >= fromHour || hour < toHour;
+}
+
+/** Тихие часы ставит игрок, не жрец. */
+export function setQuietHours(domain, { fromHour = null, toHour = null, tz = null } = {}) {
+  const notify = notifySettings(domain);
+  const from = Number(fromHour);
+  const to = Number(toHour);
+  notify.quiet = {
+    fromHour: Number.isInteger(from) && from >= 0 && from < 24 ? from : null,
+    toHour: Number.isInteger(to) && to >= 0 && to < 24 ? to : null,
+    tz: tz ? String(tz).slice(0, 64) : notify.quiet?.tz || null,
+  };
+  domain.state.notify = notify;
+  return notify.quiet;
 }
 
 /**

@@ -1,13 +1,6 @@
 /**
- * Дневной ход одиночного города.
- *
- * Тик был всем сразу: календарём, батчером событий и рейт-лимитером пушей.
- * Здесь остаётся только третья роль — просыпаться и разбирать то, что уже
- * назрело. Что назрело, решает не этот файл, а сроки дел и бед: обработчики
- * живут в `worldLoop`, очередь — в `scheduler`, часы — в `gameClock`.
- *
- * Сопряжённые города пока идут прежним месячным путём (`tick.js`): общая доска
- * двух игроков — отдельная задача, и ломать её заодно смысла нет.
+ * Дневной ход города. Сопряжённая пара идёт тем же движком: задания пары
+ * разбираются до шага доменов, нити остаются у хозяина.
  */
 
 import { normalizeDomain } from './models.js';
@@ -33,7 +26,12 @@ import { scoreChronicleStats, factsForStatJudge } from './statJudge.js';
 import { keepStories } from './storyteller.js';
 import { formatRulerVoiceForPrompt } from './rulerMemory.js';
 import { runOfficerAct, stewardOffCooldown, markStewardRan } from './steward.js';
-import { findActiveConfluxForDomain } from './conflux.js';
+import { maybeMatchmakeConfluxes } from './conflux.js';
+import { drainConfluxJobs } from './confluxJobs.js';
+import { emitConfluxAnnouncements } from './tick.js';
+import { confluxConfig } from './confluxTime.js';
+import { maybeRewriteCityGenesis } from './genesisRewrite.js';
+import { otherDomainId } from './confluxBoard.js';
 import { getLogger } from '../log.js';
 
 /** Какая настройка уведомлений отвечает за это событие. */
@@ -128,6 +126,9 @@ export async function stepDomain({
   day = 0,
   rng = Math.random,
   log: parentLog,
+  conflux = null,
+  partner = null,
+  storage = null,
 } = {}) {
   const log = (parentLog || getLogger()).child({ scope: 'dayLoop', domainId: domain?.id });
   normalizeDomain(domain, config);
@@ -135,7 +136,18 @@ export async function stepDomain({
   startClock(world);
 
   await armDomainSchedule({ runtime, domain, world, day, rng, log });
-  const events = await drainDomainJobs({ config, runtime, domain, world, day, rng, log });
+  const events = await drainDomainJobs({
+    config,
+    runtime,
+    domain,
+    world,
+    day,
+    rng,
+    log,
+    conflux,
+    partner,
+    storage,
+  });
 
   // Сановник ходит сам только в тишину: если события есть, покровителю и так есть что читать.
   let stewardAct = null;
@@ -172,8 +184,29 @@ export async function stepDomain({
     });
   }
 
+  await maybeRewriteCityGenesis({
+    runtime,
+    domain,
+    world,
+    chronicleAdds: facts,
+    config,
+    log,
+  });
+
   domain.state = domain.state || {};
   domain.state.lastDay = day;
+  const armor = confluxConfig(config);
+  if (domain.stats && typeof domain.stats === 'object') {
+    for (const key of Object.keys(domain.stats)) {
+      const n = Number(domain.stats[key]);
+      if (!Number.isFinite(n)) continue;
+      const floor = Number.isFinite(Number(domain.statFloors?.[key]))
+        ? Number(domain.statFloors[key])
+        : armor.statFloor;
+      const cap = Number.isFinite(Number(domain.statCaps?.[key])) ? Number(domain.statCaps[key]) : 100;
+      domain.stats[key] = Math.max(floor, Math.min(cap, n));
+    }
+  }
   log.info('dayLoop.step', {
     day,
     events: events.length,
@@ -214,23 +247,72 @@ export async function runDayLoop({
   const day = worldDay(world, { now, config });
   world.dayIndex = day;
 
+  const matchmake = await maybeMatchmakeConfluxes({ config, storage, world, rng, now });
+  if (matchmake.notes?.length) {
+    await emitConfluxAnnouncements({ app, storage, items: matchmake.notes });
+  }
+
+  const pairEvents = await drainConfluxJobs({
+    config,
+    runtime,
+    storage,
+    world,
+    day,
+    rng,
+    log,
+  });
+  for (const event of pairEvents || []) {
+    for (const domain of event.domains || []) {
+      const bundled = (event.facts || []).find((f) => f.domainId === domain.id);
+      const fact = bundled?.fact || null;
+      if (!fact && !event.occasion) continue;
+      await deliverEvent({
+        config,
+        runtime,
+        app,
+        domain,
+        world,
+        event: {
+          occasion: event.occasion,
+          fact,
+          plotId: event.plotId || null,
+        },
+        day,
+        log,
+      });
+      await storage.saveDomain(domain);
+    }
+  }
+
   const domains = await storage.listDomains();
+  const confluxes = await storage.listConfluxes({ status: ['approaching', 'docked'] }).catch(() => []);
   const results = [];
   const jobs = queue || new DomainQueue();
 
   for (const stale of domains) {
     if (stale.status && stale.status !== 'playing') continue;
-    // Сопряжённый город живёт месячной доской: его ведёт tick.js.
-    const conflux = await findActiveConfluxForDomain(storage, stale.id);
-    if (conflux) {
-      results.push({ domainId: stale.id, skipped: 'conflux', confluxId: conflux.id });
-      continue;
-    }
 
     const step = await jobs.run(stale.id, async () => {
       const domain = await storage.getDomain(stale.id);
       if (!domain) return { domainId: stale.id, skipped: 'gone' };
-      const out = await stepDomain({ config, runtime, domain, world, day, rng, log });
+      const conflux = (confluxes || []).find((c) => (c.domainIds || []).includes(domain.id)) || null;
+      let partner = null;
+      if (conflux) {
+        const partnerId = otherDomainId(conflux, domain.id);
+        if (partnerId) partner = await storage.getDomain(partnerId);
+      }
+      const out = await stepDomain({
+        config,
+        runtime,
+        domain,
+        world,
+        day,
+        rng,
+        log,
+        conflux,
+        partner,
+        storage,
+      });
       await storage.saveDomain(domain);
 
       const said = [];
@@ -246,6 +328,23 @@ export async function runDayLoop({
           log,
         });
         said.push(res);
+        if (event.secretVictim?.fact && partner) {
+          await deliverEvent({
+            config,
+            runtime,
+            app,
+            domain: partner,
+            world,
+            event: {
+              occasion: 'дело',
+              fact: event.secretVictim.fact,
+              plotId: event.plotId || null,
+            },
+            day,
+            log,
+          });
+          await storage.saveDomain(partner);
+        }
       }
       await storage.saveDomain(domain);
       return {

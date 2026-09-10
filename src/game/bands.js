@@ -75,6 +75,12 @@ export function difficultyBandIndex(band) {
   return DIFFICULTY_BANDS.indexOf(normalizeDifficultyBand(band));
 }
 
+export function shiftDifficultyBand(band, steps) {
+  const i = difficultyBandIndex(band);
+  const next = Math.max(0, Math.min(DIFFICULTY_BANDS.length - 1, i + Math.round(Number(steps) || 0)));
+  return DIFFICULTY_BANDS[next];
+}
+
 export function requiredStat(band) {
   return DIFFICULTY_SPEC[normalizeDifficultyBand(band)].required;
 }

@@ -154,10 +154,24 @@ export function confluxDirective(domain) {
 
 export function setConfluxDirective(domain, { text, office = null } = {}) {
   if (!domain.state) domain.state = {};
-  const body = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 400);
+  const body = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 4000);
   if (!body) return { ok: false, error: 'empty' };
   domain.state.confluxDirective = { text: body, office: office ? String(office) : null };
+  domain.proxyText = body;
   return { ok: true, directive: domain.state.confluxDirective };
+}
+
+export function proxyText(domain) {
+  return String(domain?.proxyText || domain?.state?.confluxDirective?.text || '').trim();
+}
+
+export function setProxyText(domain, text) {
+  const body = String(text || '').replace(/\s+/g, ' ').trim();
+  domain.proxyText = body;
+  if (!domain.state) domain.state = {};
+  if (body) domain.state.confluxDirective = { ...(domain.state.confluxDirective || {}), text: body };
+  else delete domain.state.confluxDirective;
+  return { ok: true, text: body };
 }
 
 export function clearConfluxDirective(domain) {

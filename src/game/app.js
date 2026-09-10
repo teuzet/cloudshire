@@ -18,11 +18,15 @@ import {
   formatRulerAttitudes,
   normalizeRulerAttitudes,
 } from './stats.js';
-import { assertsIslandsParted, monthsUntilDock, findActiveConfluxForDomain, formatContactForPrompt } from './conflux.js';
+import { noteRulerActivity } from './activity.js';
+import { confluxConfig, daysUntilDock, remainingDockDays } from './confluxTime.js';
+import { assertsIslandsParted, findActiveConfluxForDomain, formatContactForPrompt } from './conflux.js';
 import {
   hydrateDomainFromConflux,
   dehydrateDomainToConflux,
+  hydrateWithPartner,
 } from './confluxBoard.js';
+import { formatPassageForPrompt } from './passage.js';
 import {
   emptyOnboardingDraft,
   normalizeOnboardingDraft,
@@ -802,16 +806,16 @@ export class GameApp {
     }
 
     if (conflux.status === 'approaching') {
-      const left = monthsUntilDock(conflux, world);
+      const left = daysUntilDock(conflux, world?.dayIndex ?? 0);
       return [
         'КАНОН СОПРЯЖЕНИЯ (реальность, не слух — говори об этом открыто и по имени):',
         `К острову приближается чужой летающий остров — город ${partnerName}.`,
-        `До сопряжения примерно ${left} мес. Событие неизбежно, это крупнейшая новость города.`,
+        `До сопряжения примерно ${left} игровых дней. Событие неизбежно, это крупнейшая новость города.`,
         conflux.rematch
           ? 'Это ПОВТОРНОЕ сопряжение: острова уже сходились раньше, город это помнит.'
           : 'Такого сближения город прежде не знал (с этим соседом).',
         'Если покровитель спрашивает про чужой остров — отвечай прямо: имя, срок, что это значит.',
-        'Факты внутренней жизни соседа — только через consult_informant, не через лормастера.',
+        'С того берега в подготовке ничего не видно: только что остров подходит, какой он и когда сойдётся.',
         'ЗАПРЕЩЕНО говорить «не готов называть имя», «лишь слухи», «не знаю о чужих островах».',
         'Этот канон СИЛЬНЕЕ ответов лормастера: если он скажет «не подтверждено» — верь канону.',
       ]
@@ -820,14 +824,16 @@ export class GameApp {
     }
 
     const contact = conflux.contact ? formatContactForPrompt(conflux.contact) : '';
+    const passage = formatPassageForPrompt(conflux);
+    const left = remainingDockDays(conflux, world?.dayIndex ?? 0);
     return [
       'КАНОН СОПРЯЖЕНИЯ (идёт СЕЙЧАС — говори открыто и по имени):',
       `Остров в сопряжении с чужим островом — городом ${partnerName}.`,
       contact,
-      `Сопряжение длится ${conflux.monthsDocked || 0} мес. из ожидаемых ${conflux.durationMonths || '?'}.`,
+      passage,
+      `До расхождения островов примерно ${left} игровых дней.`,
       conflux.rematch ? 'Это повторное сопряжение с этим соседом.' : '',
       'ЗАПРЕЩЕНО отрицать существование соседа или отказываться называть его имя.',
-      'Факты внутренней жизни соседа — только через consult_informant.',
     ]
       .filter(Boolean)
       .join('\n');
@@ -849,7 +855,18 @@ export class GameApp {
     if (conflux) {
       const partnerId = (conflux.domainIds || []).find((id) => id !== domain.id);
       if (partnerId) partner = await this.storage.getDomain(partnerId);
-      hydrateDomainFromConflux(domain, conflux, { mode: 'ruler' });
+      hydrateDomainFromConflux(domain, conflux, { mode: 'ruler', partner });
+      noteRulerActivity(domain, {
+        now: Date.now(),
+        docked: conflux.status === 'docked',
+        tailMinutes: confluxConfig(this.config).activityTailMinutes,
+      });
+    } else {
+      noteRulerActivity(domain, {
+        now: Date.now(),
+        docked: false,
+        tailMinutes: confluxConfig(this.config).activityTailMinutes,
+      });
     }
     const character = domain.characters[0];
     normalizeRulerAttitudes(character);
@@ -1522,7 +1539,7 @@ export class GameApp {
     const domain = await this.storage.getDomain(domainId);
     if (!domain) return null;
     const conflux = await findActiveConfluxForDomain(this.storage, domain.id);
-    if (conflux) hydrateDomainFromConflux(domain, conflux, { mode: 'ruler' });
+    if (conflux) await hydrateWithPartner(this.storage, domain, conflux, { mode: 'ruler' });
     return domain;
   }
 
@@ -1531,7 +1548,7 @@ export class GameApp {
     const domain = await this.getOwnDomain(userId);
     if (!domain) return { domain: null, conflux: null };
     const conflux = await findActiveConfluxForDomain(this.storage, domain.id);
-    if (conflux) hydrateDomainFromConflux(domain, conflux, { mode });
+    if (conflux) await hydrateWithPartner(this.storage, domain, conflux, { mode });
     return { domain, conflux };
   }
 
@@ -1618,7 +1635,7 @@ export class GameApp {
     if (!domain) return { ok: false, error: 'no_domain', message: 'города ещё нет' };
     normalizeDomain(domain);
     const conflux = await findActiveConfluxForDomain(this.storage, domain.id);
-    if (conflux) hydrateDomainFromConflux(domain, conflux, { mode: 'ruler' });
+    if (conflux) await hydrateWithPartner(this.storage, domain, conflux, { mode: 'ruler' });
 
     const process = (domain.state?.pendingActions || []).find((p) => String(p.id) === id);
     if (!process) return { ok: false, error: 'not_found', message: 'такого дела нет' };

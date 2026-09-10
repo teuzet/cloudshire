@@ -289,9 +289,12 @@ export async function runOfficerAct({
     log,
     scene: 'officer_act',
     domainId: domain.id,
-    extraSystem: [
+          extraSystem: [
       `Ты действуешь от лица сановника: ${officer.title} ${officer.name}. Покровитель молчит. Жрец не правит сам.`,
       officeStrategy(officer, config) ? `Как ты действуешь: ${officeStrategy(officer, config)}` : '',
+      String(domain.proxyText || domain.state?.confluxDirective?.text || '').trim()
+        ? `Доверенность правителя — как подходить к делам: ${String(domain.proxyText || domain.state.confluxDirective.text).trim()}`
+        : '',
     ]
       .filter(Boolean)
       .join(' '),

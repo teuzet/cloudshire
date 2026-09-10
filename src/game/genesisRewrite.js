@@ -9,11 +9,29 @@ import {
   formatCityForAgents,
   parseCityBrief,
   formatCityBrief,
+  formatCityModifiersForPrompt,
+  normalizeCityModifiers,
 } from './cityContext.js';
 import { isStakedStory, parseFreeformGravity } from './plotlines.js';
 
 const BIG_GRAVITY = new Set(['CRISIS', 'RUPTURE']);
 const FIND_MIN = 16;
+const COMPACT_COUNT = 4;
+const COMPACT_CHARS = 800;
+
+function modifierLoad(domain) {
+  normalizeCityModifiers(domain);
+  const list = domain?.modifiers || [];
+  const chars = list.reduce((n, m) => n + String(m?.text || '').length, 0);
+  return { count: list.length, chars, list };
+}
+
+export function modifiersNeedCompact(domain, config = null) {
+  const { count, chars } = modifierLoad(domain);
+  const minCount = Number(config?.tick?.genesisRewrite?.compactAfterModifiers) || COMPACT_COUNT;
+  const minChars = Number(config?.tick?.genesisRewrite?.compactAfterChars) || COMPACT_CHARS;
+  return count >= minCount || chars >= minChars;
+}
 
 export function monthClosedBigStories(domain, tick) {
   const t = Number(tick);
@@ -29,7 +47,8 @@ export function monthCriticalChronicles(chronicleAdds) {
   return (chronicleAdds || []).filter((f) => String(f?.importance || '').toLowerCase() === 'critical');
 }
 
-export function shouldConsiderGenesisRewrite({ domain, tick, chronicleAdds } = {}) {
+export function shouldConsiderGenesisRewrite({ domain, tick, chronicleAdds, config } = {}) {
+  if (modifiersNeedCompact(domain, config)) return true;
   if (monthCriticalChronicles(chronicleAdds).length) return true;
   return monthClosedBigStories(domain, tick).length > 0;
 }
@@ -65,16 +84,19 @@ export async function maybeRewriteCityGenesis({
   domain,
   world,
   chronicleAdds = [],
+  config = null,
   log: parentLog,
 } = {}) {
   if (!domain) return null;
   const tick = world?.tickIndex;
-  if (!shouldConsiderGenesisRewrite({ domain, tick, chronicleAdds })) return null;
+  const compacting = modifiersNeedCompact(domain, config);
+  if (!shouldConsiderGenesisRewrite({ domain, tick, chronicleAdds, config })) return null;
 
   const log = (parentLog || getLogger()).child({ scope: 'genesis.rewrite', domainId: domain.id });
   const critical = monthCriticalChronicles(chronicleAdds);
   const closed = monthClosedBigStories(domain, tick);
   const sinceLabel = world?.gameDate?.label || null;
+  const mods = formatCityModifiersForPrompt(domain);
 
   if (!runtime) return null;
 
@@ -149,6 +171,10 @@ export async function maybeRewriteCityGenesis({
                 .map((p) => `- «${p.title}» gravity=${p.gravity} исход=${p.ending || '—'}`)
                 .join('\n')}`
             : null,
+          mods
+            ? `Дописки к городу — сверни их в бриф, если они перманентны:\n${mods}`
+            : null,
+          compacting ? 'Дописок накопилось достаточно: это повод свернуть их в бриф.' : null,
           'ТЕКУЩИЙ БРИФ — правится один кусок, не весь текст:',
           current || '(бриф пуст)',
           'Править, только если в город вошло перманентное значимое глобальное изменение: институты, рельеф, хозяйство, власть, постоянный уклад.',
@@ -170,9 +196,13 @@ export async function maybeRewriteCityGenesis({
   }
   const prev = domain.cityBrief;
   domain.cityBrief = draft.edit.brief;
+  if (compacting || (domain.modifiers || []).length) {
+    domain.modifiers = [];
+  }
   log.info('genesis.rewritten', {
     prevChars: String(prev || '').length,
     nextChars: draft.edit.brief.length,
+    compacted: compacting,
   });
-  return { brief: draft.edit.brief };
+  return { brief: draft.edit.brief, compacted: compacting };
 }

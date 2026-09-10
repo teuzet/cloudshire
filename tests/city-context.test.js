@@ -10,7 +10,7 @@ import {
   CANONICAL_UNKNOWNS_HEADING,
 } from '../src/game/cityContext.js';
 
-test('агентам только бриф; старые дописки в промпт не идут', () => {
+test('агентам бриф и дописки в хвосте', () => {
   const domain = {
     cityBrief: 'Город стоит у цистерн и держит ночной дозор.',
     description: 'Длинный генезис, который агентам тика не нужен.',
@@ -22,7 +22,9 @@ test('агентам только бриф; старые дописки в пр�
     sinceTick: 4,
     sinceLabel: 'Год 1, месяц 4',
   });
-  assert.equal(formatCityForAgents(domain), 'Город стоит у цистерн и держит ночной дозор.');
+  const withMods = formatCityForAgents(domain);
+  assert.match(withMods, /Город стоит у цистерн и держит ночной дозор/);
+  assert.match(withMods, /Нижний ярус/);
   const leftover = formatCityModifiersForPrompt(domain);
   assert.match(leftover, /Нижний ярус/);
 });
@@ -36,7 +38,9 @@ test('без брифа — запасной description; старый поря�
   normalizeCityModifiers(domain);
   assert.equal(domain.modifiers.length, 1);
   assert.equal(domain.modifiers[0].text, 'Налоги вдвое');
-  assert.equal(formatCityForAgents(domain), 'Старое описание.');
+  const forAgents = formatCityForAgents(domain);
+  assert.match(forAgents, /Старое описание/);
+  assert.match(forAgents, /Налоги вдвое/);
   assert.match(formatCityModifiersForPrompt(domain), /Налоги вдвое/);
 });
 
