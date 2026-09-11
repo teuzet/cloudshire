@@ -470,7 +470,12 @@ function plotCard(p) {
         )}</span></li>`,
     )
     .join('');
-  const known = (p.revealedPremises || []).map((t) => `<li>${esc(t)}</li>`).join('');
+  const known = [
+    p.revealedAnswer ? `<li><b>разгадано:</b> ${esc(p.revealedAnswer)}</li>` : '',
+    ...(p.revealedPremises || []).map((t) => `<li>${esc(t)}</li>`),
+  ]
+    .filter(Boolean)
+    .join('');
   return (
     `<article class="ins-card"><h4>${esc(p.title || p.id)}</h4>` +
     (meta ? `<div class="muted small">${esc(meta)}</div>` : '') +

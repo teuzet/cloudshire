@@ -1,7 +1,6 @@
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { clipPlotText, PLOT_TITLE_MAX, PLOT_SUMMARY_MAX } from './plotlines.js';
-import { normalizeHiddenPremises } from './suspenseGraph.js';
 import {
   freeformConfig,
   cityStateForPrompt,
@@ -18,7 +17,9 @@ export function normalizeSeedVariant(raw, cfg) {
   const synopsis = clipPlotText(raw?.synopsis, PLOT_SUMMARY_MAX);
   const entry = clipPlotText(raw?.entry, cfg.chronicleMaxChars);
   const closeWhen = normalizeCloseWhenList(raw?.closeWhen);
-  const hiddenPremises = normalizeHiddenPremises(raw?.hiddenPremises, 1);
+  // У посева игрока тайна если и есть, то одна и это сразу разгадка:
+  // подступы к ней городу ещё не попадались.
+  const hiddenAnswer = clipPlotText(raw?.hiddenAnswer, PLOT_SUMMARY_MAX);
   const whyMoves = clipPlotText(raw?.whyMoves || raw?.motion, PLOT_SUMMARY_MAX);
   const cause = clipPlotText(raw?.cause, PLOT_SUMMARY_MAX);
   if (!title || !synopsis || closeWhen.length < 1) return null;
@@ -29,7 +30,8 @@ export function normalizeSeedVariant(raw, cfg) {
     closeWhen,
     whyMoves,
     cause,
-    hiddenPremises,
+    hiddenAnswer,
+    hiddenPremises: [],
   };
 }
 
@@ -44,7 +46,7 @@ export function seedCardFromBlank(blank, cfg) {
       closeWhen: blank.closeWhen?.length ? blank.closeWhen : ['Ситуация исчерпала себя', 'Принять произошедшее как новый порядок'],
       whyMoves: blank.whyMoves || blank.dynamics || '',
       cause: blank.cause || '',
-      hiddenPremises: blank.hiddenPremises,
+      hiddenAnswer: blank.hiddenAnswer || '',
     },
     cfg,
   );
@@ -86,11 +88,11 @@ async function constructSeed({ runtime, domain, world, seedText, blank, repair =
               description:
                 'Одно предложение: почему история сама развивается, если ей никто не занимается. Реальный процесс, не «напряжение растёт».',
             },
-            hiddenPremises: {
-              type: 'array',
-              items: { type: 'string' },
+            hiddenAnswer: {
+              type: 'string',
               description:
-                'Пустой массив, если в полях архитектора нет загадки. Не выдумывай скрытые мотивы и закулисные факты. Максимум один пункт.',
+                'Разгадка одной строкой, если в полях архитектора есть загадка. Пусто, если загадки нет. ' +
+                'Не выдумывай скрытые мотивы и закулисные факты.',
             },
           },
         },
@@ -139,7 +141,7 @@ async function constructSeed({ runtime, domain, world, seedText, blank, repair =
           'cause — первопричина: если все спорщики разойдутся по домам, она останется на месте. Разойдётся с ними — значит это спор, а не первопричина.',
           'Хотя бы один closeWhen — исход на масштабе последствий. Не ужимай посадку до двора затравки.',
           'Gravity относится к последствиям. Синопсис не обязан уже показывать разрыв.',
-          'hiddenPremises — [] если в полях нет загадки. Не додумывай закулисье. Если тайна уже есть — один пункт, не в хронике.',
+          'hiddenAnswer — пусто, если в полях нет загадки. Не додумывай закулисье. Если тайна уже есть — разгадка одной строкой, не в хронике.',
           'Если по А судят о Б — сохрани почему; не выкидывай шарнир.',
           'Людей и товар с другого острова сейчас не бывает: посади на жителей этого острова.',
           'Urgency не ставь. entry — только если город ответил в этом же месяце; иначе пусто.',

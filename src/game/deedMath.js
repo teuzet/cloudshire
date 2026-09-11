@@ -104,14 +104,19 @@ export function repaceDeed(
 /**
  * Единицы работы. Срок задаёт потолок строки, сложность — крутизну внутри него:
  * быстрое дело не может сделать много, как бы трудно оно ни было.
+ *
+ * Кривая по сроку намеренно плоская: от короткого дела до многолетнего втрое,
+ * а не вшестеро. Платит игрок не игровым временем, а своим вниманием — он
+ * сидит и играет прямо сейчас, и десять восьмидневных вылазок ему стоят
+ * дороже одной годовой стройки, сколько бы месяцев ни прошло на доске.
  */
 export const WORK_UNITS = {
-  INSTANT: { TRIVIAL: 0.05, PLAIN: 0.1, HARD: 0.3, SEVERE: 0.5, EXTREME: 0.6 },
-  DAYS: { TRIVIAL: 0.1, PLAIN: 0.2, HARD: 0.5, SEVERE: 0.8, EXTREME: 0.8 },
-  WEEKS: { TRIVIAL: 0.2, PLAIN: 0.4, HARD: 0.8, SEVERE: 1.3, EXTREME: 1.4 },
-  SEASON: { TRIVIAL: 0.3, PLAIN: 0.6, HARD: 1.1, SEVERE: 1.7, EXTREME: 2.0 },
-  YEAR: { TRIVIAL: 0.45, PLAIN: 0.9, HARD: 1.5, SEVERE: 2.2, EXTREME: 3.0 },
-  YEARS: { TRIVIAL: 0.6, PLAIN: 1.2, HARD: 2.0, SEVERE: 3.0, EXTREME: 4.0 },
+  INSTANT: { TRIVIAL: 0.1, PLAIN: 0.25, HARD: 0.5, SEVERE: 0.7, EXTREME: 0.8 },
+  DAYS: { TRIVIAL: 0.25, PLAIN: 0.5, HARD: 0.9, SEVERE: 1.2, EXTREME: 1.3 },
+  WEEKS: { TRIVIAL: 0.35, PLAIN: 0.7, HARD: 1.2, SEVERE: 1.7, EXTREME: 1.9 },
+  SEASON: { TRIVIAL: 0.45, PLAIN: 0.9, HARD: 1.5, SEVERE: 2.1, EXTREME: 2.4 },
+  YEAR: { TRIVIAL: 0.6, PLAIN: 1.2, HARD: 1.9, SEVERE: 2.6, EXTREME: 3.2 },
+  YEARS: { TRIVIAL: 0.8, PLAIN: 1.5, HARD: 2.4, SEVERE: 3.3, EXTREME: 4.0 },
 };
 
 /** Одно и то же дело делает больше для мелкой беды, чем для разрыва. */

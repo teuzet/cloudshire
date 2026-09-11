@@ -70,6 +70,7 @@ function inspectProcess(process, day) {
 function plotSecrets(plot) {
   if (!plot || typeof plot !== 'object') return {};
   return {
+    hiddenAnswer: plot.hiddenAnswer || '',
     hiddenPremises: Array.isArray(plot.hiddenPremises) ? plot.hiddenPremises : [],
     discoveryLadder: Array.isArray(plot.discoveryLadder) ? plot.discoveryLadder : [],
     truth: plot.truth || null,

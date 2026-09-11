@@ -30,7 +30,7 @@ import { gameDateFromDay } from './gameClock.js';
 import { formatCityForAgents } from './cityContext.js';
 import { formatOfficersCastHint } from './officers.js';
 import { normalizeBeatDynamics } from './freeformDynamics.js';
-import { revealedPremises } from './premises.js';
+import { hiddenPremises, revealedPremises, hiddenAnswer, revealedAnswer } from './premises.js';
 
 export const FREEFORM_FINISH = ['fail', 'ok', 'crit'];
 
@@ -501,6 +501,7 @@ export function createFreeformPlot({ domain, world, variant, config, seedChronic
     kind: 'story',
     storyType: 'story',
     hiddenPremises: variant.hiddenPremises,
+    hiddenAnswer: variant.hiddenAnswer,
     urgency,
     gravity,
     depth: Math.max(0, Math.round(Number(variant.depth) || 0)),
@@ -564,6 +565,7 @@ export function cityStateForPrompt(domain, world) {
 export function plotCardForPrompt(plot, { revealHidden = true } = {}) {
   if (!plot) return '';
   const known = revealedPremises(plot);
+  const solved = revealedAnswer(plot);
   const lines = [
     `История «${plot.title}».`,
     `Синопсис: ${plot.synopsis || '—'}`,
@@ -573,35 +575,46 @@ export function plotCardForPrompt(plot, { revealHidden = true } = {}) {
       ? `whyMoves: ${plot.whyMoves}`
       : 'whyMoves: не задан.',
     // Раскрытое городом — уже не тайна, а установленный факт: об этом можно
-    // говорить и писать в отличие от hiddenPremises ниже.
+    // говорить и писать в отличие от скрытого слоя ниже.
+    solved ? `Город разгадал: ${solved}` : '',
     known.length ? `Город это уже выяснил:\n${known.map((h) => `- ${h}`).join('\n')}` : '',
     formatFreeformProgress(plot),
     `gravity: ${plot.gravity || '—'}`,
   ];
   if (revealHidden) {
-    const hidden = plot.hiddenPremises || [];
-    lines.push(
-      hidden.length
-        ? `hiddenPremises (только тебе, в хронику не писать):\n${hidden.map((h) => `- ${h}`).join('\n')}`
-        : 'hiddenPremises: нет. Тайны может не быть.',
-    );
+    const layer = hiddenLayerForPrompt(plot);
+    lines.push(layer || 'Скрытого слоя нет. Тайны может не быть.');
   }
   return lines.filter(Boolean).join('\n');
 }
 
+/** Ещё не раскрытое: разгадка и подступы к ней. Ни то, ни другое в хронику. */
+function hiddenLayerForPrompt(plot) {
+  const answer = hiddenAnswer(plot);
+  const hidden = hiddenPremises(plot);
+  const rows = [
+    answer ? `- разгадка: ${answer}` : '',
+    ...hidden.map((h) => `- подступ: ${h}`),
+  ].filter(Boolean);
+  if (!rows.length) return '';
+  return `Скрыто от города (только тебе, в хронику не писать):\n${rows.join('\n')}`;
+}
+
 export function formatStoryForBeatArchitect(domain, plot) {
   if (!plot) return '';
-  const hidden = plot.hiddenPremises || [];
   const known = revealedPremises(plot);
+  const solved = revealedAnswer(plot);
   return [
     plot.title ? `История «${plot.title}».` : 'История.',
     plot.synopsis || '',
     plot.cause ? `Первопричина: ${plot.cause}` : '',
     plotChronicleForPrompt(domain, plot),
+    solved ? `Город разгадал: ${solved}` : '',
     known.length ? `Город это уже установил:\n${known.map((h) => `- ${h}`).join('\n')}` : '',
-    hidden.length
-      ? `На самом деле (в текст не пиши):\n${hidden.map((h) => `- ${h}`).join('\n')}`
-      : '',
+    hiddenLayerForPrompt(plot).replace(
+      'Скрыто от города (только тебе, в хронику не писать):',
+      'На самом деле (в текст не пиши):',
+    ),
   ]
     .filter(Boolean)
     .join('\n\n');

@@ -1,6 +1,6 @@
 import { isStakedStory, plotsForProcess } from './plotlines.js';
 import { liveThreats } from './threats.js';
-import { hiddenPremises, premiseAtIndex } from './premises.js';
+import { hiddenPremises, hiddenAnswer, premiseAtIndex } from './premises.js';
 import { getLogger } from '../log.js';
 
 export const PLOT_ENGAGEMENTS = ['DIRECT', 'RELEVANT', 'DANGEROUS', 'UNRELATED'];
@@ -26,7 +26,7 @@ export function engagementAttends(engagement) {
 export function applyEngagement(
   process,
   engagement,
-  { endingId = '', threatId = '', premiseText = '' } = {},
+  { endingId = '', threatId = '', premiseText = '', reachesAnswer = false } = {},
 ) {
   const value = PLOT_ENGAGEMENTS.includes(engagement) ? engagement : 'UNRELATED';
   if (process) {
@@ -37,6 +37,9 @@ export function applyEngagement(
     // Что узнает город, если дело выйдет. Пусто у большинства дел: DIRECT решает
     // задачу и не расследуя её.
     process.premiseText = value === 'DIRECT' ? String(premiseText || '') : '';
+    // Целится ли дело в саму разгадку. Дойдёт ли — решает не судья: сердцевина
+    // может быть ещё закрыта, и тогда дело принесёт подступ.
+    process.reachesAnswer = value === 'DIRECT' && Boolean(reachesAnswer);
   }
   return value;
 }
@@ -56,7 +59,7 @@ function threatsBrief(plot) {
 }
 
 /**
- * Неизвестное городу — нумерованным списком, чтобы судья мог указать на пункт.
+ * Подступы — нумерованным списком, чтобы судья мог указать на пункт.
  * Судья прозу не пишет, поэтому утечки тут нет.
  */
 function premisesBrief(plot) {
@@ -78,7 +81,13 @@ function endingsBrief(plot) {
 export async function judgeProcessAlignment({ runtime, domain, process, plot, log: parentLog }) {
   if (!process || !isStakedStory(plot)) return null;
   const log = (parentLog || getLogger()).child({ scope: 'plot.align', plotId: plot.id });
-  const draft = { engagement: null, endingId: '', threatId: '', premiseText: '' };
+  const draft = {
+    engagement: null,
+    endingId: '',
+    threatId: '',
+    premiseText: '',
+    reachesAnswer: false,
+  };
 
   try {
     await runtime.run({
@@ -106,11 +115,17 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
                 type: 'string',
                 description: 'id беды, если relation=RELEVANT (снимает) или DANGEROUS (вызывает).',
               },
-              revealsPremise: {
+              uncoversPremise: {
                 type: 'integer',
                 description:
-                  'Номер пункта из «Город ещё не знает», который успех дела выяснит. ' +
-                  'Только для relation=DIRECT и только если дело действительно это выясняет. Иначе не указывай.',
+                  'Номер подступа, который вскроет успех дела. Только для relation=DIRECT ' +
+                  'и только если дело действительно его вскрывает. Иначе не указывай.',
+              },
+              reachesAnswer: {
+                type: 'boolean',
+                description:
+                  'true, если дело целится в саму разгадку, а не в подступ к ней. ' +
+                  'Только для relation=DIRECT.',
               },
             },
           },
@@ -119,7 +134,8 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
             draft.engagement = PLOT_ENGAGEMENTS.includes(rel) ? rel : 'UNRELATED';
             draft.endingId = String(args?.endingId || '').trim();
             draft.threatId = String(args?.threatId || '').trim();
-            draft.premiseText = premiseAtIndex(plot, args?.revealsPremise) || '';
+            draft.premiseText = premiseAtIndex(plot, args?.uncoversPremise) || '';
+            draft.reachesAnswer = Boolean(args?.reachesAnswer);
             return { ok: true };
           },
         },
@@ -139,9 +155,10 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
             endingsBrief(plot) ? `Концовки карточки:\n${endingsBrief(plot)}` : '',
             plot.mootWhen ? `История теряет смысл, когда: ${plot.mootWhen}` : '',
             threatsBrief(plot) ? `Нависшие беды:\n${threatsBrief(plot)}` : 'Нависших бед в карточке нет.',
+            hiddenAnswer(plot) ? `Разгадка, которой город не знает: ${hiddenAnswer(plot)}` : '',
             premisesBrief(plot)
-              ? `Город ещё не знает (нумерация для revealsPremise):\n${premisesBrief(plot)}`
-              : 'Неизвестного городу в карточке нет.',
+              ? `Подступы к ней, которых город не знает (нумерация для uncoversPremise):\n${premisesBrief(plot)}`
+              : 'Подступов в карточке нет.',
             plot.synopsis ? `Сейчас: ${plot.synopsis}` : '',
             `Дело: ${process.summary || ''}`,
             process.goal ? `Цель дела: ${process.goal}` : '',
@@ -170,12 +187,14 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
     endingId: draft.endingId,
     threatId: draft.threatId,
     premiseText: draft.premiseText,
+    reachesAnswer: draft.reachesAnswer,
   });
   log.info('plot.align', {
     summary: process.summary,
     engagement,
     threatId: process.threatId || null,
-    reveals: process.premiseText || null,
+    uncovers: process.premiseText || null,
+    reachesAnswer: process.reachesAnswer || false,
   });
   return engagement;
 }

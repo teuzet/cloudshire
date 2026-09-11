@@ -163,6 +163,7 @@ function labPlot(plot) {
   const publicPlot = stripPlotSecrets(plot);
   return {
     ...publicPlot,
+    hiddenAnswer: plot.hiddenAnswer || '',
     hiddenPremises: plot.hiddenPremises || [],
     closeWhen: Array.isArray(plot.closeWhen) ? plot.closeWhen : plot.closeWhen ? [plot.closeWhen] : [],
     endings: Array.isArray(plot.endings) ? plot.endings : [],

@@ -425,8 +425,9 @@ export function formatFreeformCardJudgeCase({
     card?.entry ? `entry: ${card.entry}` : null,
     `whyMoves: ${card?.whyMoves || '—'}`,
     close.length ? `closeWhen:\n${close.map((x) => `- ${x}`).join('\n')}` : 'closeWhen: (нет)',
+    card?.hiddenAnswer ? `hiddenAnswer: ${card.hiddenAnswer}` : 'hiddenAnswer: (нет)',
     hidden.length
-      ? `hiddenPremises:\n${hidden.map((h) => `- ${h}`).join('\n')}`
+      ? `hiddenPremises (подступы, каждый сам по себе):\n${hidden.map((h) => `- ${h}`).join('\n')}`
       : 'hiddenPremises: []',
   ]
     .filter((line) => line != null)

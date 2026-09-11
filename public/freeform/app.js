@@ -180,8 +180,19 @@ function renderPlot(plot, align = {}) {
     })
     .join('');
   const closes = !endings && (plot.closeWhen || []).map((x) => `<li>${esc(x)}</li>`).join('');
-  const hidden = (plot.hiddenPremises || []).map((x) => `<li>${esc(x)}</li>`).join('') || '<li class="muted">нет тайны</li>';
-  const known = (plot.revealedPremises || []).map((x) => `<li>${esc(x)}</li>`).join('');
+  const hidden =
+    [
+      plot.hiddenAnswer ? `<li><strong>разгадка:</strong> ${esc(plot.hiddenAnswer)}</li>` : '',
+      ...(plot.hiddenPremises || []).map((x) => `<li>подступ: ${esc(x)}</li>`),
+    ]
+      .filter(Boolean)
+      .join('') || '<li class="muted">нет тайны</li>';
+  const known = [
+    plot.revealedAnswer ? `<li><strong>разгадано:</strong> ${esc(plot.revealedAnswer)}</li>` : '',
+    ...(plot.revealedPremises || []).map((x) => `<li>${esc(x)}</li>`),
+  ]
+    .filter(Boolean)
+    .join('');
   const axes = axesLine(plot);
   const urgency = plot.urgency != null ? `urgency ${esc(plot.urgency)}` : '';
   const countdown = plot.countdown != null ? `автотик через ${esc(plot.countdown)} мес.` : '';
@@ -202,7 +213,7 @@ function renderPlot(plot, align = {}) {
     ${endings ? `<h2>endings</h2><ul>${endings}</ul>` : ''}
     ${closes ? `<h2>closeWhen</h2><ul>${closes}</ul>` : ''}
     ${known ? `<h2>город выяснил</h2><ul>${known}</ul>` : ''}
-    <h2>hiddenPremises (лаборатория)</h2>
+    <h2>скрытый слой (лаборатория)</h2>
     <ul>${hidden}</ul>
   `;
 }

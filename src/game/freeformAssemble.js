@@ -40,6 +40,12 @@ export function hasSeedReveal(list) {
   return keepSeedReveals(list).length > 0;
 }
 
+/** Разгадка — одна строка, и отговоркой она быть не может. */
+export function keepSeedAnswer(raw) {
+  const text = clipPlotText(raw, PLOT_SUMMARY_MAX);
+  return text && !isHollowHiddenPremise(text) ? text : '';
+}
+
 function lastSentence(text) {
   const t = String(text || '').trim();
   if (!t) return '';
@@ -68,13 +74,16 @@ export function fallbackAssembledStory(candidate) {
   const split = splitChronicleHiddenLayer(candidate?.chronicle || candidate?.text || candidate?.hook || '');
   const chronicle = split.chronicle;
   const title = clipPlotText(candidate?.title, PLOT_TITLE_MAX) || clipPlotText(chronicle, PLOT_TITLE_MAX) || 'История';
+  // В блоке «На самом деле:» разгадка идёт первой строкой, остальное — подступы.
+  const layer = keepSeedReveals(split.hiddenPremises);
   return {
     title,
     chronicle,
     synopsis: chronicle,
     whyMoves: lastSentence(chronicle),
     cause: '',
-    hiddenPremises: keepSeedReveals(split.hiddenPremises),
+    hiddenAnswer: keepSeedAnswer(layer[0]),
+    hiddenPremises: layer.slice(1),
   };
 }
 
@@ -86,16 +95,18 @@ export function normalizeAssembledStory(raw, candidate, maxChars = PLOT_SUMMARY_
   const title = clipPlotText(raw?.title, PLOT_TITLE_MAX) || fallback.title;
   const whyMoves = clipPlotText(raw?.whyMoves, PLOT_SUMMARY_MAX) || fallback.whyMoves;
   const cause = clipPlotText(raw?.cause, PLOT_SUMMARY_MAX) || fallback.cause;
+  const answer = keepSeedAnswer(raw?.hiddenAnswer) || fallback.hiddenAnswer;
   const hiddenFromTool = keepSeedReveals(raw?.hiddenPremises);
   const hidden = hiddenFromTool.length
     ? hiddenFromTool
-    : keepSeedReveals(split.hiddenPremises.length ? split.hiddenPremises : fallback.hiddenPremises);
+    : keepSeedReveals(split.hiddenPremises).filter((item) => item !== answer);
   return {
     title: title || 'История',
     chronicle,
     synopsis: chronicle,
     whyMoves,
     cause,
+    hiddenAnswer: answer,
     hiddenPremises: hidden,
   };
 }
@@ -124,7 +135,7 @@ export async function constructFreeformStory({
           type: 'object',
           additionalProperties: false,
           required: requireMystery
-            ? ['title', 'chronicle', 'cause', 'whyMoves', 'hiddenPremises']
+            ? ['title', 'chronicle', 'cause', 'whyMoves', 'hiddenAnswer', 'hiddenPremises']
             : ['title', 'chronicle', 'cause', 'whyMoves'],
           properties: {
             title: { type: 'string', description: 'Короткое имя истории.' },
@@ -144,12 +155,19 @@ export async function constructFreeformStory({
               type: 'string',
               description: 'Одно-два предложения: что ситуация сделает следующим, если город ею не займётся.',
             },
+            hiddenAnswer: {
+              type: 'string',
+              description:
+                'Разгадка одной строкой: что произошло на самом деле, кто действует, почему. ' +
+                'Одна, самая сердцевина. Не отговорка.',
+            },
             hiddenPremises: {
               type: 'array',
               items: { type: 'string' },
-              description: requireMystery
-                ? 'Конкретная разгадка из «На самом деле:»: что произошло, кто действует, почему. Не отговорка.'
-                : 'Истины из блока «На самом деле:». Пустой массив, если скрытого слоя нет.',
+              description:
+                'Подступы к разгадке, каждый сам по себе: улика, человек, который знает, ' +
+                'старая запись, причина, по которой до сих пор не поняли. ' +
+                'Независимые друг от друга, не ступени одной лестницы. Саму разгадку сюда не кладут.',
             },
           },
         },
@@ -163,10 +181,10 @@ export async function constructFreeformStory({
               'Нужна cause: вещь или процесс в мире, из-за которого вопрос стоит. Не спор сторон.',
             );
           }
-          if (requireMystery && !hasSeedReveal(card.hiddenPremises)) {
+          if (requireMystery && !card.hiddenAnswer) {
             return toolFail(
               'no_reveal',
-              'Нужна конкретная разгадка в hiddenPremises, не «неизвестно» и не «мнения расходятся».',
+              'Нужна конкретная разгадка в hiddenAnswer, не «неизвестно» и не «мнения расходятся».',
             );
           }
           draft.card = card;
@@ -196,9 +214,15 @@ export async function constructFreeformStory({
           ].join(' '),
           requireMystery
             ? [
-                'hiddenPremises обязательны: полная разгадка из блока «На самом деле:».',
-                'Не клади отговорки: «неизвестно», «мнения расходятся», «проверка не дала ответа».',
-                'Разгадка конкретна и проверяема: что произошло, кто знает или врёт, какая улика это подтвердит.',
+                'Скрытый слой из блока «На самом деле:» разложи на два поля.',
+                'hiddenAnswer — сама разгадка, одной строкой: что произошло, кто действует, почему.',
+                'Конкретно и проверяемо. Не отговорки: ни «неизвестно», ни «мнения расходятся»,',
+                'ни «проверка не дала ответа».',
+                'hiddenPremises — подступы к ней: улика, человек, который знает и молчит,',
+                'старая запись, причина, по которой до сих пор не поняли.',
+                'Каждый подступ должен работать сам по себе, независимо от остальных:',
+                'город может прийти к разгадке любым из них, и порядка между ними нет.',
+                'Не пиши подступы как ступени одной лестницы и не повторяй в них разгадку.',
               ].join(' ')
             : '',
         ]
@@ -238,8 +262,8 @@ export async function assembleFreeformLabStory({
     log,
   });
   const story = constructed.card || fallbackAssembledStory(candidate);
-  if (requireMystery && !hasSeedReveal(story.hiddenPremises)) {
-    return { ...story, hiddenPremises: [], ok: false, error: 'no_reveal' };
+  if (requireMystery && !story.hiddenAnswer) {
+    return { ...story, hiddenAnswer: '', hiddenPremises: [], ok: false, error: 'no_reveal' };
   }
   return {
     ...story,

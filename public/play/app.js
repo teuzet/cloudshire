@@ -529,19 +529,30 @@ function plotCard(p, names = {}) {
     })
     .join('');
   const hidden = Array.isArray(p.hiddenPremises) ? p.hiddenPremises : null;
-  const hiddenBlock =
+  const hiddenRows =
     hidden == null
+      ? null
+      : [
+          p.hiddenAnswer ? `<li><b>разгадка:</b> ${esc(p.hiddenAnswer)}</li>` : '',
+          ...hidden.map((t) => `<li>подступ: ${esc(t)}</li>`),
+        ]
+          .filter(Boolean)
+          .join('');
+  const hiddenBlock =
+    hiddenRows == null
       ? ''
-      : hidden.length
-        ? `<p class="small muted">на самом деле:</p><ul class="small">${hidden
-            .map((t) => `<li>${esc(t)}</li>`)
-            .join('')}</ul>`
+      : hiddenRows
+        ? `<p class="small muted">на самом деле:</p><ul class="small">${hiddenRows}</ul>`
         : '<p class="small muted">на самом деле: скрытого слоя нет</p>';
   const known = Array.isArray(p.revealedPremises) ? p.revealedPremises : [];
-  const knownBlock = known.length
-    ? `<p class="small muted">город выяснил:</p><ul class="small">${known
-        .map((t) => `<li>${esc(t)}</li>`)
-        .join('')}</ul>`
+  const knownRows = [
+    p.revealedAnswer ? `<li><b>разгадано:</b> ${esc(p.revealedAnswer)}</li>` : '',
+    ...known.map((t) => `<li>${esc(t)}</li>`),
+  ]
+    .filter(Boolean)
+    .join('');
+  const knownBlock = knownRows
+    ? `<p class="small muted">город выяснил:</p><ul class="small">${knownRows}</ul>`
     : '';
   const ladder = (p.discoveryLadder || [])
     .map((r) => {

@@ -7,7 +7,7 @@
 
 import { depthGain, closesPlot } from './deedMath.js';
 import { alignmentOf } from './deedAlign.js';
-import { revealPremise, revealNextPremise } from './premises.js';
+import { revealPremise, revealAnswer, answerOpen } from './premises.js';
 import {
   findThreat,
   liveThreats,
@@ -68,21 +68,18 @@ function pickGoodEndingId(plot, process) {
 /**
  * Что город узнал из удавшегося дела.
  *
- * Обычный успех открывает ровно то, что дело и выясняло: судья назвал это
- * заранее, и у дела, которое ничего не выясняло, открывать нечего. Крит
- * открывает ещё один пункт — блестяще сделанная работа приносит больше, чем
- * просили, и это ровно тот случай, когда разгадка не должна умереть
- * непрочитанной.
+ * Дело, которое целилось в саму разгадку, получает её — но только если
+ * сердцевина уже открыта. Закрыта — и то же дело приносит подступ, который
+ * назвал судья: пустых успехов у расследования не бывает ни в одной ветке.
+ * Дело, которое ничего не выясняло, не приносит ничего.
  */
 function revealForDeed(plot, process, finish) {
-  const out = [];
-  const aimed = revealPremise(plot, process?.premiseText);
-  if (aimed) out.push(aimed);
-  if (finish === 'crit') {
-    const extra = revealNextPremise(plot);
-    if (extra) out.push(extra);
+  if (process?.reachesAnswer && answerOpen(plot, { finish })) {
+    const answer = revealAnswer(plot);
+    if (answer) return { premises: [], answer };
   }
-  return out;
+  const aimed = revealPremise(plot, process?.premiseText);
+  return { premises: aimed ? [aimed] : [], answer: null };
 }
 
 function pickThreatForDeed(plot, process) {
@@ -117,6 +114,7 @@ export function applyDeedToPlot({
     livesLeft: livesLeft(plot),
     severity: null,
     revealed: [],
+    answer: null,
   };
   if (!plot) return out;
 
@@ -136,7 +134,11 @@ export function applyDeedToPlot({
     });
     out.depthGain = gain;
     plot.depth = Math.round(((Number(plot.depth) || 0) + gain) * 100) / 100;
-    out.revealed = revealForDeed(plot, process, finish);
+    // Глубину прибавляем до проверки сердцевины: иначе крупное расследование,
+    // само перевалившее порог, отдавало бы разгадку только следующим делом.
+    const found = revealForDeed(plot, process, finish);
+    out.revealed = found.premises;
+    out.answer = found.answer;
     if (closesPlot({ depth: 0, gain: plot.depth, maxDepth: plot.maxDepth })) {
       out.closes = true;
       out.endingKind = 'GOOD_ENDING';

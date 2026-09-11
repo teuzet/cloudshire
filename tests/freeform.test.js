@@ -575,34 +575,33 @@ test('пакет судьи карточки — абзац, whyMoves, gravity, 
   assert.equal(formatFreeformCardJudgeRepair({ verdict: 'PASS', summary: 'ок' }), '');
 });
 
-test('завязка: hiddenPremises по умолчанию пустые, лишние режутся', () => {
+test('завязка: у посева только разгадка, подступов к ней ещё нет', () => {
   const cfg = freeformConfig(loadConfig());
   const empty = normalizeSeedVariant(
     {
       title: 'Долг за камень',
       synopsis: 'Патроны спорят, платить ли каменотёсам сверх уговора.',
       closeWhen: ['Заплатить', 'Отказать'],
-      hiddenPremises: [],
       urgency: 40,
     },
     cfg,
   );
+  assert.equal(empty.hiddenAnswer, '');
   assert.deepEqual(empty.hiddenPremises, []);
   assert.equal(empty.urgency, undefined);
-  const clipped = normalizeSeedVariant(
+  const mystery = normalizeSeedVariant(
     {
       title: 'Долг за камень',
       synopsis: 'Патроны спорят, платить ли каменотёсам сверх уговора.',
       closeWhen: ['Заплатить', 'Отказать'],
-      hiddenPremises: [
-        'Первая тайна достаточно длинная для учёта',
-        'Вторая тайна тоже достаточно длинная',
-      ],
+      hiddenAnswer: 'Уговор подписан на выработку, которой в горе уже нет',
+      hiddenPremises: ['Подступ, который посев придумывать не вправе'],
       urgency: 40,
     },
     cfg,
   );
-  assert.deepEqual(clipped.hiddenPremises, ['Первая тайна достаточно длинная для учёта']);
+  assert.equal(mystery.hiddenAnswer, 'Уговор подписан на выработку, которой в горе уже нет');
+  assert.deepEqual(mystery.hiddenPremises, [], 'подступы город нащупывает делами, а не на посеве');
 });
 
 test('разгадку не рубит по букве: верхней границы у пункта нет', () => {

@@ -97,7 +97,13 @@ async function constructBeat({ runtime, domain, world, plot, deed, blank, cfg, l
               description:
                 'Пересказ сюжета: что случилось и как сейчас. Без «Год N, месяц M», «в месяц 5» и прочих нумерованных дат.',
             },
-            hiddenPremises: { type: 'array', items: { type: 'string' } },
+            hiddenPremises: {
+              type: 'array',
+              items: { type: 'string' },
+              description:
+                'Новые подступы к разгадке, если событие их создало: улика, свидетель, запись. ' +
+                'Саму разгадку не меняй и не дополняй. Пусто, если ничего нового не появилось.',
+            },
           },
         },
         handler: async (args) => {
@@ -146,7 +152,7 @@ async function constructBeat({ runtime, domain, world, plot, deed, blank, cfg, l
           'Хроника — сухой факт месяца. Синопсис — пересказ сюжета so far, без прогноза.',
           'В синопсисе не пиши «Год N, месяц M», «в месяц 5» и нумерованные даты. Порядок — сюжетом.',
           'Концовку и срочность не ставь — это не твоя ставка.',
-          'hiddenPremises в хронику не пиши.',
+          'Скрытый слой в хронику не пиши: ни разгадку, ни подступы к ней.',
         ]
           .filter(Boolean)
           .join('\n'),

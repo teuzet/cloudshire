@@ -13,7 +13,7 @@ import { getLogger } from '../log.js';
 import { captureAgentPrompt } from './agentPrompt.js';
 import { chronicleEntries } from './models.js';
 import { dreadFlag, knownThreatsForSpeech, livesLeft } from './threats.js';
-import { revealedPremises } from './premises.js';
+import { revealedPremises, revealedAnswer } from './premises.js';
 import { remainingWork } from './deedMath.js';
 
 export const OCCASIONS = ['новая история', 'дело', 'угроза', 'разрешение', 'развязка', 'доклад'];
@@ -112,7 +112,10 @@ export function threadCard(plot, day, { closed = false } = {}) {
     knownThreats: knownThreatsForSpeech(plot, day),
     // Выясненное городом. Жрецу это можно говорить — в отличие от того,
     // что ещё скрыто и ему вовсе не показывается.
-    established: revealedPremises(plot),
+    established: [
+      revealedAnswer(plot) ? `разгадка: ${revealedAnswer(plot)}` : '',
+      ...revealedPremises(plot),
+    ].filter(Boolean),
     dread: dreadFlag(plot, day),
   };
 }

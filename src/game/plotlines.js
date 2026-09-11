@@ -398,6 +398,10 @@ function storyActState(p = {}) {
           ? maxFailsForGravity(gravity)
           : Math.max(0, Math.round(Number(p.maxFails))),
       endings: normalizeFreeformEndings(p.endings),
+      // Разгадка живёт отдельно от подступов к ней: у неё своя цена, и одним
+      // дешёвым делом её не берут.
+      hiddenAnswer: clipText(p.hiddenAnswer, PLOT_SUMMARY_MAX),
+      revealedAnswer: clipText(p.revealedAnswer, PLOT_SUMMARY_MAX),
       hiddenPremises: normalizeHiddenPremises(p.hiddenPremises),
       // Раскрытое городом знание. Живёт отдельно от hiddenPremises, чтобы тот
       // список всегда означал ровно одно: чего город ещё не знает.
@@ -728,6 +732,7 @@ export function createPlotline({
   depth = null,
   maxDepth = null,
   hiddenPremises = [],
+  hiddenAnswer = '',
   whyMoves = '',
   cause = '',
   countdown = null,
@@ -786,6 +791,7 @@ export function createPlotline({
       maxFails,
       endings,
       hiddenPremises,
+      hiddenAnswer,
       whyMoves,
       cause,
       countdown,
@@ -1765,6 +1771,7 @@ export function stripPlotSecrets(plot) {
     truthGraph: _graph,
     resolutionFacts: _res,
     hiddenPremises: _hidden,
+    hiddenAnswer: _answer,
     discoveryLadder: _ladder,
     closureGate: _gate,
     ...rest
