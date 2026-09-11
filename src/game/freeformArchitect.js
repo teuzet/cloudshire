@@ -7,9 +7,10 @@ import {
   formatFreeformSeedBlank,
   formatStoryForBeatArchitect,
   finishLabel,
+  FREEFORM_AXIS_IDS,
+  FREEFORM_AXIS_TITLE,
 } from './freeform.js';
 import { repairFreeformVariant } from './freeformJudge.js';
-import { plotConfig, pickSuspenseAnnotationSeed } from './plotlines.js';
 import { captureAgentPrompt } from './agentPrompt.js';
 import {
   attachBeatDynamics,
@@ -20,91 +21,79 @@ import {
 
 export { formatAgentPrompt, captureAgentPrompt } from './agentPrompt.js';
 
-export function pickFreeformSeedAxes(config, rng = Math.random) {
-  const ids = new Set(freeformConfig(config).seedAxes);
-  const seed = pickSuspenseAnnotationSeed(plotConfig(config), rng);
-  return (seed.tags || []).filter((t) => ids.has(t.groupId));
-}
-
-export function pickFreeformSeedAxisPairs(config, count, rng = Math.random) {
-  const n = Math.max(1, Math.round(Number(count) || 1));
-  return Array.from({ length: n }, () => pickFreeformSeedAxes(config, rng));
-}
-
-const ARENA_ORDER = ['human', 'creature', 'ecology', 'material', 'built', 'earth', 'sky'];
-const RELATION_ORDER = ['native', 'contact', 'legacy'];
-
-const ARENA_HINT = {
-  human: 'решения, обещания, стыд, долг, мода, слух, статус, отказ, союз, разлад, подражание',
-  creature: 'зверь, стая, гнездо, нрав, голод, путь, линька, скот, существо у порога или на тропе',
-  ecology: 'виды, заросли, пустоши, цветение, миграция, кто кого ест, смена склона',
-  material: 'вещество, вкус, цвет, жар, липкость, звон, порча, примесь, жила, осадок',
-  built: 'дом, путь, колодец, мост, печь, ворота, лестница, сруб, тень постройки',
-  earth: 'склон, край, камень, грунт, пласт, осыпь, трещина, родник в породе',
-  sky: 'погодные явления, движение небесных тел, небо, существа живущие в небесах, звёзды',
-};
-
-const WORLD_RELATION_HINT = {
-  native: 'своё со своим: уклад, люди, места, твари, обычаи, долги, права',
-  contact: 'в привычное вошло новое: идея, обычай, значение, факт, слово — не обязательно тело и не обязательно снаружи',
-  legacy: 'нынешние с долгим следом прошлого: уговор, статус, посадка, осуждение, срок',
-};
-
-function hintKey(tag) {
-  return String(tag?.tagId || tag?.tagName || '')
-    .trim()
-    .toLowerCase();
-}
-
-function formatCatalogBlock(title, order, hints) {
-  const lines = [title];
-  for (const id of order) {
-    const hint = hints[id];
-    if (!hint) continue;
-    lines.push(`${id.toUpperCase()} — ${hint}`);
+/** Взвешенный жребий без повторов: вес задаёт частоту, пачка не дублирует значения. */
+function drawWeighted(values, count, rng) {
+  const pool = values.map((v) => ({ ...v }));
+  const out = [];
+  for (let i = 0; i < count && pool.length; i += 1) {
+    const total = pool.reduce((sum, v) => sum + v.weight, 0);
+    let roll = rng() * total;
+    let idx = pool.length - 1;
+    for (let j = 0; j < pool.length; j += 1) {
+      roll -= pool[j].weight;
+      if (roll < 0) {
+        idx = j;
+        break;
+      }
+    }
+    out.push(pool.splice(idx, 1)[0]);
   }
-  return lines.join('\n');
+  return out;
 }
 
-function formatAxisHint(tag) {
-  const name = tag?.tagName || tag?.tagId || '';
-  if (!name) return '';
-  const axis = tag.groupId === 'truthArena' || tag.groupId === 'threatArena' ? 'threatArena' : tag.groupId;
-  const pack =
-    tag.groupId === 'worldRelation' ? WORLD_RELATION_HINT[hintKey(tag)] : ARENA_HINT[hintKey(tag)];
-  return pack ? `${axis}: ${name} — ${pack}` : `${axis}: ${name}`;
+/** Наборы осей на всю пачку сразу: внутри пачки значение каждой оси не повторяется. */
+export function pickFreeformSeedAxisSets(config, count, rng = Math.random) {
+  const n = Math.max(1, Math.round(Number(count) || 1));
+  const catalog = freeformConfig(config).axes;
+  const drawn = Object.fromEntries(
+    FREEFORM_AXIS_IDS.map((id) => [id, drawWeighted(catalog[id] || [], n, rng)]),
+  );
+  return Array.from({ length: n }, (_, i) =>
+    FREEFORM_AXIS_IDS.map((groupId) => {
+      const value = drawn[groupId][i] || drawn[groupId][0] || {};
+      return {
+        groupId,
+        tagId: value.id || '',
+        tagName: value.name || '',
+        about: value.about || '',
+      };
+    }).filter((tag) => tag.tagId),
+  );
 }
 
-export function formatFreeformSeedAxesForPrompt(tags) {
-  if (!tags?.length) return '';
-  return tags.map((t) => formatAxisHint(t)).filter(Boolean).join('\n');
+export function pickFreeformSeedAxes(config, rng = Math.random) {
+  return pickFreeformSeedAxisSets(config, 1, rng)[0];
 }
 
-export function formatFreeformArenaRelationCatalogs() {
-  return [
-    formatCatalogBlock('threatArena', ARENA_ORDER, ARENA_HINT),
-    '',
-    formatCatalogBlock('worldRelation', RELATION_ORDER, WORLD_RELATION_HINT),
-  ].join('\n');
+/** Каталоги брошенных осей: единственный источник значений — конфиг. */
+export function formatFreeformAxisCatalogs(config) {
+  const catalog = freeformConfig(config).axes;
+  return FREEFORM_AXIS_IDS.map((id) =>
+    [
+      FREEFORM_AXIS_TITLE[id] || id,
+      ...(catalog[id] || []).map((v) => `${v.name} — ${v.about}`),
+    ].join('\n'),
+  ).join('\n\n');
 }
 
-export function formatFreeformSeedAxisPairsForPrompt(pairs) {
-  if (!pairs?.length) return '';
+export function formatFreeformSeedAxisSetsForPrompt(sets, config) {
+  if (!sets?.length) return '';
   const lines = [
     'Метки — ассоциативные поля, не жанр и не обязательные существительные.',
     '',
-    formatFreeformArenaRelationCatalogs(),
+    formatFreeformAxisCatalogs(config),
     '',
-    'Пары. На каждую — четыре поля (затравка, конфликт, динамика, последствия), в этом порядке:',
+    'Наборы. На каждый — четыре поля (затравка, конфликт, динамика, последствия), в этом порядке:',
   ];
-  pairs.forEach((tags, i) => {
-    const arena = (tags || []).find((t) => t.groupId === 'truthArena' || t.groupId === 'threatArena');
-    const rel = (tags || []).find((t) => t.groupId === 'worldRelation');
-    const a = arena?.tagName || arena?.tagId || '?';
-    const r = rel?.tagName || rel?.tagId || '?';
-    lines.push(`${i + 1}. ${a} · ${r}`);
+  sets.forEach((tags, i) => {
+    lines.push(`${i + 1}. ${formatAxisSetLine(tags)}`);
   });
   return lines.join('\n').trim();
+}
+
+/** Одна строка набора: ключи те же, что поля эха в инструменте. */
+export function formatAxisSetLine(tags) {
+  return FREEFORM_AXIS_IDS.map((id) => `${id} ${axisTagName(tags, id) || '?'}`).join(' · ');
 }
 
 function axisTagName(tags, groupId) {
@@ -155,7 +144,7 @@ export function normalizeSeedBlank(raw, pair = []) {
     consequences,
     text: hook,
     premise: hook,
-    arena: axisTagName(pair, 'truthArena'),
+    arena: axisTagName(pair, 'arena'),
     worldRelation: axisTagName(pair, 'worldRelation'),
   };
 }
@@ -187,7 +176,7 @@ async function askSeedParagraphs({ runtime, seedText, pairs, gravity, config, lo
     tools: [
       {
         name: 'submit_freeform_seed_blanks',
-        description: `Ровно ${n} кандидатов: четыре поля на каждую генеративную пару, в том же порядке.`,
+        description: `Ровно ${n} кандидатов: четыре поля на каждый набор осей, в том же порядке.`,
         parameters: {
           type: 'object',
           additionalProperties: false,
@@ -252,7 +241,7 @@ async function askSeedParagraphs({ runtime, seedText, pairs, gravity, config, lo
           '',
           formatFreeformGravityForPrompt(gravity, config),
           '',
-          formatFreeformSeedAxisPairsForPrompt(pairs),
+          formatFreeformSeedAxisSetsForPrompt(pairs, config),
           '',
           `Верни ровно ${n} кандидатов через submit_freeform_seed_blanks, в порядке пар.`,
           'У каждого: затравка, конфликт, динамика, последствия. Gravity — посадка в поле «последствия», не размер затравки.',
@@ -336,8 +325,8 @@ async function askBeatBlanks({ runtime, cfg, dynamics, log, userContent }) {
 
 export async function inventSeedBlanks({ runtime, seedText, cfg, config, gravity, log }) {
   const n = cfg.variantsMax;
-  const pairs = pickFreeformSeedAxisPairs(config, n);
-  log.info('freeform.architect.seed_pairs', {
+  const pairs = pickFreeformSeedAxisSets(config, n);
+  log.info('freeform.architect.seed_axes', {
     count: pairs.length,
     gravity,
     tags: pairs.map((tags) => tags.map((t) => `${t.groupId}:${t.tagId}`).join('+')),

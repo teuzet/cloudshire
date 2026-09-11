@@ -224,8 +224,10 @@ export async function assembleFreeformLabStory({
     gravity: parseFreeformGravity(gravity ?? candidate?.gravity),
     arena: candidate?.arena || '',
     worldRelation: candidate?.worldRelation || '',
-    conflictSource: candidate?.conflictSource || '',
-    temporalShape: candidate?.temporalShape || '',
+    target: candidate?.target || '',
+    knowledge: candidate?.knowledge || '',
+    engine: candidate?.engine || '',
+    timing: candidate?.timing || '',
     assemblePrompt: constructed.prompt || '',
   };
 }

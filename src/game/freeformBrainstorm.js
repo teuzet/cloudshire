@@ -1,5 +1,6 @@
 /**
- * Генератор трёх следующих хроник: код бросает оси, модель пишет один текст на набор.
+ * Генератор трёх следующих хроник: код бросает четыре оси мира, модель пишет один текст на набор.
+ * Двигатель и профиль во времени модель выбирает сама из меню и возвращает вместе с текстом.
  * Лаборатория: пачка → судья. PASS сразу в пул и не чинится.
  * Не-PASS всегда идут на починку, даже если PASS уже ≥2.
  * Второй судья видит только чиненные слоты.
@@ -16,9 +17,12 @@ import {
   formatFreeformGravityForPrompt,
   formatBrainstormCandidateForPrompt,
   freeformConfig,
+  FREEFORM_AXIS_IDS,
 } from './freeform.js';
 import {
-  pickFreeformSeedAxisPairs,
+  pickFreeformSeedAxisSets,
+  formatFreeformAxisCatalogs,
+  formatAxisSetLine,
   captureAgentPrompt,
 } from './freeformArchitect.js';
 import {
@@ -28,10 +32,22 @@ import {
   freeformPackJudgeCodes,
 } from './freeformJudge.js';
 
-export const CONFLICT_SOURCES = [
+/**
+ * Двигатель истории — меню, а не жребий: агент берёт одно значение сам и возвращает эхом.
+ * Внешнее, отложенное и аномальное сюда не входят — это уже worldRelation и arena.
+ */
+export const STORY_ENGINES = [
   {
-    id: 'EXTERNAL_THREAT',
-    hint: 'угроза снаружи привычного круга: стихия, зверь, чужой интерес, давление с моря или материка. Не чужой остров и не «прибывшие с соседнего острова», если канон не даёт текущего сопряжения',
+    id: 'REFUSAL',
+    hint: 'кто-то перестал делать то, на что город рассчитывал: отказ, уход, неявка, молчание. Не саботаж и не злодейство',
+  },
+  {
+    id: 'DISCOVERY',
+    hint: 'город нашёл или узнал то, чего у него не было: место, существо, способ, правду. Двигает не находка, а спор о том, что с ней делать',
+  },
+  {
+    id: 'OPEN_FEUD',
+    hint: 'два лагеря уже открыто бьются за одно и то же, и у обоих есть силы победить',
   },
   {
     id: 'INTERNAL_BETRAYAL',
@@ -42,16 +58,12 @@ export const CONFLICT_SOURCES = [
     hint: 'ломается уклад, на котором держится жизнь города: договор, обычай, распределение, привычный порядок труда. Чинят делом и отношением, не канцелярией и не потерянной бумагой',
   },
   {
-    id: 'SUPERNATURAL_ANOMALY',
-    hint: 'редкий сбой порядка мира. Не уличная магия и не «просто странно»',
-  },
-  {
     id: 'MORAL_DILEMMA',
     hint: 'два законных требования, нельзя удовлетворить оба. Нет злодея',
   },
   {
-    id: 'DELAYED_CONSEQUENCE',
-    hint: 'нынешнее — дозревший плод старого решения, уговора или отказа. Ищи причину назад по хронике, не изобретай новую угрозу с нуля',
+    id: 'PRICE_OF_SUCCESS',
+    hint: 'что-то вышло слишком хорошо, и город не выдерживает своей удачи: избыток, слава, приток, урожай не по силам',
   },
   {
     id: 'RIVAL_IDEOLOGY',
@@ -164,7 +176,8 @@ function formatSeedUserBlock(seedText, fromVoid, fromGenesis = false) {
   return ['ЗАТРАВКА', seedText].join('\n');
 }
 
-export const TEMPORAL_SHAPES = [
+/** Профиль во времени — тоже меню на выбор агента. */
+export const STORY_TIMINGS = [
   {
     id: 'FRESH_INCIDENT',
     hint: 'только что случилось; ещё нет привычки',
@@ -181,7 +194,32 @@ export const TEMPORAL_SHAPES = [
     id: 'DELAYED_BOMB',
     hint: 'решение или повреждение уже есть; разрыв ещё впереди',
   },
+  {
+    id: 'BLOW',
+    hint: 'удар уже случился и часть города потеряна; история про то, чем жить дальше',
+  },
+  {
+    id: 'DID_NOT_HAPPEN',
+    hint: 'то, что случалось всегда, в этот раз не случилось',
+  },
 ];
+
+function menuIds(menu) {
+  return menu.map((item) => item.id);
+}
+
+function formatMenu(title, menu) {
+  return [title, ...menu.map((item) => `${item.id} — ${item.hint}`)].join('\n');
+}
+
+/** Двигатель и время агент выбирает сам: в промпт уходит меню, не назначение. */
+export function formatFreeformBrainstormMenusForPrompt() {
+  return [
+    formatMenu('engine — природа двигателя. Выбери сам, по одному значению на кандидата:', STORY_ENGINES),
+    '',
+    formatMenu('timing — как конфликт выглядит по времени. Тоже выбери сам:', STORY_TIMINGS),
+  ].join('\n');
+}
 
 function pickWithoutReplacement(items, n, rng) {
   const pool = [...items];
@@ -193,9 +231,8 @@ function pickWithoutReplacement(items, n, rng) {
   return out;
 }
 
-function pairTagName(pair, groupId) {
-  const aliases = groupId === 'threatArena' ? ['threatArena', 'truthArena'] : [groupId];
-  return (pair || []).find((t) => aliases.includes(t.groupId))?.tagName || '';
+function axisTagName(axes, groupId) {
+  return (axes || []).find((t) => t.groupId === groupId)?.tagName || '';
 }
 
 function axisEcho(raw, key) {
@@ -207,15 +244,13 @@ function axisEcho(raw, key) {
 
 export function pickFreeformBrainstormRolls(config, count, rng = Math.random) {
   const n = Math.max(1, Math.round(Number(count) || 1));
-  const pairs = pickFreeformSeedAxisPairs(config, n, rng);
-  const sources = pickWithoutReplacement(CONFLICT_SOURCES, n, rng);
-  const shapes = pickWithoutReplacement(TEMPORAL_SHAPES, n, rng);
+  const sets = pickFreeformSeedAxisSets(config, n, rng);
   const authors = pickWithoutReplacement(freeformConfig(config).continuationAuthors, n, rng);
-  return pairs.map((pair, i) => ({
-    pair,
-    conflictSource: sources[i] || sources[0],
-    temporalShape: shapes[i] || shapes[0],
+  return sets.map((axes, i) => ({
+    axes,
     author: authors[i] || authors[0],
+    engine: null,
+    timing: null,
   }));
 }
 
@@ -223,10 +258,12 @@ export function formatFreeformBrainstormRollsForPrompt(rolls) {
   if (!rolls?.length) return '';
   return rolls
     .map((roll, i) => {
-      const arena = pairTagName(roll.pair, 'threatArena') || '?';
-      const rel = pairTagName(roll.pair, 'worldRelation') || '?';
       const author = roll.author?.name || roll.authorName || '?';
-      return `${i + 1}. threatArena ${arena} · worldRelation ${rel} · conflictSource ${roll.conflictSource.id} · temporalShape ${roll.temporalShape.id} · автор ${author}`;
+      const chosen = [
+        roll.engine?.id ? `engine ${roll.engine.id}` : null,
+        roll.timing?.id ? `timing ${roll.timing.id}` : null,
+      ].filter(Boolean);
+      return [`${i + 1}. ${formatAxisSetLine(roll.axes)}`, ...chosen, `автор ${author}`].join(' · ');
     })
     .join('\n');
 }
@@ -240,28 +277,23 @@ export function normalizeBrainstormCandidate(raw, roll, index = 1, maxChars = PL
     text: chronicle,
     hook: chronicle,
     index,
-    arena: pairTagName(roll?.pair, 'threatArena'),
-    worldRelation: pairTagName(roll?.pair, 'worldRelation'),
-    conflictSource: roll.conflictSource.id,
-    temporalShape: roll.temporalShape.id,
+    arena: axisTagName(roll?.axes, 'arena'),
+    worldRelation: axisTagName(roll?.axes, 'worldRelation'),
+    target: axisTagName(roll?.axes, 'target'),
+    knowledge: axisTagName(roll?.axes, 'knowledge'),
+    engine: roll?.engine?.id || axisEcho(raw, 'engine'),
+    timing: roll?.timing?.id || axisEcho(raw, 'timing'),
     authorId: roll.author?.id || '',
     authorName: roll.author?.name || '',
   };
 }
 
+/** Эхо сверяем только по брошенным осям: двигатель и время агент выбирает сам. */
 function logAxisEchoMismatch(log, index, raw, roll) {
-  const expected = {
-    threatArena: pairTagName(roll.pair, 'threatArena'),
-    worldRelation: pairTagName(roll.pair, 'worldRelation'),
-    conflictSource: roll.conflictSource.id,
-    temporalShape: roll.temporalShape.id,
-  };
-  const got = {
-    threatArena: axisEcho(raw, 'threatArena') || axisEcho(raw, 'arena'),
-    worldRelation: axisEcho(raw, 'worldRelation'),
-    conflictSource: axisEcho(raw, 'conflictSource'),
-    temporalShape: axisEcho(raw, 'temporalShape'),
-  };
+  const expected = Object.fromEntries(
+    FREEFORM_AXIS_IDS.map((id) => [id, axisTagName(roll.axes, id)]),
+  );
+  const got = Object.fromEntries(FREEFORM_AXIS_IDS.map((id) => [id, axisEcho(raw, id)]));
   const mismatched = Object.keys(expected).filter((key) => got[key] && got[key] !== expected[key]);
   if (!mismatched.length) return;
   log.warn('freeform.brainstorm.axis_echo_mismatch', { index, expected, got, mismatched });
@@ -269,24 +301,12 @@ function logAxisEchoMismatch(log, index, raw, roll) {
 
 export function rollFromBrainstormCandidate(candidate) {
   return {
-    pair: [
-      {
-        groupId: 'truthArena',
-        tagId: String(candidate?.arena || '')
-          .trim()
-          .toLowerCase(),
-        tagName: candidate?.arena || '',
-      },
-      {
-        groupId: 'worldRelation',
-        tagId: String(candidate?.worldRelation || '')
-          .trim()
-          .toLowerCase(),
-        tagName: candidate?.worldRelation || '',
-      },
-    ],
-    conflictSource: { id: candidate?.conflictSource || '' },
-    temporalShape: { id: candidate?.temporalShape || '' },
+    axes: FREEFORM_AXIS_IDS.map((groupId) => {
+      const name = String(candidate?.[groupId] || '').trim();
+      return { groupId, tagId: name.toLowerCase(), tagName: name };
+    }).filter((tag) => tag.tagName),
+    engine: candidate?.engine ? { id: candidate.engine } : null,
+    timing: candidate?.timing ? { id: candidate.timing } : null,
     author: {
       id: candidate?.authorId || '',
       name: candidate?.authorName || '',
@@ -297,7 +317,7 @@ export function rollFromBrainstormCandidate(candidate) {
 function emitCandidatesTool({ n, rolls, draft, log, indices = null, maxChars = PLOT_SUMMARY_MAX }) {
   return {
     name: 'emit_freeform_candidates',
-    description: `Ровно ${n} кандидатов: одна следующая хроника на каждый набор осей, в том же порядке. Оси в ответе — эхо входа, не новый выбор.`,
+    description: `Ровно ${n} кандидатов: одна следующая хроника на каждый набор осей, в том же порядке. Брошенные оси в ответе — эхо входа; engine и timing выбираешь сам.`,
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -309,17 +329,27 @@ function emitCandidatesTool({ n, rolls, draft, log, indices = null, maxChars = P
           maxItems: n,
           items: {
             type: 'object',
-            required: ['chronicle'],
+            required: ['chronicle', 'engine', 'timing'],
             properties: {
               chronicle: {
                 type: 'string',
                 description:
                   `Сюжет-затравка: обычно 4–5 предложений, можно короткая сцена, до ${maxChars} символов`,
               },
-              threatArena: { type: 'string', description: 'Эхо оси threatArena этого набора.' },
+              arena: { type: 'string', description: 'Эхо оси arena этого набора.' },
               worldRelation: { type: 'string', description: 'Эхо оси worldRelation этого набора.' },
-              conflictSource: { type: 'string', description: 'Эхо оси conflictSource этого набора.' },
-              temporalShape: { type: 'string', description: 'Эхо оси temporalShape этого набора.' },
+              target: { type: 'string', description: 'Эхо оси target этого набора.' },
+              knowledge: { type: 'string', description: 'Эхо оси knowledge этого набора.' },
+              engine: {
+                type: 'string',
+                enum: menuIds(STORY_ENGINES),
+                description: 'Двигатель, который ты выбрал для этого кандидата.',
+              },
+              timing: {
+                type: 'string',
+                enum: menuIds(STORY_TIMINGS),
+                description: 'Профиль во времени, который ты выбрал для этого кандидата.',
+              },
             },
           },
         },
@@ -363,12 +393,9 @@ export async function brainstormFreeformSeeds({
     count: rolls.length,
     gravity: g,
     tags: rolls.map((roll) =>
-      [
-        ...(roll.pair || []).map((t) => `${t.groupId}:${t.tagId}`),
-        roll.conflictSource.id,
-        roll.temporalShape.id,
-        roll.author?.id,
-      ].join('+'),
+      [...(roll.axes || []).map((t) => `${t.groupId}:${t.tagId}`), roll.author?.id]
+        .filter(Boolean)
+        .join('+'),
     ),
   });
 
@@ -391,6 +418,11 @@ export async function brainstormFreeformSeeds({
           formatSeedUserBlock(seedText, fromVoid, fromGenesis),
           '',
           'ОСИ',
+          formatFreeformAxisCatalogs(config),
+          '',
+          formatFreeformBrainstormMenusForPrompt(),
+          '',
+          'НАБОРЫ',
           formatFreeformBrainstormRollsForPrompt(rolls),
         ].join('\n'),
       },

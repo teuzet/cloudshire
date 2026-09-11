@@ -38,7 +38,14 @@ function candidateText(candidate) {
 }
 
 function formatAxes(candidate) {
-  return [candidate?.arena, candidate?.worldRelation, candidate?.conflictSource, candidate?.temporalShape]
+  return [
+    candidate?.arena,
+    candidate?.worldRelation,
+    candidate?.target,
+    candidate?.knowledge,
+    candidate?.engine,
+    candidate?.timing,
+  ]
     .map((part) => String(part || '').trim())
     .filter(Boolean)
     .join(' · ');
@@ -108,12 +115,7 @@ function formatPoolLine(entries, { winnerIndex = null, slotCount = 0 } = {}) {
 
 function pickRolls(pack) {
   return (pack?.rolls || []).map((roll) =>
-    [
-      ...(roll.pair || []).map((tag) => `${tag.groupId}:${tag.tagId}`),
-      roll.conflictSource?.id,
-      roll.temporalShape?.id,
-      roll.author?.id,
-    ]
+    [...(roll.axes || []).map((tag) => `${tag.groupId}:${tag.tagId}`), roll.author?.id]
       .filter(Boolean)
       .join('+'),
   );

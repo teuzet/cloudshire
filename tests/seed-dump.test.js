@@ -25,16 +25,27 @@ test('дамп посева держит полную хронику, а не о
       gravity: 'CRISIS',
       rolls: [
         {
-          pair: [
-            { groupId: 'threatArena', tagId: 'creature' },
-            { groupId: 'worldRelation', tagId: 'contact' },
+          axes: [
+            { groupId: 'arena', tagId: 'creature' },
+            { groupId: 'worldRelation', tagId: 'surfaced' },
+            { groupId: 'target', tagId: 'work' },
+            { groupId: 'knowledge', tagId: 'few_know' },
           ],
-          conflictSource: { id: 'MORAL_DILEMMA' },
-          temporalShape: { id: 'FRESH_INCIDENT' },
           author: { id: 'mieville' },
         },
       ],
-      drafts: [{ index: 1, arena: 'CREATURE', chronicle: LONG }],
+      drafts: [
+        {
+          index: 1,
+          arena: 'CREATURE',
+          worldRelation: 'SURFACED',
+          target: 'WORK',
+          knowledge: 'FEW_KNOW',
+          engine: 'DISCOVERY',
+          timing: 'FRESH_INCIDENT',
+          chronicle: LONG,
+        },
+      ],
       reviews: [
         {
           index: 1,
@@ -54,6 +65,8 @@ test('дамп посева держит полную хронику, а не о
   try {
     const md = formatPlotSeedDumpMarkdown(payload);
     assert.match(md, /спрятал страницу/);
+    assert.match(md, /`arena:creature\+worldRelation:surfaced\+target:work\+knowledge:few_know\+mieville`/);
+    assert.match(md, /CREATURE · SURFACED · WORK · FEW_KNOW · DISCOVERY · FRESH_INCIDENT/);
     assert.doesNotMatch(md, /Тварь оказ…/);
     assert.match(md, /Финальный пул: пуст/);
     assert.match(md, /Пул пуст: ни один кандидат не получил PASS/);

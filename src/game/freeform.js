@@ -224,6 +224,48 @@ function normalizeContinuationAuthors(raw) {
     .filter((a) => a.name);
 }
 
+/** Оси завязки, которые бросает код. Порядок — порядок вывода в промпте. */
+export const FREEFORM_AXIS_IDS = ['arena', 'worldRelation', 'target', 'knowledge'];
+
+export const FREEFORM_AXIS_TITLE = {
+  arena: 'arena — где живёт причина: причинный субстрат, не место действия и не происхождение',
+  worldRelation: 'worldRelation — как история относится к тому, что в городе уже есть',
+  target: 'target — какая несущая опора города под ударом',
+  knowledge: 'knowledge — кто понимает, что происходит',
+};
+
+const FALLBACK_AXIS_VALUES = {
+  arena: ['human', 'custom', 'creature', 'ecology', 'matter', 'sky', 'phenomenon'],
+  worldRelation: ['native', 'arrived', 'born', 'surfaced', 'legacy'],
+  target: ['food', 'body', 'work', 'rite', 'power', 'shelter', 'kin', 'word', 'night'],
+  knowledge: ['open', 'unknown', 'few_know', 'false_belief', 'too_late'],
+};
+
+function normalizeAxisValues(raw, fallbackIds) {
+  const list = Array.isArray(raw) && raw.length ? raw : fallbackIds;
+  return list
+    .map((item) => {
+      const src = typeof item === 'string' ? { id: item } : item || {};
+      const id = String(src.id || '').trim().toLowerCase();
+      if (!id) return null;
+      const weight = Number(src.weight);
+      return {
+        id,
+        name: String(src.name || '').trim() || id.toUpperCase(),
+        about: String(src.about || '').trim(),
+        weight: Number.isFinite(weight) && weight > 0 ? weight : 1,
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeAxisCatalog(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  return Object.fromEntries(
+    FREEFORM_AXIS_IDS.map((id) => [id, normalizeAxisValues(src[id], FALLBACK_AXIS_VALUES[id])]),
+  );
+}
+
 function exampleLine(x) {
   if (x && typeof x === 'object' && !Array.isArray(x)) {
     return Object.entries(x)
@@ -292,7 +334,14 @@ export function formatFreeformChronicleSeed(entries) {
 
 export function formatBrainstormCandidateForPrompt(candidate, index, { includeAuthor = false } = {}) {
   if (!candidate) return '';
-  const axes = [candidate.arena, candidate.worldRelation, candidate.conflictSource, candidate.temporalShape]
+  const axes = [
+    candidate.arena,
+    candidate.worldRelation,
+    candidate.target,
+    candidate.knowledge,
+    candidate.engine,
+    candidate.timing,
+  ]
     .map((s) => String(s || '').trim())
     .filter(Boolean)
     .join(' · ');
@@ -336,9 +385,7 @@ export function freeformConfig(config) {
     },
     boardMaxOpen: board.maxOpen,
     targetImportance: board.targetImportance,
-    seedAxes: (Array.isArray(raw.seedAxes) ? raw.seedAxes : ['truthArena', 'worldRelation'])
-      .map((id) => String(id || '').trim())
-      .filter(Boolean),
+    axes: normalizeAxisCatalog(raw.axes),
     continuationAuthors: normalizeContinuationAuthors(raw.continuationAuthors),
     beatDynamics: normalizeBeatDynamics(raw.beatDynamics),
     gravity: normalizeGravityCatalog(raw.gravity),
