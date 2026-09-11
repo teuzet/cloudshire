@@ -1,6 +1,7 @@
 import { MongoClient } from 'mongodb';
 import { createWorldFromConfig, normalizeDomain, normalizeWorld } from '../game/models.js';
 import { writeWorldArchive } from './worldArchive.js';
+import { createWipeGuard } from './wipeGuard.js';
 import { getLogger } from '../log.js';
 import { attachStoryPoolsFromCatalog } from '../game/annotationCatalog.js';
 import { stripOfficerPortraitPayload } from '../game/officers.js';
@@ -14,6 +15,7 @@ export class MongoStorage {
     this.driver = 'mongo';
     this.client = null;
     this.db = null;
+    this.guard = createWipeGuard();
   }
 
   async init() {
@@ -31,7 +33,10 @@ export class MongoStorage {
     if (!world) {
       const created = createWorldFromConfig(this.config);
       await attachStoryPoolsFromCatalog(created, this);
-      await this.saveWorld(created);
+      this.guard.setLiveWorld(created.id);
+      await this.writeWorldUnlocked(created);
+    } else {
+      this.guard.setLiveWorld(world.id);
     }
   }
 
@@ -48,12 +53,20 @@ export class MongoStorage {
     return world;
   }
 
-  async saveWorld(world) {
+  async writeWorldUnlocked(world) {
+    if (!this.guard.acceptWorld(world)) {
+      this.guard.reject('world', world?.id);
+      return world;
+    }
     normalizeWorld(world, this.config);
     world.updatedAt = new Date().toISOString();
     const doc = { ...world, _id: 'current' };
     await this.col('world').replaceOne({ _id: 'current' }, doc, { upsert: true });
     return world;
+  }
+
+  async saveWorld(world) {
+    return this.guard.exclusive(() => this.writeWorldUnlocked(world));
   }
 
   async getDomain(domainId) {
@@ -63,13 +76,21 @@ export class MongoStorage {
     return normalizeDomain({ id: _id, ...rest });
   }
 
-  async saveDomain(domain) {
+  async writeDomainUnlocked(domain) {
+    if (!this.guard.acceptDomain(domain)) {
+      this.guard.reject('domain', domain?.id);
+      return domain;
+    }
     normalizeDomain(domain);
     stripOfficerPortraitPayload(domain);
     domain.updatedAt = new Date().toISOString();
     const { id, ...rest } = domain;
     await this.col('domains').replaceOne({ _id: id }, { _id: id, ...rest }, { upsert: true });
     return domain;
+  }
+
+  async saveDomain(domain) {
+    return this.guard.exclusive(() => this.writeDomainUnlocked(domain));
   }
 
   async deleteDomain(domainId) {
@@ -94,13 +115,19 @@ export class MongoStorage {
   }
 
   async saveUserBinding(binding) {
-    binding.updatedAt = new Date().toISOString();
-    await this.col('users').replaceOne(
-      { userId: String(binding.userId) },
-      { ...binding, userId: String(binding.userId) },
-      { upsert: true },
-    );
-    return binding;
+    return this.guard.exclusive(async () => {
+      if (!this.guard.acceptBinding(binding)) {
+        this.guard.reject('user', binding?.userId);
+        return binding;
+      }
+      binding.updatedAt = new Date().toISOString();
+      await this.col('users').replaceOne(
+        { userId: String(binding.userId) },
+        { ...binding, userId: String(binding.userId) },
+        { upsert: true },
+      );
+      return binding;
+    });
   }
 
   async getDomainForUser(userId, worldId) {
@@ -118,11 +145,21 @@ export class MongoStorage {
     return { id: _id, ...rest };
   }
 
+  async deleteConflux(confluxId) {
+    await this.col('confluxes').deleteOne({ _id: confluxId });
+  }
+
   async saveConflux(conflux) {
-    conflux.updatedAt = new Date().toISOString();
-    const { id, ...rest } = conflux;
-    await this.col('confluxes').replaceOne({ _id: id }, { _id: id, ...rest }, { upsert: true });
-    return conflux;
+    return this.guard.exclusive(async () => {
+      if (!this.guard.acceptConflux(conflux)) {
+        this.guard.reject('conflux', conflux?.id);
+        return conflux;
+      }
+      conflux.updatedAt = new Date().toISOString();
+      const { id, ...rest } = conflux;
+      await this.col('confluxes').replaceOne({ _id: id }, { _id: id, ...rest }, { upsert: true });
+      return conflux;
+    });
   }
 
   async listConfluxes({ status } = {}) {
@@ -172,79 +209,101 @@ export class MongoStorage {
     return doc;
   }
 
+  async sweepForeignUnlocked() {
+    const live = this.guard.liveWorldId;
+    if (!live) return;
+    for (const d of await this.listDomains()) {
+      if (String(d.worldId || '') !== live) await this.deleteDomain(d.id);
+    }
+    for (const c of await this.listConfluxes()) {
+      if (String(c.worldId || '') !== live) {
+        await this.col('confluxes').deleteOne({ _id: c.id });
+      }
+    }
+    for (const u of await this.listUserBindings()) {
+      if (u.worldId && String(u.worldId) !== live) {
+        await this.col('users').deleteOne({ userId: String(u.userId || u.id) });
+      }
+    }
+  }
+
   async wipeAll({ reason = 'wipe' } = {}) {
-    const world = await this.getWorld();
-    const domains = await this.listDomains();
-    const users = await this.listUserBindings();
-    const confluxes = await this.listConfluxes();
+    return this.guard.exclusive(async () => {
+      const world = await this.getWorld();
+      const domains = await this.listDomains();
+      const users = await this.listUserBindings();
+      const confluxes = await this.listConfluxes();
 
-    let archiveDir = null;
-    let archivedWorldId = world?.id || null;
+      let archiveDir = null;
+      let archivedWorldId = world?.id || null;
 
-    if (world) {
-      archivedWorldId = world.id;
-      const skipDisk = this.config.logging?.file === false || process.env.DYNO || process.env.RAILWAY_ENVIRONMENT;
-      if (!skipDisk) {
+      if (world) {
+        archivedWorldId = world.id;
+        const skipDisk = this.config.logging?.file === false || process.env.DYNO || process.env.RAILWAY_ENVIRONMENT;
+        if (!skipDisk) {
+          try {
+            const archived = await writeWorldArchive({
+              config: this.config,
+              world,
+              domains,
+              users,
+              confluxes,
+              reason,
+            });
+            archiveDir = archived.archiveDir;
+          } catch (err) {
+            getLogger().warn('wipe.disk_archive_skipped', { error: err.message });
+          }
+        }
+
+        let usageRows = [];
         try {
-          const archived = await writeWorldArchive({
-            config: this.config,
-            world,
+          usageRows = await this.listUsage({ worldId: world.id, limit: 20000 });
+        } catch {
+          usageRows = [];
+        }
+
+        await this.col('world_archives').replaceOne(
+          { worldId: world.id },
+          {
+            worldId: world.id,
+            seasonKey: world.seasonKey || null,
+            archivedAt: new Date().toISOString(),
+            reason,
+            archiveDir,
+            world: { ...world, status: 'archived', endedAt: new Date().toISOString() },
             domains,
             users,
             confluxes,
-            reason,
-          });
-          archiveDir = archived.archiveDir;
-        } catch (err) {
-          getLogger().warn('wipe.disk_archive_skipped', { error: err.message });
-        }
+            usage: usageRows,
+          },
+          { upsert: true },
+        );
       }
 
-      let usageRows = [];
-      try {
-        usageRows = await this.listUsage({ worldId: world.id, limit: 20000 });
-      } catch {
-        usageRows = [];
+      await this.col('domains').deleteMany({});
+      await this.col('users').deleteMany({});
+      await this.col('confluxes').deleteMany({});
+      await this.col('world').deleteMany({});
+      if (world?.id) {
+        await this.col('usage').deleteMany({ worldId: world.id });
       }
 
-      await this.col('world_archives').replaceOne(
-        { worldId: world.id },
-        {
-          worldId: world.id,
-          seasonKey: world.seasonKey || null,
-          archivedAt: new Date().toISOString(),
-          reason,
-          archiveDir,
-          world: { ...world, status: 'archived', endedAt: new Date().toISOString() },
-          domains,
-          users,
-          confluxes,
-          usage: usageRows,
-        },
-        { upsert: true },
-      );
-    }
+      const next = createWorldFromConfig(this.config);
+      await attachStoryPoolsFromCatalog(next, this);
+      this.guard.setLiveWorld(next.id);
+      await this.writeWorldUnlocked(next);
+      await this.sweepForeignUnlocked();
 
-    await this.col('domains').deleteMany({});
-    await this.col('users').deleteMany({});
-    await this.col('confluxes').deleteMany({});
-    await this.col('world').deleteMany({});
-    if (world?.id) {
-      await this.col('usage').deleteMany({ worldId: world.id });
-    }
-
-    const next = createWorldFromConfig(this.config);
-    await attachStoryPoolsFromCatalog(next, this);
-    await this.saveWorld(next);
-
-    return {
-      ok: true,
-      driver: 'mongo',
-      archivedWorldId,
-      newWorldId: next.id,
-      archiveDir,
-      world: next,
-    };
+      return {
+        ok: true,
+        driver: 'mongo',
+        archivedWorldId,
+        newWorldId: next.id,
+        archiveDir,
+        world: next,
+      };
+    });
   }
 
   async close() {

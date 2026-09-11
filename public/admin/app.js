@@ -282,6 +282,11 @@ async function refreshConfluxUi() {
         `<div class="muted small">[${esc(c.status || '?')}]${c.rematch ? ' · повтор' : ''}</div>` +
         `<strong>${esc(names)}</strong>` +
         `<div class="muted small">${esc(detail)}</div>` +
+        `<div class="row">` +
+        `<button type="button" data-cf-act="dock" data-id="${esc(c.id)}">Стыковать</button>` +
+        `<button type="button" data-cf-act="undock" data-id="${esc(c.id)}">Расстыковать</button>` +
+        `<button type="button" data-cf-act="crystallize" data-id="${esc(c.id)}">Кристаллизовать</button>` +
+        `</div>` +
         `</article>`
       );
     })
@@ -780,7 +785,7 @@ function renderOrders() {
   const d = view.domain;
   if (!d) return empty('города ещё нет');
   const rules = d.modifiers || d.state?.modifiers || [];
-  const directive = d.state?.confluxDirective || null;
+  const proxy = String(d.proxyText || d.state?.confluxDirective?.text || '').trim();
   const subjects = d.state?.priestOrders || [];
   const out = [
     block(
@@ -803,13 +808,8 @@ function renderOrders() {
         : empty('порядка нет'),
     ),
     block(
-      'Наказ на сопряжение',
-      directive
-        ? `<article class="ins-card"><p class="pre">${esc(directive.text || '')}</p>` +
-          `<div class="muted small">${esc(
-            [directive.office, directive.sinceLabel].filter(Boolean).join(' · '),
-          )}</div></article>`
-        : empty('наказа нет'),
+      'Доверенность',
+      proxy ? `<article class="ins-card"><p class="pre">${esc(proxy)}</p></article>` : empty('доверенности нет'),
     ),
   ];
   if (subjects.length) {
@@ -1188,6 +1188,23 @@ $('cityTabs').addEventListener('click', (e) => {
 $('btnRefresh').addEventListener('click', () => void refresh());
 $('btnConfluxRefresh').addEventListener('click', () => void refreshConfluxUi());
 $('confluxFilter').addEventListener('change', () => void refreshConfluxUi());
+$('confluxPanel').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-cf-act]');
+  if (!btn) return;
+  const act = btn.dataset.cfAct;
+  const id = btn.dataset.id;
+  if (!act || !id) return;
+  try {
+    await api(`/api/dev/conflux/${encodeURIComponent(id)}/${act}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    await refresh();
+  } catch (err) {
+    alert(err.message);
+  }
+});
 
 $('btnRulerChat').addEventListener('click', () => openChatWindow('ruler'));
 $('btnOnboardChat').addEventListener('click', () => openChatWindow('onboarding'));
@@ -1227,8 +1244,8 @@ $('btnConflux').addEventListener('click', async () => {
       body: JSON.stringify({
         domainIdA: $('confluxA').value,
         domainIdB: $('confluxB').value,
-        etaMonths: Number($('confluxEta').value),
-        durationMonths: Number($('confluxDuration').value),
+        prepDays: Number($('confluxPrepDays').value),
+        dockDays: Number($('confluxDockDays').value),
       }),
     });
     await refresh();

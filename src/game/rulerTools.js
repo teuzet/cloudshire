@@ -1,5 +1,5 @@
 /**
- * Тулы жреца: чтение города, дела, постоянный порядок, ломастер, информатор, память.
+ * Тулы жреца: чтение города, дела, постоянный порядок, ломастер, память.
  * Вызываются из GameApp.runRuler; submit_reply собирается отдельно.
  *
  * Месяцев здесь нет. Дело живёт в игровых днях, а наружу отдаются полосы:
@@ -17,16 +17,14 @@ import {
 import { askLoremaster } from './loremaster.js';
 import { newId } from './ids.js';
 import {
-  hydrateDomainFromConflux,
-  dehydrateDomainToConflux,
+  overlayConfluxView,
+  stripConfluxView,
+  stampNewBoardItems,
   sharePlotWithDomain,
   plotConcerns,
   cityKnowsPlot,
   findPlotByChronicleId,
-  leakedTracesForViewer,
-  takeIntelOffer,
 } from './confluxBoard.js';
-import { askInformant } from './informant.js';
 import {
   DURATION_SPEC,
   DIFFICULTY_SPEC,
@@ -59,13 +57,12 @@ import {
 } from './threats.js';
 import {
   cityRules,
-  confluxDirective,
-  clearConfluxDirective,
   isRuleDeed,
   markRuleDeed,
   parseRuleAction,
   findRule,
-  setConfluxDirective,
+  proxyText,
+  setProxyText,
 } from './cityRules.js';
 import { applyPriestNotifyChange, notifySettings, setQuietHours } from './notify.js';
 import { applyCrossIslandJudged, remainingWindowBand } from './deedConflux.js';
@@ -230,29 +227,29 @@ export function rulerReplyCommitError({
         'и убери из речи обещание долгого дела.',
     };
   }
-  if (commitment === 'directive' && !succeeded('set_conflux_directive')) {
+  if (commitment === 'proxy' && !succeeded('set_proxy')) {
     return {
-      error: 'directive_missing',
+      error: 'proxy_missing',
       message:
-        'commitment=directive, но set_conflux_directive не выполнен. Прими наказ через tool или смени commitment. ' +
-        'Постоянное правило города — это не наказ: оно заводится declare_process с rule, commitment=process.',
+        'commitment=proxy, но set_proxy не выполнен. Прими доверенность через tool или смени commitment. ' +
+        'Постоянное правило города — это не доверенность: оно заводится declare_process с rule, commitment=process.',
     };
   }
-  if (commitment === 'revoked' && !succeeded('revoke_process', 'set_conflux_directive')) {
+  if (commitment === 'revoked' && !succeeded('revoke_process', 'set_proxy')) {
     return {
       error: 'revoke_missing',
       message:
-        'commitment=revoked, но отмена не выполнена. Сверни дело (revoke_process), снимите наказ ' +
-        '(set_conflux_directive с clear=true) или отмените правило (declare_process с rule и ruleAction=revoke, ' +
+        'commitment=revoked, но отмена не выполнена. Сверни дело (revoke_process), сними доверенность ' +
+        '(set_proxy с clear=true) или отмените правило (declare_process с rule и ruleAction=revoke, ' +
         'тогда commitment=process), либо смени commitment.',
     };
   }
   if (commitment === 'clarify') {
-    if (succeeded('declare_process', 'update_process', 'set_conflux_directive')) {
+    if (succeeded('declare_process', 'update_process', 'set_proxy')) {
       return {
         error: 'clarify_after_act',
         message:
-          'Дело или наказ уже заведены этим ходом. commitment=process или directive, не clarify.',
+          'Дело или доверенность уже заведены этим ходом. commitment=process или proxy, не clarify.',
       };
     }
     if (requestKind === 'order_impossible') {
@@ -350,11 +347,11 @@ export function submitReplyTool(turn, character) {
         },
         commitment: {
           type: 'string',
-          enum: ['none', 'process', 'directive', 'revoked', 'refused', 'clarify'],
+          enum: ['none', 'process', 'proxy', 'revoked', 'refused', 'clarify'],
           description:
             'Что сделано этим ходом: process (declare_process/update_process, в том числе правило через rule), ' +
-            'directive (принял наказ на сопряжение), ' +
-            'revoked (свернул дело или снял наказ), refused (честно отказал или отговорил), ' +
+            'proxy (принял или снял доверенность), ' +
+            'revoked (свернул дело или снял доверенность), refused (честно отказал или отговорил), ' +
             'clarify (приказ есть, но воля неясна — спросил, дело ещё не заводил), ' +
             'none (действий не требовалось).',
         },
@@ -387,11 +384,12 @@ export function submitReplyTool(turn, character) {
 export function buildRulerTools(domain, storage, character, ctx) {
   const save = async () => {
     if (ctx.conflux) {
-      dehydrateDomainToConflux(domain, ctx.conflux);
+      stampNewBoardItems(domain, ctx.conflux);
+      stripConfluxView(domain);
       await storage.saveDomain(domain);
       if (ctx.partner) await storage.saveDomain(ctx.partner);
       await storage.saveConflux(ctx.conflux);
-      hydrateDomainFromConflux(domain, ctx.conflux, { mode: 'ruler', partner: ctx.partner });
+      overlayConfluxView(domain, ctx.conflux, ctx.partner);
       return;
     }
     await storage.saveDomain(domain);
@@ -461,16 +459,13 @@ export function buildRulerTools(domain, storage, character, ctx) {
             kind: t.kind,
             text: t.text,
             remaining: DURATION_SPEC[normalizeDurationBand(t.remainingBand)].label,
+            ending: t.endingText || null,
           })),
           dread: dreadFlag(p, day),
           foreign: Boolean(ctx.conflux && !p.isMainConflux && !plotConcerns(p, domain.id)),
         })),
         standingRules: cityRules(domain).map((m) => ({ id: m.id, text: m.text, since: m.sinceLabel })),
-        confluxDirective: confluxDirective(domain),
-        leakedTraces:
-          ctx.conflux && ctx.partner
-            ? leakedTracesForViewer(ctx.conflux, domain.id, [domain, ctx.partner])
-            : [],
+        proxyText: proxyText(domain) || null,
       }),
     },
     !domain.state?.patronName && {
@@ -613,55 +608,6 @@ export function buildRulerTools(domain, storage, character, ctx) {
         };
       },
     },
-    ctx.conflux && ctx.partner && {
-      name: 'consult_informant',
-      description:
-        'Спросить информатора о соседнем острове при сопряжении. Он знает только уже известные вам факты и честно говорит «неизвестно».',
-      parameters: {
-        type: 'object',
-        required: ['questions'],
-        properties: {
-          questions: {
-            type: 'array',
-            items: { type: 'string' },
-            description: '1–5 вопросов о соседнем городе',
-          },
-        },
-      },
-      handler: async ({ questions }) => {
-        const result = await askInformant({
-          config: ctx.config,
-          runtime: ctx.runtime,
-          conflux: ctx.conflux,
-          viewer: domain,
-          partner: ctx.partner,
-          questions: questions || [],
-        });
-        const traces = leakedTracesForViewer(ctx.conflux, domain.id, [domain, ctx.partner]);
-        const knownHit = (result.answers || []).some((a) => a && a.known);
-        const freshOffers = [];
-        if (knownHit) {
-          for (const t of traces) {
-            if (takeIntelOffer(ctx.conflux, domain.id, t.plotId || t.chronicleId)) {
-              freshOffers.push(t);
-            }
-          }
-        }
-        if (freshOffers.length) await save();
-        return {
-          ok: true,
-          answers: result.answers,
-          summary: result.summary,
-          leakedTraces: traces,
-          hint:
-            'Перескажи своими словами. Если informant сказал «неизвестно» — так и скажи покровителю. ' +
-            'Предположение помечай как догадку, не как факт.' +
-            (freshOffers.length
-              ? ' Покровитель задел чужой след, сюжетной карточки ещё нет. ОДИН раз предложи узнать больше: declare_process с intel=true и chronicleId из leakedTraces. Не предлагай это каждый ход и не называй чужое дело по титулу.'
-              : ''),
-        };
-      },
-    },
     {
       name: 'declare_process',
       description:
@@ -741,8 +687,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
           chronicleId: {
             type: 'string',
             description:
-              'id просочившейся записи из leakedTraces[] или известной хроники соседа. ' +
-              'Для intel=true, если карточки сюжета ещё нет — передай chronicleId вместо plotId.',
+              'id известной хроники соседа. Для intel=true, если карточки сюжета ещё нет — передай chronicleId вместо plotId.',
           },
           intel: {
             type: 'boolean',
@@ -906,24 +851,13 @@ export function buildRulerTools(domain, storage, character, ctx) {
           if (!targetPlot) {
             return toolFail(
               'intel_needs_target',
-              'Для intel=true нужен plotId известной нити или chronicleId просочившейся записи.',
+              'Для intel=true нужен plotId нити или chronicleId известной записи.',
             );
           }
           if (cityKnowsPlot(targetPlot, domain.id)) {
             return toolFail(
               'intel_already_known',
               'Эта история уже известна городу как линия. intel не нужен — заведи обычное дело, если вмешиваетесь.',
-            );
-          }
-          const traces = leakedTracesForViewer(ctx.conflux, domain.id, partners);
-          const heard =
-            traces.some((t) => t.plotId === targetPlot.id) ||
-            traces.some((t) => String(t.chronicleId) === String(chronicleId || '')) ||
-            Boolean(chronicleId && findPlotByChronicleId(ctx.conflux, String(chronicleId), partners));
-          if (!heard) {
-            return toolFail(
-              'plot_unknown',
-              'Город не знает эту нить. Для разведки возьми chronicleId из leakedTraces.',
             );
           }
         }
@@ -1113,55 +1047,43 @@ export function buildRulerTools(domain, storage, character, ctx) {
       },
     },
     {
-      name: 'set_conflux_directive',
+      name: 'set_proxy',
       description:
-        'Наказ на сопряжение: «при каждой стыковке делайте X». Не дело и не постоянное правило — ' +
-        'наказ ждёт следующей стыковки и тогда сам заводит поручение, забирая сановника. ' +
-        'Постоянное правило города — declare_process с rule. Разовое поручение на эту встречу — обычное declare_process. ' +
-        'clear=true — снять прежний наказ.',
+        'Доверенность правителя: свободный текст, как городу вести себя при сопряжении и на ходе нити. ' +
+        'Не дело и не постоянное правило. Сановник может по ней действовать или нет. ' +
+        'clear=true — снять прежнюю доверенность.',
       parameters: {
         type: 'object',
         properties: {
           text: {
             type: 'string',
-            description: 'Что делать при каждой стыковке. Одна ясная фраза от лица города.',
+            description: 'Как городу себя вести. Одна ясная фраза от лица правителя.',
           },
-          office: {
-            type: 'string',
-            description:
-              'Должность сановника, которого наказ заберёт (treasurer/marshal/keeper/chancellor). ' +
-              'Пусто — город выберет свободного сам.',
-          },
-          clear: { type: 'boolean', description: 'true — отменить действующий наказ.' },
+          clear: { type: 'boolean', description: 'true — отменить действующую доверенность.' },
         },
       },
-      handler: async ({ text, office = null, clear = false }) => {
+      handler: async ({ text, clear = false }) => {
         if (clear) {
-          const dropped = clearConfluxDirective(domain);
-          if (!dropped.ok) {
-            return toolFail('directive_not_found', 'Наказа на сопряжение и не было. Скажи об этом покровителю.');
+          if (!proxyText(domain)) {
+            return toolFail('proxy_not_found', 'Доверенности и не было. Скажи об этом покровителю.');
           }
+          setProxyText(domain, '');
           await save();
           return {
             ok: true,
-            cleared: dropped.directive,
-            hint: 'В речи: наказ снят, при встрече будете решать заново. Коротко, без механики.',
+            cleared: true,
+            hint: 'В речи: доверенность снята. Коротко, без механики.',
           };
         }
-        const res = setConfluxDirective(domain, { text, office });
-        if (!res.ok) {
-          return toolFail(
-            'directive_empty',
-            'Пустой наказ. Сформулируй, что город делает при каждой стыковке, и вызови снова.',
-          );
+        const res = setProxyText(domain, text);
+        if (!res.proxyText) {
+          return toolFail('proxy_empty', 'Пустая доверенность. Сформулируй, как городу себя вести, и вызови снова.');
         }
         await save();
         return {
           ok: true,
-          directive: res.directive,
-          hint:
-            'В речи: наказ принят и будет исполнен при следующей стыковке. Предупреди, что сановник тогда ' +
-            'оторвётся от своего дела — прежнее встанет на паузу, и ты об этом доложишь. Разовое дело сейчас не заводи.',
+          proxyText: res.proxyText,
+          hint: 'В речи: доверенность принята. Не обещай, что город обязательно вмешается — сановник решит сам.',
         };
       },
     },

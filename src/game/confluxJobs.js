@@ -3,11 +3,16 @@
  * Берутся из общей очереди мира; handler грузит оба домена.
  */
 
-import { dueJobs, claimJob, completeJob, failJob } from './scheduler.js';
+import { dueJobs, claimJob, completeJob, failJob, LockSet } from './scheduler.js';
 import { findActiveConfluxForDomain, dockConfluxNow, undockConfluxNow } from './conflux.js';
 import { normalizeDomain } from './models.js';
 import { writePairChronicle, confluxEvent } from './confluxCanon.js';
 import { ensurePlotStatBudget } from './plotlines.js';
+import { createThreat, attachThreat } from './threats.js';
+import { resyncThreatJobs } from './worldLoop.js';
+import { pairPrimaryId } from './confluxTime.js';
+import { PARTING_ENDING_ID } from './confluxBoard.js';
+import { maybeNudgeProxy } from './proxyJudge.js';
 import { getLogger } from '../log.js';
 
 export const PAIR_JOB_KINDS = [
@@ -111,26 +116,61 @@ export async function crystallizeContainer({ runtime, conflux, domains, world, d
   plot.gravity = draft.gravity;
   plot.maxDepth = 2;
   if (draft.synopsis) plot.synopsis = draft.synopsis;
-  plot.endings = (draft.endings.length ? draft.endings : ['мирный разъезд', 'ссора у прохода', 'общий убыток']).map(
-    (text, i) => ({
+  const keptEndings = (plot.endings || []).filter((e) => e.id === PARTING_ENDING_ID);
+  const extraTexts = (draft.endings.length ? draft.endings : ['ссора у прохода', 'общий убыток']).slice(0, 3);
+  plot.endings = [
+    ...keptEndings,
+    ...extraTexts.map((text, i) => ({
       id: `end_${i}`,
-      kind: i === 0 ? 'GOOD_ENDING' : i === 1 ? 'NEUTRAL_ENDING' : 'BAD_ENDING',
+      kind: i === 0 ? 'GOOD_ENDING' : 'BAD_ENDING',
       text,
-    }),
+    })),
+  ];
+  const keptThreats = (plot.threats || []).filter(
+    (t) => t.endingId === PARTING_ENDING_ID || t.eventKind === 'dock_meet',
   );
-  plot.threats = (draft.threats.length ? draft.threats : ['проход потребует крови или платы']).map((text, i) => ({
-    id: `thr_${i}`,
-    text,
-    known: true,
-    dueDay: day + 30,
-  }));
+  plot.threats = keptThreats;
+  const threatTexts = (draft.threats.length ? draft.threats : ['проход потребует крови или платы', 'на берегу назреет ссора']).slice(
+    0,
+    3,
+  );
+  while (threatTexts.length < 2) threatTexts.push('на проходе случится столкновение');
+  for (const text of threatTexts) {
+    attachThreat(
+      plot,
+      createThreat({
+        plot,
+        text,
+        outcome: 'harm',
+        valence: 'bad',
+        known: true,
+        day,
+        band: 'SEASON',
+      }),
+    );
+  }
   if (plot.stats && typeof plot.stats === 'object') {
     delete plot.stats.budget;
     delete plot.stats.remaining;
   }
   ensurePlotStatBudget(plot);
-  void world;
+  if (world && domains?.length) {
+    const primary = domains.find((d) => d.id === pairPrimaryId(conflux)) || domains[0];
+    resyncThreatJobs(world, primary, plot);
+  }
   return plot;
+}
+
+function pairHasPlayerDeeds(conflux, domains = []) {
+  if ((conflux?.touches || []).some((t) => t.kind === 'deed' || t.deedId)) return true;
+  for (const d of domains) {
+    for (const p of d.state?.pendingActions || []) {
+      if (!p.crossIsland && !p.targetDomainId && !p.confluxId) continue;
+      if (p.status && p.status !== 'active' && p.status !== 'paused') continue;
+      return true;
+    }
+  }
+  return false;
 }
 
 export async function maybeCrystallizeFromTouch({
@@ -168,6 +208,17 @@ const HANDLERS = {
       domainId: d.id,
       fact: (d.lore || []).slice(-1)[0] || { text: out.contact?.description || 'Острова сошлись.' },
     }));
+    await maybeNudgeProxy({
+      runtime: ctx.runtime,
+      config: ctx.config,
+      world: ctx.world,
+      day: ctx.day,
+      domains,
+      trigger: 'dock',
+      context: out.contact?.description || 'Острова сошлись.',
+      rng: ctx.rng,
+      log: ctx.log,
+    });
     await savePair(ctx.storage, conflux, domains);
     return { occasion: 'сопряжение', confluxId: conflux.id, contact: out.contact, domains, facts };
   },
@@ -200,6 +251,7 @@ const HANDLERS = {
     const { conflux, domains } = loaded;
     if (conflux.status !== 'docked') return { skipped: 'not_docked' };
     if ((conflux.touches || []).length) return { skipped: 'already_touched' };
+    if (pairHasPlayerDeeds(conflux, domains)) return { skipped: 'has_deeds' };
     recordTouch(conflux, { day: ctx.day, kind: 'seed' });
     await crystallizeContainer({
       runtime: ctx.runtime,
@@ -265,6 +317,7 @@ export async function drainConfluxJobs({
   const kinds = new Set(PAIR_JOB_KINDS);
   const due = dueJobs(world, day).filter((j) => kinds.has(j.kind));
   const events = [];
+  const locks = new LockSet();
   for (const job of due) {
     if (!claimJob(job)) continue;
     const handler = HANDLERS[job.kind];
@@ -272,6 +325,12 @@ export async function drainConfluxJobs({
       completeJob(job, 'unknown_kind');
       continue;
     }
+    const loaded = await loadPair(storage, job.payload?.confluxId);
+    const keys = [
+      ...((loaded?.conflux?.domainIds || []).map(String)),
+      job.payload?.confluxId ? `pair:${job.payload.confluxId}` : `job:${job.id}`,
+    ];
+    const release = await locks.acquire(keys);
     try {
       const result = await handler({ config, runtime, storage, world, day, rng, log, job });
       completeJob(job, result?.skipped || 'ok');
@@ -279,6 +338,8 @@ export async function drainConfluxJobs({
     } catch (err) {
       failJob(job, err.message);
       log.warn('conflux.job_failed', { kind: job.kind, error: err.message });
+    } finally {
+      release();
     }
   }
   return events;

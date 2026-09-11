@@ -390,6 +390,50 @@ test('сработавшая беда ложится в хронику прош�
   assert.match(calls[0], /Пыль забьёт водосборный сток/);
 });
 
+test('принудительный исход ставится как сказали, без броска', async () => {
+  const plot = makePlot();
+  const domain = makeDomain({ plots: [plot] });
+  domain.stats.prosperity = 95;
+  const world = makeWorld();
+  attachDeed(domain, plot, { plotEngagement: 'DIRECT', difficulty: 'TRIVIAL' });
+  const res = await resolveDeedEvent({
+    config,
+    runtime: noRuntime,
+    domain,
+    world,
+    day: 130,
+    processId: 'proc1',
+    rng: () => 0.99,
+    forcedFinish: 'fail',
+    log: silentLog,
+  });
+  assert.equal(res.outcome.finish, 'fail');
+  assert.equal(plot.failCount, 1);
+  assert.equal(plot.depth, 0);
+  assert.equal(domain.state.pendingActions[0].status, 'failed');
+});
+
+test('принудительный исход снимает паузу', async () => {
+  const plot = makePlot();
+  const domain = makeDomain({ plots: [plot] });
+  const world = makeWorld();
+  const process = attachDeed(domain, plot, { plotEngagement: 'DIRECT' });
+  process.status = 'paused';
+  const res = await resolveDeedEvent({
+    config,
+    runtime: noRuntime,
+    domain,
+    world,
+    day: 130,
+    processId: process.id,
+    forcedFinish: 'ok',
+    log: silentLog,
+  });
+  assert.equal(res.skipped, undefined);
+  assert.equal(res.outcome.finish, 'ok');
+  assert.equal(process.status, 'resolved');
+});
+
 test('дело, которого нет или которое не идёт, пропускается', async () => {
   const plot = makePlot();
   const domain = makeDomain({ plots: [plot] });
@@ -462,10 +506,18 @@ test('последняя жизнь кончилась — история зак
   const world = makeWorld();
   const threat = attachThreat(
     plot,
-    createThreat({ plot, text: 'Северное крыло рухнуло', band: 'WEEKS', day: 100, rng: () => 0.5 }),
+    createThreat({
+      plot,
+      text: 'Северное крыло рухнет на мостки',
+      band: 'WEEKS',
+      day: 100,
+      endingId: 'e1',
+      rng: () => 0.5,
+    }),
   );
+  const calls = [];
   const res = await fireThreatEvent({
-    runtime: noRuntime,
+    runtime: chronicleRuntime('Северное крыло рухнуло, и с ним люди.', calls),
     domain,
     world,
     day: 140,
@@ -477,6 +529,10 @@ test('последняя жизнь кончилась — история зак
   assert.equal(res.closed, true);
   assert.equal(plot.ending.kind, 'BAD_ENDING');
   assert.equal(domain.plotlines.length, 0);
+  assert.match(calls[0], /Северное крыло рухнет на мостки/);
+  assert.match(calls[0], /Северное крыло рушится вместе с людьми/);
+  assert.match(calls[0], /не копируй дословно/);
+  assert.match(calls[0], /до 640 символов/);
 });
 
 test('сработавшая беда отодвигает выжившие, а не глушит их совсем', async () => {

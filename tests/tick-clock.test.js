@@ -37,16 +37,19 @@ test('следующий тик на границе часов, не через 
   assert.equal(fromLate.getHours(), 0);
 });
 
-test('новый мир и wipe сажают календарь на часы сервера', () => {
+test('новый мир и wipe сажают календарь на момент запуска, не на слот сегодняшней полуночи', () => {
   const world = createWorldFromConfig({ world: { id: 't', name: 'Т' }, ...cfg }, { now: at(0, 15) });
   assert.equal(world.tickIndex, 0);
-  assert.equal(world.gameDate.label, 'Год 1, месяц 1');
+  assert.equal(world.dayIndex, 0);
+  assert.equal(world.gameDate.label, 'Год 1, месяц 1, день 1');
   assert.equal(new Date(world.scheduler.nextTickAt).getHours(), 2);
 
   const afternoon = {};
   applyClockAlignedCalendar(afternoon, cfg, at(15, 0));
-  assert.equal(afternoon.tickIndex, 7);
-  assert.equal(afternoon.gameDate.label, 'Год 1, месяц 8');
+  assert.equal(afternoon.tickIndex, 0);
+  assert.equal(afternoon.dayIndex, 0);
+  assert.equal(afternoon.gameDate.label, 'Год 1, месяц 1, день 1');
+  assert.equal(afternoon.epochAt, new Date(at(15, 0)).toISOString());
   assert.equal(new Date(afternoon.scheduler.nextTickAt).getHours(), 16);
 });
 

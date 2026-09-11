@@ -31,6 +31,7 @@ import { formatWorldContractForPrompt } from './worldContract.js';
 import { formatFrozenConceptForPrompt, openingLoreFromConcept } from './genesisConcept.js';
 import { axesSnapshotTags, normalizeAxesState } from './genesisAxes.js';
 import { generateOfficers, requestCityStrengths, formatOfficerIntroSpeech } from './officers.js';
+import { stampGenesisConfluxBan } from './confluxTime.js';
 
 function aspectDefs(config) {
   return config.genesis.aspects || [];
@@ -749,6 +750,7 @@ export async function generateDomain({
     genesisSeed: axesState,
     playerDirectives,
   });
+  stampGenesisConfluxBan(domain, { config });
   syncFaith(domain);
 
   if (forcedPatronName) {

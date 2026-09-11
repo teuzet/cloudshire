@@ -339,6 +339,13 @@ button.danger:hover { border-color: #d98080; }
   padding: 0.32rem 0.5rem;
 }
 .seed-form button { padding: 0.35rem 0.75rem; font-size: 0.8rem; }
+.seed-form .seed-mystery {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+  padding-bottom: 0.35rem;
+}
+.seed-form .seed-mystery input { margin: 0; accent-color: var(--accent); }
 
 .drop-btn {
   font: inherit;
@@ -365,6 +372,44 @@ button.danger:hover { border-color: #d98080; }
 }
 .bless-btn:hover { background: rgba(201, 169, 97, 0.2); }
 .bless-btn:disabled { opacity: 0.5; cursor: default; }
+
+.force-btn {
+  font: inherit;
+  font-size: 0.72rem;
+  color: var(--ink);
+  background: rgba(201, 169, 97, 0.1);
+  border: 1px solid rgba(201, 169, 97, 0.4);
+  border-radius: 999px;
+  padding: 0.12rem 0.5rem;
+  cursor: pointer;
+}
+.force-btn.danger {
+  color: #e0a1a1;
+  background: rgba(109, 58, 58, 0.15);
+  border-color: #6d3a3a;
+}
+.force-btn:hover { border-color: var(--accent); }
+.force-btn.danger:hover { border-color: #d98080; }
+.force-btn:disabled { opacity: 0.5; cursor: default; }
+
+ul.threats li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.5rem;
+}
+
+ul.plot-chron {
+  list-style: none;
+  padding-left: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+ul.plot-chron li {
+  padding: 0.35rem 0.5rem;
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 6px;
+}
 
 .kvs { display: grid; gap: 0.2rem; }
 

@@ -21,8 +21,8 @@ async function main() {
     tickLog.info('tick.start', { reason });
     const result = await runWorldTick({ config, runtime, storage, app });
     tickLog.info('tick.done', {
-      tickIndex: result.world.tickIndex,
-      domains: result.results.length,
+      tickIndex: result.world?.tickIndex ?? result.tickIndex ?? null,
+      domains: result.results?.length ?? 0,
     });
     return result;
   }

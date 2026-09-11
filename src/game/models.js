@@ -79,8 +79,6 @@ export function normalizeDomain(domain) {
   if (typeof domain.proxyText !== 'string') {
     domain.proxyText = domain.proxyText || domain.state?.confluxDirective?.text || '';
   }
-  if (!domain.statFloors || typeof domain.statFloors !== 'object') domain.statFloors = {};
-  if (!domain.statCaps || typeof domain.statCaps !== 'object') domain.statCaps = {};
   if (!domain.activity || typeof domain.activity !== 'object') {
     domain.activity = {
       activeMsSolo: 0,
@@ -365,7 +363,7 @@ export function newCharactersSchema({ withCity = false } = {}) {
     },
     ageYears: {
       type: 'integer',
-      description: 'Возраст в полных годах сейчас. Месяц рождения ставит движок и сам сдвигает возраст.',
+      description: 'Возраст в полных годах сейчас. Год и месяц рождения ставит движок.',
     },
     role: {
       type: 'string',
@@ -646,37 +644,6 @@ export function newsChronicleEntries(entries = []) {
     const tags = f.tags || [];
     return tags.includes('chronicle') && !tags.includes('fact');
   });
-}
-
-/**
- * 1 tick = 1 game month. 12 months = 1 game year (= 1 real day at 2h ticks).
- */
-export function advanceGameDate(world) {
-  const prevTick = world.tickIndex || 0;
-  let year = world.gameDate?.year;
-  let month = world.gameDate?.month;
-
-  if (year == null || month == null) {
-    year = Math.floor(prevTick / 12) + 1;
-    month = (prevTick % 12) + 1;
-  }
-
-  month += 1;
-  if (month > 12) {
-    month = 1;
-    year += 1;
-  }
-
-  const tick = prevTick + 1;
-  world.tickIndex = tick;
-  world.gameDate = {
-    year,
-    month,
-    label: `Год ${year}, месяц ${month}`,
-    tick,
-  };
-  world.updatedAt = new Date().toISOString();
-  return world.gameDate;
 }
 
 export function assembleDescription(aspects = {}, aspectDefs = null) {

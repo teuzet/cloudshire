@@ -1730,7 +1730,7 @@ export function judgePlotSeed(domain, draft, { storyType, depth = 1 } = {}) {
   return null;
 }
 
-/** Разгадка тайны не для доски, речи и инспектора. */
+/** Разгадка тайны не для доски и речи. Инспектор тестового клиента забирает поля сам. */
 export function stripPlotSecrets(plot) {
   if (!plot || typeof plot !== 'object') return plot;
   const {

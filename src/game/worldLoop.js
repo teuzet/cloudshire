@@ -52,6 +52,7 @@ import {
   formatThreatPrompt,
   plotChronicleTail,
   writeChronicle,
+  CHRONICLE_FINALE_MAX,
 } from './chronicler.js';
 import { reconcilePlot } from './reconciler.js';
 import { expirePauses } from './reconcile.js';
@@ -212,14 +213,33 @@ export async function resolveDeedEvent({
   conflux = null,
   partner = null,
   storage = null,
+  forcedFinish = null,
 } = {}) {
   const log = (parentLog || getLogger()).child({ scope: 'loop.deed', domainId: domain?.id, processId });
   const process = findProcess(domain, processId);
   if (!process) return { skipped: 'not_found' };
-  if (process.status !== 'active') return { skipped: `not_active:${process.status}` };
+  const forced = ['fail', 'ok', 'crit'].includes(String(forcedFinish || ''))
+    ? String(forcedFinish)
+    : null;
+  if (process.status !== 'active' && !(forced && process.status === 'paused')) {
+    return { skipped: `not_active:${process.status}` };
+  }
 
   normalizeDeed(process);
-  const rolled = rollDeedFinish(domain, process, { config, rng });
+  const rolled = forced
+    ? {
+        finish: forced,
+        rolled: forced,
+        blessed: false,
+        impossible: false,
+        margin: null,
+        curveInput: null,
+        paceRatio: 1,
+        roll: null,
+        weights: null,
+        forced: true,
+      }
+    : rollDeedFinish(domain, process, { config, rng });
   finishDeed(process, { day, finish: rolled.finish, blessed: rolled.blessed });
   releaseOfficerProcess(domain, process);
   const outcome = deedOutcome(process, { finish: rolled.finish, day, roll: rolled.roll });
@@ -352,9 +372,10 @@ export async function fireThreatEvent({
   threatId,
   rng = Math.random,
   log: parentLog,
+  plot: givenPlot = null,
 } = {}) {
   const log = (parentLog || getLogger()).child({ scope: 'loop.threat', domainId: domain?.id, plotId });
-  const plot = findPlotline(domain, plotId);
+  const plot = givenPlot || findPlotline(domain, plotId);
   if (!plot) return { skipped: 'plot_gone' };
   const threat = findThreat(plot, threatId);
   if (!threat || threat.status !== 'live') return { skipped: 'threat_not_live' };
@@ -366,10 +387,13 @@ export async function fireThreatEvent({
   // Текст угрозы написан в будущем времени: это предсказание, которое движок
   // держал до срока. В летопись оно должно лечь уже случившимся.
   const occasion = res.kind === 'resolution' ? 'разрешение' : 'угроза';
+  const badClose = Boolean(res.closes) && res.kind !== 'resolution';
+  const entryMax = badClose ? CHRONICLE_FINALE_MAX : undefined;
   const written = await writeChronicle({
     runtime,
     domain,
     occasion,
+    maxChars: entryMax,
     prompt: formatThreatPrompt({
       plot,
       threat,
@@ -378,6 +402,8 @@ export async function fireThreatEvent({
       severity: res.severity,
       chronicleTail: tail,
       dateLabel: gameDateFromDay(day).label,
+      ending: plot.ending || null,
+      entryMax,
     }),
     log,
   });

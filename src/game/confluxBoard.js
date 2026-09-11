@@ -6,6 +6,7 @@
 import { createPlotline, clipPlotText, plotScale, PLOT_SUMMARY_MAX, PLOT_TITLE_MAX, refreshPlotAwareness } from './plotlines.js';
 import { newId } from './ids.js';
 import { createLoreFact } from './models.js';
+import { attachThreat, createThreat } from './threats.js';
 
 function clamp100(n, fallback = 0) {
   const v = Number(n);
@@ -560,15 +561,6 @@ export function stripConfluxView(domain) {
   return domain;
 }
 
-/**
- * Собрать рабочую доску на домене. Нити не переезжают: контейнер и известное
- * соседа накладываются поверх, хранение остаётся у хозяина.
- */
-export function hydrateDomainFromConflux(domain, conflux, { mode = 'month', partner = null } = {}) {
-  void mode;
-  return overlayConfluxView(domain, conflux, partner);
-}
-
 export function stampNewBoardItems(domain, conflux) {
   if (!domain || !conflux) return;
   normalizeConfluxBoard(conflux);
@@ -588,18 +580,11 @@ export function stampNewBoardItems(domain, conflux) {
   }
 }
 
-/** Снять наложенный вид. Объекты нитей остаются у хозяина. */
-export function dehydrateDomainToConflux(domain, conflux) {
-  if (!domain || !conflux) return;
-  stampNewBoardItems(domain, conflux);
-  stripConfluxView(domain);
-}
-
-export async function hydrateWithPartner(storage, domain, conflux, { mode = 'ruler' } = {}) {
+export async function overlayWithPartner(storage, domain, conflux) {
   if (!domain || !conflux) return { partner: null };
   const partnerId = otherDomainId(conflux, domain.id);
   const partner = partnerId && storage ? await storage.getDomain(partnerId) : null;
-  hydrateDomainFromConflux(domain, conflux, { mode, partner });
+  overlayConfluxView(domain, conflux, partner);
   return { partner };
 }
 
@@ -637,6 +622,66 @@ export function createEmptyContainer({ a, b, conflux, world, config }) {
   plot.stats.remaining = 0;
   refreshPlotAwareness(plot);
   return plot;
+}
+
+export const PARTING_ENDING_ID = 'end_parting';
+export const PARTING_ENDING_TEXT = 'Острова разошлись, всё вернулось как было.';
+export const PARTING_THREAT_TEXT = 'Острова разойдутся, и всё вернётся как было.';
+export const DOCK_MEET_EVENT = 'dock_meet';
+export const DOCK_MEET_TEXT = 'Острова сошлись.';
+
+/** Нейтральная концовка разъезда и обязательство, которое её вызывает. */
+export function seedPartingClock(plot, { day = 0, dockEndDay } = {}) {
+  if (!plot) return null;
+  plot.endings = Array.isArray(plot.endings) ? plot.endings : [];
+  if (!plot.endings.some((e) => e.id === PARTING_ENDING_ID)) {
+    plot.endings.unshift({
+      id: PARTING_ENDING_ID,
+      kind: 'NEUTRAL_ENDING',
+      text: PARTING_ENDING_TEXT,
+    });
+  }
+  const existing = (plot.threats || []).find((t) => t.endingId === PARTING_ENDING_ID);
+  if (existing) {
+    if (dockEndDay != null) existing.dueDay = Math.round(Number(dockEndDay));
+    return existing;
+  }
+  const due = dockEndDay != null ? Math.round(Number(dockEndDay)) : Math.round(Number(day) || 0) + 1;
+  return attachThreat(
+    plot,
+    createThreat({
+      plot,
+      text: PARTING_THREAT_TEXT,
+      outcome: 'neutral',
+      valence: 'neutral',
+      known: true,
+      day,
+      dueDay: due,
+      endingId: PARTING_ENDING_ID,
+      band: 'YEAR',
+    }),
+  );
+}
+
+/** Обязательство стыковки: по нему пишутся первая хроника и описание прохода. */
+export function seedDockMeet(plot, { day = 0 } = {}) {
+  if (!plot) return null;
+  const existing = (plot.threats || []).find((t) => t.eventKind === DOCK_MEET_EVENT);
+  if (existing) return existing;
+  return attachThreat(
+    plot,
+    createThreat({
+      plot,
+      text: DOCK_MEET_TEXT,
+      outcome: 'neutral',
+      valence: 'neutral',
+      known: true,
+      day,
+      dueDay: Math.round(Number(day) || 0),
+      band: 'DAYS',
+      eventKind: DOCK_MEET_EVENT,
+    }),
+  );
 }
 
 export function createMainConfluxPlot(opts) {
@@ -749,13 +794,16 @@ export async function returnBoardsOnUndock(conflux, domainsById, { decideContinu
 }
 
 export function approachingAnnounceText(domain, partner, remaining, rematch) {
+  const months = Number(remaining);
   const when =
     remaining == null || remaining === ''
-      ? 'Сопряжение уже неизбежно.'
-      : typeof remaining === 'number'
-        ? remaining <= 0
+      ? ''
+      : Number.isFinite(months)
+        ? months <= 0
           ? 'Сопряжение уже в эту пору.'
-          : `До сопряжения по приметам — примерно ${remaining} мес.`
+          : months === 1
+            ? 'До сопряжения около месяца.'
+            : `До сопряжения примерно ${Math.round(months)} мес.`
         : `До сопряжения ${remaining}.`;
   return [
     `На горизонте чужой летающий остров — город «${partner.name}».`,
@@ -771,7 +819,7 @@ export function approachMonthText(partnerName, remaining, rematch) {
   const rematchHint = rematch ? ' Это повторный конфлюкс — острова уже сходились.' : '';
   return (
     `Остров соседа («${partnerName}») ближе: в разрывах тумана уже угадывают край чужой земли. ` +
-    `До сопряжения по приметам осталось около ${remaining} мес.${rematchHint}`
+    `До сопряжения осталось около ${remaining} мес.${rematchHint}`
   );
 }
 

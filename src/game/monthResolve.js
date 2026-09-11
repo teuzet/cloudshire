@@ -37,7 +37,6 @@ import {
   rehomeUnrelatedOnDomain,
 } from './plotEngine.js';
 import { beatPlot, quietMonth, keepStories, fadeQuietPlot, plantStakedStory } from './storyteller.js';
-import { confluxDirective, fireConfluxDirective } from './cityRules.js';
 import { decideMonthSeed, applyMonthSeedTemps } from './seedChannels.js';
 import { resolveSuspenseLegacy } from './legacyResolver.js';
 import { scoreChronicleStats, factsForStatJudge } from './statJudge.js';
@@ -48,8 +47,9 @@ import { maybeRewriteCityGenesis } from './genesisRewrite.js';
 import { maybeRevealCanonicalUnknowns } from './unknownsReveal.js';
 import { realignFinishedOutcomes } from './plotAlign.js';
 import {
-  hydrateDomainFromConflux,
-  dehydrateDomainToConflux,
+  overlayConfluxView,
+  stampNewBoardItems,
+  stripConfluxView,
   maybeLeakChronicle,
   otherDomainId,
   copyChronicleToAwareCities,
@@ -79,7 +79,7 @@ export async function resolveDomainMonth({
   });
   const working = structuredClone(domain);
   normalizeDomain(working);
-  if (conflux) hydrateDomainFromConflux(working, conflux, { mode: 'month' });
+  if (conflux) overlayConfluxView(working, conflux, partner);
   normalizePlotlines(working, config);
   normalizeDomainProcesses(working, config);
   if (typeof working.population !== 'number') working.population = config.genesis.population.min;
@@ -92,38 +92,6 @@ export async function resolveDomainMonth({
   const flowAdds = [];
   const budget = createStatBudget(config);
   const day = Math.max(0, Math.round(Number(world?.tickIndex) || 0)) * DAYS_PER_MONTH;
-
-  // 0. Наказ на сопряжение: одна стыковка — одно поручение, не поток.
-  if (conflux?.status === 'docked' && confluxDirective(working)) {
-    const fired =
-      String(working.state?.confluxDirectiveFiredId || '') === String(conflux.id)
-        ? { ok: false, error: 'already_fired' }
-        : fireConfluxDirective(working, {
-            day,
-            partnerName: partner?.name || null,
-            plotId: (conflux.plotlines || []).find((p) => p?.isMainConflux)?.id || null,
-          });
-    if (fired.ok) {
-      working.state.confluxDirectiveFiredId = String(conflux.id);
-      const who = fired.officer ? `${fired.officer.title} ${fired.officer.name}` : 'город';
-      const paused = fired.paused ? ` Прежнее дело «${fired.paused.summary}» встало на паузу.` : '';
-      const fact = createLoreFact({
-        id: newId('lore'),
-        text: `По наказу на сопряжение ${who} взялся за дело: ${fired.process.summary}.${paused}`,
-        tags: ['chronicle', 'conflux'],
-        gameDateLabel: world.gameDate?.label,
-        tick: world.tickIndex,
-        day,
-        author: 'engine:directive',
-        importance: 'major',
-        relatedPendingId: fired.process.id,
-      });
-      working.lore = working.lore || [];
-      working.lore.push(fact);
-      chronicleAdds.push(fact);
-      log.info('month.directive_fired', { process: fired.process.summary, paused: Boolean(fired.paused) });
-    }
-  }
 
   // Пик месяца: то, с чего правитель начнёт письмо. Без него развязка тонет
   // в ряду обычных записей и большое дело проходит незамеченным.
@@ -437,7 +405,10 @@ export async function resolveDomainMonth({
     stats: working.stats,
   });
 
-  if (conflux) dehydrateDomainToConflux(working, conflux);
+  if (conflux) {
+    stampNewBoardItems(working, conflux);
+    stripConfluxView(working);
+  }
 
   return { domain: working, chronicleAdds, mirrorAdds, flowAdds, highlight, stewardActs: [] };
 }

@@ -12,21 +12,20 @@ function shortId() {
   return Math.random().toString(36).slice(2, 8);
 }
 
+function clipString(value, max) {
+  if (typeof value !== 'string') return value;
+  if (value.length <= max) return value;
+  return `${value.slice(0, max)}…[+${value.length - max}]`;
+}
+
 function truncate(value, max = 800) {
   if (value == null) return value;
-  if (typeof value === 'string') {
-    return value.length > max ? `${value.slice(0, max)}…[+${value.length - max}]` : value;
+  if (typeof value === 'string') return clipString(value, max);
+  if (Array.isArray(value)) return value.map((item) => truncate(item, max));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, truncate(item, max)]));
   }
-  try {
-    const s = JSON.stringify(value);
-    if (s.length <= max) return value;
-    return JSON.parse(JSON.stringify(value, (_k, v) => {
-      if (typeof v === 'string' && v.length > 200) return `${v.slice(0, 200)}…`;
-      return v;
-    }));
-  } catch {
-    return String(value).slice(0, max);
-  }
+  return value;
 }
 
 function summarizeMessages(messages = []) {

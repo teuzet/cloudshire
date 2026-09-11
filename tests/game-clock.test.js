@@ -7,6 +7,8 @@ import {
   gameDaysToRealMs,
   realMsToGameDays,
   startClock,
+  syncWorldClock,
+  tickIndexFromDay,
   currentDay,
   realTimeOfDay,
   gameDateFromDay,
@@ -74,6 +76,29 @@ test('игровой срок переводится в реальное ожи�
   assert.equal(realWaitLabel(360), '~1 сут', 'игровой год — реальные сутки');
   // Скорость времени настраиваемая: ярлык обязан идти за конфигом, а не за константой.
   assert.equal(realWaitLabel(360, { time: { realHoursPerYear: 48 } }), '~2 сут');
+});
+
+test('календарь мира считается из якоря, tickIndex — из дня', () => {
+  const world = {};
+  startClock(world, 0);
+  syncWorldClock(world, { now: 2 * HOUR });
+  assert.equal(world.dayIndex, DAYS_PER_MONTH);
+  assert.equal(world.tickIndex, 1);
+  assert.equal(world.gameDate.label, 'Год 1, месяц 2, день 1');
+  assert.equal(tickIndexFromDay(0), 0);
+  assert.equal(tickIndexFromDay(29), 0);
+  assert.equal(tickIndexFromDay(30), 1);
+});
+
+test('без якоря часы не сбрасывают уже сохранённый месяц', () => {
+  const now = 10_000;
+  const world = { tickIndex: 4, gameDate: { year: 1, month: 5 } };
+  startClock(world, now);
+  syncWorldClock(world, { now });
+  assert.equal(world.dayIndex, 120);
+  assert.equal(world.tickIndex, 4);
+  assert.equal(world.gameDate.year, 1);
+  assert.equal(world.gameDate.month, 5);
 });
 
 test('промотка двигает якорь, а не заводит второй счётчик', () => {

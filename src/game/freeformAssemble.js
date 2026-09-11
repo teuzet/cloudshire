@@ -13,9 +13,32 @@ import {
   parseFreeformGravity,
   formatFreeformGravityForPrompt,
   formatBrainstormCandidateForPrompt,
+  freeformConfig,
 } from './freeform.js';
 
 const HIDDEN_SPLIT = /\n*[ \t]*На самом деле:\s*/i;
+
+const IGNORANCE_HEAD =
+  /^(неизвестно|неясно|никто не знает|нет ответа|без ответа|тайна оста|оста[её]тся загадк|просто сквозняк|просто ошибк|просто так|так вышло)/i;
+const IGNORANCE_BODY = /расходятся во мнениях|не дал[аои]?\s+внятн|проверка ничего не дала/i;
+const ANSWER_MARK =
+  /кроме|но |а это |это не |клад[её]т|сеет|льёт|роет|прячет|врёт|скрывает|потому что|чтобы /i;
+
+/** Отговорка вместо разгадки: «неизвестно», «мнения расходятся» и т.п. */
+export function isHollowHiddenPremise(text) {
+  const raw = String(text || '').replace(/\s+/g, ' ').trim();
+  if (raw.length < 8) return true;
+  if (!IGNORANCE_HEAD.test(raw) && !IGNORANCE_BODY.test(raw)) return false;
+  return !ANSWER_MARK.test(raw);
+}
+
+export function keepSeedReveals(list) {
+  return normalizeHiddenPremises(list).filter((item) => !isHollowHiddenPremise(item));
+}
+
+export function hasSeedReveal(list) {
+  return keepSeedReveals(list).length > 0;
+}
 
 function lastSentence(text) {
   const t = String(text || '').trim();
@@ -50,21 +73,21 @@ export function fallbackAssembledStory(candidate) {
     chronicle,
     synopsis: chronicle,
     whyMoves: lastSentence(chronicle),
-    hiddenPremises: normalizeHiddenPremises(split.hiddenPremises),
+    hiddenPremises: keepSeedReveals(split.hiddenPremises),
   };
 }
 
-export function normalizeAssembledStory(raw, candidate) {
+export function normalizeAssembledStory(raw, candidate, maxChars = PLOT_SUMMARY_MAX) {
   const fallback = fallbackAssembledStory(candidate);
   const split = splitChronicleHiddenLayer(raw?.chronicle || raw?.entry || '');
-  const chronicle = clipPlotText(split.chronicle || fallback.chronicle, PLOT_SUMMARY_MAX);
+  const chronicle = clipPlotText(split.chronicle || fallback.chronicle, maxChars);
   if (!chronicle) return null;
   const title = clipPlotText(raw?.title, PLOT_TITLE_MAX) || fallback.title;
   const whyMoves = clipPlotText(raw?.whyMoves, PLOT_SUMMARY_MAX) || fallback.whyMoves;
-  const hiddenFromTool = normalizeHiddenPremises(raw?.hiddenPremises);
+  const hiddenFromTool = keepSeedReveals(raw?.hiddenPremises);
   const hidden = hiddenFromTool.length
     ? hiddenFromTool
-    : normalizeHiddenPremises(split.hiddenPremises.length ? split.hiddenPremises : fallback.hiddenPremises);
+    : keepSeedReveals(split.hiddenPremises.length ? split.hiddenPremises : fallback.hiddenPremises);
   return {
     title: title || 'История',
     chronicle,
@@ -81,10 +104,12 @@ export async function constructFreeformStory({
   candidate,
   gravity,
   config,
+  requireMystery = false,
   log: parentLog,
 }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.assemble' });
   const g = parseFreeformGravity(gravity);
+  const maxChars = freeformConfig(config).chronicleMaxChars;
   const draft = { card: null };
   const runOpts = {
     agentId: 'freeformAssemble',
@@ -95,7 +120,9 @@ export async function constructFreeformStory({
         parameters: {
           type: 'object',
           additionalProperties: false,
-          required: ['title', 'chronicle', 'whyMoves'],
+          required: requireMystery
+            ? ['title', 'chronicle', 'whyMoves', 'hiddenPremises']
+            : ['title', 'chronicle', 'whyMoves'],
           properties: {
             title: { type: 'string', description: 'Короткое имя истории.' },
             chronicle: {
@@ -109,14 +136,22 @@ export async function constructFreeformStory({
             hiddenPremises: {
               type: 'array',
               items: { type: 'string' },
-              description: 'Истины из блока «На самом деле:». Пустой массив, если скрытого слоя нет.',
+              description: requireMystery
+                ? 'Конкретная разгадка из «На самом деле:»: что произошло, кто действует, почему. Не отговорка.'
+                : 'Истины из блока «На самом деле:». Пустой массив, если скрытого слоя нет.',
             },
           },
         },
         handler: async (args) => {
-          const card = normalizeAssembledStory(args, candidate);
+          const card = normalizeAssembledStory(args, candidate, maxChars);
           if (!card) return toolFail('thin', 'Нужны title, chronicle и whyMoves.');
           if (!card.whyMoves) return toolFail('thin', 'Нужен whyMoves: следующий ход ситуации, если ею не занимаются.');
+          if (requireMystery && !hasSeedReveal(card.hiddenPremises)) {
+            return toolFail(
+              'no_reveal',
+              'Нужна конкретная разгадка в hiddenPremises, не «неизвестно» и не «мнения расходятся».',
+            );
+          }
           draft.card = card;
           return { ok: true };
         },
@@ -137,6 +172,13 @@ export async function constructFreeformStory({
           formatBrainstormCandidateForPrompt(candidate, candidate?.index || 1),
           '',
           'Собери из этой хроники историю в этом городе через submit_freeform_story.',
+          requireMystery
+            ? [
+                'hiddenPremises обязательны: полная разгадка из блока «На самом деле:».',
+                'Не клади отговорки: «неизвестно», «мнения расходятся», «проверка не дала ответа».',
+                'Разгадка конкретна и проверяема: что произошло, кто знает или врёт, какая улика это подтвердит.',
+              ].join(' ')
+            : '',
         ]
           .filter(Boolean)
           .join('\n'),
@@ -159,6 +201,7 @@ export async function assembleFreeformLabStory({
   candidate,
   gravity,
   config,
+  requireMystery = false,
   log: parentLog,
 }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.assemble.pack' });
@@ -169,9 +212,13 @@ export async function assembleFreeformLabStory({
     candidate,
     gravity,
     config,
+    requireMystery,
     log,
   });
   const story = constructed.card || fallbackAssembledStory(candidate);
+  if (requireMystery && !hasSeedReveal(story.hiddenPremises)) {
+    return { ...story, hiddenPremises: [], ok: false, error: 'no_reveal' };
+  }
   return {
     ...story,
     gravity: parseFreeformGravity(gravity ?? candidate?.gravity),

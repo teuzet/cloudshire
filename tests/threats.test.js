@@ -225,20 +225,33 @@ test('срабатывание съедает жизнь и не закрыва�
   assert.equal(t.firedDay, 100);
 });
 
-test('срабатывание за последней жизнью даёт плохую концовку', () => {
+test('обычная угроза за последней раной не закрывает историю', () => {
   const p = plot({ gravity: 'CRISIS', failCount: 2 });
   const t = threat(p, { total: 40 });
   const res = fireThreat(p, t, { day: 40 });
-  assert.equal(res.closes, true);
-  assert.equal(res.endingKind, 'BAD_ENDING');
-  assert.equal(res.severity, 'КАТАСТРОФА');
-  assert.equal(p.ending.kind, 'BAD_ENDING');
+  assert.equal(res.closes, false);
+  assert.equal(p.ending, undefined);
+  assert.equal(p.failCount, 3);
 });
 
-test('ситуация закрывается первым же срабатыванием', () => {
+test('угроза с endingId закрывает названной плохой карточкой', () => {
+  const p = plot({ gravity: 'CRISIS', failCount: 2 });
+  const t = threat(p, { total: 40 });
+  t.endingId = 'e1';
+  const res = fireThreat(p, t, { day: 40 });
+  assert.equal(res.closes, true);
+  assert.equal(res.endingKind, 'BAD_ENDING');
+  assert.equal(p.ending.endingId, 'e1');
+  assert.equal(p.ending.text, 'Северное крыло рушится вместе с людьми');
+});
+
+test('ситуация: обычная угроза ранит, финальная — закрывает', () => {
   const p = plot({ gravity: 'SITUATION', maxDepth: 1 });
-  const t = threat(p, { total: 30 });
-  const res = fireThreat(p, t, { day: 30 });
+  const wound = threat(p, { total: 30 });
+  assert.equal(fireThreat(p, wound, { day: 30 }).closes, false);
+  const [finale] = replenishThreats(p, { day: 30, rng: () => 0.5, author: () => ({ text: 'крыло падает' }) });
+  assert.equal(finale.endingId, 'e1');
+  const res = fireThreat(p, finale, { day: 60 });
   assert.equal(res.closes, true);
   assert.equal(res.endingKind, 'BAD_ENDING');
 });
@@ -250,6 +263,18 @@ test('сработавшая дважды угроза не проходит', (
   const again = fireThreat(p, t, { day: 20 });
   assert.equal(again.ok, false);
   assert.equal(p.failCount, 1);
+});
+
+test('стыковка-событие не закрывает нить и не тратит рану', () => {
+  const p = plot();
+  const t = threat(p, { outcome: 'neutral', total: 1 });
+  t.eventKind = 'dock_meet';
+  const res = fireThreat(p, t, { day: 1 });
+  assert.equal(res.ok, true);
+  assert.equal(res.closes, false);
+  assert.equal(res.kind, 'event');
+  assert.equal(p.failCount, 0);
+  assert.equal(p.ending, undefined);
 });
 
 test('разрешение закрывает историю нейтрально и жизнь не тратит', () => {
@@ -452,6 +477,24 @@ test('дозаполнение после срабатывания учитыв�
   const created = replenishThreats(p, { day: 30, rng: () => 0.5, author: () => ({ text: 'беда' }) });
   assert.equal(created.length, 0, 'жизней осталось одна — и слот один');
   assert.equal(liveThreats(p).length, 1);
+});
+
+test('после исчерпания ран заявка — финал к плохой карточке', () => {
+  const p = plot({ gravity: 'CRISIS', failCount: 2 });
+  const req = nextObligationRequest(p, { rng: () => 0.5 });
+  assert.equal(req.finale, true);
+  assert.equal(req.endingId, 'e1');
+  assert.equal(req.endingText, 'Северное крыло рушится вместе с людьми');
+  assert.equal(req.known, true);
+  const [t] = replenishThreats(p, { day: 0, rng: () => 0.5, author: () => ({ text: 'сруб обвалится' }) });
+  assert.equal(t.endingId, 'e1');
+  assert.equal(t.known, true);
+});
+
+test('пока висит финал, второй не заводим', () => {
+  const p = plot({ gravity: 'CRISIS', failCount: 2 });
+  replenishThreats(p, { day: 0, rng: () => 0.5, author: () => ({ text: 'сруб обвалится' }) });
+  assert.equal(nextObligationRequest(p, { rng: () => 0.5 }), null);
 });
 
 test('дозаполнение без автора всё равно ставит обязательство', () => {

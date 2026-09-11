@@ -43,14 +43,40 @@ export function monthClosedBigStories(domain, tick) {
   });
 }
 
+/** Крупные нити, которые закрылись в этой пачке хроники — не «все закрытые в этом месяце». */
+export function closedBigStoriesFromAdds(domain, chronicleAdds = []) {
+  const ids = new Set();
+  for (const fact of chronicleAdds || []) {
+    if (!fact?.plotClosed) continue;
+    for (const id of fact.relatedPlotlineIds || []) ids.add(String(id));
+    if (fact.sourcePlotId) ids.add(String(fact.sourcePlotId));
+  }
+  if (!ids.size) return [];
+  return (domain?.closedPlotlines || []).filter((p) => {
+    if (!ids.has(String(p?.id))) return false;
+    if (!isStakedStory(p)) return false;
+    return BIG_GRAVITY.has(parseFreeformGravity(p.gravity, ''));
+  });
+}
+
+export function endingLabel(ending) {
+  if (ending == null || ending === '') return '—';
+  if (typeof ending === 'string' || typeof ending === 'number') return String(ending);
+  const kind = String(ending.kind || ending.endingId || '').trim();
+  const text = String(ending.text || '').trim();
+  if (kind && text) return `${kind}: ${text}`;
+  return text || kind || '—';
+}
+
 export function monthCriticalChronicles(chronicleAdds) {
   return (chronicleAdds || []).filter((f) => String(f?.importance || '').toLowerCase() === 'critical');
 }
 
 export function shouldConsiderGenesisRewrite({ domain, tick, chronicleAdds, config } = {}) {
+  void tick;
   if (modifiersNeedCompact(domain, config)) return true;
   if (monthCriticalChronicles(chronicleAdds).length) return true;
-  return monthClosedBigStories(domain, tick).length > 0;
+  return closedBigStoriesFromAdds(domain, chronicleAdds).length > 0;
 }
 
 function collapse(s) {
@@ -94,7 +120,7 @@ export async function maybeRewriteCityGenesis({
 
   const log = (parentLog || getLogger()).child({ scope: 'genesis.rewrite', domainId: domain.id });
   const critical = monthCriticalChronicles(chronicleAdds);
-  const closed = monthClosedBigStories(domain, tick);
+  const closed = closedBigStoriesFromAdds(domain, chronicleAdds);
   const sinceLabel = world?.gameDate?.label || null;
   const mods = formatCityModifiersForPrompt(domain);
 
@@ -168,7 +194,7 @@ export async function maybeRewriteCityGenesis({
             : null,
           closed.length
             ? `Закрылись крупные истории (CRISIS/RUPTURE):\n${closed
-                .map((p) => `- «${p.title}» gravity=${p.gravity} исход=${p.ending || '—'}`)
+                .map((p) => `- «${p.title}» gravity=${p.gravity} исход=${endingLabel(p.ending)}`)
                 .join('\n')}`
             : null,
           mods

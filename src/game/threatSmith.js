@@ -24,20 +24,25 @@ export function formatThreatRequest(req, plot) {
       'НУЖНО РАЗРЕШЕНИЕ, а не беда: город привыкает, вопрос перестаёт быть вопросом.',
       'Не победа покровителя и не поражение. Одно предложение с предметом.',
     );
+  } else if (req.finale) {
+    lines.push(
+      '',
+      'ЭТО ПОСЛЕДНИЙ УДАР: если случится — история закроется плохой концовкой.',
+      req.endingText ? `Концовка, к которой это ведёт: «${req.endingText}».` : '',
+      'Напиши событие, которое к ней приведёт. Не переписывай саму концовку.',
+    );
   } else {
     lines.push(
       '',
       `ПОЛОСА ТЯЖЕСТИ: ${req.severity}`,
       req.severityGuidance || SEVERITY_GUIDANCE[req.severity] || '',
       req.antiTarget
-        ? req.severity === 'КАТАСТРОФА'
-          ? `Плохая концовка истории: «${req.antiTarget}». Сейчас пиши именно её.`
-          : `АНТИ-ТАРГЕТ (плохая концовка, до неё доходить НЕЛЬЗЯ): «${req.antiTarget}».`
+        ? `АНТИ-ТАРГЕТ (плохая концовка, до неё доходить НЕЛЬЗЯ): «${req.antiTarget}».`
         : '',
     );
   }
   if (req.existingThreats?.length) {
-    lines.push('', 'УЖЕ ВИСИТ (не повторяй и не продолжай):');
+    lines.push('', 'УЖЕ ВИСИТ — независимые параллельные часы, не цепочка. Не повторяй и не продолжай:');
     for (const t of req.existingThreats) lines.push(`- ${t.text}`);
   }
   lines.push('', 'Одно предложение. Срок не называй.');
@@ -101,10 +106,13 @@ export async function replenishPlotThreats({ runtime, domain, plot, day = 0, rng
     const drafted = runtime ? await draftThreatText({ runtime, domain, plot, request, log }) : null;
     const threat = createThreat({
       plot,
-      text: drafted?.text || request.antiTarget || plot?.title || '',
+      text: drafted?.text || request.antiTarget || request.endingText || plot?.title || '',
       band: request.band,
       outcome: request.outcome,
       slowdown: request.slowdown,
+      known: request.known === true || request.outcome === 'neutral' ? true : null,
+      endingId: request.endingId || null,
+      valence: request.finale ? 'bad' : request.outcome === 'neutral' ? 'neutral' : 'bad',
       day,
       rng,
     });

@@ -1,10 +1,11 @@
 /**
  * Генератор трёх следующих хроник: код бросает оси, модель пишет один текст на набор.
  * Лаборатория: пачка → судья. PASS сразу в пул и не чинится.
- * Если PASS уже ≥2 — правка и второй судья не запускаются.
- * Иначе чинятся только не-PASS; второй судья видит только их.
- * Если после sonnet-починки PASS всё ещё < 2 — до двух дешёвых кругов luna
+ * Не-PASS всегда идут на починку, даже если PASS уже ≥2.
+ * Второй судья видит только чиненные слоты.
+ * Пока есть FAIL с правкой — до двух дешёвых кругов luna
  * (gravity, оси, текст, замечание судьи; без брифа города).
+ * Победителя из PASS выбирает дешёвый агент; случайный — только запасной путь.
  */
 
 import { getLogger } from '../log.js';
@@ -66,14 +67,23 @@ export function parseRequireMystery(raw) {
   return s === '1' || s === 'true' || s === 'yes' || s === 'on';
 }
 
+/** Явный флаг перекрывает бросок. Без флага — шанс из конфига. */
+export function shouldRequireSeedMystery(config, { requireMystery, rng = Math.random } = {}) {
+  if (requireMystery !== undefined && requireMystery !== null && requireMystery !== '') {
+    return parseRequireMystery(requireMystery);
+  }
+  return rng() < freeformConfig(config).seedMysteryChance;
+}
+
 export const MYSTERY_ARCHITECT_EXTRA = [
   '==== ОБЯЗАТЕЛЬНАЯ ТАЙНА ====',
-  'Этот посев — эксперимент: в каждом кандидате ОБЯЗАТЕЛЬНО есть тайна с разгадкой.',
+  'В этом посеве в каждом кандидате ОБЯЗАТЕЛЬНО есть тайна с интересной разгадкой.',
   'Это переопределяет правило «тайну ради тайны не выдумывай».',
   '',
   '- В наблюдаемом слое игрок видит странность, нестыковку или сокрытие, которую нельзя сразу объяснить. Не обязательно преступление: ложь, пропажа, подмена, необъяснимый поступок, секрет, который кто-то бережёт.',
   '- В конце каждого кандидата блок «На самом деле:» с полной разгадкой: что произошло, кто знает, кто врёт, какая улика это подтвердит. Разгадка конкретна и проверяема в мире — не магия, не сон, не «все сошли с ума».',
   '- Разгадка не разочаровывает: она следует из уже названных фактов и характеров. Читатель, узнав её, говорит «так вот оно что», а не «и это всё?».',
+  '- «Неизвестно», «мнения расходятся», «проверка ничего не дала» — это не разгадка. Нужен конкретный ответ, который можно вскрыть делом.',
   '- Тайна не декоративна: без неё история теряет смысл. Концы (GOOD/NEUTRAL/BAD) зависят от того, вскроется ли тайна и чем это обернётся.',
   '- Не пропускай «На самом деле:» ни у одного из трёх кандидатов.',
 ].join('\n');
@@ -81,8 +91,11 @@ export const MYSTERY_ARCHITECT_EXTRA = [
 export const MYSTERY_JUDGE_EXTRA = [
   '==== ДОПОЛНИТЕЛЬНЫЕ КРИТЕРИИ (тайна обязательна) ====',
   '13. BUREAUCRACY — двигатель не канцелярия. FAIL, только если без протоколов, сверки записей, комиссии, отложенного заседания или потерянной бумаги от сюжета ничего не остаётся. Правовой или социальный конфликт, где документ — предлог или фон, допустим.',
+  '13b. ENGINEERING_PORN — двигатель не инженерия города. FAIL, только если без дорог, подъёмников, желобов, галерей, водостоков, подпорок, складов, настилов или контура «чинить инфраструктуру» от сюжета ничего не остаётся. Лес, каменоломня, осыпь, тварь или совет, где путь или кромка — место или цена, допустимы.',
   '14. MYSTERY — в пакете есть настоящая тайна: странность, которую персонажи и игрок не могут сразу объяснить. Если завязка прозрачна и нечего разгадывать — FAIL.',
-  '15. MYSTERY_PLAUSIBLE — разгадка в «На самом деле:» логична, конкретна и не разочаровывает. FAIL если разгадки нет, она противоречит фактам, сваливается на чудо/случай/«ну так вышло», или финал обесценивает всю странность.',
+  '15. MYSTERY_PLAUSIBLE — разгадка в «На самом деле:» логична, конкретна и не разочаровывает. FAIL если разгадки нет, она отговорка («неизвестно», «мнения расходятся», «проверка ничего не дала»), противоречит фактам, или вся разгадка сводится к «ну так вышло» без механизма.',
+  'Конкретный механизм, в котором есть случай, ирония или «обряд сработал не по той причине, что думали» — PASS, не отговорка.',
+  'Не ставь FAIL только потому, что разгадка не выводит каждую регулярность из первых принципов или «ослабляет» тайну иронией.',
   '',
   'CHEKHOV при этом посеве не опционален: блок «На самом деле:» обязателен у каждого кандидата.',
 ].join('\n');
@@ -218,8 +231,8 @@ export function formatFreeformBrainstormRollsForPrompt(rolls) {
     .join('\n');
 }
 
-export function normalizeBrainstormCandidate(raw, roll, index = 1) {
-  const chronicle = clipPlotText(raw?.chronicle || raw?.text || raw?.hook, PLOT_SUMMARY_MAX);
+export function normalizeBrainstormCandidate(raw, roll, index = 1, maxChars = PLOT_SUMMARY_MAX) {
+  const chronicle = clipPlotText(raw?.chronicle || raw?.text || raw?.hook, maxChars);
   if (!chronicle) return null;
   return {
     title: clipPlotText(raw?.title, PLOT_TITLE_MAX) || '',
@@ -281,7 +294,7 @@ export function rollFromBrainstormCandidate(candidate) {
   };
 }
 
-function emitCandidatesTool({ n, rolls, draft, log, indices = null }) {
+function emitCandidatesTool({ n, rolls, draft, log, indices = null, maxChars = PLOT_SUMMARY_MAX }) {
   return {
     name: 'emit_freeform_candidates',
     description: `Ровно ${n} кандидатов: одна следующая хроника на каждый набор осей, в том же порядке. Оси в ответе — эхо входа, не новый выбор.`,
@@ -301,7 +314,7 @@ function emitCandidatesTool({ n, rolls, draft, log, indices = null }) {
               chronicle: {
                 type: 'string',
                 description:
-                  'Краткое описание сюжета: строго 4–5 предложений, не больше',
+                  `Сюжет-затравка: обычно 4–5 предложений, можно короткая сцена, до ${maxChars} символов`,
               },
               threatArena: { type: 'string', description: 'Эхо оси threatArena этого набора.' },
               worldRelation: { type: 'string', description: 'Эхо оси worldRelation этого набора.' },
@@ -318,7 +331,7 @@ function emitCandidatesTool({ n, rolls, draft, log, indices = null }) {
         .map((roll, i) => {
           logAxisEchoMismatch(log, i + 1, list[i], roll);
           const index = Number(indices?.[i]) || i + 1;
-          return normalizeBrainstormCandidate(list[i], roll, index);
+          return normalizeBrainstormCandidate(list[i], roll, index, maxChars);
         })
         .filter(Boolean);
       if (variants.length < n) {
@@ -362,7 +375,7 @@ export async function brainstormFreeformSeeds({
   const draft = { variants: null };
   const runOpts = {
     agentId: 'freeformBrainstorm',
-    tools: [emitCandidatesTool({ n, rolls, draft, log })],
+    tools: [emitCandidatesTool({ n, rolls, draft, log, maxChars: cfg.chronicleMaxChars })],
     maxTurns: 3,
     toolChoice: { type: 'function', function: { name: 'emit_freeform_candidates' } },
     log,
@@ -555,6 +568,7 @@ export async function repairBrainstormPack({
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.repair' });
   const n = drafts.length;
   const g = parseFreeformGravity(gravity);
+  const maxChars = freeformConfig(config).chronicleMaxChars;
   if (!n) return { candidates: [], prompt: '' };
   const notes = (reviews || []).slice(0, n);
   const slots = drafts.map((candidate, i) => ({
@@ -579,7 +593,7 @@ export async function repairBrainstormPack({
   const cheap = omitSeed || agentId === 'freeformBrainstormRepair';
   const runOpts = {
     agentId,
-    tools: [emitCandidatesTool({ n: work.length, rolls, draft, log, indices })],
+    tools: [emitCandidatesTool({ n: work.length, rolls, draft, log, indices, maxChars })],
     maxTurns: 3,
     toolChoice: { type: 'function', function: { name: 'emit_freeform_candidates' } },
     log,
@@ -589,6 +603,8 @@ export async function repairBrainstormPack({
       : [
           'Сейчас ты не придумываешь новую пачку. Ты правишь уже написанные три хроники по замечаниям судьи.',
           'Оси и автора не меняй. Центральный механизм не подменяй, кроме случая, когда судья требует убрать новый закон мира — тогда тот же двигатель внутри уже данного порядка.',
+          'Не подменяй двигатель инженерией: желоб, водосток, водоотвод, скрытая галерея, дорога, подъёмник, настил или склад как новая причинная система.',
+          'Если просят поднять Gravity — укрупни уже данный конфликт (обряд, существо, ветер, спор), не сажай второй сюжет про трубы и влагу. Места из среза города — декорации, не новый механизм.',
           'Не поднимай и не опускай Gravity риторикой. Правь угрозу или возможность в хронике и динамику, которая её зарабатывает.',
           'Если просят обострить — конкретный конфликт и явную динамику в том же тексте, не новая посадка. Если просят ужать — вырежи орнамент, механизм оставь.',
           'Кандидат без замечания верни без изменений. Не делай кандидатов близнецами.',
@@ -625,16 +641,24 @@ export async function repairBrainstormPack({
   return { candidates: mergeRepairedSlots(drafts, variants), prompt };
 }
 
-export function collectBrainstormPool(drafts, firstReviews, repaired = null, secondReviews = null) {
-  const pool = [];
+export function collectBrainstormPoolEntries(drafts, firstReviews, repaired = null, secondReviews = null) {
+  const entries = [];
   for (let i = 0; i < (drafts || []).length; i += 1) {
+    const draft = drafts[i];
+    const index = Number(draft?.index) || i + 1;
     if (isPackPass(firstReviews?.[i])) {
-      pool.push(drafts[i]);
+      entries.push({ index, source: 'first_pass', candidate: draft });
       continue;
     }
-    if (repaired && isPackPass(secondReviews?.[i])) pool.push(repaired[i]);
+    if (repaired && isPackPass(secondReviews?.[i])) {
+      entries.push({ index, source: 'repaired', candidate: repaired[i] });
+    }
   }
-  return pool;
+  return entries;
+}
+
+export function collectBrainstormPool(drafts, firstReviews, repaired = null, secondReviews = null) {
+  return collectBrainstormPoolEntries(drafts, firstReviews, repaired, secondReviews).map((entry) => entry.candidate);
 }
 
 function pickFromPool(pool, rng = Math.random) {
@@ -643,8 +667,121 @@ function pickFromPool(pool, rng = Math.random) {
   return pool[idx];
 }
 
+function poolIndex(candidate, i) {
+  const n = Number(candidate?.index);
+  return Number.isInteger(n) && n > 0 ? n : i + 1;
+}
+
+export function parseFreeformPoolPick(raw, allowedIndices) {
+  const allowed = [
+    ...new Set(
+      (allowedIndices || [])
+        .map((n) => Math.round(Number(n)))
+        .filter((n) => Number.isInteger(n) && n > 0),
+    ),
+  ];
+  const pick = Math.round(Number(raw?.pick));
+  if (!allowed.includes(pick)) return null;
+  return { pick, why: clipPlotText(raw?.why, 400) };
+}
+
 export function pickPassedBrainstormCandidate(candidates, reviews, rng = Math.random) {
   return pickFromPool(collectBrainstormPool(candidates, reviews), rng);
+}
+
+export async function pickBrainstormPoolWinner({
+  runtime,
+  pool,
+  gravity,
+  config,
+  log: parentLog,
+  rng = Math.random,
+}) {
+  const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.pick' });
+  const list = Array.isArray(pool) ? pool.filter(Boolean) : [];
+  if (!list.length) return { winner: null, prompt: '', pickedIndex: null, source: 'empty', why: '' };
+  if (list.length === 1) {
+    const winner = list[0];
+    return {
+      winner,
+      prompt: '',
+      pickedIndex: poolIndex(winner, 0),
+      source: 'single',
+      why: '',
+    };
+  }
+  const allowed = list.map((candidate, i) => poolIndex(candidate, i));
+  const draft = { pick: null };
+  const g = parseFreeformGravity(gravity);
+  const runOpts = {
+    agentId: 'freeformBrainstormPick',
+    tools: [
+      {
+        name: 'pick_freeform_pool_winner',
+        description: `Выбери один номер из пула PASS: ${allowed.join(', ')}.`,
+        parameters: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['pick'],
+          properties: {
+            pick: { type: 'integer', description: `Номер кандидата: ${allowed.join(', ')}.` },
+            why: { type: 'string', description: 'Коротко, почему этот, а не остальные.' },
+          },
+        },
+        handler: async (args) => {
+          const parsed = parseFreeformPoolPick(args, allowed);
+          if (!parsed) {
+            return toolFail('thin', `Нужен номер из пула: ${allowed.join(', ')}.`);
+          }
+          draft.pick = parsed;
+          return { ok: true, pick: parsed.pick };
+        },
+      },
+    ],
+    maxTurns: 2,
+    toolChoice: { type: 'function', function: { name: 'pick_freeform_pool_winner' } },
+    log,
+    scene: 'freeform_brainstorm_pick',
+    userMessages: [
+      {
+        role: 'user',
+        content: [
+          `Пул PASS. Выбери один номер: ${allowed.join(', ')}.`,
+          '',
+          'GRAVITY',
+          formatFreeformGravityForPrompt(g, config),
+          '',
+          list
+            .map((candidate, i) => formatBrainstormCandidateForPrompt(candidate, poolIndex(candidate, i)))
+            .filter(Boolean)
+            .join('\n\n'),
+        ].join('\n'),
+      },
+    ],
+  };
+  const prompt = captureAgentPrompt(runtime, runOpts);
+  try {
+    await runtime.run(runOpts);
+  } catch (err) {
+    log.warn('freeform.brainstorm.pick_failed', { error: err.message });
+  }
+  const parsed = draft.pick;
+  const winner = parsed
+    ? list.find((candidate, i) => poolIndex(candidate, i) === parsed.pick) || null
+    : null;
+  if (winner) {
+    log.info('freeform.brainstorm.pick', { pick: parsed.pick, why: parsed.why, source: 'agent' });
+    return { winner, prompt, pickedIndex: parsed.pick, source: 'agent', why: parsed.why || '' };
+  }
+  const fallback = pickFromPool(list, rng);
+  log.warn('freeform.brainstorm.pick_fallback', { allowed });
+  return {
+    winner: fallback,
+    prompt,
+    pickedIndex: fallback ? poolIndex(fallback, list.indexOf(fallback)) : null,
+    source: 'fallback',
+    why: '',
+  };
 }
 
 function scatterPackReviews(slotCount, reviews) {
@@ -672,8 +809,6 @@ function latestSlotReviews(firstReviews, later) {
 function lunaRepairRoundLimit(config) {
   return freeformConfig(config).lunaRepairRounds;
 }
-
-const MIN_PASS_SKIP_SECOND = 2;
 
 export async function brainstormFreeformPack({
   runtime,
@@ -715,6 +850,9 @@ export async function brainstormFreeformPack({
       finalJudgePrompt: '',
       extraRepairPrompt: '',
       extraJudgePrompt: '',
+      pickPrompt: '',
+      pickSource: 'empty',
+      pickWhy: '',
     };
   }
   const judged = await reviewBrainstormPack({
@@ -729,29 +867,6 @@ export async function brainstormFreeformPack({
     fromGenesis,
     note,
   });
-  const firstPassCount = (judged.reviews || []).filter(isPackPass).length;
-  if (firstPassCount >= MIN_PASS_SKIP_SECOND) {
-    const winner = pickPassedBrainstormCandidate(drafted.candidates, judged.reviews, rng);
-    const pickedIndex = winner
-      ? Number(winner.index) || drafted.candidates.indexOf(winner) + 1
-      : null;
-    return {
-      ok: Boolean(winner),
-      gravity: drafted.gravity,
-      drafts: drafted.candidates,
-      reviews: judged.reviews,
-      finalReviews: [],
-      candidates: drafted.candidates,
-      winner,
-      pickedIndex,
-      prompt: drafted.prompt,
-      judgePrompt: judged.prompt,
-      repairPrompt: '',
-      finalJudgePrompt: '',
-      extraRepairPrompt: '',
-      extraJudgePrompt: '',
-    };
-  }
   const repaired = await repairBrainstormPack({
     runtime,
     seedText,
@@ -786,8 +901,6 @@ export async function brainstormFreeformPack({
   const extraJudgePrompts = [];
   const lunaMax = lunaRepairRoundLimit(config);
   for (let round = 0; round < lunaMax; round += 1) {
-    const pool = collectBrainstormPool(drafted.candidates, judged.reviews, candidates, finalReviews);
-    if (pool.length >= MIN_PASS_SKIP_SECOND) break;
     const slotReviews = latestSlotReviews(judged.reviews, finalReviews);
     if (!slotReviews.some(reviewNeedsRewrite)) break;
     const cheap = await repairBrainstormPack({
@@ -834,24 +947,31 @@ export async function brainstormFreeformPack({
     });
   }
   const pool = collectBrainstormPool(drafted.candidates, judged.reviews, candidates, finalReviews);
-  const winner = pickFromPool(pool, rng);
-  const pickedIndex = winner
-    ? Number(winner.index) || candidates.indexOf(winner) + 1 || drafted.candidates.indexOf(winner) + 1
-    : null;
+  const picked = await pickBrainstormPoolWinner({
+    runtime,
+    pool,
+    gravity: drafted.gravity,
+    config,
+    log,
+    rng,
+  });
   return {
-    ok: Boolean(winner),
+    ok: Boolean(picked.winner),
     gravity: drafted.gravity,
     drafts: drafted.candidates,
     reviews: judged.reviews,
     finalReviews,
     candidates,
-    winner,
-    pickedIndex,
+    winner: picked.winner,
+    pickedIndex: picked.pickedIndex,
+    pickSource: picked.source,
+    pickWhy: picked.why || '',
     prompt: drafted.prompt,
     judgePrompt: judged.prompt,
     repairPrompt: repaired.prompt,
     finalJudgePrompt: gated.prompt,
     extraRepairPrompt: extraRepairPrompts.join('\n\n'),
     extraJudgePrompt: extraJudgePrompts.join('\n\n'),
+    pickPrompt: picked.prompt || '',
   };
 }

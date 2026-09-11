@@ -1,5 +1,4 @@
-import { advanceGameDate } from './models.js';
-import { ageDomainPeople } from './ages.js';
+import { syncWorldClock } from './gameClock.js';
 import { monthsUntilDock } from './conflux.js';
 import { otherDomainId } from './confluxBoard.js';
 import { resolveIslandImage } from './islandImage.js';
@@ -97,17 +96,13 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
   void runtime;
   void app;
   const world = await storage.getWorld();
-  advanceGameDate(world);
+  syncWorldClock(world);
   await storage.saveWorld(world);
-  const domains = await storage.listDomains();
-  for (const domain of domains) {
-    ageDomainPeople(domain, world);
-    await storage.saveDomain(domain);
-  }
   return {
+    world,
     tickIndex: world.tickIndex,
     gameDate: world.gameDate,
-    skipped: 'conflux_days',
+    skipped: 'derived_clock',
     results: [],
     confluxNotes: [],
   };

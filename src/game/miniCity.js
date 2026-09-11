@@ -3,7 +3,7 @@ import { plotConcerns } from './confluxBoard.js';
 import { activeProcesses, pausedProcesses, processOwnedBy, processStatAverage, processPaceRatio } from './processes.js';
 import { finishChancePercents } from './rolls.js';
 import { blessManaCost, currentMana } from './mana.js';
-import { cityRules, confluxDirective } from './cityRules.js';
+import { cityRules, proxyText } from './cityRules.js';
 import { gameDateFromTickIndex } from './tickClock.js';
 import { gameDateFromDay, realWaitLabel } from './gameClock.js';
 import {
@@ -361,14 +361,13 @@ export function miniCityPayload({
     ? Math.max(0, Math.min(100, Math.round(faithRaw)))
     : null;
 
-  // Постоянный порядок города плюс наказ на сопряжение — одним списком.
-  const directive = confluxDirective(domain);
+  const proxy = proxyText(domain);
   const orders = [
     ...cityRules(domain).map((m) => ({
       text: clip(m.text || '', 400),
       since: m.sinceLabel || gameDateLabelAtTick(world, m.sinceTick),
     })),
-    ...(directive ? [{ text: `При каждом сопряжении: ${clip(directive.text, 360)}`, since: null }] : []),
+    ...(proxy ? [{ text: `Доверенность: ${clip(proxy, 360)}`, since: null }] : []),
   ];
 
   return {

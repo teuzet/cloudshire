@@ -26,23 +26,13 @@ export function pickFreeformSeedAxes(config, rng = Math.random) {
   return (seed.tags || []).filter((t) => ids.has(t.groupId));
 }
 
-export function freeformFreePair() {
-  return [
-    { groupId: 'truthArena', tagId: 'free', tagName: 'FREE' },
-    { groupId: 'worldRelation', tagId: 'free', tagName: 'FREE' },
-  ];
-}
-
 export function pickFreeformSeedAxisPairs(config, count, rng = Math.random) {
   const n = Math.max(1, Math.round(Number(count) || 1));
-  const pairs = Array.from({ length: n }, () => pickFreeformSeedAxes(config, rng));
-  const slot = Math.min(n - 1, Math.max(0, Math.floor(rng() * n)));
-  pairs[slot] = freeformFreePair();
-  return pairs;
+  return Array.from({ length: n }, () => pickFreeformSeedAxes(config, rng));
 }
 
-const ARENA_ORDER = ['human', 'creature', 'ecology', 'material', 'built', 'earth', 'sky', 'free'];
-const RELATION_ORDER = ['native', 'contact', 'legacy', 'free'];
+const ARENA_ORDER = ['human', 'creature', 'ecology', 'material', 'built', 'earth', 'sky'];
+const RELATION_ORDER = ['native', 'contact', 'legacy'];
 
 const ARENA_HINT = {
   human: 'решения, обещания, стыд, долг, мода, слух, статус, отказ, союз, разлад, подражание',
@@ -52,24 +42,18 @@ const ARENA_HINT = {
   built: 'дом, путь, колодец, мост, печь, ворота, лестница, сруб, тень постройки',
   earth: 'склон, край, камень, грунт, пласт, осыпь, трещина, родник в породе',
   sky: 'погодные явления, движение небесных тел, небо, существа живущие в небесах, звёзды',
-  free: 'вайлдкард: причинный центр на твоё усмотрение',
 };
 
 const WORLD_RELATION_HINT = {
   native: 'своё со своим: уклад, люди, места, твари, обычаи, долги, права',
   contact: 'в привычное вошло новое: идея, обычай, значение, факт, слово — не обязательно тело и не обязательно снаружи',
   legacy: 'нынешние с долгим следом прошлого: уговор, статус, посадка, осуждение, срок',
-  free: 'вайлдкард: тип отношений на твоё усмотрение',
 };
 
 function hintKey(tag) {
   return String(tag?.tagId || tag?.tagName || '')
     .trim()
     .toLowerCase();
-}
-
-function isFreeTag(tag) {
-  return hintKey(tag) === 'free';
 }
 
 function formatCatalogBlock(title, order, hints) {

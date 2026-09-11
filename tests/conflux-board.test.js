@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   takeDomainBoardIntoConflux,
-  hydrateDomainFromConflux,
-  dehydrateDomainToConflux,
+  overlayConfluxView,
+  stampNewBoardItems,
+  stripConfluxView,
   sharePlotWithDomain,
   maybeLeakPlot,
   leakChanceFromImportance,
@@ -115,9 +116,10 @@ test('гидратация правителя не показывает чужу
   c.plotlines = [plot];
   c.knownLoreIds.a = ['lore_1'];
   const a = domain('a');
-  hydrateDomainFromConflux(a, c, { mode: 'ruler' });
+  overlayConfluxView(a, c);
   assert.equal(a.plotlines.some((p) => p.id === plot.id), false);
-  dehydrateDomainToConflux(a, c);
+  stampNewBoardItems(a, c);
+  stripConfluxView(a);
   assert.equal(a.plotlines.length, 0);
   assert.equal(c.plotlines.length, 1);
 });
@@ -131,7 +133,7 @@ test('гидратация правителя показывает нить по
   const c = conflux({ status: 'docked' });
   c.plotlines = [plot];
   const a = domain('a');
-  hydrateDomainFromConflux(a, c, { mode: 'ruler' });
+  overlayConfluxView(a, c);
   assert.equal(a.plotlines.some((p) => p.id === plot.id), true);
 });
 
@@ -173,6 +175,7 @@ test('сообщение о старте конфлюкса — отдельны
   assert.match(text, /Берил/);
   assert.match(text, /8 мес/);
   assert.doesNotMatch(text, /Покровитель/);
+  assert.doesNotMatch(text, /примета|слух|час/);
 });
 
 test('до стыковки хроника нити не идёт в чужой город', () => {
@@ -239,10 +242,11 @@ test('закрытие на наложенном виде снимает ове�
   const c = conflux({ status: 'approaching' });
   plot.confluxId = c.id;
   plot.hostDomainId = 'a';
-  hydrateDomainFromConflux(a, c, { mode: 'month' });
+  overlayConfluxView(a, c);
   assert.equal(a.plotlines[0], plot);
   closePlotline(a, plot.id, { tick: 21, reason: 'успех' });
-  dehydrateDomainToConflux(a, c);
+  stampNewBoardItems(a, c);
+  stripConfluxView(a);
   assert.equal(a.closedPlotlines.filter((p) => p.id === plot.id).length, 1);
   assert.equal(a.plotlines.some((p) => p.id === plot.id), false);
 });
@@ -274,7 +278,7 @@ test('регистрация не забирает resolved дело с доме
   assert.equal(a.closedPlotlines.some((p) => p.id === closed.id), true);
 });
 
-test('dehydrate не переносит сироту на конфлюкс — дело остаётся на домене', () => {
+test('снятие вида не переносит сироту на конфлюкс — дело остаётся на домене', () => {
   const closed = createPlotline({ title: 'Мост', kind: 'errand' });
   closed.status = 'closed';
   closed.relatedProcessIds = ['act_done'];
@@ -283,12 +287,13 @@ test('dehydrate не переносит сироту на конфлюкс — �
   const a = domain('a', {
     processes: [{ id: 'act_done', summary: 'Мост', status: 'resolved', plotlineId: closed.id }],
   });
-  dehydrateDomainToConflux(a, c);
+  stampNewBoardItems(a, c);
+  stripConfluxView(a);
   assert.equal(a.state.pendingActions.length, 1);
   assert.equal((c.processes || []).some((p) => p.id === 'act_done'), false);
 });
 
-test('dehydrate не снимает законченный id: это после битов, в конце тика', () => {
+test('снятие вида не снимает законченный id: это после битов, в конце тика', () => {
   const story = createPlotline({ title: 'Смола', kind: 'story', synopsis: 'Лопнул мост.' });
   story.relatedProcessIds = ['act_old', 'act_live'];
   const c = conflux();
@@ -298,8 +303,9 @@ test('dehydrate не снимает законченный id: это после
     { id: 'act_live', status: 'active', confluxId: c.id, ownerDomainId: 'a' },
   ];
   const a = domain('a');
-  hydrateDomainFromConflux(a, c, { mode: 'ruler' });
-  dehydrateDomainToConflux(a, c);
+  overlayConfluxView(a, c);
+  stampNewBoardItems(a, c);
+  stripConfluxView(a);
   assert.deepEqual(story.relatedProcessIds, ['act_old', 'act_live']);
 });
 

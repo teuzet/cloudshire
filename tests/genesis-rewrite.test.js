@@ -5,6 +5,7 @@ import {
   maybeRewriteCityGenesis,
   applyCityBriefEdit,
   modifiersNeedCompact,
+  endingLabel,
 } from '../src/game/genesisRewrite.js';
 import { maybeAppendStoryCityModifier } from '../src/game/cityModifier.js';
 
@@ -13,6 +14,7 @@ const brief =
 
 function staked(extra = {}) {
   return {
+    id: 'plot_1',
     kind: 'story',
     storyType: 'story',
     title: 'Обвал',
@@ -21,6 +23,10 @@ function staked(extra = {}) {
     ending: 'BAD_ENDING',
     ...extra,
   };
+}
+
+function closeFact(plotId = 'plot_1') {
+  return { plotClosed: true, relatedPlotlineIds: [plotId], text: 'Квартал затопило.' };
 }
 
 test('переписывать генезис стоит после critical-хроники или закрытия CRISIS/RUPTURE', () => {
@@ -36,7 +42,7 @@ test('переписывать генезис стоит после critical-х�
     shouldConsiderGenesisRewrite({
       domain: { closedPlotlines: [staked()] },
       tick: 9,
-      chronicleAdds: [],
+      chronicleAdds: [closeFact()],
     }),
     true,
   );
@@ -44,6 +50,7 @@ test('переписывать генезис стоит после critical-х�
     shouldConsiderGenesisRewrite({
       domain: { closedPlotlines: [staked({ gravity: 'RUPTURE' })] },
       tick: 9,
+      chronicleAdds: [closeFact()],
     }),
     true,
   );
@@ -51,13 +58,15 @@ test('переписывать генезис стоит после critical-х�
     shouldConsiderGenesisRewrite({
       domain: { closedPlotlines: [staked({ gravity: 'EPISODE' })] },
       tick: 9,
+      chronicleAdds: [closeFact()],
     }),
     false,
   );
   assert.equal(
     shouldConsiderGenesisRewrite({
-      domain: { closedPlotlines: [staked({ closedTick: 8 })] },
+      domain: { closedPlotlines: [staked()] },
       tick: 9,
+      chronicleAdds: [],
     }),
     false,
   );
@@ -71,6 +80,15 @@ test('переписывать генезис стоит после critical-х�
   );
 });
 
+test('исход закрытой нити в промпт идёт текстом, не [object Object]', () => {
+  assert.equal(endingLabel('BAD_ENDING'), 'BAD_ENDING');
+  assert.equal(
+    endingLabel({ kind: 'BAD_ENDING', text: 'Нодари затопило', endingId: 'storm_ruin' }),
+    'BAD_ENDING: Нодари затопило',
+  );
+  assert.equal(endingLabel(null), '—');
+});
+
 test('агент может пропустить правку брифа', async () => {
   const domain = { id: 'd1', name: 'Саркум', cityBrief: brief, closedPlotlines: [staked()] };
   const runtime = {
@@ -82,6 +100,7 @@ test('агент может пропустить правку брифа', async
     runtime,
     domain,
     world: { tickIndex: 9, gameDate: { label: 'Год 1, месяц 10' } },
+    chronicleAdds: [closeFact()],
   });
   assert.equal(out, null);
   assert.equal(domain.cityBrief, brief);
@@ -115,6 +134,7 @@ test('агент правит кусок брифа, если город изм�
     runtime,
     domain,
     world: { tickIndex: 9 },
+    chronicleAdds: [closeFact()],
   });
   assert.match(out.brief, /стоит дальше от обрыва после обвала северного края/);
   assert.match(out.brief, /пьёт воду из цистерн верхнего яруса/);

@@ -16,6 +16,7 @@ import { liveThreats } from './threats.js';
 import { cancelJobsForPlot } from './scheduler.js';
 
 export const PLAY_SEED_GRAINS = ['genesis', 'chronicle', 'void'];
+export const PLAY_DEED_FINISHES = ['fail', 'ok', 'crit'];
 
 export function parsePlaySeedGrain(raw) {
   const key = String(raw || '')
@@ -23,6 +24,15 @@ export function parsePlaySeedGrain(raw) {
     .toLowerCase();
   if (PLAY_SEED_GRAINS.includes(key)) return key;
   if (key === 'city' || key === 'description') return 'genesis';
+  return null;
+}
+
+/** Исход дела для кнопок тестового клиента: провал / успех / крит. */
+export function parsePlayDeedFinish(raw) {
+  const key = String(raw || '')
+    .trim()
+    .toLowerCase();
+  if (PLAY_DEED_FINISHES.includes(key)) return key;
   return null;
 }
 

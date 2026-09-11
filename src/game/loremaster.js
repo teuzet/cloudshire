@@ -4,7 +4,7 @@ import { formatFullChronicleForPrompt, formatFactsForPrompt } from './memory.js'
 import { findActiveConfluxForDomain, monthsUntilDock } from './conflux.js';
 import { attachFactToPlotlines } from './plotlines.js';
 import { cityRules } from './cityRules.js';
-import { dehydrateDomainToConflux, hydrateDomainFromConflux, plotVisibleToRuler } from './confluxBoard.js';
+import { overlayConfluxView, stampNewBoardItems, stripConfluxView, plotVisibleToRuler } from './confluxBoard.js';
 import { formatTruthGraphForPrompt } from './mysteryGraph.js';
 import { formatLadderForPrompt } from './suspenseGraph.js';
 import { formatCityForAgents, parseCityBrief, formatCanonicalUnknownsForPrompt } from './cityContext.js';
@@ -537,10 +537,11 @@ export async function askLoremaster({
   });
 
   if (conflux) {
-    dehydrateDomainToConflux(working, conflux);
+    stampNewBoardItems(working, conflux);
+    stripConfluxView(working);
     await storage.saveDomain(working);
     await storage.saveConflux(conflux);
-    hydrateDomainFromConflux(working, conflux, { mode: 'ruler' });
+    overlayConfluxView(working, conflux);
   } else {
     await storage.saveDomain(working);
   }

@@ -8,7 +8,7 @@ import {
   cityKnowsPlot,
   isContested,
   isSharedPlot,
-  hydrateDomainFromConflux,
+  overlayConfluxView,
   returnBoardsOnUndock,
   applyIntelFinishes,
   nativePlotsForMonth,
@@ -130,9 +130,9 @@ test('утечка — голая хроника, без карточки и б�
   assert.equal(viewer.lore.some((f) => f.leakedFromId === 'lore_1'), true);
   assert.equal(viewer.lore[0].sourcePlotId, plot.id);
   const a = domain('a');
-  hydrateDomainFromConflux(a, c, { mode: 'ruler' });
+  overlayConfluxView(a, c);
   const bBoard = domain('b');
-  hydrateDomainFromConflux(bBoard, c, { mode: 'ruler' });
+  overlayConfluxView(bBoard, c);
   assert.equal(bBoard.plotlines.some((p) => p.id === plot.id), false);
 });
 

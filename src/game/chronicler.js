@@ -25,6 +25,13 @@ import { livesLeft } from './threats.js';
 import { toolFail } from '../agents/toolResult.js';
 
 export const CHRONICLE_ENTRY_MAX = 400;
+/** Чуть шире только финальная запись: обычный хронист остаётся на 400. */
+export const CHRONICLE_FINALE_MAX = 640;
+
+export function chronicleEntryLimit(raw) {
+  const n = Math.round(Number(raw) || 0);
+  return n > CHRONICLE_ENTRY_MAX ? n : CHRONICLE_ENTRY_MAX;
+}
 
 /** Поводы для записи. Совпадают с поводами вести, кроме новой истории: её пишет посев. */
 export const CHRONICLE_OCCASIONS = ['дело', 'угроза', 'разрешение'];
@@ -211,8 +218,12 @@ export function formatThreatPrompt({
   severity = null,
   chronicleTail = [],
   dateLabel = '',
+  ending = null,
+  entryMax = CHRONICLE_ENTRY_MAX,
 }) {
   const resolution = kind === 'resolution';
+  const finale = closed && !resolution ? endingText(plot, ending) : null;
+  const limit = chronicleEntryLimit(entryMax);
   return [
     resolution
       ? 'ПОВОД: беда выдохлась сама. Город привык, вопрос перестал быть вопросом.'
@@ -221,19 +232,34 @@ export function formatThreatPrompt({
     '',
     'ЭТО БЫЛО НАПИСАНО ЗАРАНЕЕ, В БУДУЩЕМ ВРЕМЕНИ. Теперь оно произошло:',
     threat?.text || '—',
-    'Перепиши это как случившееся, в прошедшем времени, со своими подробностями места и людей.',
+    finale
+      ? null
+      : 'Перепиши это как случившееся, в прошедшем времени, со своими подробностями места и людей.',
     'Не пиши, что это ещё только случится или что этого можно избежать.',
-    severity && !resolution ? `Насколько тяжело (полоса движка, в запись не выноси): ${severity}.` : null,
-    closed
-      ? resolution
-        ? 'Этим история кончается: без победы и без крушения. Напиши, чем всё улеглось.'
-        : 'Этим история кончается плохо. Напиши развязку, а не подступ к ней.'
-      : 'История не закрыта: беда случилась, но вопрос остался. Не пиши итог и мораль.',
+    severity && !resolution && !finale ? `Насколько тяжело (полоса движка, в запись не выноси): ${severity}.` : null,
+    finale
+      ? [
+          '',
+          'Этим история кончается плохо.',
+          'Заготовленная развязка (не копируй дословно, сведи со случившимся в одну запись):',
+          finale,
+          'В записи должны быть узнаваемы и то, что случилось из предсказания, и то, чем история кончилась.',
+          'Не одна концовка без события и не одно событие без того, чем история кончилась.',
+          limit > CHRONICLE_ENTRY_MAX
+            ? `Эта запись может быть длиннее обычной — до ${limit} символов.`
+            : null,
+        ]
+      : closed
+        ? resolution
+          ? 'Этим история кончается: без победы и без крушения. Напиши, чем всё улеглось.'
+          : 'Этим история кончается плохо. Напиши развязку, а не подступ к ней.'
+        : 'История не закрыта: беда случилась, но вопрос остался. Не пиши итог и мораль.',
     '',
     ...plotBlock(plot, chronicleTail),
     '',
     'Напиши одну запись хроники. Вызови submit_chronicle.',
   ]
+    .flat()
     .filter((l) => l != null)
     .join('\n');
 }
@@ -247,9 +273,11 @@ export async function writeChronicle({
   domain,
   occasion = 'дело',
   prompt,
+  maxChars = CHRONICLE_ENTRY_MAX,
   log: parentLog,
 } = {}) {
   const log = (parentLog || getLogger()).child({ scope: 'chronicler', domainId: domain?.id });
+  const limit = chronicleEntryLimit(maxChars);
   const draft = { text: null };
   const tools = [
     {
@@ -262,7 +290,7 @@ export async function writeChronicle({
           entry: {
             type: 'string',
             description:
-              `Что случилось в городе, до ${CHRONICLE_ENTRY_MAX} символов. Сухо и предметно, ` +
+              `Что случилось в городе, до ${limit} символов. Сухо и предметно, ` +
               'в прошедшем времени. Без названий дел и историй, без кавычек с названиями.',
           },
         },
@@ -270,7 +298,7 @@ export async function writeChronicle({
       handler: async ({ entry }) => {
         const text = String(entry || '').trim();
         if (!text) return toolFail('empty', 'Нужна запись.');
-        draft.text = text.slice(0, CHRONICLE_ENTRY_MAX);
+        draft.text = text.slice(0, limit);
         return { ok: true };
       },
     },

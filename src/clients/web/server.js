@@ -9,7 +9,10 @@ import {
   confluxSummary,
   findActiveConfluxForDomain,
   monthsUntilDock,
+  dockConfluxNow,
+  undockConfluxNow,
 } from '../../game/conflux.js';
+import { crystallizeContainer } from '../../game/confluxJobs.js';
 import { getLogger, requestLogger, truncate } from '../../log.js';
 import { statEpithet } from '../../game/stats.js';
 import { chronicleEntries, castRecords } from '../../game/models.js';
@@ -18,11 +21,11 @@ import { FINISH_SHORT } from '../../game/rolls.js';
 import { resolveIslandImage } from '../../game/islandImage.js';
 import { resolveOfficerPortrait } from '../../game/officerImage.js';
 import { domainHasIslandImage, officerHasPortrait } from '../../storage/r2.js';
-import { knownPartnerLore, hydrateWithPartner } from '../../game/confluxBoard.js';
+import { knownPartnerLore, overlayWithPartner } from '../../game/confluxBoard.js';
 import { deriveOnboardingPhase, normalizeOnboardingDraft } from '../../game/onboarding.js';
 import { genesisTutorialText } from '../../game/progressBar.js';
 import { miniCityPayload } from '../../game/miniCity.js';
-import { cityRules, confluxDirective } from '../../game/cityRules.js';
+import { cityRules, proxyText } from '../../game/cityRules.js';
 import { worldDay } from '../../game/scheduler.js';
 import { gameDateFromDay } from '../../game/gameClock.js';
 import { DIFFICULTY_SPEC, DURATION_SPEC, normalizeDifficultyBand } from '../../game/bands.js';
@@ -63,15 +66,56 @@ function inspectProcess(process, day) {
   };
 }
 
+/** Скрытый слой нити — только инспектору тестового клиента, не доске и не речи. */
+function plotSecrets(plot) {
+  if (!plot || typeof plot !== 'object') return {};
+  return {
+    hiddenPremises: Array.isArray(plot.hiddenPremises) ? plot.hiddenPremises : [],
+    discoveryLadder: Array.isArray(plot.discoveryLadder) ? plot.discoveryLadder : [],
+    truth: plot.truth || null,
+  };
+}
+
+function loreBelongsToPlot(entry, plot) {
+  const pid = String(plot?.id || '');
+  if (!pid || !entry) return false;
+  if (String(entry.sourcePlotId || '') === pid) return true;
+  if ((entry.relatedPlotlineIds || []).map(String).includes(pid)) return true;
+  if ((plot.chronicleIds || []).map(String).includes(String(entry.id))) return true;
+  return false;
+}
+
+function inspectPlotChronicles(plot, lore) {
+  return chronicleEntries(lore)
+    .filter((e) => loreBelongsToPlot(e, plot))
+    .sort(
+      (a, b) =>
+        (Number(a.day) || 0) - (Number(b.day) || 0) ||
+        (Number(a.tick) || 0) - (Number(b.tick) || 0) ||
+        String(a.id || '').localeCompare(String(b.id || '')),
+    )
+    .map((e) => ({
+      id: e.id,
+      text: e.text,
+      day: e.day ?? null,
+      tick: e.tick ?? null,
+      gameDateLabel: e.gameDateLabel || null,
+      importance: e.importance || null,
+      author: e.author || null,
+    }));
+}
+
 /**
  * Нить для инспектора. Здесь, в отличие от речи жреца, видно всё нависшее —
  * включая то, о чём город ещё не знает: иначе отлаживать угрозы нечем.
+ * Скрытый слой и хроника нити тоже здесь: иначе нечем проследить, как она шла.
  */
-function inspectPlot(plot, day) {
+function inspectPlot(plot, day, lore = []) {
   const bare = stripPlotSecrets(plot);
   if (!bare) return bare;
   return {
     ...bare,
+    ...plotSecrets(plot),
     threats: liveThreats(plot).map((t) => ({
       id: t.id,
       text: t.text,
@@ -82,6 +126,7 @@ function inspectPlot(plot, day) {
       totalDays: t.totalDays,
       remainingDays: threatRemainingDays(t, day),
     })),
+    chronicles: inspectPlotChronicles(plot, lore),
   };
 }
 
@@ -99,10 +144,6 @@ function slimLore(f) {
   };
 }
 
-function publicLore(domain) {
-  return (domain?.lore || []).filter((f) => f && !f.secret);
-}
-
 function nameForDomain(id, domain, partner) {
   const sid = String(id || '');
   if (sid && sid === String(domain?.id)) return domain.name;
@@ -110,8 +151,8 @@ function nameForDomain(id, domain, partner) {
   return sid || null;
 }
 
-/** Живая доска конфлюкса и корпус информатора этого города. */
-function inspectConfluxBoard(conflux, domain, partner, world) {
+/** Живая доска сопряжения для инспектора. */
+function inspectConfluxBoard(conflux, domain, partner, world, day) {
   if (!conflux) return null;
   const viewerId = String(domain.id);
   const partnerId = partner ? String(partner.id) : null;
@@ -119,8 +160,8 @@ function inspectConfluxBoard(conflux, domain, partner, world) {
     (conflux.domainIds || []).map((id) => [String(id), nameForDomain(id, domain, partner) || String(id)]),
   );
   const known = partner ? knownPartnerLore(partner, conflux, viewerId) : [];
-  const theyKnow = partnerId ? knownPartnerLore(domain, conflux, partnerId) : [];
   const byTick = (a, b) => (Number(b.tick) || 0) - (Number(a.tick) || 0);
+  const boardLore = [...(conflux.lore || []), ...(domain.lore || []), ...(partner?.lore || [])];
   return {
     ...confluxSummary(conflux, world, {
       [domain.id]: domain,
@@ -128,21 +169,10 @@ function inspectConfluxBoard(conflux, domain, partner, world) {
     }),
     partnerName: partner?.name || partnerId,
     mainPlotId: conflux.mainPlotId || null,
-    awareness: {
-      ours: Number(conflux.awareness?.[viewerId] || 0),
-      theirs: partnerId ? Number(conflux.awareness?.[partnerId] || 0) : 0,
-    },
-    informant: {
-      knownCount: known.length,
-      publicCount: publicLore(partner).length,
-      known: [...known].sort(byTick).map(slimLore),
-      theyKnowCount: theyKnow.length,
-      theyPublicCount: publicLore(domain).length,
-      theyKnow: [...theyKnow].sort(byTick).map(slimLore),
-    },
-    plotlines: (conflux.plotlines || []).map(stripPlotSecrets),
-    closedPlotlines: (conflux.closedPlotlines || []).slice(-20).map(stripPlotSecrets),
-    processes: conflux.processes || [],
+    knownAboutPartner: [...known].sort(byTick).map(slimLore),
+    plotlines: (conflux.plotlines || []).map((p) => inspectPlot(p, day, boardLore)),
+    closedPlotlines: (conflux.closedPlotlines || []).map((p) => inspectPlot(p, day, boardLore)),
+    processes: (conflux.processes || []).map((p) => inspectProcess(p, day)),
     lore: [...(conflux.lore || [])].slice(-40).map(slimLore),
     domainNames: names,
   };
@@ -443,7 +473,7 @@ export function createWebServer({ config, app, runtime, storage }) {
       const world = await storage.getWorld();
       const domain = await storage.getDomainForUser(who.userId, world.id);
       const conflux = domain ? await findActiveConfluxForDomain(storage, domain.id) : null;
-      if (domain && conflux) await hydrateWithPartner(storage, domain, conflux, { mode: 'ruler' });
+      if (domain && conflux) await overlayWithPartner(storage, domain, conflux);
       const payload = miniCityPayload({
         domain,
         conflux,
@@ -635,7 +665,7 @@ export function createWebServer({ config, app, runtime, storage }) {
         const day = worldDay(world, { config });
         const conflux = await findActiveConfluxForDomain(storage, domain.id);
         const { partner: partnerDomain } = conflux
-          ? await hydrateWithPartner(storage, domain, conflux, { mode: 'ruler' })
+          ? await overlayWithPartner(storage, domain, conflux)
           : { partner: null };
         const partner = partnerDomain?.id || null;
 
@@ -665,15 +695,18 @@ export function createWebServer({ config, app, runtime, storage }) {
             tags: (domain.tags || []).map((t) => t.tagName || t.tagId),
             processes: (domain.state?.pendingActions || []).map((p) => inspectProcess(p, day)),
             standingRules: cityRules(domain),
-            confluxDirective: confluxDirective(domain),
+            proxyText: proxyText(domain) || null,
             priestOrders: priestOrders(domain),
             notify: notifySettings(domain),
             monthLog: domain.state?.monthLog || [],
             plotlines: (domain.plotlines || []).map((p) => ({
-              ...inspectPlot(p, day),
+              ...inspectPlot(p, day, lore),
               canDrop: canDropPlayStory(domain, p),
             })),
-            closedPlotlines: (domain.closedPlotlines || []).slice(-20).map(stripPlotSecrets),
+            closedPlotlines: (domain.closedPlotlines || []).map((p) => ({
+              ...inspectPlot(p, day, lore),
+              canDrop: false,
+            })),
             cast: castRecords(lore),
             facts: lore
               .filter((f) => (f.tags || []).includes('fact'))
@@ -694,7 +727,7 @@ export function createWebServer({ config, app, runtime, storage }) {
               ...chronicleRelations(e, domain, conflux || {}),
               statChanges: e.statChanges || null,
             })),
-            conflux: inspectConfluxBoard(conflux, domain, partnerDomain, world),
+            conflux: inspectConfluxBoard(conflux, domain, partnerDomain, world, day),
             confluxHistory: {
               monthsSolo: domain.confluxMonthsSolo ?? 0,
               monthsDocked: domain.confluxMonthsDocked ?? 0,
@@ -784,6 +817,7 @@ export function createWebServer({ config, app, runtime, storage }) {
           const result = await app.forceSeedStory(userId, {
             gravity: req.body?.gravity,
             grain: req.body?.grain,
+            mystery: req.body?.mystery,
           });
           if (!result.ok) {
             const status =
@@ -800,8 +834,55 @@ export function createWebServer({ config, app, runtime, storage }) {
             userId,
             grain: result.grain,
             gravity: result.gravity,
+            mystery: Boolean(result.requireMystery),
             title: result.plot?.title,
           });
+          res.json(result);
+        } catch (err) {
+          req.log?.error('http.error', { error: err.message, stack: err.stack });
+          res.status(500).json({ error: err.message });
+        }
+      });
+
+      server.post('/api/play/force-threat', async (req, res) => {
+        try {
+          const userId = String(req.body?.userId || 'local-user');
+          const result = await app.forcePlayThreat(userId, {
+            plotId: req.body?.plotId,
+            threatId: req.body?.threatId,
+          });
+          if (!result.ok) {
+            const status =
+              result.error === 'ticking'
+                ? 409
+                : result.error === 'not_found' || result.error === 'no_domain'
+                  ? 404
+                  : 400;
+            return res.status(status).json(result);
+          }
+          res.json(result);
+        } catch (err) {
+          req.log?.error('http.error', { error: err.message, stack: err.stack });
+          res.status(500).json({ error: err.message });
+        }
+      });
+
+      server.post('/api/play/force-deed', async (req, res) => {
+        try {
+          const userId = String(req.body?.userId || 'local-user');
+          const result = await app.forcePlayDeed(userId, {
+            processId: req.body?.processId,
+            finish: req.body?.finish,
+          });
+          if (!result.ok) {
+            const status =
+              result.error === 'ticking'
+                ? 409
+                : result.error === 'not_found' || result.error === 'no_domain'
+                  ? 404
+                  : 400;
+            return res.status(status).json(result);
+          }
           res.json(result);
         } catch (err) {
           req.log?.error('http.error', { error: err.message, stack: err.stack });
@@ -1050,8 +1131,10 @@ export function createWebServer({ config, app, runtime, storage }) {
     try {
       const domainIdA = String(req.body.domainIdA || '').trim();
       const domainIdB = String(req.body.domainIdB || '').trim();
-      const etaMonths = Number(req.body.etaMonths ?? 3);
-      const durationMonths = Number(req.body.durationMonths ?? 8);
+      const prepDays = req.body.prepDays != null ? Number(req.body.prepDays) : null;
+      const dockDays = req.body.dockDays != null ? Number(req.body.dockDays) : null;
+      const etaMonths = req.body.etaMonths != null ? Number(req.body.etaMonths) : null;
+      const durationMonths = req.body.durationMonths != null ? Number(req.body.durationMonths) : null;
       if (!domainIdA || !domainIdB) {
         return res.status(400).json({ error: 'domainIdA and domainIdB required' });
       }
@@ -1059,9 +1142,12 @@ export function createWebServer({ config, app, runtime, storage }) {
         storage,
         domainIdA,
         domainIdB,
+        prepDays,
+        dockDays,
         etaMonths,
         durationMonths,
         config,
+        runtime,
       });
       const { conflux, domains, announce } = created;
       if (announce) {
@@ -1092,6 +1178,89 @@ export function createWebServer({ config, app, runtime, storage }) {
       });
     } catch (err) {
       req.log?.error('http.error', { error: err.message, stack: err.stack });
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  async function loadDevPair(confluxId) {
+    const conflux = await storage.getConflux(confluxId);
+    if (!conflux) return null;
+    const world = await storage.getWorld();
+    const domains = [];
+    for (const id of conflux.domainIds || []) {
+      const d = await storage.getDomain(id);
+      if (d) domains.push(d);
+    }
+    return { conflux, world, domains };
+  }
+
+  server.post('/api/dev/conflux/:id/dock', async (req, res) => {
+    try {
+      const loaded = await loadDevPair(req.params.id);
+      if (!loaded) return res.status(404).json({ error: 'conflux not found' });
+      const { conflux, world, domains } = loaded;
+      await dockConfluxNow({
+        config,
+        runtime,
+        conflux,
+        domains,
+        world,
+        day: world.dayIndex,
+      });
+      for (const d of domains) await storage.saveDomain(d);
+      await storage.saveConflux(conflux);
+      const byId = Object.fromEntries(domains.map((d) => [d.id, d]));
+      res.json({ ok: true, conflux: confluxSummary(conflux, world, byId) });
+    } catch (err) {
+      req.log?.error('http.error', { error: err.message });
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  server.post('/api/dev/conflux/:id/undock', async (req, res) => {
+    try {
+      const loaded = await loadDevPair(req.params.id);
+      if (!loaded) return res.status(404).json({ error: 'conflux not found' });
+      const { conflux, world, domains } = loaded;
+      await undockConfluxNow({
+        runtime,
+        conflux,
+        domains,
+        world,
+        day: world.dayIndex,
+        config,
+      });
+      for (const d of domains) await storage.saveDomain(d);
+      await storage.saveConflux(conflux);
+      await storage.saveWorld(world);
+      const byId = Object.fromEntries(domains.map((d) => [d.id, d]));
+      res.json({ ok: true, conflux: confluxSummary(conflux, world, byId) });
+    } catch (err) {
+      req.log?.error('http.error', { error: err.message });
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  server.post('/api/dev/conflux/:id/crystallize', async (req, res) => {
+    try {
+      const loaded = await loadDevPair(req.params.id);
+      if (!loaded) return res.status(404).json({ error: 'conflux not found' });
+      const { conflux, world, domains } = loaded;
+      if (!conflux.container) return res.status(400).json({ error: 'нет контейнера' });
+      await crystallizeContainer({
+        runtime,
+        conflux,
+        domains,
+        world,
+        day: world.dayIndex,
+      });
+      for (const d of domains) await storage.saveDomain(d);
+      await storage.saveConflux(conflux);
+      await storage.saveWorld(world);
+      const byId = Object.fromEntries(domains.map((d) => [d.id, d]));
+      res.json({ ok: true, conflux: confluxSummary(conflux, world, byId) });
+    } catch (err) {
+      req.log?.error('http.error', { error: err.message });
       res.status(400).json({ error: err.message });
     }
   });

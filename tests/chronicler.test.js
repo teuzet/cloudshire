@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CHRONICLE_ENTRY_MAX,
+  CHRONICLE_FINALE_MAX,
+  chronicleEntryLimit,
   deedConsequenceLines,
   fallbackDeedEntry,
   formatDeedPrompt,
@@ -140,6 +142,29 @@ test('промпт беды требует прошедшего времени',
   assert.match(text, /как случившееся, в прошедшем времени/);
   assert.match(text, /забьёт водосборный сток/, 'предсказание отдаём как есть');
   assert.match(text, /История не закрыта/);
+  assert.doesNotMatch(text, /длиннее обычной/);
+});
+
+test('финальная беда даёт и предсказание, и развязку, без копирования концовки', () => {
+  const p = plot({
+    endings: [{ id: 'e_bad', kind: 'BAD_ENDING', text: 'марш обвалился вместе с людьми' }],
+  });
+  const text = formatThreatPrompt({
+    plot: p,
+    threat: { text: 'Северное крыло рухнет на мостки' },
+    kind: 'threat',
+    closed: true,
+    ending: { kind: 'BAD_ENDING', text: '', endingId: 'e_bad' },
+    entryMax: CHRONICLE_FINALE_MAX,
+  });
+  assert.match(text, /Северное крыло рухнет на мостки/);
+  assert.match(text, /марш обвалился вместе с людьми/);
+  assert.match(text, /не копируй дословно/);
+  assert.match(text, /узнаваемы/);
+  assert.match(text, new RegExp(`до ${CHRONICLE_FINALE_MAX} символов`));
+  assert.doesNotMatch(text, /как случившееся, в прошедшем времени/);
+  assert.equal(chronicleEntryLimit(CHRONICLE_FINALE_MAX), CHRONICLE_FINALE_MAX);
+  assert.equal(chronicleEntryLimit(10), CHRONICLE_ENTRY_MAX);
 });
 
 test('развязка берётся из заготовленных концовок, а не из пустого ending.text', () => {
@@ -251,6 +276,25 @@ test('хронист возвращает запись и режет её по �
   assert.equal(calls[0].agentId, 'chronicler');
   assert.equal(calls[0].scene, 'chronicle_дело');
   assert.match(calls[0].extraSystem, /Варшена/);
+  assert.match(calls[0].tools[0].parameters.properties.entry.description, new RegExp(`до ${CHRONICLE_ENTRY_MAX}`));
+});
+
+test('финальная запись режется по расширенному пределу, не по обычному', async () => {
+  const runtime = {
+    run: async (opts) => {
+      await opts.tools[0].handler({ entry: 'Ж'.repeat(CHRONICLE_FINALE_MAX + 20) });
+      return {};
+    },
+  };
+  const res = await writeChronicle({
+    runtime,
+    domain: domain(),
+    occasion: 'угроза',
+    prompt: 'финал',
+    maxChars: CHRONICLE_FINALE_MAX,
+    log: silentLog,
+  });
+  assert.equal(res.text.length, CHRONICLE_FINALE_MAX);
 });
 
 test('пустой ответ модели не выдаётся за запись', async () => {

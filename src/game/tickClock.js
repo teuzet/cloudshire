@@ -1,7 +1,9 @@
 /**
- * Тики по стенным часам сервера, не «через N часов после прошлого».
- * 00:00 дня старта/wipe = год 1, месяц 1; в 02:00 — год 1, месяц 2 (при intervalHours=2).
+ * Стенные часы сервера — только для nextTickAt админского force_tick.
+ * Игровой календарь считается в gameClock от якоря запуска мира.
  */
+
+import { syncWorldClock } from './gameClock.js';
 
 export function tickIntervalHours(config) {
   const hours = Number(config?.tick?.intervalHours);
@@ -70,18 +72,19 @@ export function nextAlignedTickAt(now = Date.now(), config) {
   return out.toISOString();
 }
 
-/** Календарь и nextTickAt нового мира (старт сервера / wipeAll). */
+/** Календарь нового мира: якорь = момент запуска, год 1 день 1. */
 export function applyClockAlignedCalendar(world, config, now = Date.now()) {
-  const tick = clockTickIndex(now, config);
-  world.tickIndex = tick;
-  world.gameDate = gameDateFromTickIndex(tick);
+  const epochAt = new Date(now).toISOString();
+  world.epochAt = epochAt;
+  world.dayIndex = 0;
   world.scheduler = {
     ...(world.scheduler || {}),
-    epochAt: new Date(localDayStartMs(now)).toISOString(),
+    epochAt,
     lastTickAt: null,
     nextTickAt: nextAlignedTickAt(now, config),
     tickInProgress: false,
     tickStartedAt: null,
   };
+  syncWorldClock(world, { now, config });
   return world;
 }

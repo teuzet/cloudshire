@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createConfluxRecord, beginConfluxOwnership, schedulePairJobs, monthsUntilDock, abortCrossIslandDeeds } from '../src/game/conflux.js';
-import { hoursToGameDays, pickPrepDelayHours, confluxConfig, remainingDockDays } from '../src/game/confluxTime.js';
+import { createConfluxRecord, beginConfluxOwnership, dockConfluxNow, schedulePairJobs, monthsUntilDock, abortCrossIslandDeeds } from '../src/game/conflux.js';
+import { hoursToGameDays, pickPrepDelayHours, confluxConfig, remainingDockDays, rollConfluxSpan, stampGenesisConfluxBan, confluxDue } from '../src/game/confluxTime.js';
+import { seedDockMeet, DOCK_MEET_EVENT } from '../src/game/confluxBoard.js';
+import { fireThreat } from '../src/game/threats.js';
 import { hourInTimeZone, noteRulerActivity, emptyActivity } from '../src/game/activity.js';
 import { inQuietHours, setQuietHours, pushVerdict } from '../src/game/notify.js';
 import { applyCrossIslandJudged, secretRevealTexts } from '../src/game/deedConflux.js';
@@ -22,7 +24,7 @@ const config = {
       dockHours: 6,
       cadenceHours: 48,
       crossIslandSpeedup: 2,
-      statFloor: 10,
+      contactSeedAtFraction: 0.05,
     },
   },
 };
@@ -81,8 +83,65 @@ test('нити при сближении остаются на домене', ()
   assert.equal(a.plotlines[0], plot);
   assert.equal(b.plotlines.length, 0);
   assert.equal(c.plotRefs.some((r) => r.plotId === plot.id), true);
-  assert.equal(c.container, null);
+  assert.ok(c.container);
+  assert.equal(c.container.crystallized, false);
+  assert.equal(c.container.endings.some((e) => e.id === 'end_parting'), true);
+  assert.equal((c.container.threats || []).some((t) => t.endingId === 'end_parting'), true);
   assert.match(a.lore[0].text, /Берил/);
+  assert.match(a.lore[0].text, /мес/);
+  assert.doesNotMatch(a.lore[0].text, /~\d/);
+  assert.doesNotMatch(a.lore[0].text, /слух|примета/);
+});
+
+test('свежий город не идёт в матчмейк четыре часа', () => {
+  const now = Date.parse('2026-09-10T12:00:00Z');
+  const d = { id: 'fresh' };
+  stampGenesisConfluxBan(d, { config, now });
+  assert.equal(confluxDue(d, now), false);
+  assert.equal(confluxDue(d, now + 3 * 3600 * 1000), false);
+  assert.equal(confluxDue(d, now + 4 * 3600 * 1000), true);
+});
+
+test('стыковка вешает «острова сошлись» и не закрывает контейнер', async () => {
+  const w = world(100);
+  const a = city('a', 'Астра');
+  const b = city('b', 'Берил');
+  const c = createConfluxRecord({
+    domainIds: ['a', 'b'],
+    world: w,
+    prepStartDay: 10,
+    dockStartDay: 100,
+    dockEndDay: 190,
+  });
+  beginConfluxOwnership({ a, b, conflux: c, world: w, config });
+  const out = await dockConfluxNow({
+    config,
+    runtime: null,
+    conflux: c,
+    domains: [a, b],
+    world: w,
+    day: 100,
+  });
+  const meet = (c.container.threats || []).find((t) => t.eventKind === DOCK_MEET_EVENT);
+  assert.ok(meet);
+  assert.equal(meet.status, 'fired');
+  assert.equal(meet.text, 'Острова сошлись.');
+  assert.equal(c.container.ending, undefined);
+  assert.equal((c.container.threats || []).some((t) => t.endingId === 'end_parting' && t.status === 'live'), true);
+  assert.ok(out.contact?.description);
+  assert.ok(c.passage?.text);
+  assert.match(a.lore.map((f) => f.text).join('\n'), /Берил|проход|сошл/i);
+});
+
+test('срабатывание «острова сошлись» не ранит и не закрывает нить', () => {
+  const plot = { id: 'p1', failCount: 0, endings: [], threats: [] };
+  const meet = seedDockMeet(plot, { day: 10 });
+  const res = fireThreat(plot, meet, { day: 10 });
+  assert.equal(res.ok, true);
+  assert.equal(res.closes, false);
+  assert.equal(res.kind, 'event');
+  assert.equal(plot.failCount, 0);
+  assert.equal(plot.ending, undefined);
 });
 
 test('пустой контейнер не кристаллизован и не двигает статы', () => {
@@ -215,12 +274,28 @@ test('ход правителя пишет гистограмму часов', (
   assert.equal(d.activity.activeMsDocked, 0);
 });
 
-test('конфиг сопряжения читает часы, а не месяцы', () => {
+test('естественное окно — подготовка 1–3 месяца и стыковка 3–6', () => {
+  const span = rollConfluxSpan(
+    { tick: { conflux: { prepDaysMin: 30, prepDaysMax: 90, dockDaysMin: 90, dockDaysMax: 180 } } },
+    () => 0,
+  );
+  assert.equal(span.prepDays, 30);
+  assert.equal(span.dockDays, 90);
+  const hi = rollConfluxSpan(
+    { tick: { conflux: { prepDaysMin: 30, prepDaysMax: 90, dockDaysMin: 90, dockDaysMax: 180 } } },
+    () => 0.999,
+  );
+  assert.equal(hi.prepDays, 90);
+  assert.equal(hi.dockDays, 180);
+});
+
+test('конфиг сопряжения читает каденцию и сроки в днях', () => {
   const cfg = confluxConfig(config);
-  assert.equal(cfg.prepHours, 6);
-  assert.equal(cfg.dockHours, 6);
   assert.equal(cfg.cadenceHours, 48);
   assert.equal(cfg.crossIslandSpeedup, 2);
+  assert.equal(cfg.contactSeedAtFraction, 0.05);
+  assert.ok(cfg.prepDaysMin >= 1);
+  assert.ok(cfg.dockDaysMin >= 1);
 });
 
 test('обрыв дела через проход отпускает сановника', () => {

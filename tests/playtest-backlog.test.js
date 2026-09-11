@@ -12,7 +12,7 @@ import {
 import { pauseProcess, resumeProcess, applyEngineProgress, normalizeProcess } from '../src/game/processes.js';
 import { resolveConfluxSharedMonth } from '../src/game/confluxMonth.js';
 import { createPlotline } from '../src/game/plotlines.js';
-import { ageDomainPeople } from '../src/game/ages.js';
+import { ageDomainPeople, stampPersonAge } from '../src/game/ages.js';
 
 test('пул имён копируется в мир и вынимается', () => {
   const world = createWorldFromConfig({ world: { id: 't', name: 'Т' } });
@@ -129,7 +129,7 @@ test('пустой пол имён сразу наполняется из фай
   assert.ok(world.namePool.female.length > 10);
 });
 
-test('персонажу ставится возраст и месяц рождения, в свой месяц год прибавляется', () => {
+test('персонажу ставится год рождения, возраст считается от даты мира', () => {
   const world = { tickIndex: 4, gameDate: { year: 1, month: 4, label: 'Год 1, месяц 4' } };
   const person = createCharacterRecord({
     id: 'lore_1',
@@ -140,7 +140,9 @@ test('персонажу ставится возраст и месяц рожд�
     world,
   });
   person.birthMonth = 5;
-  person.agedInYear = 0;
+  delete person.birthYear;
+  stampPersonAge(person, world, { ageYears: 34 });
+  assert.equal(person.birthYear, -34);
   assert.equal(person.ageYears, 34);
   assert.match(formatCastForPrompt([person]), /34 лет/);
   assert.match(formatCastForPrompt([person]), /ткачиха/);
@@ -151,5 +153,6 @@ test('персонажу ставится возраст и месяц рожд�
   assert.equal(person.ageYears, 35);
   ageDomainPeople({ lore: [person], characters: [] }, world);
   assert.equal(person.ageYears, 35);
+  assert.equal(person.birthYear, -34);
   assert.match(firstMentionHintForSpeech(), /впервые/);
 });

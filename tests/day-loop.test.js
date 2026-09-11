@@ -127,6 +127,10 @@ function storageOf(domains, world) {
     async listConfluxes() {
       return [];
     },
+    async saveConflux() {},
+    async getConflux() {
+      return null;
+    },
   };
 }
 

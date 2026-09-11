@@ -10,15 +10,11 @@ import {
   findRule,
   removeRule,
   applyRuleDeed,
-  confluxDirective,
-  setConfluxDirective,
-  clearConfluxDirective,
-  fireConfluxDirective,
+  proxyText,
+  setProxyText,
   formatCityRulesForPrompt,
 } from '../src/game/cityRules.js';
 import { seedQueue, enqueueSeedRequest } from '../src/game/seedSchedule.js';
-import { startDeed } from '../src/game/deeds.js';
-import { officerActiveProcess } from '../src/game/officers.js';
 
 function makeDomain() {
   return {
@@ -150,79 +146,37 @@ test('правило находится по смыслу, а не только 
   assert.equal(removeRule(domain, 'нет такого'), null);
 });
 
-// ─────────────────────── наказ на сопряжение ───────────────────────
+// ─────────────────────── доверенность ───────────────────────
 
-test('наказ ставится и снимается', () => {
+test('доверенность ставится и снимается', () => {
   const domain = makeDomain();
-  assert.equal(confluxDirective(domain), null);
-  const set = setConfluxDirective(domain, { text: 'Слать посольство первым', office: 'influence' });
+  assert.equal(proxyText(domain), '');
+  const set = setProxyText(domain, 'Слать посольство первым');
   assert.equal(set.ok, true);
-  assert.equal(confluxDirective(domain).office, 'influence');
-  assert.equal(clearConfluxDirective(domain).ok, true);
-  assert.equal(confluxDirective(domain), null);
-  assert.equal(clearConfluxDirective(domain).ok, false);
+  assert.equal(proxyText(domain), 'Слать посольство первым');
+  setProxyText(domain, '');
+  assert.equal(proxyText(domain), '');
 });
 
-test('пустой наказ не ставится', () => {
+test('пустая доверенность не ставится', () => {
   const domain = makeDomain();
-  assert.equal(setConfluxDirective(domain, { text: '  ' }).ok, false);
+  assert.equal(setProxyText(domain, '  ').proxyText, '');
 });
 
-test('наказ заводит обычное дело и называет столп', () => {
+test('старый наказ читается как доверенность', () => {
   const domain = makeDomain();
-  setConfluxDirective(domain, { text: 'Слать посольство первым', office: 'influence' });
-  const res = fireConfluxDirective(domain, { day: 300, partnerName: 'Гряда Ветров', plotId: 'main1', rng: () => 0.5 });
-  assert.equal(res.ok, true);
-  assert.equal(res.officer.id, 'off2');
-  assert.equal(res.process.officerId, 'off2');
-  assert.equal(res.process.plotlineId, 'main1');
-  assert.match(res.process.detail, /Гряда Ветров/);
-  assert.ok(res.process.dueDay > 300, 'дело идёт по дням, а не срабатывает мгновенно');
-});
-
-test('занятый столп прерывается паузой, о которой докладывают', () => {
-  const domain = makeDomain();
-  const busy = startDeed(
-    { id: 'old', summary: 'вести тяжбу', status: 'active', officerId: 'off2', office: 'influence' },
-    { day: 200, judged: { durationBand: 'SEASON', objectiveDays: 100 } },
-  );
-  domain.state.pendingActions.push(busy);
-  domain.officers[1].processId = 'old';
-  setConfluxDirective(domain, { text: 'Слать посольство первым', office: 'influence' });
-
-  const res = fireConfluxDirective(domain, { day: 250, plotId: 'main1', rng: () => 0.5 });
-  assert.equal(res.paused.id, 'old');
-  assert.equal(busy.status, 'paused');
-  assert.equal(busy.pausedBy, 'order', 'такая пауза не истлевает молча');
-  assert.equal(busy.pausedRemainingDays, 50, 'проделанное не пропадает');
-  assert.equal(officerActiveProcess(domain, domain.officers[1])?.id, res.process.id);
-});
-
-test('наказ не срабатывает дважды на одной встрече', () => {
-  const domain = makeDomain();
-  setConfluxDirective(domain, { text: 'Слать посольство первым' });
-  fireConfluxDirective(domain, { day: 300, plotId: 'main1', rng: () => 0.5 });
-  const again = fireConfluxDirective(domain, { day: 305, plotId: 'main1', rng: () => 0.5 });
-  assert.equal(again.ok, false);
-  assert.equal(again.error, 'already_acting');
-});
-
-test('без наказа ничего не заводится', () => {
-  const domain = makeDomain();
-  const res = fireConfluxDirective(domain, { day: 300, plotId: 'main1' });
-  assert.equal(res.ok, false);
-  assert.equal(res.error, 'no_directive');
-  assert.equal(domain.state.pendingActions.length, 0);
+  domain.state.confluxDirective = { text: 'Не пускать чужих' };
+  assert.equal(proxyText(domain), 'Не пускать чужих');
 });
 
 // ───────────────────────────── речь жреца ─────────────────────────────
 
-test('порядок для промпта собирает правила и наказ', () => {
+test('порядок для промпта собирает только правила', () => {
   const domain = makeDomain();
   assert.equal(formatCityRulesForPrompt(domain), '');
   applyRuleDeed(domain, ruleDeed(), { finish: 'ok', day: 120, rng: () => 0.9 });
-  setConfluxDirective(domain, { text: 'Слать посольство первым' });
+  setProxyText(domain, 'Слать посольство первым');
   const text = formatCityRulesForPrompt(domain);
   assert.match(text, /Подать удвоена/);
-  assert.match(text, /при сопряжении: Слать посольство первым/);
+  assert.equal(text.includes('посольство'), false);
 });

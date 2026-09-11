@@ -42,13 +42,49 @@ function epochMs(world) {
   return Number.isFinite(t) ? t : null;
 }
 
-/** Завести часы нового мира. Идемпотентно: существующий якорь не трогаем. */
-export function startClock(world, now = Date.now()) {
+/** Месячный индекс из игрового дня: 30 дней = бывший тик. */
+export function tickIndexFromDay(dayIndex) {
+  return Math.floor(Math.max(0, Math.round(Number(dayIndex) || 0)) / DAYS_PER_MONTH);
+}
+
+/**
+ * Завести часы мира. Идемпотентно: существующий якорь не трогаем.
+ * Если якоря нет, но календарь уже есть — считаем, что этот момент и есть
+ * сохранённый день, чтобы живой мир не откатился в год 1.
+ */
+export function startClock(world, now = Date.now(), config = null) {
   if (!world || typeof world !== 'object') return world;
-  if (!world.epochAt) {
-    world.epochAt = world.scheduler?.epochAt || new Date(now).toISOString();
+  if (epochMs(world) == null) {
+    const knownDay = Number.isFinite(Number(world.dayIndex))
+      ? Math.max(0, Math.round(Number(world.dayIndex)))
+      : Math.max(0, Math.round(Number(world.tickIndex) || 0)) * DAYS_PER_MONTH;
+    world.epochAt = new Date(now - gameDaysToRealMs(knownDay, config)).toISOString();
+    if (!Number.isFinite(Number(world.dayIndex))) world.dayIndex = knownDay;
+  } else if (!world.epochAt) {
+    world.epochAt = world.scheduler.epochAt;
   }
   if (!Number.isFinite(Number(world.dayIndex))) world.dayIndex = 0;
+  return world;
+}
+
+/**
+ * Подтянуть dayIndex / tickIndex / gameDate из якоря и реального времени.
+ * Календарь больше не инкрементируется полуночным тиком.
+ */
+export function syncWorldClock(world, { now = Date.now(), config = null, day = null } = {}) {
+  if (!world || typeof world !== 'object') return world;
+  startClock(world, now, config);
+  const nextDay =
+    day == null || !Number.isFinite(Number(day))
+      ? currentDay(world, { now, config })
+      : Math.max(0, Math.round(Number(day)));
+  world.dayIndex = nextDay;
+  world.tickIndex = tickIndexFromDay(nextDay);
+  world.gameDate = {
+    ...gameDateFromDay(nextDay),
+    tick: world.tickIndex,
+  };
+  world.updatedAt = new Date().toISOString();
   return world;
 }
 
@@ -80,16 +116,15 @@ export function realTimeOfDay(world, day, { config = null, pausedMs = 0 } = {}) 
  */
 export function skipGameDays(world, days, { config = null, now = Date.now() } = {}) {
   if (!world || typeof world !== 'object') return 0;
-  startClock(world, now);
+  startClock(world, now, config);
   const jump = Math.max(0, Math.round(Number(days) || 0));
   if (!jump) return currentDay(world, { now, config });
   const shift = gameDaysToRealMs(jump, config);
   // Якорь месячного планировщика не трогаем: сдвинув его, мы бы заодно
   // объявили просроченными все пропущенные тики сопряжения.
   world.epochAt = new Date(Date.parse(world.epochAt) - shift).toISOString();
-  const day = currentDay(world, { now, config });
-  world.dayIndex = day;
-  return day;
+  syncWorldClock(world, { now, config });
+  return world.dayIndex;
 }
 
 export function gameDateFromDay(dayIndex) {

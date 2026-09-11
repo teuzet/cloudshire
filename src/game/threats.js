@@ -60,6 +60,29 @@ export function livesLeft(plot) {
   return maxFails - failCount;
 }
 
+/** Запас ран кончился: новые обязательства — только финальные, к плохой карточке. */
+export function woundsExhausted(plot) {
+  return livesLeft(plot) <= 0;
+}
+
+export function plotBadEndings(plot) {
+  return (plot?.endings || []).filter((e) => e && e.kind === 'BAD_ENDING');
+}
+
+export function pickBadEnding(plot, rng = Math.random) {
+  const list = plotBadEndings(plot);
+  if (!list.length) return null;
+  return list[Math.min(list.length - 1, Math.floor(rng() * list.length))];
+}
+
+export function liveFinaleThreats(plot) {
+  return liveThreats(plot).filter((t) => {
+    if (!t?.endingId) return false;
+    const ending = (plot?.endings || []).find((e) => String(e.id) === String(t.endingId));
+    return !ending || ending.kind === 'BAD_ENDING';
+  });
+}
+
 /**
  * Полоса тяжести по остатку жизней. Автор угрозы получает её вместе с текстом
  * плохой концовки как анти-таргет: вот пол, до которого нельзя доходить.
@@ -140,6 +163,14 @@ function nextThreatId(plotId) {
 /**
  * Завести угрозу. Полосу и текст даёт автор, конкретный срок и видимость — код.
  */
+export const THREAT_VALENCES = ['good', 'neutral', 'bad'];
+
+export function normalizeValence(raw, { outcome = 'harm' } = {}) {
+  const key = String(raw || '').trim().toLowerCase();
+  if (THREAT_VALENCES.includes(key)) return key;
+  return outcome === 'neutral' ? 'neutral' : 'bad';
+}
+
 export function createThreat({
   plot,
   text = '',
@@ -149,10 +180,18 @@ export function createThreat({
   known = null,
   slowdown = 0,
   rng = Math.random,
+  dueDay = null,
+  endingId = null,
+  valence = null,
+  eventKind = null,
 } = {}) {
   const effectiveBand = shiftThreatBand(normalizeThreatBand(band), Math.max(0, Math.round(slowdown)));
-  const totalDays = Math.max(1, rollThreatDays(effectiveBand, rng));
-  const isNeutral = outcome === 'neutral';
+  const rolledDays = Math.max(1, rollThreatDays(effectiveBand, rng));
+  const created = Math.round(Number(day) || 0);
+  const resolvedDue = dueDay != null ? Math.round(Number(dueDay)) : created + rolledDays;
+  const totalDays = Math.max(1, dueDay != null ? resolvedDue - created : rolledDays);
+  const isNeutral = outcome === 'neutral' || valence === 'neutral';
+  const resolvedValence = normalizeValence(valence, { outcome: isNeutral ? 'neutral' : outcome });
   const visible = isNeutral ? true : known == null ? rng() < (THREAT_KNOWN_CHANCE[effectiveBand] ?? 0.6) : !!known;
   return {
     id: nextThreatId(plot?.id),
@@ -160,11 +199,14 @@ export function createThreat({
     text: String(text || '').trim().slice(0, 400),
     band: effectiveBand,
     totalDays,
-    dueDay: Math.round(Number(day) || 0) + totalDays,
-    createdDay: Math.round(Number(day) || 0),
+    dueDay: resolvedDue,
+    createdDay: created,
     severity: isNeutral ? null : severityForPlot(plot),
     known: visible,
     outcome: isNeutral ? 'neutral' : 'harm',
+    valence: resolvedValence,
+    endingId: endingId ? String(endingId) : null,
+    eventKind: eventKind ? String(eventKind) : null,
     status: 'live',
     firedBy: null,
   };
@@ -228,12 +270,19 @@ export function dreadFlag(plot, day) {
 export function knownThreatsForSpeech(plot, day) {
   return liveThreats(plot)
     .filter((t) => t.known)
-    .map((t) => ({
-      id: t.id,
-      text: t.text,
-      remainingBand: remainingBand(remainingDays(t, day)),
-      kind: t.outcome === 'neutral' ? 'разрешение' : 'угроза',
-    }))
+    .map((t) => {
+      const ending = t.endingId
+        ? (plot?.endings || []).find((e) => String(e.id) === String(t.endingId))
+        : null;
+      return {
+        id: t.id,
+        text: t.text,
+        remainingBand: remainingBand(remainingDays(t, day)),
+        kind: t.outcome === 'neutral' ? 'разрешение' : ending ? 'финал' : 'угроза',
+        endingId: t.endingId || null,
+        endingText: ending?.text || null,
+      };
+    })
     .sort((a, b) => remainingDays(findThreat(plot, a.id), day) - remainingDays(findThreat(plot, b.id), day));
 }
 
@@ -271,6 +320,20 @@ export function deferSurvivors(plot, firedThreat, day) {
  * Срабатывание угрозы. Возвращает решение для планировщика; запись в хронику
  * и текст события делает рассказчик.
  */
+function endingForThreat(plot, threat) {
+  if (String(threat?.eventKind || '') === 'dock_meet') return null;
+  const id = String(threat?.endingId || '').trim();
+  if (id) {
+    const found = (plot?.endings || []).find((e) => String(e.id) === id);
+    if (found) return found;
+    return { id, kind: 'BAD_ENDING', text: threat.text };
+  }
+  if (threat?.outcome === 'neutral') {
+    return { id: null, kind: 'NEUTRAL_ENDING', text: threat.text };
+  }
+  return null;
+}
+
 export function fireThreat(plot, threat, { day = 0, firedBy = null } = {}) {
   if (!plot || !threat || threat.status !== 'live') {
     return { ok: false, reason: 'not_live' };
@@ -279,32 +342,37 @@ export function fireThreat(plot, threat, { day = 0, firedBy = null } = {}) {
   threat.firedDay = Math.round(Number(day) || 0);
   threat.firedBy = firedBy || null;
 
-  if (threat.outcome === 'neutral') {
-    plot.ending = { kind: 'NEUTRAL_ENDING', text: threat.text, threatId: threat.id };
+  if (String(threat.eventKind || '') === 'dock_meet') {
     return {
       ok: true,
-      kind: 'resolution',
+      kind: 'event',
+      closes: false,
+      severity: null,
+      endingKind: null,
+      deferred: [],
+    };
+  }
+
+  const linked = endingForThreat(plot, threat);
+  if (linked) {
+    plot.ending = {
+      kind: linked.kind || 'NEUTRAL_ENDING',
+      text: linked.text || threat.text,
+      threatId: threat.id,
+      endingId: linked.id || threat.endingId || null,
+    };
+    return {
+      ok: true,
+      kind: linked.kind === 'BAD_ENDING' ? 'threat' : 'resolution',
       severity: null,
       closes: true,
-      endingKind: 'NEUTRAL_ENDING',
+      endingKind: plot.ending.kind,
       deferred: [],
     };
   }
 
   plot.failCount = Math.max(0, Math.round(Number(plot.failCount) || 0)) + 1;
   const lives = livesLeft(plot);
-  if (lives < 0) {
-    plot.ending = { kind: 'BAD_ENDING', text: threat.text, threatId: threat.id };
-    return {
-      ok: true,
-      kind: 'threat',
-      severity: 'КАТАСТРОФА',
-      closes: true,
-      endingKind: 'BAD_ENDING',
-      deferred: [],
-    };
-  }
-
   const deferred = deferSurvivors(plot, threat, day);
   return {
     ok: true,
@@ -405,28 +473,76 @@ export function resolutionChance(plot) {
  * Решает код — у автора нет права выбирать, чем кончится история.
  */
 export function nextObligationRequest(plot, { day = 0, rng = Math.random } = {}) {
-  const target = targetThreatCount(plot);
   const live = liveThreats(plot);
-  if (live.length >= target) return null;
   if (liveResolutions(plot).length) return null;
+
+  const used = live.map((t) => t.band);
+  const [band] = pickThreatBands(1, rng);
+  const existing = live.map((t) => ({ text: t.text, remainingBand: remainingBand(remainingDays(t, day)) }));
+  const depth = Math.max(0, Number(plot?.depth) || 0);
+  const maxDepth = Math.max(0.01, Number(plot?.maxDepth) || 1);
+
+  if (woundsExhausted(plot)) {
+    if (liveFinaleThreats(plot).length) return null;
+    if (depth >= maxDepth) {
+      return {
+        plotId: plot?.id || null,
+        outcome: 'neutral',
+        finale: false,
+        endingId: null,
+        band: shiftThreatBand(band, 1),
+        slowdown: 0,
+        severity: null,
+        severityGuidance: null,
+        antiTarget: null,
+        endingText: null,
+        known: true,
+        livesLeft: livesLeft(plot),
+        existingThreats: existing,
+        usedBands: used,
+      };
+    }
+    const ending = pickBadEnding(plot, rng);
+    return {
+      plotId: plot?.id || null,
+      outcome: 'harm',
+      finale: true,
+      endingId: ending?.id || null,
+      endingText: ending?.text || null,
+      band,
+      slowdown: 0,
+      severity: 'КАТАСТРОФА',
+      severityGuidance: SEVERITY_GUIDANCE.КАТАСТРОФА,
+      antiTarget: ending?.text || null,
+      known: true,
+      livesLeft: livesLeft(plot),
+      existingThreats: existing,
+      usedBands: used,
+    };
+  }
+
+  const target = targetThreatCount(plot);
+  if (live.length >= target) return null;
 
   const wantsResolution = rng() < resolutionChance(plot);
   const slowdown = defenseSlowdown(plot);
-  const used = live.map((t) => t.band);
-  const [band] = pickThreatBands(1, rng);
   const severity = severityForPlot(plot);
-  const badEnding = (plot?.endings || []).find((e) => e?.kind === 'BAD_ENDING');
+  const badEnding = plotBadEndings(plot)[0];
 
   return {
     plotId: plot?.id || null,
     outcome: wantsResolution ? 'neutral' : 'harm',
+    finale: false,
+    endingId: null,
     band: wantsResolution ? shiftThreatBand(band, 1) : band,
     slowdown: wantsResolution ? 0 : slowdown,
     severity: wantsResolution ? null : severity,
     severityGuidance: wantsResolution ? null : SEVERITY_GUIDANCE[severity],
     antiTarget: wantsResolution ? null : badEnding?.text || null,
+    endingText: null,
+    known: wantsResolution ? true : null,
     livesLeft: livesLeft(plot),
-    existingThreats: live.map((t) => ({ text: t.text, remainingBand: remainingBand(remainingDays(t, day)) })),
+    existingThreats: existing,
     usedBands: used,
   };
 }
@@ -450,7 +566,9 @@ export function replenishThreats(plot, { day = 0, rng = Math.random, author = nu
       band: drafted?.band || req.band,
       outcome: req.outcome,
       slowdown: req.slowdown,
-      known: req.outcome === 'neutral' ? true : drafted?.known ?? null,
+      known: req.known === true || req.outcome === 'neutral' ? true : drafted?.known ?? null,
+      endingId: req.endingId || null,
+      valence: req.finale ? 'bad' : req.outcome === 'neutral' ? 'neutral' : 'bad',
       day,
       rng,
     });
@@ -479,6 +597,8 @@ export function normalizeThreat(raw, plotId = null) {
     severity: SEVERITY_BANDS.includes(raw.severity) ? raw.severity : outcome === 'neutral' ? null : 'ТРЕВОГА',
     known: outcome === 'neutral' ? true : !!raw.known,
     outcome,
+    valence: normalizeValence(raw.valence, { outcome }),
+    endingId: raw.endingId ? String(raw.endingId) : null,
     status,
     firedBy: raw.firedBy || null,
     ...(raw.surfacedDay != null ? { surfacedDay: Math.round(Number(raw.surfacedDay)) } : {}),

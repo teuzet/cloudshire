@@ -51,6 +51,12 @@ function forcedToolName(toolChoice) {
  * toolChoice только принуждает первый вызов; сам по себе ход не закрывает.
  * terminal: true/false на определении tool перекрывает правило по имени.
  */
+const FULL_TOOL_ARG_LOG = new Set(['emit_freeform_candidates', 'submit_freeform_pack_review']);
+
+function keepFullToolArgs(name) {
+  return FULL_TOOL_ARG_LOG.has(String(name || ''));
+}
+
 export function toolEndsAgentRun(tool, { soleTool = false } = {}) {
   if (!tool || typeof tool !== 'object') return false;
   if (tool.terminal === true) return true;
@@ -380,7 +386,7 @@ export class AgentRuntime {
             tool: name,
             ok: result?.ok !== false,
             ms: Date.now() - toolStarted,
-            args: truncate(args, 500),
+            args: keepFullToolArgs(name) ? args : truncate(args, 2000),
             result: truncate(result, 500),
           });
 

@@ -93,7 +93,8 @@ export function startTickScheduler({ config, storage, onTick }) {
       } catch (e2) {
         log.error('scheduler.recover_failed', { error: e2.message });
       }
-      throw err;
+      if (reason === 'manual' || reason === 'play-force') throw err;
+      return null;
     } finally {
       running = false;
     }

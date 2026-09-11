@@ -185,6 +185,9 @@ export const FREEFORM_PACK_JUDGE_CODES = [
   'PATRON',
   'CONFLUX',
   'BUREAUCRACY',
+  'ENGINEERING_PORN',
+  'UNCAUSED_WATER_SYSTEMS',
+  'WATER_SYSTEMS_PORN',
   'SAME_STORY',
   'HIDDEN',
   'ENDING',
@@ -200,12 +203,18 @@ export function freeformPackJudgeCodes({ requireMystery = false } = {}) {
   return FREEFORM_PACK_JUDGE_CODES.filter((c) => !FREEFORM_MYSTERY_PACK_CODES.includes(c));
 }
 
+const PACK_CODE_ALIASES = {
+  BUREAUCRACY_PORN: 'BUREAUCRACY',
+  ENGINEERING: 'ENGINEERING_PORN',
+};
+
 function asPackCode(raw) {
   const c = String(raw || '')
     .trim()
     .toUpperCase()
     .replace(/[\s-]+/g, '_');
-  return FREEFORM_PACK_JUDGE_CODES.includes(c) ? c : 'OTHER';
+  const mapped = PACK_CODE_ALIASES[c] || c;
+  return FREEFORM_PACK_JUDGE_CODES.includes(mapped) ? mapped : 'OTHER';
 }
 
 function asPackVerdict(raw) {

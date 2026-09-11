@@ -21,13 +21,36 @@ export function confluxConfig(config) {
       0,
       Math.round(Number(raw.minDomainAgeDays ?? (Number.isFinite(minAgeMonths) ? minAgeMonths * 30 : 180))),
     ),
+    genesisBanHours: Math.max(0, Number(raw.genesisBanHours ?? 4)),
     preferNeverMet: raw.preferNeverMet !== false,
     maxNewPairsPerDay: Math.max(0, Math.round(Number(raw.maxNewPairsPerDay ?? raw.maxNewPairsPerTick ?? 2))),
     crossIslandSpeedup: Math.max(1, Number(raw.crossIslandSpeedup ?? 2)),
-    contactSeedAtFraction: Math.min(0.9, Math.max(0.05, Number(raw.contactSeedAtFraction ?? 0.2))),
-    statFloor: Math.max(0, Number(raw.statFloor ?? 10)),
-    statFloorAfk: Math.max(0, Number(raw.statFloorAfk ?? 25)),
+    contactSeedAtFraction: Math.min(0.9, Math.max(0.05, Number(raw.contactSeedAtFraction ?? 0.05))),
+    prepDaysMin: Math.max(1, Math.round(Number(raw.prepDaysMin ?? (raw.etaMonths?.min ?? 1) * 30))),
+    prepDaysMax: Math.max(
+      Math.max(1, Math.round(Number(raw.prepDaysMin ?? (raw.etaMonths?.min ?? 1) * 30))),
+      Math.round(Number(raw.prepDaysMax ?? (raw.etaMonths?.max ?? 3) * 30)),
+    ),
+    dockDaysMin: Math.max(1, Math.round(Number(raw.dockDaysMin ?? (raw.durationMonths?.min ?? 3) * 30))),
+    dockDaysMax: Math.max(
+      Math.max(1, Math.round(Number(raw.dockDaysMin ?? (raw.durationMonths?.min ?? 3) * 30))),
+      Math.round(Number(raw.dockDaysMax ?? (raw.durationMonths?.max ?? 6) * 30)),
+    ),
     contactWeights: raw.contactWeights && typeof raw.contactWeights === 'object' ? raw.contactWeights : {},
+  };
+}
+
+export function rollInclusiveDays(min, max, rng = Math.random) {
+  const lo = Math.min(Math.round(Number(min) || 1), Math.round(Number(max) || 1));
+  const hi = Math.max(Math.round(Number(min) || 1), Math.round(Number(max) || 1));
+  return lo + Math.floor(rng() * (hi - lo + 1));
+}
+
+export function rollConfluxSpan(config, rng = Math.random) {
+  const cfg = confluxConfig(config);
+  return {
+    prepDays: rollInclusiveDays(cfg.prepDaysMin, cfg.prepDaysMax, rng),
+    dockDays: rollInclusiveDays(cfg.dockDaysMin, cfg.dockDaysMax, rng),
   };
 }
 
@@ -69,6 +92,18 @@ export function stampNextConflux(domain, { config, now = Date.now(), rng = Math.
   const jitter = (rng() * 2 - 1) * cfg.cadenceJitterHours;
   const hours = Math.max(1, cfg.cadenceHours + jitter);
   domain.nextConfluxNotBefore = new Date(Number(now) + hours * 3600 * 1000).toISOString();
+  return domain.nextConfluxNotBefore;
+}
+
+/** Свежий город: бан на сопряжение в реальных часах с момента генезиса. */
+export function stampGenesisConfluxBan(domain, { config, now = Date.now() } = {}) {
+  const hours = confluxConfig(config).genesisBanHours;
+  if (!hours) return domain.nextConfluxNotBefore || null;
+  const until = new Date(Number(now) + hours * 3600 * 1000).toISOString();
+  const prev = Date.parse(domain.nextConfluxNotBefore || '');
+  if (!Number.isFinite(prev) || prev < Date.parse(until)) {
+    domain.nextConfluxNotBefore = until;
+  }
   return domain.nextConfluxNotBefore;
 }
 

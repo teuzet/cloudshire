@@ -22,9 +22,10 @@ import { noteRulerActivity } from './activity.js';
 import { confluxConfig, daysUntilDock, remainingDockDays } from './confluxTime.js';
 import { assertsIslandsParted, findActiveConfluxForDomain, formatContactForPrompt } from './conflux.js';
 import {
-  hydrateDomainFromConflux,
-  dehydrateDomainToConflux,
-  hydrateWithPartner,
+  overlayConfluxView,
+  overlayWithPartner,
+  stampNewBoardItems,
+  stripConfluxView,
 } from './confluxBoard.js';
 import { formatPassageForPrompt } from './passage.js';
 import {
@@ -69,11 +70,17 @@ import {
 } from './onboarding.js';
 import { blessProcess, processOwnedBy } from './processes.js';
 import { spendTurnMana } from './mana.js';
-import { beginRulerTurn, endRulerTurn, worldDay } from './scheduler.js';
-import { formatBoardForSpeech, warmPlotlines, plotConfig } from './plotlines.js';
+import { beginRulerTurn, endRulerTurn, worldDay, cancelJobsForThreat } from './scheduler.js';
+import { formatBoardForSpeech, warmPlotlines, plotConfig, findPlotline } from './plotlines.js';
 import { plantStakedStory } from './storyteller.js';
-import { ensurePlotObligations } from './worldLoop.js';
-import { packPlaySeedGrain, dropPlayStory as applyDropPlayStory } from './playDev.js';
+import { ensurePlotObligations, fireThreatEvent, resolveDeedEvent, cancelDeedJobs } from './worldLoop.js';
+import { deliverEvent } from './dayLoop.js';
+import { findThreat } from './threats.js';
+import {
+  packPlaySeedGrain,
+  dropPlayStory as applyDropPlayStory,
+  parsePlayDeedFinish,
+} from './playDev.js';
 import { islandDeleteCheck } from '../clients/telegram/access.js';
 import { generateIslandImage, removeIslandImage } from './islandImage.js';
 import { generateOfficerPortraits, removeOfficerPortraits } from './officerImage.js';
@@ -123,7 +130,7 @@ function looksLikeToolDump(text) {
   if (!t.trim()) return false;
   if (/tools\.\w+/i.test(t)) return true;
   if (/天天送json|комментary|commentary\s+json/i.test(t)) return true;
-  if (/declare_action|declare_process|consult_loremaster|consult_informant|set_patron_name|read_domain_brief/i.test(t) && /\{/.test(t)) {
+  if (/declare_action|declare_process|consult_loremaster|set_patron_name|read_domain_brief|set_proxy/i.test(t) && /\{/.test(t)) {
     return true;
   }
   if (/"summary"\s*:/.test(t) && (/"durationMonths"\s*:/.test(t) || /"expectedMonths"\s*:/.test(t))) return true;
@@ -173,6 +180,8 @@ export class GameApp {
     this.onClockReleased = null;
     /** Принудительный посев из тестового клиента — не класть второй поверх. */
     this.seedingUsers = new Set();
+    /** Кнопки инспектора: угроза или исход дела — по одному за раз. */
+    this.playForcing = false;
   }
 
   beginWorldTick() {
@@ -855,7 +864,7 @@ export class GameApp {
     if (conflux) {
       const partnerId = (conflux.domainIds || []).find((id) => id !== domain.id);
       if (partnerId) partner = await this.storage.getDomain(partnerId);
-      hydrateDomainFromConflux(domain, conflux, { mode: 'ruler', partner });
+      overlayConfluxView(domain, conflux, partner);
       noteRulerActivity(domain, {
         now: Date.now(),
         docked: conflux.status === 'docked',
@@ -932,7 +941,7 @@ export class GameApp {
             'Если неясно, про какую беду приказ или это отдельное хозяйство — спроси (commitment=clarify), не гадай id. Лучше спросить до приказа, чем потом снимать дело с истории.',
             'Приказ по истории без поручения — новое дело с plotId этой истории, не правка соседнего.',
             conflux
-              ? 'Чужой след без карточки — не история. Если покровитель хочет знать, что это, intel=true с chronicleId. Вмешательство в уже раскрытую чужую нить — обычное дело с plotId.'
+              ? 'Чужая нить, которую город уже знает как линию — обычное дело с plotId. Разведка ещё не раскрытой — intel=true с plotId или chronicleId.'
               : '',
           ]
             .filter(Boolean)
@@ -942,10 +951,7 @@ export class GameApp {
       formatOfficersForPrompt(domain, this.config),
       firstMentionHintForSpeech(),
       conflux
-        ? [
-            'ИНФОРМАТОР: факты и хроника соседнего острова — только через consult_informant.',
-            'Он не выдумывает: если не знает, так и скажи покровителю. Ломастер про соседа не спрашивай.',
-          ].join(' ')
+        ? 'Доверенность — set_proxy: свободный текст, как городу себя вести. Сановник может по ней действовать или нет.'
         : '',
     ]
       .filter(Boolean)
@@ -1264,8 +1270,8 @@ export class GameApp {
     const confluxLead = confluxAdds.length && !opts.undock
       ? [
           'ГЛАВНОЕ СОБЫТИЕ МЕСЯЦА — чужой летающий остров (сближение или сопряжение).',
-          'Начни письмо с него и говори прямо: назови город соседа, срок или характер сопряжения.',
-          'Это не примета и не слух — покровитель должен понять масштаб.',
+          'Начни письмо с него и говори прямо: назови город соседа и срок в игровых месяцах.',
+          'Не переводи срок в часы и не оговаривайся, что это «не слух» или «не примета».',
           'Прочие дела — коротко, после.',
         ].join(' ')
       : '';
@@ -1448,7 +1454,7 @@ export class GameApp {
         ? 'сопряжение уже в этом месяце'
         : months === 1
           ? 'до сопряжения около месяца'
-          : `до сопряжения по приметам примерно ${months} мес.`;
+          : `до сопряжения примерно ${months} мес.`;
     const partner = partnerName ? `«${partnerName}»` : 'чужой город';
     const firstSight = kind !== 'approach';
     try {
@@ -1472,14 +1478,14 @@ export class GameApp {
             content: [
               firstSight
                 ? 'Это не письмо месяца. Срочное слово покровителю: на горизонте впервые виден чужой летающий остров, сопряжение неизбежно.'
-                : 'Это не письмо месяца. Срочное слово покровителю: чужой остров уже близко, до сопряжения около месяца. Край чужой земли уже различим.',
+                : 'Это не письмо месяца. Срочное слово покровителю: чужой остров уже близко. Край чужой земли уже различим.',
               `Соседний город зовут ${partner}.`,
-              `Срок: ${when}.`,
+              `Срок в игровых месяцах: ${when}. Не переводи в часы и не называй реальное время.`,
               rematch ? 'Острова уже сходились с этим соседом раньше — город это помнит.' : '',
-              'Факт (так было, не слух):',
+              'Что уже известно городу:',
               fallback,
               'Напиши короткое живое письмо от первого лица: 1–2 коротких абзаца.',
-              `Назови ${partner} и срок прямо. Это не примета и не слух — покровитель должен понять масштаб.`,
+              `Назови ${partner} и срок в месяцах прямо. Не оговаривайся, что это «не слух» или «не примета».`,
               'Внутренней жизни соседа ещё не видно — не выдумывай, что у них там происходит.',
               'Не заканчивай служебной формулой. Без списков, markdown, механики.',
               addressHint,
@@ -1539,16 +1545,17 @@ export class GameApp {
     const domain = await this.storage.getDomain(domainId);
     if (!domain) return null;
     const conflux = await findActiveConfluxForDomain(this.storage, domain.id);
-    if (conflux) await hydrateWithPartner(this.storage, domain, conflux, { mode: 'ruler' });
+    if (conflux) await overlayWithPartner(this.storage, domain, conflux);
     return domain;
   }
 
-  /** Своя доска: при сближении — после hydrate, без записи. */
+  /** Своя доска: при сближении контейнер накладывается, без записи. */
   async loadOwnBoard(userId, { mode = 'ruler' } = {}) {
+    void mode;
     const domain = await this.getOwnDomain(userId);
     if (!domain) return { domain: null, conflux: null };
     const conflux = await findActiveConfluxForDomain(this.storage, domain.id);
-    if (conflux) await hydrateWithPartner(this.storage, domain, conflux, { mode });
+    if (conflux) await overlayWithPartner(this.storage, domain, conflux);
     return { domain, conflux };
   }
 
@@ -1635,7 +1642,7 @@ export class GameApp {
     if (!domain) return { ok: false, error: 'no_domain', message: 'города ещё нет' };
     normalizeDomain(domain);
     const conflux = await findActiveConfluxForDomain(this.storage, domain.id);
-    if (conflux) await hydrateWithPartner(this.storage, domain, conflux, { mode: 'ruler' });
+    if (conflux) await overlayWithPartner(this.storage, domain, conflux);
 
     const process = (domain.state?.pendingActions || []).find((p) => String(p.id) === id);
     if (!process) return { ok: false, error: 'not_found', message: 'такого дела нет' };
@@ -1667,7 +1674,8 @@ export class GameApp {
     }
 
     if (conflux) {
-      dehydrateDomainToConflux(domain, conflux);
+      stampNewBoardItems(domain, conflux);
+      stripConfluxView(domain);
       await this.storage.saveConflux(conflux);
     }
     await this.storage.saveDomain(domain);
@@ -1686,7 +1694,7 @@ export class GameApp {
    * Тестовый клиент: посадить историю сейчас, тем же конвейером, что живой посев.
    * Зерно и gravity задаёт человек, не бросок канала.
    */
-  async forceSeedStory(userId, { gravity, grain } = {}) {
+  async forceSeedStory(userId, { gravity, grain, mystery } = {}) {
     const uid = String(userId || '').trim();
     if (this.isWorldTicking()) {
       return { ok: false, error: 'ticking', message: 'сейчас идёт шаг времени' };
@@ -1718,6 +1726,7 @@ export class GameApp {
         gravity: packed.gravity,
         fromVoid: packed.fromVoid,
         fromGenesis: packed.fromGenesis,
+        requireMystery: Boolean(mystery),
         day,
         log,
       });
@@ -1738,11 +1747,13 @@ export class GameApp {
         title: planted.plot.title,
         gravity: planted.plot.gravity,
         grain: packed.grain,
+        requireMystery: Boolean(planted.requireMystery),
       });
       return {
         ok: true,
         grain: packed.grain,
         gravity: planted.plot.gravity,
+        requireMystery: Boolean(planted.requireMystery),
         plot: {
           id: planted.plot.id,
           title: planted.plot.title,
@@ -1756,6 +1767,167 @@ export class GameApp {
     } finally {
       this.seedingUsers.delete(uid);
     }
+  }
+
+  /**
+   * Тестовый клиент: прогнать одно событие тем же путём, что дневной цикл —
+   * хроника, речь жреца, сохранение.
+   */
+  async runPlayForce(userId, run) {
+    const uid = String(userId || '').trim();
+    if (this.isWorldTicking() || this.playForcing) {
+      return { ok: false, error: 'ticking', message: 'сейчас идёт шаг времени' };
+    }
+    const world = await this.storage.getWorld();
+    const domain = await this.storage.getDomainForUser(uid, world.id);
+    if (!domain) return { ok: false, error: 'no_domain', message: 'города ещё нет' };
+    normalizeDomain(domain);
+    const conflux = await findActiveConfluxForDomain(this.storage, domain.id);
+    const { partner } = conflux
+      ? await overlayWithPartner(this.storage, domain, conflux)
+      : { partner: null };
+    const day = worldDay(world, { config: this.config });
+    const log = getLogger().child({ userId: uid, domainId: domain.id, scope: 'play.force' });
+    this.playForcing = true;
+    try {
+      const result = await run({ uid, world, domain, conflux, partner, day, log });
+      if (!result?.ok) return result;
+      const { event, ...publicResult } = result;
+      if (event && !event.skipped) {
+        await deliverEvent({
+          config: this.config,
+          runtime: this.runtime,
+          app: this,
+          domain,
+          world,
+          event,
+          day,
+          log,
+        });
+        if (event.secretVictim?.fact && partner) {
+          await deliverEvent({
+            config: this.config,
+            runtime: this.runtime,
+            app: this,
+            domain: partner,
+            world,
+            event: {
+              occasion: 'дело',
+              fact: event.secretVictim.fact,
+              plotId: event.plotId || null,
+            },
+            day,
+            log,
+          });
+          await this.storage.saveDomain(partner);
+        }
+      }
+      if (conflux) {
+        stampNewBoardItems(domain, conflux);
+        stripConfluxView(domain);
+        await this.storage.saveConflux(conflux);
+      }
+      await this.storage.saveDomain(domain);
+      await this.storage.saveWorld(world);
+      return publicResult;
+    } finally {
+      this.playForcing = false;
+    }
+  }
+
+  /** Тестовый клиент: сработать живую угрозу сейчас, не дожидаясь срока. */
+  async forcePlayThreat(userId, { plotId, threatId } = {}) {
+    const pid = String(plotId || '').trim();
+    const tid = String(threatId || '').trim();
+    if (!pid || !tid) return { ok: false, error: 'not_found', message: 'не указаны нить или угроза' };
+    return this.runPlayForce(userId, async ({ world, domain, conflux, day, log }) => {
+      const plot =
+        findPlotline(domain, pid) ||
+        (conflux?.plotlines || []).find((p) => String(p.id) === pid) ||
+        (conflux?.container && String(conflux.container.id) === pid ? conflux.container : null) ||
+        null;
+      if (!plot) return { ok: false, error: 'not_found', message: 'такой нити нет' };
+      const threat = findThreat(plot, tid);
+      if (!threat || threat.status !== 'live') {
+        return { ok: false, error: 'not_live', message: 'эта угроза уже не жива' };
+      }
+      cancelJobsForThreat(world, threat.id);
+      const event = await fireThreatEvent({
+        runtime: this.runtime,
+        domain,
+        world,
+        day,
+        plotId: plot.id,
+        threatId: threat.id,
+        plot,
+        log,
+      });
+      if (event?.skipped) {
+        return { ok: false, error: event.skipped, message: 'угроза не сработала' };
+      }
+      log.info('play.threat_forced', { plotId: plot.id, threatId: threat.id, closed: Boolean(event.closed) });
+      return {
+        ok: true,
+        plotId: plot.id,
+        threatId: threat.id,
+        title: plot.title,
+        closed: Boolean(event.closed),
+        occasion: event.occasion || 'угроза',
+        event,
+      };
+    });
+  }
+
+  /** Тестовый клиент: закрыть дело выбранным исходом, без броска. */
+  async forcePlayDeed(userId, { processId, finish } = {}) {
+    const id = String(processId || '').trim();
+    const kind = parsePlayDeedFinish(finish);
+    if (!id) return { ok: false, error: 'not_found', message: 'не указано дело' };
+    if (!kind) return { ok: false, error: 'bad_finish', message: 'исход: fail, ok или crit' };
+    return this.runPlayForce(userId, async ({ world, domain, conflux, partner, day, log }) => {
+      const fromDomain = (domain.state?.pendingActions || []).find((p) => String(p.id) === id);
+      const fromConflux = (conflux?.processes || []).find((p) => String(p.id) === id);
+      const process = fromDomain || fromConflux || null;
+      if (!process) return { ok: false, error: 'not_found', message: 'такого дела нет' };
+      if (process.status !== 'active' && process.status !== 'paused') {
+        return { ok: false, error: 'not_active', message: 'дело уже закрыто' };
+      }
+      if (!fromDomain) {
+        domain.state = domain.state || {};
+        domain.state.pendingActions = domain.state.pendingActions || [];
+        domain.state.pendingActions.push(process);
+      }
+      cancelDeedJobs(world, process.id);
+      const event = await resolveDeedEvent({
+        config: this.config,
+        runtime: this.runtime,
+        domain,
+        world,
+        day,
+        processId: process.id,
+        forcedFinish: kind,
+        conflux,
+        partner,
+        storage: this.storage,
+        log,
+      });
+      if (event?.skipped) {
+        return { ok: false, error: event.skipped, message: 'дело не закрылось' };
+      }
+      log.info('play.deed_forced', {
+        processId: process.id,
+        finish: kind,
+        closed: Boolean(event.closed),
+      });
+      return {
+        ok: true,
+        processId: process.id,
+        finish: kind,
+        summary: process.summary || '',
+        closed: Boolean(event.closed),
+        event,
+      };
+    });
   }
 
   /** Тестовый клиент: снять историю и её хронику, если на ней нет дел. */

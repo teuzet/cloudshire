@@ -22,6 +22,7 @@ import { judgeProcessAlignment, engagementOf } from './plotAlign.js';
 import { qualitativeStatsBrief, qualitativePopulation } from './stats.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
+import { proxyText } from './cityRules.js';
 import {
   pickRandomFreeOfficer,
   bindOfficerProcess,
@@ -204,8 +205,11 @@ export async function runOfficerAct({
   day = 0,
   log: parentLog,
   rng = Math.random,
+  reason = 'silence',
+  proxyTrigger = null,
+  proxyContext = '',
 }) {
-  const gate = shouldRunSteward(domain, config);
+  const gate = reason === 'proxy' ? { ok: true, silent: 0 } : shouldRunSteward(domain, config);
   if (!gate.ok) return { silent: gate.silent, act: null };
 
   const officer = pickRandomFreeOfficer(domain, rng);
@@ -290,10 +294,13 @@ export async function runOfficerAct({
     scene: 'officer_act',
     domainId: domain.id,
           extraSystem: [
-      `Ты действуешь от лица сановника: ${officer.title} ${officer.name}. Покровитель молчит. Жрец не правит сам.`,
+      reason === 'proxy'
+        ? `Ты действуешь от лица сановника: ${officer.title} ${officer.name}. Судья решил, что доверенность может требовать реакции (${proxyTrigger || 'событие'}). Жрец не правит сам.`
+        : `Ты действуешь от лица сановника: ${officer.title} ${officer.name}. Покровитель молчит. Жрец не правит сам.`,
       officeStrategy(officer, config) ? `Как ты действуешь: ${officeStrategy(officer, config)}` : '',
-      String(domain.proxyText || domain.state?.confluxDirective?.text || '').trim()
-        ? `Доверенность правителя — как подходить к делам: ${String(domain.proxyText || domain.state.confluxDirective.text).trim()}`
+      proxyText(domain) ? `Доверенность правителя: ${proxyText(domain)}` : '',
+      reason === 'proxy'
+        ? 'Имеешь право ничего не сделать (action=none), даже если судья сказал действовать.'
         : '',
     ]
       .filter(Boolean)
@@ -302,7 +309,9 @@ export async function runOfficerAct({
       {
         role: 'user',
         content: [
-          `Покровитель не отвечает уже ${gate.silent} вестей подряд.`,
+          reason === 'proxy'
+            ? `Событие по доверенности: ${proxyTrigger || 'событие'}.${proxyContext ? ` ${proxyContext}` : ''}`
+            : `Покровитель не отвечает уже ${gate.silent} вестей подряд.`,
           `Движок выбрал сановника: ${officer.title} ${officer.name} (${officer.office}, стат ${officer.statId}).`,
           officer.nature ? `Характер: ${officer.nature}` : '',
           officeStrategy(officer, config) ? `Стратегия должности: ${officeStrategy(officer, config)}` : '',

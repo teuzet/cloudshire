@@ -56,6 +56,27 @@ function makeDomain() {
         tags: ['chronicle'],
         day: 120,
         gameDateLabel: 'Год 1, месяц 5, день 1',
+        sourcePlotId: 'plot_well',
+      },
+      {
+        id: 'lore_old',
+        text: 'Межа высохла за ночь.',
+        tags: ['chronicle'],
+        day: 80,
+        gameDateLabel: 'Год 1, месяц 3, день 21',
+        sourcePlotId: 'plot_old',
+      },
+    ],
+    closedPlotlines: [
+      {
+        id: 'plot_old',
+        kind: 'story',
+        title: 'Сухая межа',
+        synopsis: 'Трава легла.',
+        reason: 'lives',
+        closeReason: 'lives',
+        hiddenPremises: ['ветер с края сдул посев'],
+        chronicleIds: ['lore_old'],
       },
     ],
     plotlines: [
@@ -68,6 +89,8 @@ function makeDomain() {
         depth: 1,
         maxDepth: 3,
         relatedProcessIds: ['act_1'],
+        hiddenPremises: ['под срубом чужая кладка, не городская'],
+        discoveryLadder: [{ id: 'rung_1', promise: 'кто клал камень', revealed: false }],
         endings: [
           { id: 'end_good', kind: 'GOOD_ENDING', text: 'Сруб держит, вода снова чистая' },
           { id: 'end_neutral', kind: 'NEUTRAL_ENDING', text: 'Колодец забросили и роют новый' },
@@ -104,6 +127,7 @@ function makeDomain() {
         ],
       },
     ],
+    proxyText: 'Не пускать чужих в город',
     state: {
       faith: 52,
       mana: 40.4,
@@ -124,7 +148,6 @@ function makeDomain() {
           linkedStats: ['security'],
         },
       ],
-      confluxDirective: { text: 'Не пускать чужих в город', office: 'marshal', sinceDay: 90 },
       priestOrders: [{ id: 'po_1', subject: 'как идут дела в порту', lastEventNo: null }],
     },
   };
@@ -172,6 +195,16 @@ function makeApp(calls = [], hooks = {}) {
       calls.push({ kind: 'drop', userId, plotId });
       if (hooks.dropPlayStory) return hooks.dropPlayStory(userId, plotId);
       return dropPlayStory(hooks.domain, hooks.world, plotId, { day: WORLD_DAY });
+    },
+    forcePlayThreat: async (userId, opts) => {
+      calls.push({ kind: 'force-threat', userId, ...opts });
+      if (hooks.forcePlayThreat) return hooks.forcePlayThreat(userId, opts);
+      return { ok: true, plotId: opts.plotId, threatId: opts.threatId, title: 'Гул колодца', closed: false };
+    },
+    forcePlayDeed: async (userId, opts) => {
+      calls.push({ kind: 'force-deed', userId, ...opts });
+      if (hooks.forcePlayDeed) return hooks.forcePlayDeed(userId, opts);
+      return { ok: true, processId: opts.processId, finish: opts.finish, summary: 'Укрепить колодец', closed: false };
     },
   };
 }
@@ -252,6 +285,19 @@ test('инспектор показывает и скрытое нависшее
     );
     assert.equal(plot.depth, 1);
     assert.equal(plot.canDrop, false, 'на нити живое дело — снимать нельзя');
+    assert.deepEqual(plot.hiddenPremises, ['под срубом чужая кладка, не городская']);
+    assert.equal(plot.discoveryLadder[0].promise, 'кто клал камень');
+    assert.deepEqual(
+      plot.chronicles.map((e) => e.text),
+      ['Колодец загудел в ночь.'],
+    );
+    const closed = data.domain.closedPlotlines[0];
+    assert.equal(closed.title, 'Сухая межа');
+    assert.deepEqual(closed.hiddenPremises, ['ветер с края сдул посев']);
+    assert.deepEqual(
+      closed.chronicles.map((e) => e.text),
+      ['Межа высохла за ночь.'],
+    );
   });
 });
 
@@ -280,15 +326,22 @@ test('клиент рисует концовки списком с пометк�
     assert.match(js, /function endingsBlock/);
     assert.match(js, /GOOD_ENDING: 'хорошая'/);
     assert.match(js, /data-seed-form/);
+    assert.match(js, /посеять с тайной/);
+    assert.match(js, /name="mystery"/);
     assert.match(js, /data-drop/);
+    assert.match(js, /data-fire-threat/);
+    assert.match(js, /data-finish/);
+    assert.match(js, /на самом деле:/);
+    assert.match(js, /хроника нити/);
+    assert.match(js, /function plotChroniclesBlock/);
   });
 });
 
-test('порядок города, наказ на сопряжение и темы докладов видны клиенту', async () => {
+test('порядок города, доверенность и темы докладов видны клиенту', async () => {
   await withServer(async ({ base }) => {
     const data = await get(base, '/api/play/inspect?userId=local-user');
     assert.equal(data.domain.standingRules[0].text, 'Ночной дозор у края');
-    assert.equal(data.domain.confluxDirective.text, 'Не пускать чужих в город');
+    assert.equal(data.domain.proxyText, 'Не пускать чужих в город');
     assert.deepEqual(
       data.domain.priestOrders.map((o) => o.subject),
       ['как идут дела в порту'],
@@ -363,7 +416,7 @@ test('принудительный посев принимает gravity и зе
       const res = await fetch(`${base}/api/play/seed`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: 'local-user', gravity: 'SITUATION', grain: 'genesis' }),
+        body: JSON.stringify({ userId: 'local-user', gravity: 'SITUATION', grain: 'genesis', mystery: true }),
       });
       assert.equal(res.status, 200);
       const body = await res.json();
@@ -373,7 +426,13 @@ test('принудительный посев принимает gravity и зе
     },
     { calls },
   );
-  assert.deepEqual(calls[0], { kind: 'seed', userId: 'local-user', gravity: 'SITUATION', grain: 'genesis' });
+  assert.deepEqual(calls[0], {
+    kind: 'seed',
+    userId: 'local-user',
+    gravity: 'SITUATION',
+    grain: 'genesis',
+    mystery: true,
+  });
 });
 
 test('снятие истории без дел и отказ, если дело ещё идёт', async () => {
@@ -431,8 +490,50 @@ test('без playDev посев и снятие не торчат', async () => 
         body: JSON.stringify({ userId: 'local-user', plotId: 'plot_well' }),
       });
       assert.equal(drop.status, 404);
+      const threat = await fetch(`${base}/api/play/force-threat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: 'local-user', plotId: 'plot_well', threatId: 'thr_known' }),
+      });
+      assert.equal(threat.status, 404);
+      const deed = await fetch(`${base}/api/play/force-deed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: 'local-user', processId: 'act_1', finish: 'ok' }),
+      });
+      assert.equal(deed.status, 404);
     },
     { playDev: false },
   );
+});
+
+test('кнопки инспектора срабатывают угрозу и закрывают дело выбранным исходом', async () => {
+  const calls = [];
+  await withServer(
+    async ({ base }) => {
+      const threat = await fetch(`${base}/api/play/force-threat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: 'local-user', plotId: 'plot_well', threatId: 'thr_hidden' }),
+      });
+      assert.equal(threat.status, 200);
+      assert.equal((await threat.json()).threatId, 'thr_hidden');
+
+      const deed = await fetch(`${base}/api/play/force-deed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: 'local-user', processId: 'act_1', finish: 'crit' }),
+      });
+      assert.equal(deed.status, 200);
+      assert.equal((await deed.json()).finish, 'crit');
+    },
+    { calls },
+  );
+  assert.deepEqual(
+    calls.map((c) => c.kind),
+    ['force-threat', 'force-deed'],
+  );
+  assert.equal(calls[0].threatId, 'thr_hidden');
+  assert.equal(calls[1].finish, 'crit');
 });
 

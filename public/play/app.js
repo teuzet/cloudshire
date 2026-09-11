@@ -454,6 +454,23 @@ function endingsBlock(p) {
   return `${happened}<p class="small muted">закроется, когда:</p><ul class="small endings">${rows}</ul>`;
 }
 
+function plotChroniclesBlock(p) {
+  const list = p.chronicles || [];
+  if (!list.length) return '<p class="small muted">хроники этой нити нет</p>';
+  const rows = list
+    .map((e) => {
+      const meta = [e.gameDateLabel, e.importance, e.author].filter(Boolean).join(' · ');
+      return (
+        `<li>` +
+        (meta ? `<div class="muted small">${esc(meta)}</div>` : '') +
+        `<div class="pre">${esc(e.text)}</div>` +
+        `</li>`
+      );
+    })
+    .join('');
+  return `<p class="small muted">хроника нити (${list.length}):</p><ul class="small plot-chron">${rows}</ul>`;
+}
+
 function plotCard(p, names = {}) {
   const concerns = (p.concernsDomainIds || [])
     .map((id) => names[id] || id)
@@ -478,6 +495,9 @@ function plotCard(p, names = {}) {
     `битов ${p.beatCount}`,
     p.mirrorOf ? 'зеркало' : null,
     p.partnerGone ? 'партнёр ушёл' : null,
+    p.status === 'closed' || p.closeReason || p.reason
+      ? `закрыта: ${p.closeReason || p.reason}`
+      : null,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -492,14 +512,40 @@ function plotCard(p, names = {}) {
       ]
         .filter(Boolean)
         .join(' · ');
-      return `<li>${esc(t.text)} <span class="muted small">${esc(bits)}</span></li>`;
+      const fire =
+        canDev && t.id
+          ? `<button type="button" class="force-btn danger" data-fire-threat="${esc(t.id)}" data-plot="${esc(p.id)}">сработать</button>`
+          : '';
+      return `<li>${esc(t.text)} <span class="muted small">${esc(bits)}</span>${fire}</li>`;
     })
     .join('');
+  const hidden = Array.isArray(p.hiddenPremises) ? p.hiddenPremises : null;
+  const hiddenBlock =
+    hidden == null
+      ? ''
+      : hidden.length
+        ? `<p class="small muted">на самом деле:</p><ul class="small">${hidden
+            .map((t) => `<li>${esc(t)}</li>`)
+            .join('')}</ul>`
+        : '<p class="small muted">на самом деле: скрытого слоя нет</p>';
+  const ladder = (p.discoveryLadder || [])
+    .map((r) => {
+      const label = r.promise || r.text || r.id || '';
+      if (!label) return '';
+      return `<li>${esc(label)} <span class="muted small">${esc(r.revealed ? 'открыто' : 'скрыто')}</span></li>`;
+    })
+    .filter(Boolean)
+    .join('');
+  const truth = p.truth ? `<p class="small muted">истина: ${esc(p.truth)}</p>` : '';
   return (
     `<article class="ins-card"><h4>${esc(p.title)}</h4>` +
     `<div class="muted small">${esc(meta)}</div>` +
     (p.synopsis ? `<p class="pre">${esc(p.synopsis)}</p>` : '') +
-    (threats ? `<p class="small muted">нависло:</p><ul class="small">${threats}</ul>` : '') +
+    hiddenBlock +
+    truth +
+    (ladder ? `<p class="small muted">лестница:</p><ul class="small">${ladder}</ul>` : '') +
+    (threats ? `<p class="small muted">нависло:</p><ul class="small threats">${threats}</ul>` : '') +
+    plotChroniclesBlock(p) +
     endingsBlock(p) +
     (p.relatedStats?.length
       ? `<p class="small muted">статы: ${esc(p.relatedStats.join(', '))}</p>`
@@ -558,6 +604,7 @@ function seedFormHtml() {
     '<option value="chronicle">недавняя хроника</option>' +
     '<option value="void">пустота</option>' +
     '</select></label>' +
+    '<label class="seed-mystery"><input type="checkbox" name="mystery" />посеять с тайной</label>' +
     '<button type="submit">посеять</button>' +
     '</form>'
   );
@@ -574,10 +621,8 @@ function renderPlotsTab(d) {
 
   const closed = (d.closedPlotlines || []).length
     ? block(
-        'Закрытые нити',
-        `<ul>${d.closedPlotlines
-          .map((p) => `<li>${esc(p.title)} <span class="muted small">${esc(p.reason || p.closeReason || '')}</span></li>`)
-          .join('')}</ul>`,
+        `Закрытые нити (${d.closedPlotlines.length})`,
+        d.closedPlotlines.map((p) => plotCard(p)).join(''),
       )
     : '';
 
@@ -603,7 +648,6 @@ function renderConfluxTab(d) {
   }
 
   const names = c.domainNames || {};
-  const info = c.informant || {};
   const plots = c.plotlines || [];
   const procs = c.processes || [];
   const out = [];
@@ -626,41 +670,6 @@ function renderConfluxTab(d) {
 
   out.push(
     block(
-      'Информатор',
-      awarenessMeter('мы знаем о них', c.awareness?.ours) +
-        awarenessMeter('они знают о нас', c.awareness?.theirs) +
-        `<p class="muted small">${
-          c.status === 'docked'
-            ? 'Информированность растёт только в сопряжении. Информатор отвечает лишь из известных записей; секреты соседа сюда не попадают.'
-            : 'Пока острова только сближаются, информированность не растёт. Информатор заработает после сопряжения.'
-        }</p>`,
-    ),
-  );
-
-  const knownNote =
-    info.publicCount != null
-      ? `известно ${info.knownCount || 0} из ${info.publicCount} публичных записей соседа`
-      : `известно ${info.knownCount || 0}`;
-  out.push(
-    block(
-      `Что знает наш информатор (${knownNote})`,
-      loreCards(info.known, 'ещё ничего не известно'),
-    ),
-  );
-
-  const theyNote =
-    info.theyPublicCount != null
-      ? `известно ${info.theyKnowCount || 0} из ${info.theyPublicCount} наших публичных`
-      : `известно ${info.theyKnowCount || 0}`;
-  out.push(
-    block(
-      `Что знает их информатор (${theyNote})`,
-      loreCards(info.theyKnow, 'они ещё ничего не знают'),
-    ),
-  );
-
-  out.push(
-    block(
       `Нити сопряжения (${plots.length})`,
       plots.length ? plots.map((p) => plotCard(p, names)).join('') : '<p class="muted">нитей на сопряжении нет</p>',
     ),
@@ -669,10 +678,8 @@ function renderConfluxTab(d) {
   if (c.closedPlotlines?.length) {
     out.push(
       block(
-        'Закрытые нити сопряжения',
-        `<ul>${c.closedPlotlines
-          .map((p) => `<li>${esc(p.title)} <span class="muted small">${esc(p.reason || p.closeReason || '')}</span></li>`)
-          .join('')}</ul>`,
+        `Закрытые нити сопряжения (${c.closedPlotlines.length})`,
+        c.closedPlotlines.map((p) => plotCard(p, names)).join(''),
       ),
     );
   }
@@ -701,7 +708,7 @@ function renderConfluxTab(d) {
 
 function renderOrdersBlocks(d) {
   const rules = d.standingRules || [];
-  const directive = d.confluxDirective || null;
+  const proxy = d.proxyText || (d.confluxDirective && d.confluxDirective.text) || null;
   const subjects = d.priestOrders || [];
   const out = [
     block(
@@ -720,12 +727,8 @@ function renderOrdersBlocks(d) {
         : '<p class="muted">порядка нет</p>',
     ),
     block(
-      'Наказ на сопряжение',
-      directive
-        ? `<p>${esc(directive.text)}</p><p class="muted small">${esc(
-            [directive.office, directive.sinceLabel].filter(Boolean).join(' · '),
-          )}</p>`
-        : '<p class="muted">наказа нет</p>',
+      'Доверенность',
+      proxy ? `<p>${esc(typeof proxy === 'string' ? proxy : proxy.text || '')}</p>` : '<p class="muted">доверенности нет</p>',
     ),
   ];
   if (subjects.length) {
@@ -800,13 +803,20 @@ function processCard(p, opts = {}) {
         ? `<span class="muted small">благословить · ${cost} маны (не хватает, есть ${Math.floor(mana)})</span>`
         : `<button type="button" class="bless-btn" data-bless="${esc(p.id)}">благословить · ${cost} маны</button>`;
   }
+  const finishBtns =
+    canDev && (active || paused)
+      ? `<button type="button" class="force-btn danger" data-finish="${esc(p.id)}" data-kind="fail">провал</button>` +
+        `<button type="button" class="force-btn" data-finish="${esc(p.id)}" data-kind="ok">успех</button>` +
+        `<button type="button" class="force-btn" data-finish="${esc(p.id)}" data-kind="crit">крит</button>`
+      : '';
+  const actions = [blessBtn, finishBtns].filter(Boolean).join('');
   return (
     `<article class="ins-card${active ? '' : ' dim'}"><h4>${esc(p.summary || p.title || p.id)}</h4>` +
     `<div class="muted small">${esc(meta)}</div>` +
     (p.goal ? `<p class="muted small">цель: ${esc(p.goal)}</p>` : '') +
     (p.detail ? `<p class="pre">${esc(p.detail)}</p>` : '') +
     `<p class="small muted">${esc(p.id)}</p>` +
-    (blessBtn ? `<div class="row-actions">${blessBtn}</div>` : '') +
+    (actions ? `<div class="row-actions">${actions}</div>` : '') +
     `</article>`
   );
 }
@@ -1001,6 +1011,51 @@ $('inspectBody').addEventListener('click', async (e) => {
     }
     return;
   }
+  const fire = e.target.closest('[data-fire-threat]');
+  if (fire) {
+    const threatId = fire.getAttribute('data-fire-threat');
+    const plotId = fire.getAttribute('data-plot');
+    fire.disabled = true;
+    setBanner('Срабатывает угроза…');
+    try {
+      const result = await api('/api/play/force-threat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, plotId, threatId }),
+      });
+      setBanner(
+        result.closed
+          ? `Угроза сработала — нить «${result.title || ''}» закрылась.`
+          : `Угроза сработала${result.title ? `: «${result.title}»` : ''}.`,
+      );
+      await refresh({ force: true });
+    } catch (err) {
+      fire.disabled = false;
+      setBanner(err.message);
+    }
+    return;
+  }
+  const finish = e.target.closest('[data-finish]');
+  if (finish) {
+    const processId = finish.getAttribute('data-finish');
+    const kind = finish.getAttribute('data-kind');
+    finish.disabled = true;
+    setBanner('Закрываем дело…');
+    try {
+      const result = await api('/api/play/force-deed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, processId, finish: kind }),
+      });
+      const label = { fail: 'провалом', ok: 'успехом', crit: 'критом' }[result.finish] || result.finish;
+      setBanner(`Дело закрыто ${label}${result.summary ? `: «${result.summary}»` : ''}.`);
+      await refresh({ force: true });
+    } catch (err) {
+      finish.disabled = false;
+      setBanner(err.message);
+    }
+    return;
+  }
   const btn = e.target.closest('[data-bless]');
   if (!btn) return;
   const processId = btn.getAttribute('data-bless');
@@ -1027,6 +1082,7 @@ $('inspectBody').addEventListener('submit', async (e) => {
   e.preventDefault();
   const gravity = form.gravity?.value || 'EPISODE';
   const grain = form.grain?.value || 'genesis';
+  const mystery = Boolean(form.mystery?.checked);
   const btn = form.querySelector('button[type="submit"]');
   if (btn) btn.disabled = true;
   $('btnSeed').disabled = true;
@@ -1035,7 +1091,7 @@ $('inspectBody').addEventListener('submit', async (e) => {
     const result = await api('/api/play/seed', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, gravity, grain }),
+      body: JSON.stringify({ userId, gravity, grain, mystery }),
     });
     setBanner(`Посеяли «${result.plot?.title || 'историю'}» · ${result.gravity} · ${result.grain}`);
     await refreshInspector();

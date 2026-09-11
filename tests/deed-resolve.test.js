@@ -145,12 +145,12 @@ test('DIRECT-провал стоит жизни, а не глубины', () => 
   assert.equal(res.closes, false);
 });
 
-test('DIRECT-провал на последней жизни закрывает историю плохо', () => {
+test('DIRECT-провал на последней ране не закрывает — только копит провал', () => {
   const p = plot({ failCount: 2 });
   const res = applyDeedToPlot({ plot: p, process: deed('DIRECT'), finish: 'fail' });
-  assert.equal(res.closes, true);
-  assert.equal(res.endingKind, 'BAD_ENDING');
-  assert.equal(p.ending.kind, 'BAD_ENDING');
+  assert.equal(res.closes, false);
+  assert.equal(p.ending, undefined);
+  assert.equal(p.failCount, 3);
 });
 
 // ──────────────────────────── RELEVANT ────────────────────────────
@@ -309,7 +309,7 @@ test('DANGEROUS-крит роняет беду немедленно', () => {
   assert.equal(res.closes, false);
 });
 
-test('DANGEROUS-крит на последней жизни хоронит историю', () => {
+test('DANGEROUS-крит обычной угрозы на краю не хоронит историю', () => {
   const p = plot({ failCount: 2 });
   const t = threat(p);
   const res = applyDeedToPlot({
@@ -317,8 +317,22 @@ test('DANGEROUS-крит на последней жизни хоронит ис�
     process: deed('DANGEROUS', { threatId: t.id }),
     finish: 'crit',
   });
+  assert.equal(res.closes, false);
+  assert.equal(p.failCount, 3);
+});
+
+test('DANGEROUS-крит финальной угрозы ставит названную концовку', () => {
+  const p = plot({ failCount: 2 });
+  const t = threat(p);
+  t.endingId = 'e1';
+  const res = applyDeedToPlot({
+    plot: p,
+    process: deed('DANGEROUS', { threatId: t.id }),
+    finish: 'crit',
+  });
   assert.equal(res.closes, true);
   assert.equal(res.endingKind, 'BAD_ENDING');
+  assert.equal(p.ending.endingId, 'e1');
 });
 
 // ──────────────────────────── UNRELATED ────────────────────────────

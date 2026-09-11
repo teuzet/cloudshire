@@ -326,8 +326,9 @@ export function freeformConfig(config) {
   return {
     variantsMin: Math.max(2, Math.round(Number(raw.variantsMin) || 3)),
     variantsMax: Math.max(3, Math.round(Number(raw.variantsMax) || 3)),
-    chronicleMaxChars: Math.max(180, Math.round(Number(raw.chronicleMaxChars) || 700)),
+    chronicleMaxChars: Math.max(180, Math.round(Number(raw.chronicleMaxChars) || 2800)),
     lunaRepairRounds: Math.max(0, Math.min(2, Math.round(Number(raw.lunaRepairRounds ?? 2)))),
+    seedMysteryChance: Math.max(0, Math.min(1, Number(raw.seedMysteryChance ?? 0.25) || 0)),
     seedChance: {
       critical: Number(raw.seedChance?.critical ?? 0.85),
       major: Number(raw.seedChance?.major ?? 0.45),

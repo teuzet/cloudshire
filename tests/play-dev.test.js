@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   packPlaySeedGrain,
   parsePlaySeedGrain,
+  parsePlayDeedFinish,
   canDropPlayStory,
   dropPlayStory,
 } from '../src/game/playDev.js';
@@ -144,4 +145,12 @@ test('историю с живым делом и нить сопряжения �
   assert.equal(dropPlayStory(domain, {}, 'plot_busy').error, 'has_deeds');
   assert.equal(dropPlayStory(domain, {}, 'plot_cf').error, 'conflux');
   assert.equal(domain.plotlines.length, 2);
+});
+
+test('исход для кнопок клиента — только fail, ok, crit', () => {
+  assert.equal(parsePlayDeedFinish('fail'), 'fail');
+  assert.equal(parsePlayDeedFinish('OK'), 'ok');
+  assert.equal(parsePlayDeedFinish('crit'), 'crit');
+  assert.equal(parsePlayDeedFinish('success'), null);
+  assert.equal(parsePlayDeedFinish(''), null);
 });

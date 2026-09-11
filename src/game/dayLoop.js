@@ -5,7 +5,7 @@
 
 import { normalizeDomain } from './models.js';
 import { ageDomainPeople } from './ages.js';
-import { startClock, gameDateFromDay } from './gameClock.js';
+import { startClock, syncWorldClock, gameDateFromDay } from './gameClock.js';
 import {
   DomainQueue,
   endRulerTurn,
@@ -29,9 +29,9 @@ import { runOfficerAct, stewardOffCooldown, markStewardRan } from './steward.js'
 import { maybeMatchmakeConfluxes } from './conflux.js';
 import { drainConfluxJobs } from './confluxJobs.js';
 import { emitConfluxAnnouncements } from './tick.js';
-import { confluxConfig } from './confluxTime.js';
 import { maybeRewriteCityGenesis } from './genesisRewrite.js';
-import { otherDomainId } from './confluxBoard.js';
+import { otherDomainId, overlayConfluxView, stampNewBoardItems, stripConfluxView } from './confluxBoard.js';
+import { maybeNudgeProxy } from './proxyJudge.js';
 import { getLogger } from '../log.js';
 
 /** Какая настройка уведомлений отвечает за это событие. */
@@ -134,6 +134,7 @@ export async function stepDomain({
   normalizeDomain(domain, config);
   ageDomainPeople(domain, world);
   startClock(world);
+  if (conflux) overlayConfluxView(domain, conflux, partner);
 
   await armDomainSchedule({ runtime, domain, world, day, rng, log });
   const events = await drainDomainJobs({
@@ -168,8 +169,23 @@ export async function stepDomain({
     ? await scoreChronicleStats({ config, runtime, domain, world, chronicleAdds: facts, log })
     : { scored: 0 };
 
+  const plotIds = [...new Set(events.map((e) => e.plotId).filter(Boolean))];
+  if (plotIds.length) {
+    await maybeNudgeProxy({
+      runtime,
+      config,
+      world,
+      day,
+      domains: [domain],
+      trigger: 'plot_tick',
+      context: `Сдвинулись нити: ${plotIds.join(', ')}`,
+      rng,
+      log,
+    });
+  }
+
   // Синопсис обновляем только у тех нитей, которые сегодня сдвинулись.
-  const moved = [...new Set(events.map((e) => e.plotId).filter(Boolean))]
+  const moved = plotIds
     .map((id) => (domain.plotlines || []).find((p) => p.id === id))
     .filter(Boolean);
   if (moved.length) {
@@ -195,17 +211,16 @@ export async function stepDomain({
 
   domain.state = domain.state || {};
   domain.state.lastDay = day;
-  const armor = confluxConfig(config);
   if (domain.stats && typeof domain.stats === 'object') {
     for (const key of Object.keys(domain.stats)) {
       const n = Number(domain.stats[key]);
       if (!Number.isFinite(n)) continue;
-      const floor = Number.isFinite(Number(domain.statFloors?.[key]))
-        ? Number(domain.statFloors[key])
-        : armor.statFloor;
-      const cap = Number.isFinite(Number(domain.statCaps?.[key])) ? Number(domain.statCaps[key]) : 100;
-      domain.stats[key] = Math.max(floor, Math.min(cap, n));
+      domain.stats[key] = Math.max(0, Math.min(100, n));
     }
+  }
+  if (conflux) {
+    stampNewBoardItems(domain, conflux);
+    stripConfluxView(domain);
   }
   log.info('dayLoop.step', {
     day,
@@ -235,7 +250,7 @@ export async function runDayLoop({
 } = {}) {
   const log = (parentLog || getLogger()).child({ scope: 'dayLoop' });
   const world = await storage.getWorld();
-  startClock(world, now);
+  startClock(world, now, config);
 
   if (rulerTurnStale(world, now)) {
     log.warn('dayLoop.turn_failsafe', { turnStartedAt: world.turnStartedAt });
@@ -245,9 +260,9 @@ export async function runDayLoop({
   }
 
   const day = worldDay(world, { now, config });
-  world.dayIndex = day;
+  syncWorldClock(world, { now, config, day });
 
-  const matchmake = await maybeMatchmakeConfluxes({ config, storage, world, rng, now });
+  const matchmake = await maybeMatchmakeConfluxes({ config, runtime, storage, world, rng, now });
   if (matchmake.notes?.length) {
     await emitConfluxAnnouncements({ app, storage, items: matchmake.notes });
   }
@@ -314,6 +329,7 @@ export async function runDayLoop({
         storage,
       });
       await storage.saveDomain(domain);
+      if (conflux && storage.saveConflux) await storage.saveConflux(conflux);
 
       const said = [];
       for (const event of out.events) {

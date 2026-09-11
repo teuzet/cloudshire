@@ -64,8 +64,9 @@ import { sharedPlots } from './confluxBoard.js';
 import { TINT_LABELS, pickRollStat, rollTint, formatFinishForPrompt } from './rolls.js';
 import { offerNames, formatOfferedNamesForPrompt, bindCharacterNames, takeNameAtRandom, seedWorldNamePool } from './names.js';
 import { formatActMoveForPrompt } from './storyActs.js';
-import { brainstormFreeformPack } from './freeformBrainstorm.js';
+import { brainstormFreeformPack, shouldRequireSeedMystery } from './freeformBrainstorm.js';
 import { assembleFreeformLabStory } from './freeformAssemble.js';
+import { writePlotSeedDump } from './seedDump.js';
 import { createFreeformPlot, appendChronicle, openStoryTitlesLine } from './freeform.js';
 import { refreshFreeformEndings } from './freeformEndings.js';
 import { setFreeformUrgency } from './freeformUrgency.js';
@@ -958,50 +959,83 @@ export async function plantStakedStory({
   gravity,
   fromVoid = false,
   fromGenesis = false,
+  requireMystery,
+  rng = Math.random,
   day = null,
   log,
 }) {
-  const drafted = await brainstormFreeformPack({
-    config,
-    runtime,
+  const wantMystery = shouldRequireSeedMystery(config, { requireMystery, rng });
+  const request = {
     seedText,
     gravity,
     fromVoid: Boolean(fromVoid) && !fromGenesis,
     fromGenesis: Boolean(fromGenesis) && !fromVoid,
-    note: openStoryTitlesLine(domain),
-    log,
-  });
-  if (!drafted?.winner) {
-    log.warn('storyteller.opening_failed', { gravity, error: 'no_winner', fromVoid, fromGenesis });
-    return null;
+    requireMystery: wantMystery,
+  };
+  let drafted = null;
+  try {
+    drafted = await brainstormFreeformPack({
+      config,
+      runtime,
+      seedText,
+      gravity,
+      fromVoid: request.fromVoid,
+      fromGenesis: request.fromGenesis,
+      requireMystery: wantMystery,
+      note: openStoryTitlesLine(domain),
+      log,
+    });
+    if (!drafted?.winner) {
+      log.warn('storyteller.opening_failed', { gravity, error: 'no_winner', fromVoid, fromGenesis });
+      await writePlotSeedDump({ domain, request, pack: drafted, outcome: 'no_winner' }, config);
+      return null;
+    }
+    const assembled = await assembleFreeformLabStory({
+      config,
+      runtime,
+      domain,
+      world,
+      candidate: drafted.winner,
+      gravity,
+      requireMystery: wantMystery,
+      log,
+    });
+    const plot = createFreeformPlot({
+      domain,
+      world,
+      variant: assembled,
+      config,
+    });
+    const chronicleText = assembled.chronicle || drafted.winner.chronicle || drafted.winner.text;
+    const fact = chronicleText
+      ? appendChronicle(domain, world, {
+          text: chronicleText,
+          plotId: plot.id,
+          author: 'freeform:seed',
+          day,
+        })
+      : null;
+    await refreshFreeformEndings({ runtime, domain, plot, log });
+    await setFreeformUrgency({ runtime, domain, plot, log });
+    await writePlotSeedDump(
+      {
+        domain,
+        request,
+        pack: drafted,
+        assembled: { title: assembled?.title || '', chronicle: assembled?.chronicle || chronicleText || '' },
+        plot: { id: plot.id, title: plot.title },
+        outcome: 'planted',
+      },
+      config,
+    );
+    return { plot, fact, requireMystery: wantMystery };
+  } catch (err) {
+    await writePlotSeedDump(
+      { domain, request, pack: drafted, outcome: 'error', error: err.message },
+      config,
+    );
+    throw err;
   }
-  const assembled = await assembleFreeformLabStory({
-    config,
-    runtime,
-    domain,
-    world,
-    candidate: drafted.winner,
-    gravity,
-    log,
-  });
-  const plot = createFreeformPlot({
-    domain,
-    world,
-    variant: assembled,
-    config,
-  });
-  const chronicleText = assembled.chronicle || drafted.winner.chronicle || drafted.winner.text;
-  const fact = chronicleText
-    ? appendChronicle(domain, world, {
-        text: chronicleText,
-        plotId: plot.id,
-        author: 'freeform:seed',
-        day,
-      })
-    : null;
-  await refreshFreeformEndings({ runtime, domain, plot, log });
-  await setFreeformUrgency({ runtime, domain, plot, log });
-  return { plot, fact };
 }
 
 async function askMysteryCore({

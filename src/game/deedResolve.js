@@ -88,14 +88,7 @@ export function applyDeedToPlot({
     if (finish === 'fail') {
       plot.failCount = Math.max(0, Math.round(Number(plot.failCount) || 0)) + 1;
       out.livesLeft = livesLeft(plot);
-      if (out.livesLeft < 0) {
-        out.closes = true;
-        out.endingKind = 'BAD_ENDING';
-        out.severity = 'КАТАСТРОФА';
-        plot.ending = { kind: 'BAD_ENDING', text: '', processId: process?.id || null };
-      } else {
-        out.severity = severityForLives(out.livesLeft + 1);
-      }
+      out.severity = severityForLives(out.livesLeft + 1);
       return out;
     }
     const gain = depthGain({

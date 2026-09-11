@@ -6,6 +6,7 @@ import { reconcilePlot, formatReconcilePrompt } from '../src/game/reconciler.js'
 import { nextObligationRequest, createThreat, attachThreat, liveThreats, findThreat } from '../src/game/threats.js';
 import { reconcileRequest, reconcileScope } from '../src/game/reconcile.js';
 import { MIN_OFFICER_DAYS, DURATION_SPEC } from '../src/game/bands.js';
+import { loadConfig } from '../src/config.js';
 
 /** Рантайм, который зовёт тул с заранее заданными аргументами. */
 function fakeRuntime(argsByTool, { throwOn = null } = {}) {
@@ -56,11 +57,13 @@ test('заявка на беду несёт тяжесть и анти-тарг�
   assert.ok(!/дней/.test(text));
 });
 
-test('на катастрофе анти-таргет перестаёт быть запретом', () => {
+test('на исчерпанных ранах автор пишет последний удар к названной концовке', () => {
   const p = plot({ failCount: 2 });
-  const text = formatThreatRequest(nextObligationRequest(p, { rng: () => 0.5 }), p);
-  assert.match(text, /ПОЛОСА ТЯЖЕСТИ: КАТАСТРОФА/);
-  assert.match(text, /Сейчас пиши именно её/);
+  const req = nextObligationRequest(p, { rng: () => 0.5 });
+  const text = formatThreatRequest(req, p);
+  assert.equal(req.finale, true);
+  assert.match(text, /ПОСЛЕДНИЙ УДАР/);
+  assert.match(text, /Северное крыло рушится вместе с людьми/);
   assert.ok(!/АНТИ-ТАРГЕТ/.test(text));
 });
 
@@ -73,11 +76,19 @@ test('заявка на разрешение просит нейтральный
   assert.ok(!/ПОЛОСА ТЯЖЕСТИ/.test(text));
 });
 
+test('автор беды получает правило независимых параллельных часов', () => {
+  const ins = loadConfig().agents.threatSmith.instructions;
+  assert.match(ins, /независим/);
+  assert.match(ins, /параллельные часы/);
+  assert.match(ins, /даже если остальные/);
+});
+
 test('автор видит уже висящие беды, чтобы не повторяться', () => {
   const p = plot({ gravity: 'RUPTURE' });
   attachThreat(p, createThreat({ plot: p, text: 'фундамент садится', band: 'SEASON', rng: () => 0.5 }));
   const text = formatThreatRequest(nextObligationRequest(p, { rng: () => 0.5 }), p);
   assert.match(text, /УЖЕ ВИСИТ/);
+  assert.match(text, /независим/);
   assert.match(text, /фундамент садится/);
 });
 

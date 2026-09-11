@@ -11,8 +11,8 @@
  * изменения города, а дальше правило просто окрашивает посев по общим
  * правилам: события рождаются угрозами историй, а не расписанием указа.
  *
- * Единственный выживший наказ — на сопряжение: у него есть внешний триггер,
- * которого никакой посев не заменит.
+ * Доверенность — свободный текст правителя себе на потом. Её читает
+ * дешёвый судья на стыковке и на ходе нити; дело заводит сановник, если решит.
  */
 
 import { newId } from './ids.js';
@@ -143,24 +143,6 @@ export function applyRuleDeed(domain, process, { finish = 'ok', day = 0, rng = M
 
 // ─────────────────────────── наказ на сопряжение ───────────────────────────
 
-/**
- * Единственный наказ, у которого есть внешний триггер. Он называет сановника,
- * который заберёт, — иначе на стыковке пришлось бы или ломать лимит слотов,
- * или молча ничего не делать.
- */
-export function confluxDirective(domain) {
-  return domain?.state?.confluxDirective || null;
-}
-
-export function setConfluxDirective(domain, { text, office = null } = {}) {
-  if (!domain.state) domain.state = {};
-  const body = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 4000);
-  if (!body) return { ok: false, error: 'empty' };
-  domain.state.confluxDirective = { text: body, office: office ? String(office) : null };
-  domain.proxyText = body;
-  return { ok: true, directive: domain.state.confluxDirective };
-}
-
 export function proxyText(domain) {
   return String(domain?.proxyText || domain?.state?.confluxDirective?.text || '').trim();
 }
@@ -168,81 +150,11 @@ export function proxyText(domain) {
 export function setProxyText(domain, text) {
   const body = String(text || '').replace(/\s+/g, ' ').trim();
   domain.proxyText = body;
-  if (!domain.state) domain.state = {};
-  if (body) domain.state.confluxDirective = { ...(domain.state.confluxDirective || {}), text: body };
-  else delete domain.state.confluxDirective;
-  return { ok: true, text: body };
-}
-
-export function clearConfluxDirective(domain) {
-  const had = confluxDirective(domain);
-  if (!had) return { ok: false, error: 'not_found' };
-  delete domain.state.confluxDirective;
-  return { ok: true, directive: had };
-}
-
-/**
- * Наказ сработал: заводим обычное дело и, если названный сановник занят,
- * прерываем его паузой. Пауза от наказа не истлевает молча — о ней доложено.
- */
-export function fireConfluxDirective(
-  domain,
-  { day = 0, partnerName = null, plotId = null, rng = Math.random } = {},
-) {
-  const directive = confluxDirective(domain);
-  if (!directive) return { ok: false, error: 'no_directive' };
-  if (!domain.state) domain.state = {};
-  if (!Array.isArray(domain.state.pendingActions)) domain.state.pendingActions = [];
-
-  const already = domain.state.pendingActions.some(
-    (a) => (!a.status || a.status === 'active') && a.fromDirective && String(a.plotlineId || '') === String(plotId || ''),
-  );
-  if (already) return { ok: false, error: 'already_acting' };
-
-  const officer =
-    (directive.office ? findOfficer(domain, { office: directive.office }) : null) ||
-    pickRandomFreeOfficer(domain, rng) ||
-    listOfficers(domain)[0] ||
-    null;
-
-  let paused = null;
-  const busy = officer ? officerActiveProcess(domain, officer) : null;
-  if (busy) {
-    busy.status = 'paused';
-    busy.pausedDay = Math.round(Number(day) || 0);
-    busy.pausedBy = 'order';
-    busy.pauseReason = 'сановник забран наказом на сопряжение';
-    pauseDeedClock(busy, day);
-    releaseOfficerProcess(domain, busy);
-    paused = busy;
-  }
-
-  const neighbor = partnerName ? `остров «${partnerName}»` : 'соседний остров';
-  const process = startDeed(
-    {
-      id: newId('act'),
-      summary: String(directive.text).slice(0, 80),
-      detail: `${directive.text} Сопряжение с ${neighbor}: исполнить наказ.`.slice(0, 400),
-      goal: `Исполнить наказ на этой встрече.`,
-      status: 'active',
-      initiative: 'patron',
-      fromDirective: true,
-      plotlineId: plotId || null,
-      linkedStats: officer?.statId ? [officer.statId] : [],
-      createdAt: new Date().toISOString(),
-    },
-    { day, judged: { durationBand: 'WEEKS', difficulty: RULE_DIFFICULTY }, rng },
-  );
-  if (officer) bindOfficerProcess(domain, officer, process);
-  domain.state.pendingActions.push(process);
-  return { ok: true, process, officer, paused };
+  return { ok: true, proxyText: body };
 }
 
 export function formatCityRulesForPrompt(domain) {
   const rules = cityRules(domain);
-  const directive = confluxDirective(domain);
-  const lines = rules.map((m) => `- ${m.text}`);
-  if (directive) lines.push(`- при сопряжении: ${directive.text}`);
-  if (!lines.length) return '';
-  return `Постоянный порядок города:\n${lines.join('\n')}`;
+  if (!rules.length) return '';
+  return `Постоянный порядок города:\n${rules.map((m) => `- ${m.text}`).join('\n')}`;
 }

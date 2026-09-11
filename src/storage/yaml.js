@@ -3,6 +3,7 @@ import path from 'node:path';
 import yaml from 'js-yaml';
 import { createWorldFromConfig, normalizeDomain, normalizeWorld } from '../game/models.js';
 import { writeWorldArchive } from './worldArchive.js';
+import { createWipeGuard } from './wipeGuard.js';
 import { attachStoryPoolsFromCatalog } from '../game/annotationCatalog.js';
 import { ensureOfficersFromLore, stripOfficerPortraitPayload } from '../game/officers.js';
 
@@ -27,11 +28,21 @@ async function writeYaml(filePath, data) {
   await fs.rename(tmp, filePath);
 }
 
+async function clearYamlDir(dir) {
+  const files = await fs.readdir(dir).catch(() => []);
+  for (const file of files) {
+    if (file.endsWith('.yaml') || file.endsWith('.tmp')) {
+      await fs.unlink(path.join(dir, file)).catch(() => {});
+    }
+  }
+}
+
 export class YamlStorage {
   constructor(config) {
     this.config = config;
     this.root = config.storage.yaml.dir;
     this.driver = 'yaml';
+    this.guard = createWipeGuard();
   }
 
   async init() {
@@ -45,7 +56,10 @@ export class YamlStorage {
     if (!world) {
       world = createWorldFromConfig(this.config);
       await attachStoryPoolsFromCatalog(world, this);
-      await this.saveWorld(world);
+      this.guard.setLiveWorld(world.id);
+      await this.writeWorldUnlocked(world);
+    } else {
+      this.guard.setLiveWorld(world.id);
     }
   }
 
@@ -94,11 +108,19 @@ export class YamlStorage {
     return normalized;
   }
 
-  async saveWorld(world) {
+  async writeWorldUnlocked(world) {
+    if (!this.guard.acceptWorld(world)) {
+      this.guard.reject('world', world?.id);
+      return world;
+    }
     normalizeWorld(world, this.config);
     world.updatedAt = new Date().toISOString();
     await writeYaml(this.worldPath(), world);
     return world;
+  }
+
+  async saveWorld(world) {
+    return this.guard.exclusive(() => this.writeWorldUnlocked(world));
   }
 
   async getDomain(domainId) {
@@ -109,13 +131,21 @@ export class YamlStorage {
     return domain;
   }
 
-  async saveDomain(domain) {
+  async writeDomainUnlocked(domain) {
+    if (!this.guard.acceptDomain(domain)) {
+      this.guard.reject('domain', domain?.id);
+      return domain;
+    }
     normalizeDomain(domain);
     ensureOfficersFromLore(domain, this.config);
     stripOfficerPortraitPayload(domain);
     domain.updatedAt = new Date().toISOString();
     await writeYaml(this.domainPath(domain.id), domain);
     return domain;
+  }
+
+  async saveDomain(domain) {
+    return this.guard.exclusive(() => this.writeDomainUnlocked(domain));
   }
 
   async deleteDomain(domainId) {
@@ -155,9 +185,15 @@ export class YamlStorage {
   }
 
   async saveUserBinding(binding) {
-    binding.updatedAt = new Date().toISOString();
-    await writeYaml(this.userPath(String(binding.userId)), binding);
-    return binding;
+    return this.guard.exclusive(async () => {
+      if (!this.guard.acceptBinding(binding)) {
+        this.guard.reject('user', binding?.userId);
+        return binding;
+      }
+      binding.updatedAt = new Date().toISOString();
+      await writeYaml(this.userPath(String(binding.userId)), binding);
+      return binding;
+    });
   }
 
   async getDomainForUser(userId, worldId) {
@@ -172,10 +208,20 @@ export class YamlStorage {
     return readYaml(this.confluxPath(confluxId), null);
   }
 
+  async deleteConflux(confluxId) {
+    await fs.unlink(this.confluxPath(confluxId)).catch(() => {});
+  }
+
   async saveConflux(conflux) {
-    conflux.updatedAt = new Date().toISOString();
-    await writeYaml(this.confluxPath(conflux.id), conflux);
-    return conflux;
+    return this.guard.exclusive(async () => {
+      if (!this.guard.acceptConflux(conflux)) {
+        this.guard.reject('conflux', conflux?.id);
+        return conflux;
+      }
+      conflux.updatedAt = new Date().toISOString();
+      await writeYaml(this.confluxPath(conflux.id), conflux);
+      return conflux;
+    });
   }
 
   async listConfluxes({ status } = {}) {
@@ -195,63 +241,71 @@ export class YamlStorage {
     return out;
   }
 
+  async sweepForeignUnlocked() {
+    const live = this.guard.liveWorldId;
+    if (!live) return;
+    for (const d of await this.listDomains()) {
+      if (String(d.worldId || '') !== live) await this.deleteDomain(d.id);
+    }
+    for (const c of await this.listConfluxes()) {
+      if (String(c.worldId || '') !== live) {
+        await fs.unlink(this.confluxPath(c.id)).catch(() => {});
+      }
+    }
+    for (const u of await this.listUserBindings()) {
+      if (u.worldId && String(u.worldId) !== live) {
+        await fs.unlink(this.userPath(u.userId || u.id)).catch(() => {});
+      }
+    }
+  }
+
   /**
    * Архив текущего мира + логи, затем новый уникальный мир.
    * @returns {{ ok, driver, archivedWorldId, newWorldId, archiveDir }}
    */
   async wipeAll({ reason = 'wipe' } = {}) {
-    const world = await this.getWorld();
-    const domains = await this.listDomains();
-    const users = await this.listUserBindings();
-    const confluxes = await this.listConfluxes();
+    return this.guard.exclusive(async () => {
+      const world = await this.getWorld();
+      const domains = await this.listDomains();
+      const users = await this.listUserBindings();
+      const confluxes = await this.listConfluxes();
 
-    let archiveDir = null;
-    let archivedWorldId = world?.id || null;
+      let archiveDir = null;
+      let archivedWorldId = world?.id || null;
 
-    if (world) {
-      const archived = await writeWorldArchive({
-        config: this.config,
-        world,
-        domains,
-        users,
-        confluxes,
-        reason,
-      });
-      archiveDir = archived.archiveDir;
-      archivedWorldId = archived.worldId;
-    }
-
-    for (const d of domains) {
-      await fs.unlink(this.domainPath(d.id)).catch(() => {});
-    }
-    const usersDir = path.join(this.root, 'users');
-    const userFiles = await fs.readdir(usersDir).catch(() => []);
-    for (const file of userFiles) {
-      if (file.endsWith('.yaml')) {
-        await fs.unlink(path.join(usersDir, file)).catch(() => {});
+      if (world) {
+        const archived = await writeWorldArchive({
+          config: this.config,
+          world,
+          domains,
+          users,
+          confluxes,
+          reason,
+        });
+        archiveDir = archived.archiveDir;
+        archivedWorldId = archived.worldId;
       }
-    }
-    const confluxDir = path.join(this.root, 'confluxes');
-    const confluxFiles = await fs.readdir(confluxDir).catch(() => []);
-    for (const file of confluxFiles) {
-      if (file.endsWith('.yaml')) {
-        await fs.unlink(path.join(confluxDir, file)).catch(() => {});
-      }
-    }
-    await fs.unlink(this.worldPath()).catch(() => {});
 
-    const next = createWorldFromConfig(this.config);
-    await attachStoryPoolsFromCatalog(next, this);
-    await this.saveWorld(next);
+      await clearYamlDir(path.join(this.root, 'domains'));
+      await clearYamlDir(path.join(this.root, 'users'));
+      await clearYamlDir(path.join(this.root, 'confluxes'));
+      await fs.unlink(this.worldPath()).catch(() => {});
 
-    return {
-      ok: true,
-      driver: 'yaml',
-      archivedWorldId,
-      newWorldId: next.id,
-      archiveDir,
-      world: next,
-    };
+      const next = createWorldFromConfig(this.config);
+      await attachStoryPoolsFromCatalog(next, this);
+      this.guard.setLiveWorld(next.id);
+      await this.writeWorldUnlocked(next);
+      await this.sweepForeignUnlocked();
+
+      return {
+        ok: true,
+        driver: 'yaml',
+        archivedWorldId,
+        newWorldId: next.id,
+        archiveDir,
+        world: next,
+      };
+    });
   }
 
   async close() {}
