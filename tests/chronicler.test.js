@@ -5,13 +5,17 @@ import {
   CHRONICLE_FINALE_MAX,
   chronicleEntryLimit,
   deedConsequenceLines,
+  deedTriggerLines,
   fallbackDeedEntry,
   formatDeedPrompt,
+  formatFinalePrompt,
   formatThreatPrompt,
+  threatTriggerLines,
   endingText,
   plotChronicleTail,
   writeChronicle,
 } from '../src/game/chronicler.js';
+import { loadConfig } from '../src/config.js';
 
 const silentLog = {
   child: () => silentLog,
@@ -83,10 +87,21 @@ test('снятая беда идёт в запись предотвращённ�
   const lines = deedConsequenceLines({
     plot: plot(),
     applied: { alignment: 'RELEVANT', finish: 'ok' },
-    threat: { id: 't1', text: 'Известковая пыль забьёт водосборный сток' },
+    threat: { id: 't1', known: true, text: 'Известковая пыль забьёт водосборный сток' },
   }).join('\n');
   assert.match(lines, /Нависшее снято/);
   assert.match(lines, /как случившуюся не пиши/);
+});
+
+test('снятая беда, которой город не видел, в запись текстом не попадает', () => {
+  const lines = deedConsequenceLines({
+    plot: plot(),
+    applied: { alignment: 'RELEVANT', finish: 'ok' },
+    threat: { id: 't1', known: false, text: 'Стая хищных тварей сорвёт загон на дальнем выгоне' },
+  }).join('\n');
+  assert.match(lines, /которой город не видел/);
+  assert.match(lines, /город этого не знает/);
+  assert.doesNotMatch(lines, /хищных тварей/);
 });
 
 test('UNRELATED-делу прямо запрещают двигать историю', () => {
@@ -145,24 +160,33 @@ test('промпт беды требует прошедшего времени',
   assert.doesNotMatch(text, /длиннее обычной/);
 });
 
-test('финальная беда даёт и предсказание, и развязку, без копирования концовки', () => {
+test('финальная запись несёт и случившееся, и всю тройку концовки', () => {
   const p = plot({
-    endings: [{ id: 'e_bad', kind: 'BAD_ENDING', text: 'марш обвалился вместе с людьми' }],
+    cause: 'марш держится на одной осевшей опоре',
+    endings: [
+      {
+        id: 'e_bad',
+        kind: 'BAD_ENDING',
+        text: 'марш обвалился вместе с людьми',
+        questionGone: 'спорить о лестнице больше не о чем: её нет',
+        nowDifferent: 'Срединный пояс отрезан от нижних дворов',
+      },
+    ],
   });
-  const text = formatThreatPrompt({
+  const text = formatFinalePrompt({
     plot: p,
-    threat: { text: 'Северное крыло рухнет на мостки' },
-    kind: 'threat',
-    closed: true,
     ending: { kind: 'BAD_ENDING', text: '', endingId: 'e_bad' },
+    triggerLines: threatTriggerLines({ text: 'Северное крыло рухнет на мостки' }),
     entryMax: CHRONICLE_FINALE_MAX,
   });
+  assert.match(text, /этим история кончается/i);
   assert.match(text, /Северное крыло рухнет на мостки/);
   assert.match(text, /марш обвалился вместе с людьми/);
-  assert.match(text, /не копируй дословно/);
-  assert.match(text, /узнаваемы/);
+  assert.match(text, /спорить о лестнице больше не о чем/);
+  assert.match(text, /Срединный пояс отрезан/);
+  assert.match(text, /марш держится на одной осевшей опоре/);
+  assert.match(text, /утратой, а не решением/);
   assert.match(text, new RegExp(`до ${CHRONICLE_FINALE_MAX} символов`));
-  assert.doesNotMatch(text, /как случившееся, в прошедшем времени/);
   assert.equal(chronicleEntryLimit(CHRONICLE_FINALE_MAX), CHRONICLE_FINALE_MAX);
   assert.equal(chronicleEntryLimit(10), CHRONICLE_ENTRY_MAX);
 });
@@ -179,38 +203,43 @@ test('развязка берётся из заготовленных концо
   assert.equal(endingText(p, ending), 'ход расчистили, лестница смолкла');
   assert.equal(endingText(p, { kind: 'GOOD_ENDING', text: '', endingId: null }), null);
 
-  const text = formatDeedPrompt({
-    domain: domain(),
+  const text = formatFinalePrompt({
     plot: p,
-    process: deed,
-    applied: { alignment: 'DIRECT', finish: 'crit' },
-    closed: true,
     ending,
+    triggerLines: deedTriggerLines({
+      domain: domain(),
+      process: deed,
+      applied: { alignment: 'DIRECT', finish: 'crit' },
+    }),
   });
-  assert.match(text, /Развязка истории.*лестница смолкла/);
+  assert.match(text, /лестница смолкла/);
+  assert.match(text, /Канцлер Жален/);
+  assert.match(text, /ПОЛНЫЙ УСПЕХ/);
+  assert.match(text, /что-то приобрёл/);
 });
 
-test('незакрытой истории развязку не показывают', () => {
+test('обычная запись о деле развязку не тянет — её пишет финальный бриф', () => {
   const text = formatDeedPrompt({
     domain: domain(),
     plot: plot({ endings: [{ id: 'e_good', kind: 'GOOD_ENDING', text: 'лестница смолкла' }] }),
     process: deed,
     applied: { alignment: 'DIRECT', finish: 'ok' },
     closed: false,
-    ending: { kind: 'GOOD_ENDING', text: '', endingId: 'e_good' },
   });
-  assert.doesNotMatch(text, /Развязка истории/);
+  assert.doesNotMatch(text, /Развязка истории|лестница смолкла/);
 });
 
-test('разрешение — не победа и не крушение', () => {
-  const text = formatThreatPrompt({
-    plot: plot(),
-    threat: { text: 'Осевшее крыло огородят и забудут о нём' },
-    kind: 'resolution',
-    closed: true,
+test('нейтральная развязка — не победа и не крушение', () => {
+  const p = plot({
+    endings: [{ id: 'e_n', kind: 'NEUTRAL_ENDING', text: 'осевшее крыло огородили и забыли' }],
   });
-  assert.match(text, /выдохлась сама/);
-  assert.match(text, /без победы и без крушения/);
+  const text = formatFinalePrompt({
+    plot: p,
+    ending: { kind: 'NEUTRAL_ENDING', text: '', endingId: 'e_n' },
+    triggerLines: threatTriggerLines({ text: 'Осевшее крыло огородят и забудут о нём' }),
+  });
+  assert.match(text, /Ни победы, ни крушения/);
+  assert.match(text, /заплатил|исчерпал/);
 });
 
 // ──────────────────────────── запасная запись ────────────────────────────
@@ -279,9 +308,11 @@ test('хронист возвращает запись и режет её по �
   assert.match(calls[0].tools[0].parameters.properties.entry.description, new RegExp(`до ${CHRONICLE_ENTRY_MAX}`));
 });
 
-test('финальная запись режется по расширенному пределу, не по обычному', async () => {
+test('финальная запись режется по расширенному пределу и пишется своим агентом', async () => {
+  const calls = [];
   const runtime = {
     run: async (opts) => {
+      calls.push(opts);
       await opts.tools[0].handler({ entry: 'Ж'.repeat(CHRONICLE_FINALE_MAX + 20) });
       return {};
     },
@@ -289,12 +320,27 @@ test('финальная запись режется по расширенном
   const res = await writeChronicle({
     runtime,
     domain: domain(),
-    occasion: 'угроза',
+    occasion: 'развязка',
+    agentId: 'chronicleFinale',
     prompt: 'финал',
     maxChars: CHRONICLE_FINALE_MAX,
     log: silentLog,
   });
   assert.equal(res.text.length, CHRONICLE_FINALE_MAX);
+  assert.equal(calls[0].agentId, 'chronicleFinale');
+  assert.equal(calls[0].scene, 'chronicle_развязка');
+});
+
+test('конфиг: у финального хрониста свой контракт, у обычного — запрет тянуть срок в прошедшее', () => {
+  const agents = loadConfig().agents;
+  assert.ok(agents.chronicleFinale, 'финальную запись пишет отдельный агент');
+  assert.match(agents.chronicleFinale.instructions, /ПОСЛЕДНЮЮ запись/);
+  assert.match(agents.chronicleFinale.instructions, /больше не пишут/);
+  assert.match(agents.chronicleFinale.instructions, /к зиме/);
+  assert.match(agents.chronicler.instructions, /СРОК ИЗ ВВОДА НЕ ПЕРЕНОСИ В ПРОШЕДШЕЕ ВРЕМЯ/);
+  assert.match(agents.chronicler.instructions, /«К зиме начали разрушаться» — бессмыслица/);
+  assert.match(agents.herald.instructions, /ПОВОД «РАЗВЯЗКА»/);
+  assert.match(agents.herald.instructions, /утрату прямо/);
 });
 
 test('пустой ответ модели не выдаётся за запись', async () => {

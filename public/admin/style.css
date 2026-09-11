@@ -319,8 +319,9 @@ button.danger {
 .ins-card h4 { margin: 0 0 0.2rem; font-size: 0.95rem; }
 .ins-card p { margin: 0.35rem 0 0; }
 .ins-card ul { margin: 0.2rem 0 0; padding-left: 1.15rem; }
-.endings li { margin-bottom: 0.2rem; }
+.endings li { margin-bottom: 0.45rem; }
 .endings li.hit { font-weight: 600; }
+.endings li .muted.small { font-weight: 400; }
 
 .person-card {
   display: grid;

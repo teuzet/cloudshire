@@ -74,7 +74,7 @@ import { beginRulerTurn, endRulerTurn, worldDay, cancelJobsForThreat } from './s
 import { formatBoardForSpeech, warmPlotlines, plotConfig, findPlotline } from './plotlines.js';
 import { plantStakedStory } from './storyteller.js';
 import { ensurePlotObligations, fireThreatEvent, resolveDeedEvent, cancelDeedJobs } from './worldLoop.js';
-import { deliverEvent } from './dayLoop.js';
+import { deliverEvent, settleEvents } from './dayLoop.js';
 import { findThreat } from './threats.js';
 import {
   packPlaySeedGrain,
@@ -1794,6 +1794,17 @@ export class GameApp {
       if (!result?.ok) return result;
       const { event, ...publicResult } = result;
       if (event && !event.skipped) {
+        // Порядок как в дневном цикле: последствия сначала, речь жреца потом —
+        // иначе жрец говорит о городе, статы и синопсис которого ещё не сдвинулись.
+        await settleEvents({
+          config: this.config,
+          runtime: this.runtime,
+          domain,
+          world,
+          events: [event],
+          day,
+          log,
+        });
         await deliverEvent({
           config: this.config,
           runtime: this.runtime,

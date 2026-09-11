@@ -57,14 +57,31 @@ test('заявка на беду несёт тяжесть и анти-тарг�
   assert.ok(!/дней/.test(text));
 });
 
-test('на исчерпанных ранах автор пишет последний удар к названной концовке', () => {
-  const p = plot({ failCount: 2 });
+test('на исчерпанных ранах автор пишет событие утраты, а не ещё одно ухудшение', () => {
+  const p = plot({
+    cause: 'опорный столб держит всё северное крыло и трескается сам по себе',
+    failCount: 2,
+    endings: [
+      {
+        id: 'e1',
+        kind: 'BAD_ENDING',
+        text: 'Северное крыло рушится вместе с людьми',
+        questionGone: 'крыла больше нет, спорить не о чем',
+        nowDifferent: 'город потерял четверть жилых дворов',
+      },
+    ],
+  });
   const req = nextObligationRequest(p, { rng: () => 0.5 });
   const text = formatThreatRequest(req, p);
   assert.equal(req.finale, true);
-  assert.match(text, /ПОСЛЕДНИЙ УДАР/);
+  assert.match(text, /ЭТИМ ИСТОРИЯ КОНЧАЕТСЯ/);
+  assert.match(text, /необратимо лишается/);
   assert.match(text, /Северное крыло рушится вместе с людьми/);
-  assert.ok(!/АНТИ-ТАРГЕТ/.test(text));
+  assert.match(text, /крыла больше нет/);
+  assert.match(text, /четверть жилых дворов/);
+  assert.match(text, /опорный столб держит всё северное крыло/);
+  assert.match(text, /Никаких «к зиме»/, 'горизонт последствий запрещён прямо');
+  assert.doesNotMatch(text, /АНТИ-ТАРГЕТ/);
 });
 
 test('заявка на разрешение просит нейтральный конец', () => {

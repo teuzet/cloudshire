@@ -98,10 +98,11 @@ const noRuntime = null;
  * Рантайм с одним живым агентом — хронистом. Остальные вызовы (автор угроз,
  * разбор) молча ничего не возвращают: движок обязан обойтись без них.
  */
-function chronicleRuntime(text, calls = []) {
+function chronicleRuntime(text, calls = [], agentIds = []) {
   return {
     run: async (opts) => {
-      if (opts.agentId !== 'chronicler') return {};
+      if (opts.agentId !== 'chronicler' && opts.agentId !== 'chronicleFinale') return {};
+      agentIds.push(opts.agentId);
       calls.push(opts.userMessages[0].content);
       await opts.tools[0].handler({ entry: text });
       return {};
@@ -516,8 +517,9 @@ test('последняя жизнь кончилась — история зак
     }),
   );
   const calls = [];
+  const agentIds = [];
   const res = await fireThreatEvent({
-    runtime: chronicleRuntime('Северное крыло рухнуло, и с ним люди.', calls),
+    runtime: chronicleRuntime('Северное крыло рухнуло, и с ним люди.', calls, agentIds),
     domain,
     world,
     day: 140,
@@ -527,12 +529,14 @@ test('последняя жизнь кончилась — история зак
     log: silentLog,
   });
   assert.equal(res.closed, true);
+  assert.equal(res.occasion, 'развязка');
   assert.equal(plot.ending.kind, 'BAD_ENDING');
   assert.equal(domain.plotlines.length, 0);
+  assert.deepEqual(agentIds, ['chronicleFinale'], 'развязку пишет финальный агент, не хронист');
   assert.match(calls[0], /Северное крыло рухнет на мостки/);
   assert.match(calls[0], /Северное крыло рушится вместе с людьми/);
-  assert.match(calls[0], /не копируй дословно/);
-  assert.match(calls[0], /до 640 символов/);
+  assert.match(calls[0], /дословно не копируй/);
+  assert.match(calls[0], /до 900 символов/);
 });
 
 test('сработавшая беда отодвигает выжившие, а не глушит их совсем', async () => {
@@ -580,7 +584,7 @@ test('разрешение закрывает историю нейтральн�
     rng: () => 0.5,
     log: silentLog,
   });
-  assert.equal(res.occasion, 'разрешение');
+  assert.equal(res.occasion, 'развязка');
   assert.equal(plot.ending.kind, 'NEUTRAL_ENDING');
   assert.equal(plot.failCount, 0, 'нейтральный конец не стоит жизни');
 });

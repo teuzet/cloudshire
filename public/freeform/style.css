@@ -127,6 +127,7 @@ button:disabled { opacity: 0.5; cursor: wait; }
 
 .plot-title { font-family: Georgia, serif; font-size: 1.15rem; margin: 0 0 0.4rem; }
 .meta { font-size: 0.85rem; white-space: pre-wrap; }
+#plotCard ul li .muted { margin-top: 0.15rem; font-size: 0.82rem; }
 .axes {
   margin: 0 0 0.35rem;
   font-size: 0.78rem;

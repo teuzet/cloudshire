@@ -46,6 +46,7 @@ import {
 } from '../src/game/freeformAssemble.js';
 import { plantStakedStory } from '../src/game/storyteller.js';
 import { startFreeformStory, normalizeSeedVariant } from '../src/game/freeformStarter.js';
+import { normalizeHiddenPremises } from '../src/game/suspenseGraph.js';
 import { tellFreeformBeat } from '../src/game/freeformTeller.js';
 import { loadConfig } from '../src/config.js';
 import { createWebServer } from '../src/clients/web/server.js';
@@ -87,9 +88,27 @@ function passPackReviews(n = 3) {
 }
 
 const LAB_ENDINGS = [
-  { id: 'g', text: 'Хозяин найден.', kind: 'GOOD_ENDING' },
-  { id: 'n', text: 'Сапог забыт.', kind: 'NEUTRAL_ENDING' },
-  { id: 'b', text: 'Сапог проклял двор.', kind: 'BAD_ENDING' },
+  {
+    id: 'g',
+    text: 'Хозяин найден.',
+    kind: 'GOOD_ENDING',
+    questionGone: 'сапог отдан, спрашивать больше не о чем',
+    nowDifferent: 'двор завёл книгу оставленных вещей',
+  },
+  {
+    id: 'n',
+    text: 'Сапог забыт.',
+    kind: 'NEUTRAL_ENDING',
+    questionGone: 'о сапоге перестали спрашивать сами',
+    nowDifferent: 'угол у ворот отдан под ничейное добро',
+  },
+  {
+    id: 'b',
+    text: 'Сапог проклял двор.',
+    kind: 'BAD_ENDING',
+    questionGone: 'двор оставили, спорить не о чем',
+    nowDifferent: 'площадь у ворот стоит пустая',
+  },
 ];
 
 async function handleBeatPipeline(opts, { blanks, construct, n = 3 } = {}) {
@@ -104,6 +123,11 @@ async function handleBeatPipeline(opts, { blanks, construct, n = 3 } = {}) {
     await tool.handler(construct);
   } else if (opts.agentId === 'freeformEndings') {
     await tool.handler({ keep: false, endings: LAB_ENDINGS });
+  } else if (opts.agentId === 'freeformEndingsJudge') {
+    const count = Number(tool.parameters?.properties?.reviews?.maxItems) || LAB_ENDINGS.length;
+    await tool.handler({
+      reviews: Array.from({ length: count }, (_, i) => ({ index: i + 1, verdict: 'PASS' })),
+    });
   } else if (opts.agentId === 'freeformUrgency') {
     await tool.handler({ urgency: 'MEDIUM' });
   }
@@ -156,6 +180,7 @@ test('нормализация снимает трёхтактный блоб и
         hook: 'старый хук',
         conflict: 'старый конфликт',
         importance: 80,
+        cause: 'соль сыплется из разлома края',
       },
     ],
     closedPlotlines: [
@@ -182,6 +207,7 @@ test('нормализация снимает трёхтактный блоб и
   assert.equal(live.hook, undefined);
   assert.equal(live.conflict, undefined);
   assert.equal(live.importance, undefined);
+  assert.equal(live.cause, 'соль сыплется из разлома края', 'первопричина переживает нормализацию');
   assert.equal(domain.closedPlotlines[0].truth, undefined);
 });
 
@@ -457,6 +483,15 @@ test('конфиг freeform читается из YAML', () => {
   assert.deepEqual(agents.freeformEndings.canon, ['world', 'time']);
   assert.match(agents.freeformEndings.instructions, /submit_freeform_endings/);
   assert.match(agents.freeformEndings.instructions, /GOOD_ENDING/);
+  assert.match(agents.freeformEndings.instructions, /вопрос в городе больше не стоит/);
+  assert.match(agents.freeformEndings.instructions, /УХУДШЕНИЕ — НЕ УТРАТА/);
+  assert.match(agents.freeformEndings.instructions, /questionGone/);
+  assert.match(agents.freeformEndings.instructions, /nowDifferent/);
+  assert.match(agents.freeformEndings.instructions, /к зиме/, 'горизонт последствий запрещён');
+  assert.equal(agents.freeformEndingsJudge.reasoningEffort, 'low', 'судья концовок дешёвый');
+  assert.match(agents.freeformEndingsJudge.instructions, /submit_endings_review/);
+  assert.match(agents.freeformEndingsJudge.instructions, /QUESTION_OPEN/);
+  assert.match(agents.freeformEndingsJudge.instructions, /NOT_A_LOSS/);
   assert.equal(agents.freeformBeatJudge.model, 'gpt-5.6-luna');
   assert.match(agents.freeformBeatJudge.instructions, /submit_freeform_pack_review/);
   assert.match(agents.freeformAlign.instructions, /DIRECT/);
@@ -570,6 +605,14 @@ test('завязка: hiddenPremises по умолчанию пустые, ли�
   assert.deepEqual(clipped.hiddenPremises, ['Первая тайна достаточно длинная для учёта']);
 });
 
+test('разгадку не рубит по букве: верхней границы у пункта нет', () => {
+  const long = `${'Каменотёсы платят за проход через выработку, потому что '.repeat(9)}иначе им негде брать камень.`;
+  assert.ok(long.length > 280);
+  const [kept] = normalizeHiddenPremises([long]);
+  assert.equal(kept, long);
+  assert.ok(kept.endsWith('иначе им негде брать камень.'));
+});
+
 test('болванка архитектора — четыре поля без urgency', () => {
   const blank = normalizeSeedBlank(
     {
@@ -631,6 +674,7 @@ test('архитектор не видит бриф города, констру
           entry: '',
           closeWhen: ['Найти хозяина 2', 'Бросить сапог'],
           whyMoves: 'Пока сапог лежит на площади, хозяин ищет его, а двор держит чужака.',
+          cause: 'Гость ушёл к створу и не вернулся за своим сапогом.',
           hiddenPremises: [],
         });
       } else if (opts.agentId === 'freeformCardJudge') {
@@ -732,6 +776,7 @@ test('FAIL судьи карточки — одна доработка конс�
               : 'Горький корень гуще у стены, потому что там течёт скрытый сток, и по густоте судят о числе жильцов.',
           closeWhen: ['Признать жильцов', 'Срезать корень'],
           whyMoves: 'Корень растёт и закрывает сток.',
+          cause: 'Под стеной течёт неучтённый сток, и корень кормится им.',
           hiddenPremises: [],
         });
       } else if (opts.agentId === 'freeformCardJudge') {
@@ -777,6 +822,7 @@ test('UNCERTAIN судьи карточки не гоняет конструкт
           synopsis: 'Гость оставил сапог.',
           closeWhen: ['Найти', 'Бросить'],
           whyMoves: 'Хозяин ищет сапог.',
+          cause: 'Гость ушёл к створу и не вернулся за сапогом.',
           hiddenPremises: [],
         });
       } else if (opts.agentId === 'freeformCardJudge') {
@@ -874,7 +920,14 @@ test('продолжение: архитектор без города, конс
   assert.match(ctor.user, /нумерованн/);
   assert.deepEqual(
     calls.map((c) => c.agentId),
-    ['freeformArchitectTell', 'freeformBeatJudge', 'freeformTell', 'freeformEndings', 'freeformUrgency'],
+    [
+      'freeformArchitectTell',
+      'freeformBeatJudge',
+      'freeformTell',
+      'freeformEndings',
+      'freeformEndingsJudge',
+      'freeformUrgency',
+    ],
   );
 });
 
@@ -2189,6 +2242,7 @@ test('живой посев без флага и без выпавшего ша�
           title: 'Мосток у межи',
           chronicle: 'Двор чинит мосток у межи. Доски скрипят под возом.',
           whyMoves: 'Мосток осядет, если его не перебрать.',
+          cause: 'Опоры мостка сгнили от воды, стоящей у межи.',
           hiddenPremises: [],
         });
       }
@@ -2242,6 +2296,7 @@ test('живой посев с выпавшей тайной просит раз
           title: 'Мосток у межи',
           chronicle: 'Двор чинит мосток у межи. Доски скрипят под возом.',
           whyMoves: 'Мосток осядет, если его не перебрать.',
+          cause: 'Опоры мостка сгнили от воды, стоящей у межи.',
           hiddenPremises: ['сосед подпилил балку, чтобы воз соседа застрял'],
         });
       }
@@ -2298,6 +2353,7 @@ test('конструктор собирает хронику, hidden и whyMoves
           title: 'Чужой сапог',
           chronicle: 'На площади Грастока двор держит сапог без пары.',
           whyMoves: 'Пока сапог лежит, хозяин ищет его дворами.',
+          cause: 'Соль сыплется из разлома края, и двор не знает, чей это сапог.',
           hiddenPremises: ['Соль сыплется из разлома края, не из склада.'],
         });
       }
@@ -2321,9 +2377,11 @@ test('конструктор собирает хронику, hidden и whyMoves
   assert.match(out.chronicle, /площади/);
   assert.doesNotMatch(out.chronicle, /На самом деле/i);
   assert.match(out.whyMoves, /хозяин/);
+  assert.match(out.cause, /разлома края/);
   assert.match(out.hiddenPremises[0], /Соль/);
   assert.equal(out.countdown, undefined);
   assert.match(out.assemblePrompt, /submit_freeform_story/);
+  assert.match(out.assemblePrompt, /Первопричина/);
   assert.doesNotMatch(out.assemblePrompt, /\bdepth\b|countdown|urgency/i);
   const plot = createFreeformPlot({
     domain: { plotlines: [] },
@@ -2336,6 +2394,7 @@ test('конструктор собирает хронику, hidden и whyMoves
   assert.equal(plot.urgency, 'MEDIUM');
   assert.equal(plot.countdown, null);
   assert.equal(plot.whyMoves, out.whyMoves);
+  assert.equal(plot.cause, out.cause, 'первопричина живёт на нити, а не только в сборке');
   assert.equal(plot.arena, undefined);
   assert.equal(plot.hook, undefined);
   assert.equal(plot.conflict, undefined);
@@ -2375,6 +2434,7 @@ test('завязка возвращает полный промпт архите
           synopsis: 'Гость оставил сапог.',
           closeWhen: ['Найти', 'Бросить'],
           whyMoves: 'Хозяин ищет сапог.',
+          cause: 'Гость ушёл к створу и не вернулся за сапогом.',
           hiddenPremises: [],
         });
       } else if (opts.agentId === 'freeformCardJudge') {

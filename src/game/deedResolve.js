@@ -7,6 +7,7 @@
 
 import { depthGain, closesPlot } from './deedMath.js';
 import { alignmentOf } from './deedAlign.js';
+import { revealPremise, revealNextPremise } from './premises.js';
 import {
   findThreat,
   liveThreats,
@@ -50,6 +51,40 @@ export function critCascade(plot, threat, { day = 0 } = {}) {
   return { step: 'depth', depthGain: 0.5 };
 }
 
+/**
+ * Какая именно хорошая концовка сыграла.
+ *
+ * Дело не обязано целиться в конкретную концовку: глубину набирают чем угодно.
+ * Но без ссылки на концовку финальную запись не к чему привязать — она не знает
+ * ни чем снят вопрос, ни что в городе теперь иначе.
+ */
+function pickGoodEndingId(plot, process) {
+  const aimed = String(process?.endingId || '').trim();
+  if (aimed) return aimed;
+  const good = (plot?.endings || []).find((e) => e.kind === 'GOOD_ENDING');
+  return good?.id || null;
+}
+
+/**
+ * Что город узнал из удавшегося дела.
+ *
+ * Обычный успех открывает ровно то, что дело и выясняло: судья назвал это
+ * заранее, и у дела, которое ничего не выясняло, открывать нечего. Крит
+ * открывает ещё один пункт — блестяще сделанная работа приносит больше, чем
+ * просили, и это ровно тот случай, когда разгадка не должна умереть
+ * непрочитанной.
+ */
+function revealForDeed(plot, process, finish) {
+  const out = [];
+  const aimed = revealPremise(plot, process?.premiseText);
+  if (aimed) out.push(aimed);
+  if (finish === 'crit') {
+    const extra = revealNextPremise(plot);
+    if (extra) out.push(extra);
+  }
+  return out;
+}
+
 function pickThreatForDeed(plot, process) {
   const byId = findThreat(plot, process?.threatId);
   if (byId && byId.status === 'live') return byId;
@@ -81,6 +116,7 @@ export function applyDeedToPlot({
     fired: null,
     livesLeft: livesLeft(plot),
     severity: null,
+    revealed: [],
   };
   if (!plot) return out;
 
@@ -100,13 +136,14 @@ export function applyDeedToPlot({
     });
     out.depthGain = gain;
     plot.depth = Math.round(((Number(plot.depth) || 0) + gain) * 100) / 100;
+    out.revealed = revealForDeed(plot, process, finish);
     if (closesPlot({ depth: 0, gain: plot.depth, maxDepth: plot.maxDepth })) {
       out.closes = true;
       out.endingKind = 'GOOD_ENDING';
       plot.ending = {
         kind: 'GOOD_ENDING',
         text: '',
-        endingId: process?.endingId || null,
+        endingId: pickGoodEndingId(plot, process),
         processId: process?.id || null,
       };
     }

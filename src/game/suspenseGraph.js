@@ -3,8 +3,12 @@
  * Движок продвигает ровно одну ступень за meaningful beat. Тайну не трогает.
  */
 
+function normalizeSpace(s) {
+  return String(s || '').replace(/\s+/g, ' ').trim();
+}
+
 function clip(s, max) {
-  const t = String(s || '').replace(/\s+/g, ' ').trim();
+  const t = normalizeSpace(s);
   if (!t) return '';
   return t.length > max ? t.slice(0, max).trim() : t;
 }
@@ -41,7 +45,8 @@ export function normalizeHiddenPremises(raw, depth = null) {
   const seen = new Set();
   const max = depth != null ? hiddenPremisesBudget(depth).max : 6;
   for (const item of list) {
-    const text = clip(typeof item === 'string' ? item : item?.text || item?.premise || '', 280);
+    // Без верхней границы: разгадку рубило по букве на середине предложения.
+    const text = normalizeSpace(typeof item === 'string' ? item : item?.text || item?.premise || '');
     if (text.length < 8) continue;
     const key = text.toLowerCase();
     if (seen.has(key)) continue;

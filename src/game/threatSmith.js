@@ -12,11 +12,13 @@ import { nextObligationRequest, createThreat, attachThreat, SEVERITY_GUIDANCE } 
 import { THREAT_SPEC } from './bands.js';
 
 const THREAT_TEXT_MAX = 240;
+const THREAT_FINALE_TEXT_MAX = 420;
 
 export function formatThreatRequest(req, plot) {
   const lines = [
     `История: ${plot?.title || ''}`,
     plot?.synopsis ? `Сейчас: ${plot.synopsis}` : '',
+    plot?.cause ? `Первопричина: ${plot.cause}` : '',
   ];
   if (req.outcome === 'neutral') {
     lines.push(
@@ -27,9 +29,16 @@ export function formatThreatRequest(req, plot) {
   } else if (req.finale) {
     lines.push(
       '',
-      'ЭТО ПОСЛЕДНИЙ УДАР: если случится — история закроется плохой концовкой.',
+      'ЭТИМ ИСТОРИЯ КОНЧАЕТСЯ. Не очередное ухудшение, а событие, которым город',
+      'необратимо лишается того, из-за чего вопрос стоял.',
       req.endingText ? `Концовка, к которой это ведёт: «${req.endingText}».` : '',
-      'Напиши событие, которое к ней приведёт. Не переписывай саму концовку.',
+      req.endingQuestionGone ? `После неё вопрос снят так: ${req.endingQuestionGone}` : '',
+      req.endingNowDifferent ? `И в городе навсегда иначе: ${req.endingNowDifferent}` : '',
+      '',
+      'Напиши событие, которое к этому приводит. Саму концовку не переписывай.',
+      'Проверь себя: после этого события спорить уже не о чем — предмета спора нет.',
+      'Если получилось «стало хуже», «работать тяжелее», «доверие подорвано» — это не то.',
+      'Событие происходит сейчас и целиком. Никаких «к зиме», «со временем», «постепенно».',
     );
   } else {
     lines.push(
@@ -45,7 +54,7 @@ export function formatThreatRequest(req, plot) {
     lines.push('', 'УЖЕ ВИСИТ — независимые параллельные часы, не цепочка. Не повторяй и не продолжай:');
     for (const t of req.existingThreats) lines.push(`- ${t.text}`);
   }
-  lines.push('', 'Одно предложение. Срок не называй.');
+  lines.push('', req.finale ? 'Одно-два предложения. Срок не называй.' : 'Одно предложение. Срок не называй.');
   return lines.filter(Boolean).join('\n');
 }
 
@@ -68,7 +77,8 @@ export async function draftThreatText({ runtime, domain, plot, request, log: par
           },
         },
         handler: async (args) => {
-          draft.text = String(args?.text || '').trim().slice(0, THREAT_TEXT_MAX);
+          const max = request.finale ? THREAT_FINALE_TEXT_MAX : THREAT_TEXT_MAX;
+          draft.text = String(args?.text || '').trim().slice(0, max);
           return { ok: true };
         },
       },

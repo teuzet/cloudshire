@@ -60,7 +60,7 @@ function domain({ chronicle = [], dialogue = [] } = {}) {
 }
 
 test('поводы и просьбы — закрытые словари', () => {
-  assert.deepEqual(OCCASIONS, ['новая история', 'дело', 'угроза', 'разрешение', 'доклад']);
+  assert.deepEqual(OCCASIONS, ['новая история', 'дело', 'угроза', 'разрешение', 'развязка', 'доклад']);
   assert.equal(parseOccasion('УГРОЗА'), 'угроза');
   assert.equal(parseOccasion('что-то'), 'дело');
   assert.equal(parseAsk('НУЖНА ПОМОЩЬ'), 'нужна помощь');
@@ -207,6 +207,50 @@ test('скрытая угроза в промпт не попадает — то
   const text = formatHeraldPrompt(ctx);
   assert.ok(!text.includes('опора треснет насквозь'));
   assert.match(text, /Смутное чувство: очень тревожно/);
+});
+
+test('на развязке жрец получает тройку концовки и запрет на продолжение', () => {
+  const p = plot({
+    cause: 'опорный столб трескается сам по себе',
+    endings: [
+      {
+        id: 'e_bad',
+        kind: 'BAD_ENDING',
+        text: 'северное крыло обрушилось',
+        questionGone: 'крыла нет, спорить не о чем',
+        nowDifferent: 'Срединный пояс отрезан от нижних дворов',
+      },
+    ],
+    ending: { kind: 'BAD_ENDING', text: '', endingId: 'e_bad' },
+  });
+  threat(p, { total: 12, text: 'обвал северного крыла' });
+  const ctx = buildHeraldContext({
+    domain: domain(),
+    plot: p,
+    fact: { text: 'северное крыло обрушилось на мостки' },
+    occasion: 'развязка',
+    closed: true,
+  });
+  const text = formatHeraldPrompt(ctx);
+  assert.match(text, /ПОВОД: развязка/);
+  assert.match(text, /ЭТИМ ИСТОРИЯ КОНЧИЛАСЬ/);
+  assert.match(text, /Это утрата, а не трудность/);
+  assert.match(text, /опорный столб трескается сам по себе/);
+  assert.match(text, /крыла нет, спорить не о чем/);
+  assert.match(text, /Срединный пояс отрезан/);
+  assert.match(text, /возвращаться к этому нечем/);
+  assert.doesNotMatch(text, /обвал северного крыла/, 'у закрытой истории нависшего уже нет');
+});
+
+test('карточка закрытой нити не отдаёт ни жизней, ни нависшего', () => {
+  const p = plot();
+  threat(p, { total: 12, known: true, text: 'обвал' });
+  const card = threadCard(p, 0, { closed: true });
+  assert.equal(card.closed, true);
+  assert.equal(card.livesLeft, null);
+  assert.equal(card.workLeft, null);
+  assert.deepEqual(card.knownThreats, []);
+  assert.equal(card.dread, null);
 });
 
 test('без нити промпт всё равно собирается', () => {

@@ -25,8 +25,8 @@ import { livesLeft } from './threats.js';
 import { toolFail } from '../agents/toolResult.js';
 
 export const CHRONICLE_ENTRY_MAX = 400;
-/** Чуть шире только финальная запись: обычный хронист остаётся на 400. */
-export const CHRONICLE_FINALE_MAX = 640;
+/** Финальную запись пишет отдельный агент, и ей нужно место на всю развязку. */
+export const CHRONICLE_FINALE_MAX = 900;
 
 export function chronicleEntryLimit(raw) {
   const n = Math.round(Number(raw) || 0);
@@ -109,9 +109,14 @@ export function deedConsequenceLines({ plot, applied, threat = null, closed = fa
   } else if (alignment === 'RELEVANT') {
     if (finish === 'fail') {
       lines.push('Работа должна была снять нависшее, но не справилась: нависшее осталось.');
-    } else if (threat?.text) {
+    } else if (threat?.known && threat?.text) {
       lines.push(`Нависшее снято, этого уже не случится: ${threat.text}`);
       lines.push('Пиши, что именно предотвратили. Саму беду как случившуюся не пиши.');
+    } else if (threat?.text) {
+      // Беда городу неизвестна, и её формулировка выдаёт то, чего город ещё не
+      // знает. Иначе хроника рассказывает разгадку, а жрец потом отрекается.
+      lines.push('Работа отвела беду, которой город не видел и теперь уже не увидит.');
+      lines.push('Пиши только сделанную работу. Что именно отвели — не пиши: город этого не знает.');
     } else {
       lines.push('Работа сняла одну нависшую над городом беду.');
     }
@@ -127,6 +132,18 @@ export function deedConsequenceLines({ plot, applied, threat = null, closed = fa
     lines.push(
       'Историю это не двигает: работа сама по себе, её итог не меняет положения дел. ' +
         'Не приписывай ей сдвига в истории.',
+    );
+  }
+
+  // Раскрытое дело переводит скрытую посылку в знание города: с этой минуты её
+  // не только можно, но и нужно писать — иначе разгадка умирает непрочитанной.
+  const revealed = Array.isArray(applied?.revealed) ? applied.revealed : [];
+  if (revealed.length) {
+    lines.push('Этой работой город ВЫЯСНИЛ следующее, и теперь знает это точно:');
+    for (const text of revealed) lines.push(`- ${text}`);
+    lines.push(
+      'Запиши, что именно выяснили — это главное в записи. Пиши как установленное, ' +
+        'а не как догадку. Дальше выясненного не заходи и остального скрытого не домысливай.',
     );
   }
 
@@ -176,12 +193,10 @@ export function formatDeedPrompt({
   applied,
   threat = null,
   closed = false,
-  ending = null,
   chronicleTail = [],
   dateLabel = '',
 }) {
   const actor = who(domain, process);
-  const finale = closed ? endingText(plot, ending) : null;
   return [
     'ПОВОД: закончилась работа, которую город вёл по воле покровителя.',
     dateLabel ? `Когда: ${dateLabel}.` : null,
@@ -193,7 +208,6 @@ export function formatDeedPrompt({
     `ИСХОД (решено броском, не спорь): ${FINISH_WORD[applied?.finish] || FINISH_WORD.ok}.`,
     '',
     ...deedConsequenceLines({ plot, applied, threat, closed }),
-    finale ? `Развязка истории, к которой это привело: ${finale}` : null,
     '',
     ...plotBlock(plot, chronicleTail),
     '',
@@ -204,7 +218,8 @@ export function formatDeedPrompt({
 }
 
 /**
- * Запись о сработавшем обязательстве мира.
+ * Запись о сработавшем обязательстве мира, которое историю не закрыло.
+ * Развязку пишет `formatFinalePrompt`: там другой объём работы.
  *
  * Текст угрозы написан в будущем времени — это предсказание, которое движок
  * держал до срока. В хронику оно должно попасть уже случившимся, иначе
@@ -213,53 +228,103 @@ export function formatDeedPrompt({
 export function formatThreatPrompt({
   plot,
   threat,
-  kind = 'threat',
-  closed = false,
   severity = null,
   chronicleTail = [],
   dateLabel = '',
-  ending = null,
-  entryMax = CHRONICLE_ENTRY_MAX,
 }) {
-  const resolution = kind === 'resolution';
-  const finale = closed && !resolution ? endingText(plot, ending) : null;
-  const limit = chronicleEntryLimit(entryMax);
   return [
-    resolution
-      ? 'ПОВОД: беда выдохлась сама. Город привык, вопрос перестал быть вопросом.'
-      : 'ПОВОД: город не успел, и то, чего боялись, случилось.',
+    'ПОВОД: город не успел, и то, чего боялись, случилось.',
     dateLabel ? `Когда: ${dateLabel}.` : null,
     '',
     'ЭТО БЫЛО НАПИСАНО ЗАРАНЕЕ, В БУДУЩЕМ ВРЕМЕНИ. Теперь оно произошло:',
     threat?.text || '—',
-    finale
-      ? null
-      : 'Перепиши это как случившееся, в прошедшем времени, со своими подробностями места и людей.',
+    'Перепиши это как случившееся, в прошедшем времени, со своими подробностями места и людей.',
     'Не пиши, что это ещё только случится или что этого можно избежать.',
-    severity && !resolution && !finale ? `Насколько тяжело (полоса движка, в запись не выноси): ${severity}.` : null,
-    finale
-      ? [
-          '',
-          'Этим история кончается плохо.',
-          'Заготовленная развязка (не копируй дословно, сведи со случившимся в одну запись):',
-          finale,
-          'В записи должны быть узнаваемы и то, что случилось из предсказания, и то, чем история кончилась.',
-          'Не одна концовка без события и не одно событие без того, чем история кончилась.',
-          limit > CHRONICLE_ENTRY_MAX
-            ? `Эта запись может быть длиннее обычной — до ${limit} символов.`
-            : null,
-        ]
-      : closed
-        ? resolution
-          ? 'Этим история кончается: без победы и без крушения. Напиши, чем всё улеглось.'
-          : 'Этим история кончается плохо. Напиши развязку, а не подступ к ней.'
-        : 'История не закрыта: беда случилась, но вопрос остался. Не пиши итог и мораль.',
+    severity ? `Насколько тяжело (полоса движка, в запись не выноси): ${severity}.` : null,
+    'История не закрыта: беда случилась, но вопрос остался. Не пиши итог и мораль.',
     '',
     ...plotBlock(plot, chronicleTail),
     '',
     'Напиши одну запись хроники. Вызови submit_chronicle.',
   ]
-    .flat()
+    .filter((l) => l != null)
+    .join('\n');
+}
+
+const ENDING_KIND_LINE = {
+  GOOD_ENDING:
+    'Вопрос снят, и город на этом что-то приобрёл. Приобретение назови прямо, ' +
+    'но не превращай запись в триумф: цена тоже была.',
+  NEUTRAL_ENDING:
+    'Вопрос снят, но город за это заплатил или он просто исчерпал себя. ' +
+    'Ни победы, ни крушения: напиши, чем всё улеглось и во что это обошлось.',
+  BAD_ENDING:
+    'Вопрос закрыт утратой, а не решением: города лишился того, из-за чего всё это стояло. ' +
+    'Не пиши «стало хуже» — пиши, чего больше нет.',
+};
+
+/** Ввод финальной записи, когда историю закрыло дело города. */
+export function deedTriggerLines({ domain, process, applied }) {
+  const actor = who(domain, process);
+  const revealed = Array.isArray(applied?.revealed) ? applied.revealed : [];
+  return [
+    `Город вёл работу по воле покровителя: ${process?.detail || process?.summary || '—'}`,
+    process?.goal ? `Чего добивались: ${process.goal}` : null,
+    actor ? `Кто вёл: ${actor}.` : 'Кто вёл: город сам, без названного лица.',
+    `Исход работы (решён броском, не спорь): ${FINISH_WORD[applied?.finish] || FINISH_WORD.ok}.`,
+    revealed.length ? `Этой работой выяснилось, и город теперь это знает:\n- ${revealed.join('\n- ')}` : null,
+  ].filter(Boolean);
+}
+
+/** Ввод финальной записи, когда историю закрыло сработавшее обязательство мира. */
+export function threatTriggerLines(threat) {
+  return [
+    'Это было написано заранее, в будущем времени. Теперь оно произошло:',
+    threat?.text || '—',
+    'Перепиши случившимся, со своими подробностями места и людей.',
+  ];
+}
+
+/**
+ * Последняя запись об истории.
+ *
+ * Отдельно от `formatDeedPrompt` и `formatThreatPrompt`, потому что там задача —
+ * зафиксировать один ход, а здесь закрыть линию: обычный хронист на таком
+ * брифе сводил событие и развязку в одну сухую строчку.
+ *
+ * `triggerLines` даёт вызывающий: у дела и у сработавшей беды это разные вводы.
+ */
+export function formatFinalePrompt({
+  plot,
+  ending = null,
+  triggerLines = [],
+  chronicleTail = [],
+  dateLabel = '',
+  entryMax = CHRONICLE_FINALE_MAX,
+}) {
+  const resolved = findPlotEnding(plot, ending?.endingId) || null;
+  const kind = ending?.kind || resolved?.kind || 'NEUTRAL_ENDING';
+  const text = endingText(plot, ending);
+  const limit = chronicleEntryLimit(entryMax);
+  return [
+    'ПОВОД: этим история кончается. Это последняя запись о ней.',
+    dateLabel ? `Когда: ${dateLabel}.` : null,
+    '',
+    'ЧТО ПРИВЕЛО К РАЗВЯЗКЕ:',
+    ...triggerLines,
+    '',
+    'РАЗВЯЗКА (что должно стать правдой; дословно не копируй):',
+    text || '—',
+    resolved?.questionGone ? `Почему вопрос больше не стоит: ${resolved.questionGone}` : null,
+    resolved?.nowDifferent ? `Что в городе теперь по-другому: ${resolved.nowDifferent}` : null,
+    plot?.cause ? `Первопричина, из-за которой всё это стояло: ${plot.cause}` : null,
+    '',
+    ENDING_KIND_LINE[kind] || ENDING_KIND_LINE.NEUTRAL_ENDING,
+    '',
+    ...plotBlock(plot, chronicleTail),
+    '',
+    `Одна связная запись до ${limit} символов. Вызови submit_chronicle.`,
+  ]
     .filter((l) => l != null)
     .join('\n');
 }
@@ -274,9 +339,10 @@ export async function writeChronicle({
   occasion = 'дело',
   prompt,
   maxChars = CHRONICLE_ENTRY_MAX,
+  agentId = 'chronicler',
   log: parentLog,
 } = {}) {
-  const log = (parentLog || getLogger()).child({ scope: 'chronicler', domainId: domain?.id });
+  const log = (parentLog || getLogger()).child({ scope: 'chronicler', domainId: domain?.id, agentId });
   const limit = chronicleEntryLimit(maxChars);
   const draft = { text: null };
   const tools = [
@@ -306,7 +372,7 @@ export async function writeChronicle({
 
   try {
     await runtime.run({
-      agentId: 'chronicler',
+      agentId,
       tools,
       maxTurns: 2,
       toolChoice: { type: 'function', function: { name: 'submit_chronicle' } },

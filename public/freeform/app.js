@@ -168,9 +168,20 @@ function renderPlot(plot, align = {}) {
     plotCard.innerHTML = '';
     return;
   }
-  const endings = (plot.endings || []).map((e) => `<li><code>${esc(e.id)}</code> [${esc(e.kind)}] ${esc(e.text)}</li>`).join('');
+  const endings = (plot.endings || [])
+    .map((e) => {
+      const extra = [
+        e.questionGone ? `<div class="muted">вопрос снят: ${esc(e.questionGone)}</div>` : '',
+        e.nowDifferent ? `<div class="muted">теперь иначе: ${esc(e.nowDifferent)}</div>` : '',
+      ]
+        .filter(Boolean)
+        .join('');
+      return `<li><code>${esc(e.id)}</code> [${esc(e.kind)}] ${esc(e.text)}${extra}</li>`;
+    })
+    .join('');
   const closes = !endings && (plot.closeWhen || []).map((x) => `<li>${esc(x)}</li>`).join('');
   const hidden = (plot.hiddenPremises || []).map((x) => `<li>${esc(x)}</li>`).join('') || '<li class="muted">нет тайны</li>';
+  const known = (plot.revealedPremises || []).map((x) => `<li>${esc(x)}</li>`).join('');
   const axes = axesLine(plot);
   const urgency = plot.urgency != null ? `urgency ${esc(plot.urgency)}` : '';
   const countdown = plot.countdown != null ? `автотик через ${esc(plot.countdown)} мес.` : '';
@@ -185,10 +196,12 @@ function renderPlot(plot, align = {}) {
     <h2 class="plot-title">${esc(plot.title)}</h2>
     ${axes ? `<p class="axes">${esc(axes)}</p>` : ''}
     <p class="meta">${esc(plot.synopsis || '')}</p>
+    ${plot.cause ? `<p class="muted"><strong>первопричина.</strong> ${esc(plot.cause)}</p>` : ''}
     ${plot.whyMoves ? `<p class="muted"><strong>whyMoves.</strong> ${esc(plot.whyMoves)}</p>` : ''}
     <p class="muted">${[urgency, countdown, gravity, depth, fails, alignLine].filter(Boolean).join(' · ')}</p>
     ${endings ? `<h2>endings</h2><ul>${endings}</ul>` : ''}
     ${closes ? `<h2>closeWhen</h2><ul>${closes}</ul>` : ''}
+    ${known ? `<h2>город выяснил</h2><ul>${known}</ul>` : ''}
     <h2>hiddenPremises (лаборатория)</h2>
     <ul>${hidden}</ul>
   `;

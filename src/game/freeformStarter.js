@@ -20,6 +20,7 @@ export function normalizeSeedVariant(raw, cfg) {
   const closeWhen = normalizeCloseWhenList(raw?.closeWhen);
   const hiddenPremises = normalizeHiddenPremises(raw?.hiddenPremises, 1);
   const whyMoves = clipPlotText(raw?.whyMoves || raw?.motion, PLOT_SUMMARY_MAX);
+  const cause = clipPlotText(raw?.cause, PLOT_SUMMARY_MAX);
   if (!title || !synopsis || closeWhen.length < 1) return null;
   return {
     title,
@@ -27,6 +28,7 @@ export function normalizeSeedVariant(raw, cfg) {
     entry: entry || '',
     closeWhen,
     whyMoves,
+    cause,
     hiddenPremises,
   };
 }
@@ -41,6 +43,7 @@ export function seedCardFromBlank(blank, cfg) {
       entry: '',
       closeWhen: blank.closeWhen?.length ? blank.closeWhen : ['Ситуация исчерпала себя', 'Принять произошедшее как новый порядок'],
       whyMoves: blank.whyMoves || blank.dynamics || '',
+      cause: blank.cause || '',
       hiddenPremises: blank.hiddenPremises,
     },
     cfg,
@@ -58,10 +61,17 @@ async function constructSeed({ runtime, domain, world, seedText, blank, repair =
         parameters: {
           type: 'object',
           additionalProperties: false,
-          required: ['title', 'synopsis', 'closeWhen', 'whyMoves'],
+          required: ['title', 'synopsis', 'closeWhen', 'whyMoves', 'cause'],
           properties: {
             title: { type: 'string' },
             synopsis: { type: 'string' },
+            cause: {
+              type: 'string',
+              description: [
+                'Первопричина одним предложением: вещь или процесс в мире, из-за которого вопрос стоит.',
+                'Не спор сторон: то, что останется, даже если все спорщики разойдутся.',
+              ].join(' '),
+            },
             entry: {
               type: 'string',
               description: 'Опциональная вторая запись этого месяца. Не пересказ затравки.',
@@ -92,6 +102,12 @@ async function constructSeed({ runtime, domain, world, seedText, blank, repair =
           if (!card.whyMoves) {
             return toolFail('thin', 'Нужен whyMoves: почему история движется, если ей не занимаются.');
           }
+          if (!card.cause) {
+            return toolFail(
+              'no_cause',
+              'Нужна cause: вещь или процесс в мире, из-за которого вопрос стоит. Не спор сторон.',
+            );
+          }
           draft.card = card;
           return { ok: true };
         },
@@ -120,6 +136,7 @@ async function constructSeed({ runtime, domain, world, seedText, blank, repair =
           'Посади ЭТОТ сюжет в город через submit_freeform_seed.',
           'synopsis — затравка и конфликт в этом городе; он может остаться в масштабе затравки.',
           'whyMoves — из динамики: путь к посадке. Не «напряжение растёт».',
+          'cause — первопричина: если все спорщики разойдутся по домам, она останется на месте. Разойдётся с ними — значит это спор, а не первопричина.',
           'Хотя бы один closeWhen — исход на масштабе последствий. Не ужимай посадку до двора затравки.',
           'Gravity относится к последствиям. Синопсис не обязан уже показывать разрыв.',
           'hiddenPremises — [] если в полях нет загадки. Не додумывай закулисье. Если тайна уже есть — один пункт, не в хронике.',

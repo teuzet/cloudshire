@@ -400,6 +400,13 @@ const ENDING_KIND_LABEL = {
  * Концовки нити списком. `closeWhen` у нити со ставками — это все её концовки
  * сразу, и склеенные в строку они читались как один длинный исход.
  */
+function endingExtra(e) {
+  const bits = [];
+  if (e?.questionGone) bits.push(`<div class="muted small">вопрос снят: ${esc(e.questionGone)}</div>`);
+  if (e?.nowDifferent) bits.push(`<div class="muted small">теперь иначе: ${esc(e.nowDifferent)}</div>`);
+  return bits.join('');
+}
+
 function endingsBlock(p) {
   const list = (p.endings || []).filter((e) => e && e.text);
   const closed = p.ending && typeof p.ending === 'object' ? p.ending : null;
@@ -416,7 +423,9 @@ function endingsBlock(p) {
         const label = ENDING_KIND_LABEL[e.kind] || e.kind || '?';
         return (
           `<li${hit ? ' class="hit"' : ''}>` +
-          `<span class="muted small">${esc(label)}${hit ? ' · случилась' : ''}</span> ${esc(e.text)}</li>`
+          `<span class="muted small">${esc(label)}${hit ? ' · случилась' : ''}</span> ${esc(e.text)}` +
+          endingExtra(e) +
+          `</li>`
         );
       })
       .join('');
@@ -461,10 +470,14 @@ function plotCard(p) {
         )}</span></li>`,
     )
     .join('');
+  const known = (p.revealedPremises || []).map((t) => `<li>${esc(t)}</li>`).join('');
   return (
     `<article class="ins-card"><h4>${esc(p.title || p.id)}</h4>` +
     (meta ? `<div class="muted small">${esc(meta)}</div>` : '') +
     (p.synopsis ? `<p class="pre">${esc(p.synopsis)}</p>` : '') +
+    (p.cause ? `<p class="muted small">первопричина: ${esc(p.cause)}</p>` : '') +
+    (p.whyMoves ? `<p class="muted small">если не займутся: ${esc(p.whyMoves)}</p>` : '') +
+    (known ? `<div class="muted small">город выяснил:</div><ul class="small">${known}</ul>` : '') +
     (threats ? `<div class="muted small">нависло:</div><ul class="small">${threats}</ul>` : '') +
     endingsBlock(p) +
     (p.relatedStats?.length ? `<p class="muted small">статы: ${esc(p.relatedStats.join(', '))}</p>` : '') +

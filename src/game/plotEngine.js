@@ -219,10 +219,6 @@ export function detachProcessFromPlots(domain, process, { tick = null } = {}) {
   return { closedErrands };
 }
 
-export function plotSituationForSpeech(plot) {
-  return clipPlotText(String(plot?.synopsis || plot?.closeWhen || '').trim(), 160);
-}
-
 /**
  * На трёхтактной нити в месяц тикает только старшее DIRECT/RELEVANT дело.
  * UNRELATED и поручения идут своим ходом. Если голова очереди уже продвинулась

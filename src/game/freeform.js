@@ -30,6 +30,7 @@ import { gameDateFromDay } from './gameClock.js';
 import { formatCityForAgents } from './cityContext.js';
 import { formatOfficersCastHint } from './officers.js';
 import { normalizeBeatDynamics } from './freeformDynamics.js';
+import { revealedPremises } from './premises.js';
 
 export const FREEFORM_FINISH = ['fail', 'ok', 'crit'];
 
@@ -508,6 +509,7 @@ export function createFreeformPlot({ domain, world, variant, config, seedChronic
     maxFails: maxFailsForGravity(gravity),
     endings: variant.endings,
     whyMoves: variant.whyMoves,
+    cause: variant.cause,
     countdown,
     tick: world.tickIndex,
     config,
@@ -561,13 +563,18 @@ export function cityStateForPrompt(domain, world) {
 
 export function plotCardForPrompt(plot, { revealHidden = true } = {}) {
   if (!plot) return '';
+  const known = revealedPremises(plot);
   const lines = [
     `История «${plot.title}».`,
     `Синопсис: ${plot.synopsis || '—'}`,
+    plot.cause ? `Первопричина: ${plot.cause}` : '',
     `Исходы:\n${formatFreeformEndings(plot) || formatCloseWhen(plot)}`,
     plot.whyMoves
       ? `whyMoves: ${plot.whyMoves}`
       : 'whyMoves: не задан.',
+    // Раскрытое городом — уже не тайна, а установленный факт: об этом можно
+    // говорить и писать в отличие от hiddenPremises ниже.
+    known.length ? `Город это уже выяснил:\n${known.map((h) => `- ${h}`).join('\n')}` : '',
     formatFreeformProgress(plot),
     `gravity: ${plot.gravity || '—'}`,
   ];
@@ -579,16 +586,19 @@ export function plotCardForPrompt(plot, { revealHidden = true } = {}) {
         : 'hiddenPremises: нет. Тайны может не быть.',
     );
   }
-  return lines.join('\n');
+  return lines.filter(Boolean).join('\n');
 }
 
 export function formatStoryForBeatArchitect(domain, plot) {
   if (!plot) return '';
   const hidden = plot.hiddenPremises || [];
+  const known = revealedPremises(plot);
   return [
     plot.title ? `История «${plot.title}».` : 'История.',
     plot.synopsis || '',
+    plot.cause ? `Первопричина: ${plot.cause}` : '',
     plotChronicleForPrompt(domain, plot),
+    known.length ? `Город это уже установил:\n${known.map((h) => `- ${h}`).join('\n')}` : '',
     hidden.length
       ? `На самом деле (в текст не пиши):\n${hidden.map((h) => `- ${h}`).join('\n')}`
       : '',

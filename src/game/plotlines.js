@@ -4,6 +4,7 @@ import { textsLookSame, processIsLive } from './processes.js';
 import { normalizeTruthGraph, judgeTruthGraph, parseMysteryShapes, normalizeFactList, RESOLUTION_FACT_MAX } from './mysteryGraph.js';
 import { normalizeDiscoveryLadder, normalizeHiddenPremises, judgeSuspenseCore } from './suspenseGraph.js';
 import { normalizeThreat } from './threats.js';
+import { normalizeRevealedPremises } from './premises.js';
 
 /**
  * Сюжетные нити — ядро мира: событий вне нитей не бывает.
@@ -256,6 +257,10 @@ export function normalizeFreeformEndings(raw) {
       id,
       text,
       kind: parseFreeformEndingKind(item?.kind || item?.type),
+      // Концовка обязана снять вопрос, а не отодвинуть его: эти два поля —
+      // проверяемая часть обещания, по ним же судит судья концовок.
+      questionGone: clipText(item?.questionGone, PLOT_ENDING_MAX),
+      nowDifferent: clipText(item?.nowDifferent, PLOT_ENDING_MAX),
     });
   }
   return out;
@@ -268,7 +273,17 @@ export function formatFreeformEndings(plotOrList) {
       ? plotOrList.endings
       : [];
   if (!list.length) return '';
-  return list.map((e, i) => `${i + 1}. ${e.id} [${e.kind}] ${e.text}`).join('\n');
+  return list
+    .map((e, i) =>
+      [
+        `${i + 1}. ${e.id} [${e.kind}] ${e.text}`,
+        e.questionGone ? `   вопрос снят: ${e.questionGone}` : '',
+        e.nowDifferent ? `   теперь иначе: ${e.nowDifferent}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    )
+    .join('\n');
 }
 
 /** Обязательства мира — часть карточки нити и переживают круг через хранилище. */
@@ -371,6 +386,9 @@ function storyActState(p = {}) {
       gravity,
       countdown: parseStoryCountdown(p.countdown),
       whyMoves: clipText(p.whyMoves, PLOT_SUMMARY_MAX),
+      // Первопричина живёт столько же, сколько нить: концовки обязаны снять
+      // именно её, а не спор сторон вокруг неё.
+      cause: clipText(p.cause, PLOT_SUMMARY_MAX),
       ending: p.ending || null,
       depth,
       maxDepth,
@@ -381,6 +399,9 @@ function storyActState(p = {}) {
           : Math.max(0, Math.round(Number(p.maxFails))),
       endings: normalizeFreeformEndings(p.endings),
       hiddenPremises: normalizeHiddenPremises(p.hiddenPremises),
+      // Раскрытое городом знание. Живёт отдельно от hiddenPremises, чтобы тот
+      // список всегда означал ровно одно: чего город ещё не знает.
+      revealedPremises: normalizeRevealedPremises(p.revealedPremises),
       threats: normalizeThreatList(p.threats, p.id),
       defenseCount: Math.max(0, Math.round(Number(p.defenseCount) || 0)),
     };
@@ -708,6 +729,7 @@ export function createPlotline({
   maxDepth = null,
   hiddenPremises = [],
   whyMoves = '',
+  cause = '',
   countdown = null,
   config = null,
 }) {
@@ -765,6 +787,7 @@ export function createPlotline({
       endings,
       hiddenPremises,
       whyMoves,
+      cause,
       countdown,
       kind: resolvedKind,
       isMainConflux,

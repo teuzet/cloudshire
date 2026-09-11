@@ -85,16 +85,37 @@ function makeDomain() {
         kind: 'story',
         title: 'Гул колодца',
         synopsis: 'Вода поёт.',
+        cause: 'под срубом чужая кладка, и колодец держится на ней',
+        whyMoves: 'кладка осыпается, и гул усиливается сам',
         gravity: 'CRISIS',
         depth: 1,
         maxDepth: 3,
         relatedProcessIds: ['act_1'],
         hiddenPremises: ['под срубом чужая кладка, не городская'],
+        revealedPremises: ['воду мутит не сруб, а подземный сток'],
         discoveryLadder: [{ id: 'rung_1', promise: 'кто клал камень', revealed: false }],
         endings: [
-          { id: 'end_good', kind: 'GOOD_ENDING', text: 'Сруб держит, вода снова чистая' },
-          { id: 'end_neutral', kind: 'NEUTRAL_ENDING', text: 'Колодец забросили и роют новый' },
-          { id: 'end_bad', kind: 'BAD_ENDING', text: 'Колодец обрушился вместе с водовозами' },
+          {
+            id: 'end_good',
+            kind: 'GOOD_ENDING',
+            text: 'Сруб держит, вода снова чистая',
+            questionGone: 'колодец починен, спорить не о чем',
+            nowDifferent: 'двор знает, как чинить сруб',
+          },
+          {
+            id: 'end_neutral',
+            kind: 'NEUTRAL_ENDING',
+            text: 'Колодец забросили и роют новый',
+            questionGone: 'о старом колодце больше не спрашивают',
+            nowDifferent: 'воду берут из новой ямы за межой',
+          },
+          {
+            id: 'end_bad',
+            kind: 'BAD_ENDING',
+            text: 'Колодец обрушился вместе с водовозами',
+            questionGone: 'колодца нет, спорить не о чем',
+            nowDifferent: 'северные дворы остались без воды',
+          },
         ],
         closeWhen: [
           'Сруб держит, вода снова чистая',
@@ -286,6 +307,7 @@ test('инспектор показывает и скрытое нависшее
     assert.equal(plot.depth, 1);
     assert.equal(plot.canDrop, false, 'на нити живое дело — снимать нельзя');
     assert.deepEqual(plot.hiddenPremises, ['под срубом чужая кладка, не городская']);
+    assert.deepEqual(plot.revealedPremises, ['воду мутит не сруб, а подземный сток']);
     assert.equal(plot.discoveryLadder[0].promise, 'кто клал камень');
     assert.deepEqual(
       plot.chronicles.map((e) => e.text),
@@ -308,13 +330,15 @@ test('концовки приходят разобранными, а не одн
     // closeWhen у нити со ставками — это все её концовки сразу; склеенный
     // в строку он читался как один длинный исход и ничего не объяснял.
     assert.deepEqual(
-      plot.endings.map((e) => [e.kind, e.text]),
+      plot.endings.map((e) => [e.kind, e.text, e.questionGone, e.nowDifferent]),
       [
-        ['GOOD_ENDING', 'Сруб держит, вода снова чистая'],
-        ['NEUTRAL_ENDING', 'Колодец забросили и роют новый'],
-        ['BAD_ENDING', 'Колодец обрушился вместе с водовозами'],
+        ['GOOD_ENDING', 'Сруб держит, вода снова чистая', 'колодец починен, спорить не о чем', 'двор знает, как чинить сруб'],
+        ['NEUTRAL_ENDING', 'Колодец забросили и роют новый', 'о старом колодце больше не спрашивают', 'воду берут из новой ямы за межой'],
+        ['BAD_ENDING', 'Колодец обрушился вместе с водовозами', 'колодца нет, спорить не о чем', 'северные дворы остались без воды'],
       ],
     );
+    assert.equal(plot.cause, 'под срубом чужая кладка, и колодец держится на ней');
+    assert.equal(plot.whyMoves, 'кладка осыпается, и гул усиливается сам');
   });
 });
 
@@ -325,6 +349,10 @@ test('клиент рисует концовки списком с пометк�
     const js = await res.text();
     assert.match(js, /function endingsBlock/);
     assert.match(js, /GOOD_ENDING: 'хорошая'/);
+    assert.match(js, /вопрос снят:/);
+    assert.match(js, /теперь иначе:/);
+    assert.match(js, /первопричина:/);
+    assert.match(js, /если не займутся:/);
     assert.match(js, /data-seed-form/);
     assert.match(js, /посеять с тайной/);
     assert.match(js, /name="mystery"/);
@@ -332,6 +360,7 @@ test('клиент рисует концовки списком с пометк�
     assert.match(js, /data-fire-threat/);
     assert.match(js, /data-finish/);
     assert.match(js, /на самом деле:/);
+    assert.match(js, /город выяснил:/);
     assert.match(js, /хроника нити/);
     assert.match(js, /function plotChroniclesBlock/);
   });

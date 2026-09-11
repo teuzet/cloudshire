@@ -119,7 +119,6 @@ import {
   ensureErrandForProcess,
   linkProcessToPlotline,
   rehomeUnrelatedProcess,
-  plotSituationForSpeech,
   attendingQueueForPlot,
   detachProcessFromPlots,
 } from './plotEngine.js';
@@ -185,17 +184,23 @@ function unlinkProcessFromAllPlots(domain, processId) {
   }
 }
 
-function unrelatedAttachHint(originPlot) {
-  const situation = plotSituationForSpeech(originPlot);
+/**
+ * Дело заведено, но названную беду не двигает.
+ *
+ * Что оно перевешено на отдельное поручение, жрецу не сообщаем: это механика,
+ * и от неё он начинает извиняться за собственное непонимание и сворачивать
+ * только что отданный приказ. Ему нужно одно — предупредить покровителя.
+ */
+function unrelatedAttachHint(paceLine = '') {
   return (
-    'Дело заведено, но к названной истории оно не относится — снято на отдельное поручение. ' +
-    'В речи: приказ отдан, однако ты сомневаешься, что это поможет с той бедой, о которой говорил покровитель' +
-    (situation ? ` (${situation})` : '') +
-    '. Не уверен, что правильно понял замысел. Спроси коротко: это отдельное дело или всё же про ту беду? ' +
-    'Не называй историю заголовком. commitment=process — работа уже началась. ' +
-    'Если подтвердит, что отдельно — ничего не перевешивай. ' +
-    'Если настаивает, что про ту беду — не перевешивай это поручение: revoke_process его (карточка поручения снимется), ' +
-    'затем declare_process с УТОЧНЁННОЙ целью, которая реально двигает ту историю, и plotId той нити. commitment=process.'
+    'В речи: приказ принят и пошёл в работу. ' +
+    (paceLine ? `${paceLine} ` : '') +
+    'Но предупреди покровителя: той беде, о которой он говорил, это дело не поможет — ' +
+    'его исполнят, а беда останется где была. Скажи прямо и коротко, истории заголовком не называй. ' +
+    'Если видишь, чем взяться за саму беду, предложи одно такое дело. Решает покровитель: ' +
+    'велит оставить как есть — оставляй. ' +
+    'Приказ ты только что отдал, поэтому сам его не сворачивай: revoke_process не вызывай. ' +
+    'commitment=process.'
   );
 }
 
@@ -986,7 +991,6 @@ export function buildRulerTools(domain, storage, character, ctx) {
           }).plot;
         }
         action.plotlineId = plot?.id || null;
-        let originPlot = null;
         let rehomed = false;
         if (plot && isStakedStory(plot) && !wantIntel) {
           await judgeProcessAlignment({
@@ -1002,7 +1006,6 @@ export function buildRulerTools(domain, storage, character, ctx) {
               config: ctx.config,
             });
             plot = moved.plot;
-            originPlot = moved.originPlot;
             rehomed = moved.rehomed;
             action.plotlineId = plot?.id || null;
           }
@@ -1028,7 +1031,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
             : ' Это объявление постоянного правила: если город его примет, оно останется в порядке города.'
           : '';
         const hint = rehomed
-          ? unrelatedAttachHint(originPlot)
+          ? unrelatedAttachHint(paceHint(action, judged?.note))
           : `В речи: принял повеление. ${paceHint(action, judged?.note)}` +
             ruleWarn +
             impossibleWarn +
@@ -1202,7 +1205,6 @@ export function buildRulerTools(domain, storage, character, ctx) {
         }
         let plot = findPlotline(domain, action.plotlineId);
         let rehomed = false;
-        let originPlot = null;
         if (
           plot &&
           isStakedStory(plot) &&
@@ -1221,7 +1223,6 @@ export function buildRulerTools(domain, storage, character, ctx) {
               config: ctx.config,
             });
             plot = moved.plot;
-            originPlot = moved.originPlot;
             rehomed = moved.rehomed;
             action.plotlineId = plot?.id || action.plotlineId;
           }
@@ -1235,7 +1236,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
           remaining: bandWord(deedRemainingBand(action, day)),
           rehomed,
           hint: rehomed
-            ? unrelatedAttachHint(originPlot)
+            ? unrelatedAttachHint(paceHint(action))
             : `${mode}. ${paceHint(action)}` +
               ' В речи не обещай, что уже сделано: весть об исходе принесёшь сам.' +
               threatTimingHint(plot, action, day) +

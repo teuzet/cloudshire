@@ -7,6 +7,7 @@ import { cityRules } from './cityRules.js';
 import { overlayConfluxView, stampNewBoardItems, stripConfluxView, plotVisibleToRuler } from './confluxBoard.js';
 import { formatTruthGraphForPrompt } from './mysteryGraph.js';
 import { formatLadderForPrompt } from './suspenseGraph.js';
+import { revealedPremises } from './premises.js';
 import { formatCityForAgents, parseCityBrief, formatCanonicalUnknownsForPrompt } from './cityContext.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
@@ -101,6 +102,14 @@ export function formatFocusedStoryForLoremaster(p, { viewerId = null } = {}) {
       'Чужая история: канон истины и скрытые посылки этому городу не открыты. Отвечай по видимой хронике. Не раскрывай, не достраивай скрытое и не записывай его в fact.',
     );
     return lines.filter(Boolean).join('\n');
+  }
+  // Город это выяснил своей работой, значит это уже знание, а не тайна: об этом
+  // можно отвечать прямо. Без этого жрец спрашивает про то, что сам объявил,
+  // получает «город не знает» и отрекается от собственной вести.
+  const known = revealedPremises(p);
+  if (known.length) {
+    lines.push('ГОРОД ЭТО УЖЕ ВЫЯСНИЛ (можно отвечать прямо, это установлено):');
+    for (const text of known) lines.push(`- ${text}`);
   }
   if (p.storyType === 'mystery' && (p.truthGraph || p.truth)) {
     lines.push(

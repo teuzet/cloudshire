@@ -47,10 +47,13 @@ import {
 } from './threats.js';
 import { replenishPlotThreats } from './threatSmith.js';
 import {
+  deedTriggerLines,
   fallbackDeedEntry,
   formatDeedPrompt,
+  formatFinalePrompt,
   formatThreatPrompt,
   plotChronicleTail,
+  threatTriggerLines,
   writeChronicle,
   CHRONICLE_FINALE_MAX,
 } from './chronicler.js';
@@ -258,21 +261,33 @@ export async function resolveDeedEvent({
   // Порядок города говорит сам за себя — там текст уже предметный.
   let text = rule?.text || null;
   if (!text) {
+    // Последнюю запись об истории пишет отдельный агент: у обычного хрониста
+    // бриф на один ход, и развязка у него сжимается в строчку.
+    const closesStory = Boolean(applied.closes) && Boolean(plot);
     const written = await writeChronicle({
       runtime,
       domain,
       occasion: 'дело',
-      prompt: formatDeedPrompt({
-        domain,
-        plot,
-        process,
-        applied,
-        threat: plot ? findThreat(plot, applied.threatId) : null,
-        closed: Boolean(applied.closes),
-        ending: plot?.ending || null,
-        chronicleTail: plotChronicleTail(domain, plot?.id),
-        dateLabel: gameDateFromDay(day).label,
-      }),
+      agentId: closesStory ? 'chronicleFinale' : 'chronicler',
+      maxChars: closesStory ? CHRONICLE_FINALE_MAX : undefined,
+      prompt: closesStory
+        ? formatFinalePrompt({
+            plot,
+            ending: plot.ending || null,
+            triggerLines: deedTriggerLines({ domain, process, applied }),
+            chronicleTail: plotChronicleTail(domain, plot.id),
+            dateLabel: gameDateFromDay(day).label,
+          })
+        : formatDeedPrompt({
+            domain,
+            plot,
+            process,
+            applied,
+            threat: plot ? findThreat(plot, applied.threatId) : null,
+            closed: false,
+            chronicleTail: plotChronicleTail(domain, plot?.id),
+            dateLabel: gameDateFromDay(day).label,
+          }),
       log,
     });
     text = written?.text || fallbackDeedEntry(process, rolled.finish);
@@ -347,7 +362,7 @@ export async function resolveDeedEvent({
     fact,
     plot: closed || plot,
     plotId: plot?.id || null,
-    occasion: 'дело',
+    occasion: closed ? 'развязка' : 'дело',
     outcome,
     applied,
     rule,
@@ -386,25 +401,31 @@ export async function fireThreatEvent({
 
   // Текст угрозы написан в будущем времени: это предсказание, которое движок
   // держал до срока. В летопись оно должно лечь уже случившимся.
-  const occasion = res.kind === 'resolution' ? 'разрешение' : 'угроза';
-  const badClose = Boolean(res.closes) && res.kind !== 'resolution';
-  const entryMax = badClose ? CHRONICLE_FINALE_MAX : undefined;
+  const closesStory = Boolean(res.closes);
+  const occasion = closesStory ? 'развязка' : 'угроза';
   const written = await writeChronicle({
     runtime,
     domain,
     occasion,
-    maxChars: entryMax,
-    prompt: formatThreatPrompt({
-      plot,
-      threat,
-      kind: res.kind,
-      closed: Boolean(res.closes),
-      severity: res.severity,
-      chronicleTail: tail,
-      dateLabel: gameDateFromDay(day).label,
-      ending: plot.ending || null,
-      entryMax,
-    }),
+    agentId: closesStory ? 'chronicleFinale' : 'chronicler',
+    maxChars: closesStory ? CHRONICLE_FINALE_MAX : undefined,
+    prompt: closesStory
+      ? formatFinalePrompt({
+          plot,
+          ending: plot.ending || null,
+          triggerLines: threatTriggerLines(threat),
+          chronicleTail: tail,
+          dateLabel: gameDateFromDay(day).label,
+        })
+      : formatThreatPrompt({
+          plot,
+          threat,
+          kind: res.kind,
+          closed: false,
+          severity: res.severity,
+          chronicleTail: tail,
+          dateLabel: gameDateFromDay(day).label,
+        }),
     log,
   });
 

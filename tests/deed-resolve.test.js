@@ -153,6 +153,83 @@ test('DIRECT-провал на последней ране не закрывае
   assert.equal(p.failCount, 3);
 });
 
+// ─────────────────────── раскрытие на DIRECT ───────────────────────
+
+function mystery(extra = {}) {
+  return plot({
+    hiddenPremises: ['стада вытеснила стая через трещину', 'старейшина нашёл следы и молчит'],
+    revealedPremises: [],
+    ...extra,
+  });
+}
+
+test('DIRECT-успех раскрывает то, что дело и выясняло', () => {
+  const p = mystery();
+  const res = applyDeedToPlot({
+    plot: p,
+    process: deed('DIRECT', { premiseText: 'стада вытеснила стая через трещину' }),
+    finish: 'ok',
+    rng: () => 0.5,
+  });
+  assert.deepEqual(res.revealed, ['стада вытеснила стая через трещину']);
+  assert.deepEqual(p.revealedPremises, ['стада вытеснила стая через трещину']);
+  assert.deepEqual(p.hiddenPremises, ['старейшина нашёл следы и молчит'], 'раскрытое уходит из скрытого');
+  assert.ok(res.depthGain > 0, 'расследование первопричины — это работа по сути');
+});
+
+test('DIRECT без расследования только копит глубину', () => {
+  const p = mystery();
+  const res = applyDeedToPlot({ plot: p, process: deed('DIRECT'), finish: 'ok', rng: () => 0.5 });
+  assert.deepEqual(res.revealed, []);
+  assert.equal(p.hiddenPremises.length, 2);
+  assert.ok(res.depthGain > 0);
+});
+
+test('DIRECT-крит открывает ещё один пункт сверху', () => {
+  const p = mystery();
+  const res = applyDeedToPlot({
+    plot: p,
+    process: deed('DIRECT', { premiseText: 'старейшина нашёл следы и молчит' }),
+    finish: 'crit',
+    rng: () => 0.5,
+  });
+  assert.deepEqual(res.revealed, ['старейшина нашёл следы и молчит', 'стада вытеснила стая через трещину']);
+  assert.deepEqual(p.hiddenPremises, []);
+});
+
+test('DIRECT-провал не выясняет ничего', () => {
+  const p = mystery();
+  const res = applyDeedToPlot({
+    plot: p,
+    process: deed('DIRECT', { premiseText: 'стада вытеснила стая через трещину' }),
+    finish: 'fail',
+  });
+  assert.deepEqual(res.revealed, []);
+  assert.equal(p.hiddenPremises.length, 2);
+  assert.deepEqual(p.revealedPremises, []);
+});
+
+test('уже раскрытое вторым делом не раскрывается снова', () => {
+  const p = mystery();
+  const process = deed('DIRECT', { premiseText: 'стада вытеснила стая через трещину' });
+  applyDeedToPlot({ plot: p, process, finish: 'ok', rng: () => 0.5 });
+  const res = applyDeedToPlot({ plot: p, process, finish: 'ok', rng: () => 0.5 });
+  assert.deepEqual(res.revealed, []);
+  assert.deepEqual(p.revealedPremises, ['стада вытеснила стая через трещину']);
+});
+
+test('RELEVANT ничего не выясняет, даже если пункт назван', () => {
+  const p = mystery();
+  const t = threat(p);
+  const res = applyDeedToPlot({
+    plot: p,
+    process: deed('RELEVANT', { threatId: t.id, premiseText: 'стада вытеснила стая через трещину' }),
+    finish: 'ok',
+  });
+  assert.deepEqual(res.revealed, []);
+  assert.equal(p.hiddenPremises.length, 2);
+});
+
 // ──────────────────────────── RELEVANT ────────────────────────────
 
 test('RELEVANT-успех снимает названную угрозу', () => {

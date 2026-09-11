@@ -509,6 +509,8 @@ export function nextObligationRequest(plot, { day = 0, rng = Math.random } = {})
       finale: true,
       endingId: ending?.id || null,
       endingText: ending?.text || null,
+      endingQuestionGone: ending?.questionGone || null,
+      endingNowDifferent: ending?.nowDifferent || null,
       band,
       slowdown: 0,
       severity: 'КАТАСТРОФА',

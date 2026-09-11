@@ -421,6 +421,13 @@ const ENDING_KIND_LABEL = {
  * запятую они читались как один длинный исход, и понять, что чем кончится,
  * было нельзя.
  */
+function endingExtra(e) {
+  const bits = [];
+  if (e?.questionGone) bits.push(`<div class="muted small">вопрос снят: ${esc(e.questionGone)}</div>`);
+  if (e?.nowDifferent) bits.push(`<div class="muted small">теперь иначе: ${esc(e.nowDifferent)}</div>`);
+  return bits.join('');
+}
+
 function endingsBlock(p) {
   const list = (p.endings || []).filter((e) => e && e.text);
   const closed = p.ending && typeof p.ending === 'object' ? p.ending : null;
@@ -437,7 +444,9 @@ function endingsBlock(p) {
         const label = ENDING_KIND_LABEL[e.kind] || e.kind || '?';
         return (
           `<li${hit ? ' class="hit"' : ''}>` +
-          `<span class="muted small">${esc(label)}${hit ? ' · случилась' : ''}</span> ${esc(e.text)}</li>`
+          `<span class="muted small">${esc(label)}${hit ? ' · случилась' : ''}</span> ${esc(e.text)}` +
+          endingExtra(e) +
+          `</li>`
         );
       })
       .join('');
@@ -528,6 +537,12 @@ function plotCard(p, names = {}) {
             .map((t) => `<li>${esc(t)}</li>`)
             .join('')}</ul>`
         : '<p class="small muted">на самом деле: скрытого слоя нет</p>';
+  const known = Array.isArray(p.revealedPremises) ? p.revealedPremises : [];
+  const knownBlock = known.length
+    ? `<p class="small muted">город выяснил:</p><ul class="small">${known
+        .map((t) => `<li>${esc(t)}</li>`)
+        .join('')}</ul>`
+    : '';
   const ladder = (p.discoveryLadder || [])
     .map((r) => {
       const label = r.promise || r.text || r.id || '';
@@ -541,6 +556,9 @@ function plotCard(p, names = {}) {
     `<article class="ins-card"><h4>${esc(p.title)}</h4>` +
     `<div class="muted small">${esc(meta)}</div>` +
     (p.synopsis ? `<p class="pre">${esc(p.synopsis)}</p>` : '') +
+    (p.cause ? `<p class="small muted">первопричина: ${esc(p.cause)}</p>` : '') +
+    (p.whyMoves ? `<p class="small muted">если не займутся: ${esc(p.whyMoves)}</p>` : '') +
+    knownBlock +
     hiddenBlock +
     truth +
     (ladder ? `<p class="small muted">лестница:</p><ul class="small">${ladder}</ul>` : '') +

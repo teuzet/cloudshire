@@ -73,6 +73,7 @@ export function fallbackAssembledStory(candidate) {
     chronicle,
     synopsis: chronicle,
     whyMoves: lastSentence(chronicle),
+    cause: '',
     hiddenPremises: keepSeedReveals(split.hiddenPremises),
   };
 }
@@ -84,6 +85,7 @@ export function normalizeAssembledStory(raw, candidate, maxChars = PLOT_SUMMARY_
   if (!chronicle) return null;
   const title = clipPlotText(raw?.title, PLOT_TITLE_MAX) || fallback.title;
   const whyMoves = clipPlotText(raw?.whyMoves, PLOT_SUMMARY_MAX) || fallback.whyMoves;
+  const cause = clipPlotText(raw?.cause, PLOT_SUMMARY_MAX) || fallback.cause;
   const hiddenFromTool = keepSeedReveals(raw?.hiddenPremises);
   const hidden = hiddenFromTool.length
     ? hiddenFromTool
@@ -93,6 +95,7 @@ export function normalizeAssembledStory(raw, candidate, maxChars = PLOT_SUMMARY_
     chronicle,
     synopsis: chronicle,
     whyMoves,
+    cause,
     hiddenPremises: hidden,
   };
 }
@@ -121,13 +124,21 @@ export async function constructFreeformStory({
           type: 'object',
           additionalProperties: false,
           required: requireMystery
-            ? ['title', 'chronicle', 'whyMoves', 'hiddenPremises']
-            : ['title', 'chronicle', 'whyMoves'],
+            ? ['title', 'chronicle', 'cause', 'whyMoves', 'hiddenPremises']
+            : ['title', 'chronicle', 'cause', 'whyMoves'],
           properties: {
             title: { type: 'string', description: 'Короткое имя истории.' },
             chronicle: {
               type: 'string',
               description: 'Стартовая хроника: наблюдаемый слой, посаженный в этот город. Без блока «На самом деле:».',
+            },
+            cause: {
+              type: 'string',
+              description: [
+                'Первопричина одним предложением: вещь или процесс в мире, из-за которого вопрос вообще стоит.',
+                'Не спор сторон и не чьё-то упрямство: то, что останется, даже если все спорщики разойдутся.',
+                'Пример: «гон костоломов — сезонный цикл карьерных птиц, из-за которого нельзя работать в выработке».',
+              ].join(' '),
             },
             whyMoves: {
               type: 'string',
@@ -146,6 +157,12 @@ export async function constructFreeformStory({
           const card = normalizeAssembledStory(args, candidate, maxChars);
           if (!card) return toolFail('thin', 'Нужны title, chronicle и whyMoves.');
           if (!card.whyMoves) return toolFail('thin', 'Нужен whyMoves: следующий ход ситуации, если ею не занимаются.');
+          if (!card.cause) {
+            return toolFail(
+              'no_cause',
+              'Нужна cause: вещь или процесс в мире, из-за которого вопрос стоит. Не спор сторон.',
+            );
+          }
           if (requireMystery && !hasSeedReveal(card.hiddenPremises)) {
             return toolFail(
               'no_reveal',
@@ -172,6 +189,11 @@ export async function constructFreeformStory({
           formatBrainstormCandidateForPrompt(candidate, candidate?.index || 1),
           '',
           'Собери из этой хроники историю в этом городе через submit_freeform_story.',
+          [
+            'cause — первопричина: вещь или процесс в мире, из-за которого вопрос стоит.',
+            'Проверь себя: если все спорщики разойдутся по домам, cause останется на месте.',
+            'Разойдётся вместе с ними — значит это не первопричина, а спор.',
+          ].join(' '),
           requireMystery
             ? [
                 'hiddenPremises обязательны: полная разгадка из блока «На самом деле:».',
@@ -222,6 +244,7 @@ export async function assembleFreeformLabStory({
   return {
     ...story,
     gravity: parseFreeformGravity(gravity ?? candidate?.gravity),
+    cause: story.cause || '',
     arena: candidate?.arena || '',
     worldRelation: candidate?.worldRelation || '',
     target: candidate?.target || '',

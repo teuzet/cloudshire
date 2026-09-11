@@ -40,7 +40,7 @@ export function triggerForEvent(event) {
   if (event.surfaced) return 'threatSurfaced';
   if (event.occasion === 'новая история') return 'newStory';
   if (event.occasion === 'угроза') return 'threatFired';
-  if (event.occasion === 'разрешение' || event.closed) return 'plotClosed';
+  if (event.occasion === 'развязка' || event.occasion === 'разрешение' || event.closed) return 'plotClosed';
   if (event.occasion === 'доклад') return 'priestReport';
   if (event.outcome?.finish === 'fail') return 'deedFailed';
   return event.plotId ? 'deedDone' : 'errandDone';
@@ -78,6 +78,7 @@ export async function deliverEvent({
     plot: event.plot || null,
     fact,
     occasion: event.occasion,
+    closed: Boolean(event.closed),
     ask: askForEvent(domain, event, config),
     day,
     memory: formatRulerVoiceForPrompt(domain),
@@ -112,6 +113,85 @@ export async function deliverEvent({
   }
   log.info('dayLoop.said', { trigger, occasion: event.occasion, day, wouldMute: gate.wouldMute });
   return { text, pushed: true, wouldMute: gate.wouldMute || null };
+}
+
+/**
+ * Разбор последствий пачки событий: статы, синопсисы, описание города.
+ *
+ * Вынесено из шага дня, потому что тестовый клиент форсирует события в обход
+ * дневного цикла. Пока это жило внутри `stepDomain`, форсированная угроза не
+ * двигала статы, не обновляла синопсис и не правила описание города — то есть
+ * проверяла не тот путь, который работает в игре.
+ */
+export async function settleEvents({
+  config,
+  runtime,
+  domain,
+  world,
+  events = [],
+  day = 0,
+  rng = Math.random,
+  log: parentLog,
+} = {}) {
+  const log = (parentLog || getLogger()).child({ scope: 'dayLoop.settle', domainId: domain?.id });
+  const list = (events || []).filter((e) => e && !e.skipped);
+  if (!list.length) return { scored: 0, catastrophe: null };
+
+  for (const event of list) attachReport(domain, event, { day });
+
+  const facts = factsForStatJudge(list.map((e) => e.fact).filter(Boolean));
+  const scored = facts.length
+    ? await scoreChronicleStats({ config, runtime, domain, world, chronicleAdds: facts, log })
+    : { scored: 0, catastrophe: null };
+
+  const plotIds = [...new Set(list.map((e) => e.plotId).filter(Boolean))];
+  if (plotIds.length) {
+    await maybeNudgeProxy({
+      runtime,
+      config,
+      world,
+      day,
+      domains: [domain],
+      trigger: 'plot_tick',
+      context: `Сдвинулись нити: ${plotIds.join(', ')}`,
+      rng,
+      log,
+    });
+  }
+
+  // Синопсис обновляем только у тех нитей, которые сегодня сдвинулись.
+  const moved = plotIds
+    .map((id) => (domain.plotlines || []).find((p) => p.id === id))
+    .filter(Boolean);
+  if (moved.length) {
+    await keepStories({
+      config,
+      runtime,
+      domain,
+      world,
+      chronicleAdds: facts,
+      plots: moved,
+      log,
+    });
+  }
+
+  await maybeRewriteCityGenesis({
+    runtime,
+    domain,
+    world,
+    chronicleAdds: facts,
+    config,
+    log,
+  });
+
+  if (domain.stats && typeof domain.stats === 'object') {
+    for (const key of Object.keys(domain.stats)) {
+      const n = Number(domain.stats[key]);
+      if (!Number.isFinite(n)) continue;
+      domain.stats[key] = Math.max(0, Math.min(100, n));
+    }
+  }
+  return scored;
 }
 
 /**
@@ -162,62 +242,10 @@ export async function stepDomain({
     }
   }
 
-  for (const event of events) attachReport(domain, event, { day });
-
-  const facts = factsForStatJudge(events.map((e) => e.fact).filter(Boolean));
-  const scored = facts.length
-    ? await scoreChronicleStats({ config, runtime, domain, world, chronicleAdds: facts, log })
-    : { scored: 0 };
-
-  const plotIds = [...new Set(events.map((e) => e.plotId).filter(Boolean))];
-  if (plotIds.length) {
-    await maybeNudgeProxy({
-      runtime,
-      config,
-      world,
-      day,
-      domains: [domain],
-      trigger: 'plot_tick',
-      context: `Сдвинулись нити: ${plotIds.join(', ')}`,
-      rng,
-      log,
-    });
-  }
-
-  // Синопсис обновляем только у тех нитей, которые сегодня сдвинулись.
-  const moved = plotIds
-    .map((id) => (domain.plotlines || []).find((p) => p.id === id))
-    .filter(Boolean);
-  if (moved.length) {
-    await keepStories({
-      config,
-      runtime,
-      domain,
-      world,
-      chronicleAdds: facts,
-      plots: moved,
-      log,
-    });
-  }
-
-  await maybeRewriteCityGenesis({
-    runtime,
-    domain,
-    world,
-    chronicleAdds: facts,
-    config,
-    log,
-  });
+  const scored = await settleEvents({ config, runtime, domain, world, events, day, rng, log });
 
   domain.state = domain.state || {};
   domain.state.lastDay = day;
-  if (domain.stats && typeof domain.stats === 'object') {
-    for (const key of Object.keys(domain.stats)) {
-      const n = Number(domain.stats[key]);
-      if (!Number.isFinite(n)) continue;
-      domain.stats[key] = Math.max(0, Math.min(100, n));
-    }
-  }
   if (conflux) {
     stampNewBoardItems(domain, conflux);
     stripConfluxView(domain);

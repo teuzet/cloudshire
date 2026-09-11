@@ -13,9 +13,10 @@ import { getLogger } from '../log.js';
 import { captureAgentPrompt } from './agentPrompt.js';
 import { chronicleEntries } from './models.js';
 import { dreadFlag, knownThreatsForSpeech, livesLeft } from './threats.js';
+import { revealedPremises } from './premises.js';
 import { remainingWork } from './deedMath.js';
 
-export const OCCASIONS = ['новая история', 'дело', 'угроза', 'разрешение', 'доклад'];
+export const OCCASIONS = ['новая история', 'дело', 'угроза', 'разрешение', 'развязка', 'доклад'];
 
 export const ASKS = ['нет', 'сановник свободен', 'нужна помощь', 'подтверди паузу', 'можно закрыть'];
 
@@ -81,17 +82,54 @@ export function recentChat(domain, { limit = CHAT_WINDOW } = {}) {
     }));
 }
 
-/** Карточка нити глазами жреца: полосы и формулировки, без чисел механики. */
-export function threadCard(plot, day) {
+/**
+ * Карточка нити глазами жреца: полосы и формулировки, без чисел механики.
+ *
+ * У закрытой истории нависшего и жизней уже нет: если их отдать, жрец говорит
+ * о развязке так, будто впереди ещё ходы.
+ */
+export function threadCard(plot, day, { closed = false } = {}) {
   if (!plot) return null;
+  if (closed) {
+    return {
+      title: plot.title || '',
+      synopsis: plot.synopsis || '',
+      gravity: plot.gravity || null,
+      closed: true,
+      livesLeft: null,
+      workLeft: null,
+      knownThreats: [],
+      dread: null,
+    };
+  }
   return {
     title: plot.title || '',
     synopsis: plot.synopsis || '',
     gravity: plot.gravity || null,
+    closed: false,
     livesLeft: livesLeft(plot),
     workLeft: remainingWork(plot),
     knownThreats: knownThreatsForSpeech(plot, day),
+    // Выясненное городом. Жрецу это можно говорить — в отличие от того,
+    // что ещё скрыто и ему вовсе не показывается.
+    established: revealedPremises(plot),
     dread: dreadFlag(plot, day),
+  };
+}
+
+/** Чем история кончилась: вид развязки и обещание, которое она сняла. */
+export function closingCard(plot) {
+  const ending = plot?.ending;
+  if (!ending) return null;
+  const id = String(ending.endingId || '').trim();
+  const full = id ? (plot?.endings || []).find((e) => e.id === id) : null;
+  const text = String(ending.text || full?.text || '').trim();
+  return {
+    kind: ending.kind || full?.kind || 'NEUTRAL_ENDING',
+    text,
+    questionGone: full?.questionGone || '',
+    nowDifferent: full?.nowDifferent || '',
+    cause: plot?.cause || '',
   };
 }
 
@@ -104,19 +142,28 @@ export function buildHeraldContext({
   day = 0,
   memory = '',
   reportSubject = '',
+  closed = false,
 } = {}) {
   const history = plot ? threadHistory(domain, plot.id) : { facts: [], truncated: false };
+  const isClosed = Boolean(closed) || parseOccasion(occasion) === 'развязка';
   return {
     occasion: parseOccasion(occasion),
     ask: parseAsk(ask),
     fact: fact ? { text: fact.text || '', kind: fact.kind || null } : null,
-    thread: threadCard(plot, day),
+    thread: threadCard(plot, day, { closed: isClosed }),
+    closing: isClosed ? closingCard(plot) : null,
     threadHistory: history,
     chat: recentChat(domain),
     memory: String(memory || '').slice(0, 1200),
     reportSubject: String(reportSubject || '').slice(0, 200),
   };
 }
+
+const CLOSING_KIND_LINE = {
+  GOOD_ENDING: 'Кончилась хорошо: вопрос снят, и город на этом что-то приобрёл. Но и цена была.',
+  NEUTRAL_ENDING: 'Кончилась без победы и без крушения: вопрос снят, город за это заплатил.',
+  BAD_ENDING: 'Кончилась плохо: города лишился того, из-за чего всё это стояло. Это утрата, а не трудность.',
+};
 
 function formatThreats(rows = []) {
   if (!rows.length) return '';
@@ -140,7 +187,25 @@ export function formatHeraldPrompt(ctx) {
     if (ctx.thread.synopsis) lines.push(`Сейчас: ${ctx.thread.synopsis}`);
     const threats = formatThreats(ctx.thread.knownThreats);
     if (threats) lines.push('Город знает о нависшем:', threats);
+    if (ctx.thread.established?.length) {
+      lines.push('Город это уже выяснил, и об этом ты говоришь как об установленном:');
+      for (const text of ctx.thread.established) lines.push(`- ${text}`);
+    }
     if (ctx.thread.dread) lines.push(`Смутное чувство: ${ctx.thread.dread}. Что именно — ты не знаешь.`);
+  }
+  if (ctx.closing) {
+    lines.push(
+      '',
+      'ЭТИМ ИСТОРИЯ КОНЧИЛАСЬ. Это твоё последнее слово о ней.',
+      CLOSING_KIND_LINE[ctx.closing.kind] || CLOSING_KIND_LINE.NEUTRAL_ENDING,
+    );
+    if (ctx.closing.cause) lines.push(`Из-за чего всё это стояло: ${ctx.closing.cause}`);
+    if (ctx.closing.questionGone) lines.push(`Почему вопроса больше нет: ${ctx.closing.questionGone}`);
+    if (ctx.closing.nowDifferent) lines.push(`Что в городе теперь по-другому: ${ctx.closing.nowDifferent}`);
+    lines.push(
+      'Скажи так, чтобы покровитель понял: возвращаться к этому нечем и незачем.',
+      'Не проси помощи и не обещай заняться этим дальше. Не подводи мораль.',
+    );
   }
   if (ctx.threadHistory?.facts?.length) {
     lines.push('', 'ЧТО БЫЛО В ЭТОЙ ИСТОРИИ ДО СЕГО ДНЯ (контекст, не пересказывай):');
