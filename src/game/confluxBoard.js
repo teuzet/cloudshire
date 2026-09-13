@@ -168,6 +168,11 @@ export function normalizeConfluxBoard(conflux) {
   if (!Array.isArray(conflux.processes)) conflux.processes = [];
   if (!Array.isArray(conflux.lore)) conflux.lore = [];
   if (conflux.mainPlotId == null) conflux.mainPlotId = null;
+  if (!conflux.forecast || typeof conflux.forecast !== 'object') conflux.forecast = {};
+  if (!conflux.synopsis || typeof conflux.synopsis !== 'object') conflux.synopsis = {};
+  if (!conflux.quiet || typeof conflux.quiet !== 'object') {
+    conflux.quiet = { nextAttemptDay: null, cooldownUntilDay: null };
+  }
   return conflux;
 }
 
@@ -190,7 +195,15 @@ export function overlayConfluxView(domain, conflux, partner = null) {
     extra.push(plot);
     seen.add(plot.id);
   };
-  if (conflux.container) add(conflux.container);
+  if (conflux.container) {
+    const syn = conflux.synopsis?.[domain.id];
+    add({
+      ...conflux.container,
+      synopsis: syn || conflux.container.synopsis,
+      endings: [],
+      threats: [],
+    });
+  }
   for (const p of conflux.plotlines || []) {
     if (p?.isMainConflux) add(p);
   }

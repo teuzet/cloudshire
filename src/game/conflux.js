@@ -30,10 +30,11 @@ import { fireThreat } from './threats.js';
 import { resyncThreatJobs } from './worldLoop.js';
 import { maybeNudgeProxy } from './proxyJudge.js';
 import { decideUndockContinuation } from './undockContinuation.js';
-import { writePairChronicle, confluxEvent } from './confluxCanon.js';
+import { publishPairCanon, PLACE_PAIR } from './confluxCanon.js';
 import { releaseOfficerProcess } from './officers.js';
 import { ensurePassage } from './passage.js';
 import { applyUndockTrace } from './confluxTrace.js';
+import { enqueueSeedRequest } from './seedSchedule.js';
 
 /** Ширина прохода: ГСЧ выбирает kind; LLM только описывает. control — можно ли закрыть. */
 export const CONTACT_KINDS = {
@@ -315,7 +316,7 @@ export function monthsUntilDock(conflux, world) {
   return Math.max(0, at - (world.tickIndex || 0));
 }
 
-export function schedulePairJobs(world, conflux, { contactAtFraction = 0.05 } = {}) {
+export function schedulePairJobs(world, conflux, { contactAtFraction = 0.05, quietSilenceDays = 21 } = {}) {
   if (!world || !conflux) return [];
   const primary = pairPrimaryId(conflux);
   const payload = { confluxId: conflux.id };
@@ -324,8 +325,9 @@ export function schedulePairJobs(world, conflux, { contactAtFraction = 0.05 } = 
     scheduleJob(world, { domainId: primary, kind: 'conflux_dock', dueDay: conflux.dockStartDay, payload }),
     scheduleJob(world, { domainId: primary, kind: 'conflux_undock', dueDay: conflux.dockEndDay, payload }),
   ];
-  const span = Math.max(1, Number(conflux.dockEndDay) - Number(conflux.dockStartDay));
-  const contactDay = Number(conflux.dockStartDay) + Math.round(span * contactAtFraction);
+  void contactAtFraction;
+  const silence = Math.max(1, Math.round(Number(quietSilenceDays) || 21));
+  const contactDay = Number(conflux.dockStartDay) + silence;
   jobs.push(
     scheduleJob(world, { domainId: primary, kind: 'conflux_contact', dueDay: contactDay, payload }),
   );
@@ -495,7 +497,10 @@ export async function forceCreateConflux({
     world,
     config: config || storage.config,
   });
-  schedulePairJobs(world, conflux, { contactAtFraction: cfg.contactSeedAtFraction });
+  schedulePairJobs(world, conflux, {
+    contactAtFraction: cfg.contactSeedAtFraction,
+    quietSilenceDays: cfg.quietSilenceDays,
+  });
   await maybeNudgeProxy({
     runtime,
     config: config || storage.config,
@@ -637,7 +642,10 @@ export async function maybeMatchmakeConfluxes({
       world,
       config,
     });
-    schedulePairJobs(world, conflux, { contactAtFraction: cfg.contactSeedAtFraction });
+    schedulePairJobs(world, conflux, {
+    contactAtFraction: cfg.contactSeedAtFraction,
+    quietSilenceDays: cfg.quietSilenceDays,
+  });
     await maybeNudgeProxy({
       runtime,
       config,
@@ -710,7 +718,7 @@ export function confluxSummary(c, world, domainsById = {}) {
 export function abortCrossIslandDeeds(domain, { day, reason = 'undock' } = {}) {
   const aborted = [];
   for (const p of domain.state?.pendingActions || []) {
-    if (!p.crossIsland && !p.targetDomainId) continue;
+    if (!p.crossIsland && !p.targetDomainId && !p.needsPassage) continue;
     if (p.status && p.status !== 'active' && p.status !== 'paused') continue;
     p.status = 'resolved';
     p.finishKind = 'abort';
@@ -721,6 +729,85 @@ export function abortCrossIslandDeeds(domain, { day, reason = 'undock' } = {}) {
     aborted.push(p);
   }
   return aborted;
+}
+
+function formatAbortedForPrompt(aborted, domain) {
+  if (!aborted?.length) return '';
+  const city = domain?.name || 'город';
+  return aborted
+    .map((p) => {
+      const who = p.characterName || p.office || 'сановник';
+      const fate = p.abortOutcome ? `; обрыв: ${p.abortOutcome}` : '';
+      return `- у «${city}»: «${p.summary || 'дело'}» (${who})${fate}`;
+    })
+    .join('\n');
+}
+
+/** Дела без флага, которым всё же нужен живой проход. */
+export async function flagPassageDeeds({ runtime, domain, partner, log } = {}) {
+  const candidates = (domain?.state?.pendingActions || []).filter(
+    (p) =>
+      (!p.status || p.status === 'active' || p.status === 'paused') &&
+      !p.crossIsland &&
+      !p.targetDomainId &&
+      !p.needsPassage,
+  );
+  if (!candidates.length || !runtime?.run) return [];
+  const draft = { ids: [] };
+  try {
+    await runtime.run({
+      agentId: 'undockPassage',
+      scene: 'conflux_undock_passage',
+      log,
+      domainId: domain.id,
+      maxTurns: 2,
+      toolChoice: { type: 'function', function: { name: 'submit_passage_needs' } },
+      tools: [
+        {
+          name: 'submit_passage_needs',
+          description: 'Какие из этих дел теряют смысл без живого прохода к соседу.',
+          parameters: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['processIds'],
+            properties: {
+              processIds: { type: 'array', items: { type: 'string' } },
+            },
+          },
+          handler: async (args) => {
+            draft.ids = Array.isArray(args?.processIds) ? args.processIds.map(String) : [];
+            return { ok: true };
+          },
+        },
+      ],
+      extraSystem:
+        'Ты решаешь, каким делам нужен живой проход к соседнему острову. ' +
+        'needsPassage=true, если дело готовит встречу, оборону к сопряжению, посольство, переход, удар по соседу — даже если цель не названа. ' +
+        'Локальные дела своего острова не трогай. Верни submit_passage_needs.',
+      userMessages: [
+        {
+          role: 'user',
+          content: [
+            `Город «${domain.name}». Сосед «${partner?.name || '?'}» уходит.`,
+            'Идущие дела:',
+            candidates.map((p) => `- ${p.id}: ${p.summary || ''} ${p.detail ? `— ${p.detail}` : ''}`).join('\n'),
+            'Верни id тех дел, которым без прохода нечего делать.',
+          ].join('\n'),
+        },
+      ],
+    });
+  } catch (err) {
+    (log || getLogger()).warn('conflux.passage_flag_failed', { error: err.message });
+    return [];
+  }
+  const wanted = new Set(draft.ids);
+  const flagged = [];
+  for (const p of candidates) {
+    if (!wanted.has(String(p.id))) continue;
+    p.needsPassage = true;
+    flagged.push(p);
+  }
+  return flagged;
 }
 
 /** Стыковка: проход, пустой контейнер, канон. */
@@ -766,23 +853,21 @@ export async function dockConfluxNow({
   }
   recordPartnerDock(pair[0], pair[1]);
 
-  await writePairChronicle({
+  await publishPairCanon({
     runtime,
     world,
     conflux,
     domains: pair,
-    event: confluxEvent({
-      kind: 'dock',
-      day,
-      plotId: conflux.container.id,
-      textHint: contact.description,
-    }),
+    text: contact.description || `Летающие острова городов «${pair[0].name}» и «${pair[1].name}» сошлись.`,
+    place: PLACE_PAIR,
+    plot: conflux.container,
+    day,
     log,
   });
   return { conflux, contact, container: conflux.container };
 }
 
-/** Расстыковка: след, обрыв дел через проход, сановники возвращаются. */
+/** Расстыковка: большая хроника, обрыв дел через проход, посев последствий. */
 export async function undockConfluxNow({
   runtime,
   conflux,
@@ -807,42 +892,82 @@ export async function undockConfluxNow({
   }
   if (world && plot) cancelJobsForPlot(world, plot.id);
 
-  for (const d of pair) abortCrossIslandDeeds(d, { day, reason: 'undock' });
+  const abortedByCity = [];
+  for (const d of pair) {
+    const partner = pair.find((x) => x.id !== d.id) || null;
+    await flagPassageDeeds({ runtime, domain: d, partner, log });
+    abortedByCity.push({ domain: d, aborted: abortCrossIslandDeeds(d, { day, reason: 'undock' }) });
+  }
+
+  const abortedLines = abortedByCity
+    .map(({ domain, aborted }) => formatAbortedForPrompt(aborted, domain))
+    .filter(Boolean)
+    .join('\n');
 
   if (pair.length >= 2) {
-    applyUndockTrace({ a: pair[0], b: pair[1], conflux, world, day, rng });
+    const text = await generateUndockChronicle({
+      runtime,
+      conflux,
+      domains: pair,
+      world,
+      log,
+      abortedLines,
+    });
+    await publishPairCanon({
+      runtime,
+      world,
+      conflux,
+      domains: pair,
+      text,
+      place: PLACE_PAIR,
+      plot,
+      day,
+      log,
+    });
+    applyUndockTrace({ a: pair[0], b: pair[1], conflux, world, day, rng, contagion: false });
     stampNextConflux(pair[0], { config, rng });
     stampNextConflux(pair[1], { config, rng });
+    seedUndockAftermath({ pair, conflux, world, day, rng });
   }
 
   const byId = new Map(pair.map((d) => [d.id, d]));
   await returnBoardsOnUndock(conflux, byId, {
-    decideContinuation: async ({ plot, domainId, domain }) =>
+    decideContinuation: async ({ plot: keepPlot, domainId, domain }) =>
       decideUndockContinuation({
         runtime,
-        plot,
+        plot: keepPlot,
         domain,
         partner: pair.find((x) => x.id !== domainId) || null,
         world,
         log,
       }),
   });
-
-  await writePairChronicle({
-    runtime,
-    world,
-    conflux,
-    domains: pair,
-    event: confluxEvent({
-      kind: 'undock',
-      day,
-      textHint: pair.length >= 2
-        ? `Острова «${pair[0].name}» и «${pair[1].name}» разошлись в небе.`
-        : 'Острова разошлись в небе; пути между ними больше нет.',
-    }),
-    log,
-  });
   return { conflux };
+}
+
+function seedUndockAftermath({ pair, conflux, world, day, rng }) {
+  for (const domain of pair) {
+    const fact = [...(domain.lore || [])]
+      .reverse()
+      .find((f) => (f.tags || []).includes('subjective') || (f.tags || []).includes('conflux'));
+    if (!fact?.text) continue;
+    const request = enqueueSeedRequest(domain, {
+      source: 'chronicle',
+      seedFactId: fact.id,
+      grain: fact.text,
+      day,
+      delayDays: 1,
+      rng,
+    });
+    if (world) {
+      scheduleJob(world, {
+        domainId: domain.id,
+        kind: 'seed_appear',
+        dueDay: request.appearDay,
+        payload: { requestId: request.id, source: request.source, confluxId: conflux.id },
+      });
+    }
+  }
 }
 
 function trackChronicleAdd(map, domainId, fact) {
@@ -890,10 +1015,17 @@ export async function findActiveConfluxForDomain(storage, domainId) {
   return list.find((c) => (c.domainIds || []).includes(domainId)) || null;
 }
 
-async function generateUndockChronicle({ runtime, conflux, domains, world, log }) {
+async function generateUndockChronicle({ runtime, conflux, domains, world, log, abortedLines = '' }) {
   const nameA = domains[0].name;
   const nameB = domains[1].name;
   const draft = { text: null };
+  const forecast = conflux.forecast || {};
+  const forecastLines = [
+    forecast.neutral ? `Нейтральный прогноз, который теперь факт: ${forecast.neutral}` : '',
+    ...domains.map((d) => (forecast[d.id] ? `Для «${d.name}»: ${forecast[d.id]}` : '')),
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   const looksLikeIslandsParted = (body) => assertsIslandsParted(body);
 
@@ -901,7 +1033,7 @@ async function generateUndockChronicle({ runtime, conflux, domains, world, log }
     {
       name: 'submit_undock',
       description:
-        'Канон конца сопряжения: ОСТРОВА разошлись в небе. Не «мостик сломался» — именно разлёт островов.',
+        'Большая хроника конца сопряжения: острова разошлись, прогноз стал фактом, оборванные дела получили судьбу.',
       parameters: {
         type: 'object',
         required: ['text'],
@@ -909,9 +1041,10 @@ async function generateUndockChronicle({ runtime, conflux, domains, world, log }
           text: {
             type: 'string',
             description:
-              `2–4 предложения. ОБЯЗАТЕЛЬНО «${nameA}» и «${nameB}». ` +
+              `3–6 предложений. ОБЯЗАТЕЛЬНО «${nameA}» и «${nameB}». ` +
               'Главное: два летающих острова разошлись в небе; пути между ними больше нет. ' +
-              'НЕ своди к обвалу моста — мост/переход исчезает потому, что острова ушли.',
+              'Прогноз впиши как случившееся. Судьбы оборванных дел — в эту же запись, не шаблоном. ' +
+              'НЕ своди к обвалу моста — мост исчезает потому, что острова ушли.',
           },
         },
       },
@@ -920,7 +1053,7 @@ async function generateUndockChronicle({ runtime, conflux, domains, world, log }
         if (body.length < 40) {
           return toolFail(
             'too_short',
-            'Текст слишком короткий (<40 символов). Напиши 2–4 предложения про разлёт островов с именами обоих городов.',
+            'Текст слишком короткий (<40 символов). Напиши 3–6 предложений про разлёт островов с именами обоих городов.',
           );
         }
         if (!body.includes(nameA) || !body.includes(nameB)) {
@@ -945,42 +1078,47 @@ async function generateUndockChronicle({ runtime, conflux, domains, world, log }
     ? `Бывший контакт: ${formatContactForPrompt(conflux.contact)}`
     : '';
 
-  try {
-    await runtime.run({
-      agentId: 'confluxResolver',
-      tools,
-      maxTurns: 5,
-      toolChoice: { type: 'function', function: { name: 'submit_undock' } },
-      log,
-      scene: 'conflux_undock',
-      domainId: `${domains[0].id}+${domains[1].id}`,
-      userMessages: [
-        {
-          role: 'user',
-          content: [
-            `Сопряжение кончается. Дата: ${world.gameDate?.label || ''}.`,
-            `Летающие острова городов «${nameA}» и «${nameB}» расходятся.`,
-            contactHint,
-            '',
-            'Вызови submit_undock. Одна каноническая запись для хроники обоих.',
-            `Обязательный смысл: «${nameA} и ${nameB} разошлись в небе — между ними снова нет никакого пути».`,
-            'ЗАПРЕЩЕНО сводить событие к «мостик обвалился». Мост/переход кончается потому, что острова ушли.',
-            'Глорифицируй: ветер, бездна, силуэт чужого края тает вдали. Без третьего острова.',
-          ]
-            .filter(Boolean)
-            .join('\n'),
-        },
-      ],
-    });
-  } catch (err) {
-    log.warn('conflux.undock_llm_failed', { error: err.message });
+  if (runtime?.run) {
+    try {
+      await runtime.run({
+        agentId: 'confluxResolver',
+        tools,
+        maxTurns: 5,
+        toolChoice: { type: 'function', function: { name: 'submit_undock' } },
+        log,
+        scene: 'conflux_undock',
+        domainId: `${domains[0].id}+${domains[1].id}`,
+        userMessages: [
+          {
+            role: 'user',
+            content: [
+              `Сопряжение кончается. Дата: ${world?.gameDate?.label || ''}.`,
+              `Летающие острова городов «${nameA}» и «${nameB}» расходятся.`,
+              contactHint,
+              forecastLines,
+              abortedLines ? `Оборванные дела (впиши их судьбы в хронику, не копируй шаблон):\n${abortedLines}` : '',
+              '',
+              'Вызови submit_undock. Одна каноническая запись.',
+              `Обязательный смысл: «${nameA} и ${nameB} разошлись в небе — между ними снова нет никакого пути».`,
+              'ЗАПРЕЩЕНО сводить событие к «мостик обвалился». Мост/переход кончается потому, что острова ушли.',
+              'Не пиши голый номер игрового дня.',
+            ]
+              .filter(Boolean)
+              .join('\n'),
+          },
+        ],
+      });
+    } catch (err) {
+      log?.warn?.('conflux.undock_llm_failed', { error: err.message });
+    }
   }
 
   if (draft.text) return draft.text;
 
   return (
     `«${nameA}» и «${nameB}» разошлись в небе: чужой край ушёл в даль облаков, ` +
-    'и между городами снова нет никакого пути — ни моста, ни щели, лишь ветер над бездной.'
+    'и между городами снова нет никакого пути — ни моста, ни щели, лишь ветер над бездной.' +
+    (forecast.neutral ? ` ${forecast.neutral}` : '')
   );
 }
 

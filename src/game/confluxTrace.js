@@ -54,7 +54,7 @@ export function collectContagionThreats(domain) {
   return out;
 }
 
-export function applyUndockTrace({ a, b, conflux, world, day, rng = Math.random }) {
+export function applyUndockTrace({ a, b, conflux, world, day, rng = Math.random, contagion = true }) {
   const traces = [];
   const fromA = pickTransferEntity(a, rng);
   const fromB = pickTransferEntity(b, rng);
@@ -66,24 +66,26 @@ export function applyUndockTrace({ a, b, conflux, world, day, rng = Math.random 
     appendCityModifier(b, { text: `После сопряжения с «${a.name}» в городе иначе говорят о чужих краях.` });
   }
 
-  for (const { plot, threat } of collectContagionThreats(a)) {
-    if (rng() < 0.5) {
-      enqueueSeedRequest(b, {
-        grain: threat.text || plot.synopsis,
-        source: 'chronicle',
-        day,
-      });
-      traces.push({ to: b.id, contagion: threat.id || plot.id });
+  if (contagion) {
+    for (const { plot, threat } of collectContagionThreats(a)) {
+      if (rng() < 0.5) {
+        enqueueSeedRequest(b, {
+          grain: threat.text || plot.synopsis,
+          source: 'chronicle',
+          day,
+        });
+        traces.push({ to: b.id, contagion: threat.id || plot.id });
+      }
     }
-  }
-  for (const { plot, threat } of collectContagionThreats(b)) {
-    if (rng() < 0.5) {
-      enqueueSeedRequest(a, {
-        grain: threat.text || plot.synopsis,
-        source: 'chronicle',
-        day,
-      });
-      traces.push({ to: a.id, contagion: threat.id || plot.id });
+    for (const { plot, threat } of collectContagionThreats(b)) {
+      if (rng() < 0.5) {
+        enqueueSeedRequest(a, {
+          grain: threat.text || plot.synopsis,
+          source: 'chronicle',
+          day,
+        });
+        traces.push({ to: a.id, contagion: threat.id || plot.id });
+      }
     }
   }
 

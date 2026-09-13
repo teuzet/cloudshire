@@ -1908,9 +1908,11 @@ export function formatBoardForSpeech(domain, { statsFeel = null, max = 8, viewer
             : 'история';
       const duty = plotHasLiveProcess(domain, p)
         ? 'дело уже идёт'
-        : p.kind === 'errand'
-          ? 'дела нет'
-          : 'поручения ещё нет';
+        : p.isMainConflux
+          ? 'отношения'
+          : p.kind === 'errand'
+            ? 'дела нет'
+            : 'поручения ещё нет';
       const syn = clipText(p.synopsis || 'только началось', 180);
       return `[${p.id}] (${kind}, ${duty}): ${syn}${feel}`;
     })

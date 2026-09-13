@@ -13,6 +13,7 @@ import { plotHostId, plotConcerns } from './confluxBoard.js';
 import { gameDateFromDay } from './gameClock.js';
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
+import { afterPairLoreWrite } from './confluxForecast.js';
 
 export const PLACE_PAIR = 'pair';
 export const FROZEN_SYNOPSIS_PREFIX = 'Что случилось в этой истории на данный момент:';
@@ -308,7 +309,7 @@ export async function judgeChronicleLeak({
   return draft.both ? 'both' : 'one';
 }
 
-async function renderCityView({
+export async function renderCityView({
   runtime,
   world,
   conflux,
@@ -462,5 +463,70 @@ export async function spreadChronicleToPair({
     await storage.saveDomain(partner);
     if (storage.saveConflux) await storage.saveConflux(conflux);
   }
+  const cityFacts = [];
+  if (cityFact) cityFacts.push({ domainId: partner.id, fact: cityFact });
+  await afterPairLoreWrite({
+    runtime,
+    conflux,
+    domains: [domain, partner],
+    world,
+    day,
+    cityFacts,
+    log,
+  });
   return { concern, fromData, first, frozen, pairFact, cityFact, hostile: place === PLACE_PAIR };
+}
+
+/**
+ * Одна нейтральная запись в архив пары и взгляды задетых городов.
+ * Для стыковки и расставания, у которых нет городской хроники-источника.
+ */
+export async function publishPairCanon({
+  runtime,
+  world,
+  conflux,
+  domains = [],
+  text,
+  place = PLACE_PAIR,
+  plot = null,
+  day = null,
+  log = null,
+} = {}) {
+  const body = String(text || '').trim();
+  if (!conflux || !body) return { pairFact: null, cityFacts: [] };
+  const pairFact = appendPairEntry(conflux, world, {
+    text: body,
+    place,
+    plotId: plot?.id || conflux.container?.id || null,
+    day,
+    author: 'conflux-canon',
+  });
+  const archive = formatPairArchive(conflux, domains);
+  const cityFacts = [];
+  for (const domain of domains || []) {
+    const partner = (domains || []).find((d) => d.id !== domain.id) || null;
+    const cityFact = await renderCityView({
+      runtime,
+      world,
+      conflux,
+      domain,
+      partner,
+      plot,
+      sourceText: body,
+      archive,
+      day,
+      log,
+    });
+    if (cityFact) cityFacts.push({ domainId: domain.id, fact: cityFact });
+  }
+  await afterPairLoreWrite({
+    runtime,
+    conflux,
+    domains,
+    world,
+    day,
+    cityFacts,
+    log,
+  });
+  return { pairFact, cityFacts };
 }

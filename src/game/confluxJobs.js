@@ -7,6 +7,7 @@ import { dueJobs, claimJob, completeJob, failJob, LockSet } from './scheduler.js
 import { findActiveConfluxForDomain, dockConfluxNow, undockConfluxNow } from './conflux.js';
 import { normalizeDomain } from './models.js';
 import { writePairChronicle, confluxEvent } from './confluxCanon.js';
+import { attemptPairSilence } from './confluxForecast.js';
 import { ensurePlotStatBudget } from './plotlines.js';
 import { createThreat, attachThreat } from './threats.js';
 import { resyncThreatJobs } from './worldLoop.js';
@@ -203,10 +204,26 @@ const HANDLERS = {
     await savePair(ctx.storage, conflux, domains);
     return { occasion: 'расстыковка', confluxId: conflux.id, domains, facts };
   },
-  async conflux_contact() {
-    // Контейнер больше не куётся в историю по тишине или касанию.
-    // Угрозы от молчания сажает §7; этот слот оставлен, чтобы старые задания не зависали.
-    return { skipped: 'no_auto_crystal' };
+  async conflux_contact(ctx) {
+    const loaded = await loadPair(ctx.storage, ctx.job.payload?.confluxId);
+    if (!loaded) return { skipped: 'gone' };
+    const { conflux, domains } = loaded;
+    if (conflux.status !== 'docked') return { skipped: 'not_docked' };
+    const out = attemptPairSilence({
+      conflux,
+      world: ctx.world,
+      day: ctx.day,
+      config: ctx.config,
+      rng: ctx.rng,
+      log: ctx.log,
+    });
+    if (out.threat && ctx.world && domains.length) {
+      const primary = domains.find((d) => d.id === pairPrimaryId(conflux)) || domains[0];
+      resyncThreatJobs(ctx.world, primary, conflux.container);
+    }
+    await savePair(ctx.storage, conflux, domains);
+    if (out.skipped) return { skipped: out.skipped, nextAttemptDay: out.nextAttemptDay || null };
+    return { occasion: 'сопряжение', confluxId: conflux.id, domains, threatId: out.threat?.id || null };
   },
   async conflux_beat(ctx) {
     const loaded = await loadPair(ctx.storage, ctx.job.payload?.confluxId);

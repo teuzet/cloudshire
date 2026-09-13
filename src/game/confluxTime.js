@@ -37,6 +37,9 @@ export function confluxConfig(config) {
       Math.round(Number(raw.dockDaysMax ?? (raw.durationMonths?.max ?? 6) * 30)),
     ),
     contactWeights: raw.contactWeights && typeof raw.contactWeights === 'object' ? raw.contactWeights : {},
+    quietSilenceDays: Math.max(1, Math.round(Number(raw.quietSilenceDays ?? 21))),
+    quietChance: Math.max(0, Math.min(1, Number(raw.quietChance ?? 0.4))),
+    quietCooldownDays: Math.max(1, Math.round(Number(raw.quietCooldownDays ?? 21))),
   };
 }
 
