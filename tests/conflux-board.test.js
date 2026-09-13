@@ -264,6 +264,29 @@ test('речь правителя не отдаёт заголовок нити 
   assert.equal(speech.includes('седьмому удару'), true);
 });
 
+test('речь правителя не видит концовки', () => {
+  const plot = createPlotline({
+    title: 'Сочение',
+    kind: 'story',
+    storyType: 'story',
+    synopsis: 'Из коры течёт густая тёмная смола, у смолокуров немеют пальцы.',
+    closeWhen: ['Развилки вскрывают и очищают от насекомых и поражённой коры.'],
+    hiddenAnswer: 'Мелкие паразитические насекомые выходят из-под коры.',
+  });
+  const open = createPlotline({
+    title: 'Гул',
+    kind: 'story',
+    synopsis: 'Ночами в цистерне гудит вода.',
+    closeWhen: 'Найдут источник гула.',
+  });
+  const speech = formatBoardForSpeech({ plotlines: [plot, open] });
+  assert.doesNotMatch(speech, /насеком/i);
+  assert.doesNotMatch(speech, /К чему идёт/);
+  assert.doesNotMatch(speech, /Найдут источник/);
+  assert.match(speech, /густая тёмная смола/);
+  assert.match(speech, /гудит вода/);
+});
+
 test('регистрация не забирает resolved дело с домена', () => {
   const closed = createPlotline({ title: 'Мост', kind: 'errand' });
   closed.status = 'closed';

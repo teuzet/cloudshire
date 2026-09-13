@@ -5,7 +5,8 @@
  *
  * `hiddenAnswer` — сама разгадка, одна на историю. Её нельзя взять одним
  * дешёвым делом: сердцевина открывается, только когда город уже вложился —
- * либо исчерпал все подступы, либо набрал глубину, либо блестяще сработал.
+ * либо исчерпал все подступы, либо набрал большую часть глубины, либо блестяще
+ * сработал.
  *
  * `hiddenPremises` — подступы к ней: улики, люди, которые знают, старые
  * записи, причина, по которой до сих пор не поняли. Они независимы друг от
@@ -22,7 +23,7 @@
 import { normalizeHiddenPremises } from './suspenseGraph.js';
 
 /** Доля maxDepth, после которой расследование способно сложить картину. */
-export const ANSWER_DEPTH_SHARE = 0.25;
+export const ANSWER_DEPTH_SHARE = 0.6;
 
 export function normalizeRevealedPremises(raw) {
   return normalizeHiddenPremises(raw);
@@ -46,8 +47,8 @@ export function revealedAnswer(plot) {
 
 /**
  * Целевая глубина, на которой сердцевина становится досягаемой.
- * Считается от maxDepth, поэтому масштаб истории учтён сам: мелкая ситуация
- * отдаёт секрет со второго дела, разрыв держит его до серьёзных вложений.
+ * Считается от maxDepth, поэтому масштаб истории учтён сам: короткая ситуация
+ * всё равно требует нескольких дел, разрыв держит секрет почти до конца.
  */
 export function answerDepthTarget(plot) {
   const max = Number(plot?.maxDepth);
@@ -109,4 +110,39 @@ export function revealAnswer(plot) {
   plot.hiddenAnswer = '';
   plot.revealedAnswer = text;
   return text;
+}
+
+function foldSpeech(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/[^a-zа-я0-9]+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function speechWords(text, min) {
+  return foldSpeech(text)
+    .split(' ')
+    .filter((w) => w.length >= min);
+}
+
+/**
+ * Речь выдаёт ещё скрытую причину: уникальные длинные слова разгадки
+ * проступили вслух, даже как «мы про это ничего не знаем».
+ */
+export function speechHintsHidden(plot, speech, { alreadySaid = '' } = {}) {
+  const secret = [hiddenAnswer(plot), ...hiddenPremises(plot)].filter(Boolean).join(' ');
+  if (!foldSpeech(secret)) return false;
+  const pub = [plot?.synopsis, plot?.title, revealedAnswer(plot), ...revealedPremises(plot)].join(' ');
+  const publicStems = new Set(speechWords(pub, 5).map((w) => w.slice(0, 6)));
+  const allowed = new Set(speechWords(alreadySaid, 5).map((w) => w.slice(0, 6)));
+  const said = foldSpeech(speech);
+  if (!said) return false;
+  for (const w of speechWords(secret, 8)) {
+    const stem = w.slice(0, 6);
+    if (publicStems.has(stem) || allowed.has(stem)) continue;
+    if (said.includes(stem)) return true;
+  }
+  return false;
 }

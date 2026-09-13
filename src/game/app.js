@@ -983,7 +983,7 @@ export class GameApp {
           return res;
         },
       })),
-      submitReplyTool(turn, character),
+      submitReplyTool(turn, character, { plots: domain.plotlines || [], userText: turnText }),
     ];
 
     const holdMs = Number(this.config.agents?.ruler?.holdAfterMs);
@@ -1026,6 +1026,7 @@ export class GameApp {
                 role: 'user',
                 content:
                   'Ответ не принят: речь передаётся только через submit_reply. Вызови его сейчас. ' +
+                  'Если покровитель спросил — ответь на вопрос, не пиши «приказа не было». ' +
                   'Если дела ты не заводил — commitment=none (или refused, если отговариваешь; ' +
                   'clarify — если приказ есть, но нужно уточнить волю), ' +
                   'и в речи не обещай долгих работ.',

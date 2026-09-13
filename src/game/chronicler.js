@@ -61,14 +61,21 @@ export function plotChronicleTail(domain, plotId, limit = CHRONICLE_TAIL) {
 }
 
 /** Запасная запись, если модель не ответила. Без названий дел и историй. */
-export function fallbackDeedEntry(process, finish) {
+export function fallbackDeedEntry(process, finish, { actor } = {}) {
   const what = String(process?.goal || process?.detail || '').trim();
   const tail = what ? `: ${what}` : '.';
-  if (finish === 'fail') return `Порученную работу довести не удалось${tail}`;
-  return `Порученную работу закончили${tail}`;
+  const who = String(actor || '').trim();
+  if (finish === 'fail') {
+    return who
+      ? `${who} не довёл порученную работу${tail}`
+      : `Порученную работу довести не удалось${tail}`;
+  }
+  return who
+    ? `${who} закончил порученную работу${tail}`
+    : `Порученную работу закончили${tail}`;
 }
 
-function who(domain, process) {
+export function deedActor(domain, process) {
   const officer = findOfficer(domain, {
     officerId: process?.officerId,
     office: process?.office,
@@ -203,7 +210,7 @@ export function formatDeedPrompt({
   chronicleTail = [],
   dateLabel = '',
 }) {
-  const actor = who(domain, process);
+  const actor = deedActor(domain, process);
   return [
     'ПОВОД: закончилась работа, которую город вёл по воле покровителя.',
     dateLabel ? `Когда: ${dateLabel}.` : null,
@@ -211,7 +218,9 @@ export function formatDeedPrompt({
     'ЧТО БЫЛО ПОРУЧЕНО (служебная формулировка, в запись её не переписывай):',
     process?.detail || process?.summary || '—',
     process?.goal ? `Чего добивались: ${process.goal}` : null,
-    actor ? `Кто вёл: ${actor}.` : 'Кто вёл: город сам, без названного лица.',
+    actor
+      ? `Кто вёл: ${actor}. Назови его в записи. Что он свободен и чем заняться дальше — не пиши.`
+      : 'Кто вёл: город сам, без названного лица.',
     `ИСХОД (решено броском, не спорь): ${FINISH_WORD[applied?.finish] || FINISH_WORD.ok}.`,
     '',
     ...deedConsequenceLines({ plot, applied, threat, closed }),
@@ -272,7 +281,7 @@ const ENDING_KIND_LINE = {
 
 /** Ввод финальной записи, когда историю закрыло дело города. */
 export function deedTriggerLines({ domain, process, applied }) {
-  const actor = who(domain, process);
+  const actor = deedActor(domain, process);
   const revealed = Array.isArray(applied?.revealed) ? applied.revealed : [];
   return [
     `Город вёл работу по воле покровителя: ${process?.detail || process?.summary || '—'}`,

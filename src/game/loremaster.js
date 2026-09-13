@@ -7,7 +7,7 @@ import { cityRules } from './cityRules.js';
 import { overlayConfluxView, stampNewBoardItems, stripConfluxView, plotVisibleToRuler } from './confluxBoard.js';
 import { formatTruthGraphForPrompt } from './mysteryGraph.js';
 import { formatLadderForPrompt } from './suspenseGraph.js';
-import { revealedPremises, revealedAnswer } from './premises.js';
+import { revealedPremises, revealedAnswer, hiddenAnswer } from './premises.js';
 import { formatCityForAgents, parseCityBrief, formatCanonicalUnknownsForPrompt } from './cityContext.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
@@ -89,13 +89,16 @@ export function formatFocusedStoryForLoremaster(p, { viewerId = null } = {}) {
         : p.isMainConflux || p.shared
           ? 'общая история сопряжения'
           : 'история';
+  const secret = hiddenAnswer(p);
   const lines = [
     `ФОКУС: нить ${p.id} (${kind}). Это идущая история — не закрытая.`,
     p.synopsis ? `Как сейчас: ${p.synopsis}` : null,
-    p.closeWhen ? `Успешный исход: ${p.closeWhen}` : null,
+    // Пока разгадка скрыта, closeWhen часто её и называет. Не даём копировать в ответы.
+    !secret && p.closeWhen ? `Успешный исход: ${p.closeWhen}` : null,
     p.mootWhen ? `Теряет смысл, когда: ${p.mootWhen}` : null,
     'Можно дописать мелкие детали места, обычая, материала, имени фона — если они не заводят новое направление сюжета и не ломают повествование.',
     'Нельзя: раскрывать скрытое, ставить исход, виновника, мотив, причину странности; заводить новую интригу, конфликт или расследование.',
+    'Неизвестно городу — не называй даже отрицанием. «Причина не установлена» — можно. «Не знаем, не такое ли» с перечислением кандидатов — нельзя: это тоже слив. Опиши только уже видимое.',
   ];
   if (!own) {
     lines.push(

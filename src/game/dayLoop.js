@@ -80,6 +80,7 @@ export async function deliverEvent({
     occasion: event.occasion,
     closed: Boolean(event.closed),
     ask: askForEvent(domain, event, config),
+    actor: event.actor || '',
     day,
     memory: formatRulerVoiceForPrompt(domain),
     reportSubject: event.reportSubject || '',

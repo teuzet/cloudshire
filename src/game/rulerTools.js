@@ -123,6 +123,7 @@ import {
   detachProcessFromPlots,
 } from './plotEngine.js';
 import { judgeProcessAlignment, engagementOf, engagementAttends } from './plotAlign.js';
+import { speechHintsHidden } from './premises.js';
 import { writeRulerMemory, forgetRulerMemory } from './rulerMemory.js';
 import { toolFail } from '../agents/toolResult.js';
 
@@ -302,10 +303,27 @@ export function rulerReplyCommitError({
         'Сцену, будто это происходит, не отыгрывай.',
     };
   }
+  if (requestKind === 'question' && questionLooksUnanswered(text)) {
+    return {
+      error: 'question_unanswered',
+      message:
+        'Покровитель спросил — ответь на вопрос из того, что городу уже известно (хроника, бриф, предыдущая речь). ' +
+        'Не подменяй ответ «я услышал / приказа не было» и не проси новый приказ. commitment=none.',
+    };
+  }
   return null;
 }
 
-export function submitReplyTool(turn, character) {
+export function questionLooksUnanswered(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!t) return true;
+  return (
+    /(услышал[аи]? тебя|слово принято).{0,120}(нового приказа|не отдавал|поручения не отдал)/i.test(t) ||
+    /нового приказа.{0,40}не отдавал/i.test(t)
+  );
+}
+
+export function submitReplyTool(turn, character, { plots = [], userText = '' } = {}) {
   return {
     name: 'submit_reply',
     description:
@@ -335,7 +353,8 @@ export function submitReplyTool(turn, character) {
             '«Так и оставить / сами справятся» — commitment=none. ' +
             'order_impossible — велел то, чего в этом мире не бывает ' +
             '(отправить тебя за край или в пустоту, воскресить мёртвых, стереть память, космос, перенос); ' +
-            'question — спросил; smalltalk — беседа; other — прочее.',
+            'question — спросил: ответь на вопрос, не пиши «приказа не было»; ' +
+            'smalltalk — беседа; other — прочее.',
         },
         touchedPlotIds: {
           type: 'array',
@@ -374,6 +393,13 @@ export function submitReplyTool(turn, character) {
         okTools: turn.okTools,
       });
       if (commitErr) return toolFail(commitErr.error, commitErr.message);
+      if ((plots || []).some((p) => speechHintsHidden(p, body, { alreadySaid: userText }))) {
+        return toolFail(
+          'hidden_leak',
+          'В речи проступила скрытая причина живой истории. Скажи только уже видимое городу. ' +
+            'Неизвестную причину не называй даже отрицанием и не перечисляй, чего именно не нашли.',
+        );
+      }
       turn.reply = body;
       turn.meta = {
         requestKind,

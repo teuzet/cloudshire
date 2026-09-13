@@ -43,6 +43,25 @@ test('фокус на идущей тайне даёт канон и запре�
   assert.equal(focused.includes('«Гул в цистерне»'), false);
 });
 
+test('скрытая разгадка не торчит в «успешном исходе» фокуса', () => {
+  const focused = formatFocusedStoryForLoremaster(
+    {
+      id: 'plot_sap',
+      kind: 'story',
+      storyType: 'story',
+      synopsis: 'Из коры течёт густая тёмная смола, у смолокуров немеют пальцы.',
+      closeWhen: [
+        'Развилки вскрывают и очищают от насекомых и поражённой коры.',
+      ],
+      hiddenAnswer: 'Мелкие паразитические насекомые выходят из-под коры.',
+    },
+    { viewerId: 'city_a' },
+  );
+  assert.doesNotMatch(focused, /насеком/i);
+  assert.doesNotMatch(focused, /Успешный исход/);
+  assert.match(focused, /густая тёмная смола/);
+});
+
 test('фокус на саспенсе показывает hiddenPremises целиком, только как скрытые', () => {
   const text = formatFocusedStoryForLoremaster(
     {

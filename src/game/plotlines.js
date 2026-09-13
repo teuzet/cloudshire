@@ -1910,9 +1910,7 @@ export function formatBoardForSpeech(domain, { statsFeel = null, max = 8, viewer
           ? 'дела нет'
           : 'поручения ещё нет';
       const syn = clipText(p.synopsis || 'только началось', 180);
-      const toward =
-        p.kind === 'story' && p.closeWhen ? ` К чему идёт: ${clipText(p.closeWhen, 120)}.` : '';
-      return `[${p.id}] (${kind}, ${duty}): ${syn}${toward}${feel}`;
+      return `[${p.id}] (${kind}, ${duty}): ${syn}${feel}`;
     })
     .join('\n');
 }

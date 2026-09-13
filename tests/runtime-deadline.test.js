@@ -1,6 +1,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AgentRuntime, deadlineRemainingMs, toolEndsAgentRun } from '../src/agents/runtime.js';
+import { AgentRuntime, deadlineRemainingMs, noToolNudge, toolEndsAgentRun } from '../src/agents/runtime.js';
+
+test('пинк без tool сохраняет уже написанную речь', () => {
+  assert.match(
+    noToolNudge({
+      draftedText:
+        'Орион, этого мы пока не знаем. На восточном дереве кора сочится густой тёмной смолой.',
+    }),
+    /кора сочится густой тёмной смолой/,
+  );
+  assert.match(noToolNudge({ draftedText: 'речь' }), /ту же речь/);
+  assert.equal(
+    noToolNudge({}),
+    'Ход ещё не сдан. Вызови итоговый tool (submit_… / emit_…).',
+  );
+});
 
 test('сдачу хода определяют итоговые tools, а не toolChoice', () => {
   assert.equal(toolEndsAgentRun({ name: 'submit_answers' }), true);
@@ -211,6 +226,34 @@ test('toolChoice на подготовительном tool не заканчи�
   assert.equal(calls, 2);
   assert.ok(!result.truncated);
   assert.deepEqual(result.toolTrace.map((t) => t.name), ['read_lore', 'submit_answers']);
+});
+
+test('пинк без tool кладёт черновик речи в следующее сообщение', async () => {
+  let calls = 0;
+  let nudge = '';
+  const runtime = stubRuntime('loremaster', async ({ messages }) => {
+    calls += 1;
+    if (calls === 1) {
+      return { message: { content: 'учёт на табличках', tool_calls: [] }, usage: {} };
+    }
+    nudge = [...messages].reverse().find((m) => m.role === 'user')?.content || '';
+    return {
+      message: {
+        content: '',
+        tool_calls: [{ id: '1', function: { name: 'submit_answers', arguments: '{}' } }],
+      },
+      usage: {},
+    };
+  });
+  const result = await runtime.run({
+    agentId: 'loremaster',
+    userMessages: [{ role: 'user', content: 'как ведут учёт?' }],
+    maxTurns: 4,
+    tools: [{ name: 'submit_answers', handler: async () => ({ ok: true }) }],
+  });
+  assert.equal(calls, 2);
+  assert.match(nudge, /учёт на табличках/);
+  assert.deepEqual(result.toolTrace.map((t) => t.name), ['submit_answers']);
 });
 
 test('после чтения лора голый текст не считается сдачей — агента nudжат к итоговому tool', async () => {

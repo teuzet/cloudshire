@@ -189,7 +189,7 @@ function renderPlot(plot, align = {}) {
       .join('') || '<li class="muted">нет тайны</li>';
   const known = [
     plot.revealedAnswer ? `<li><strong>разгадано:</strong> ${esc(plot.revealedAnswer)}</li>` : '',
-    ...(plot.revealedPremises || []).map((x) => `<li>${esc(x)}</li>`),
+    ...(plot.revealedPremises || []).map((x) => `<li>подступ: ${esc(x)}</li>`),
   ]
     .filter(Boolean)
     .join('');

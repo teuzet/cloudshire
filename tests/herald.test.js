@@ -65,18 +65,15 @@ test('поводы и просьбы — закрытые словари', () =>
   assert.equal(parseOccasion('что-то'), 'дело');
   assert.equal(parseAsk('НУЖНА ПОМОЩЬ'), 'нужна помощь');
   assert.equal(parseAsk('дай денег'), 'нет');
+  assert.equal(parseAsk('сановник свободен'), 'нет', 'слот свободен — не повод спрашивать');
   assert.ok(ASKS.includes('нет'));
+  assert.equal(ASKS.includes('сановник свободен'), false);
 });
 
 test('просьбу считает движок, а не настроение модели', () => {
   assert.equal(decideAsk({}), 'нет');
   assert.equal(decideAsk({ needsHelp: true }), 'нужна помощь');
-  assert.equal(
-    decideAsk({ officerFreed: true, needsHelp: true }),
-    'сановник свободен',
-    '«столп» — слово движка, вслух его говорить нельзя',
-  );
-  assert.equal(decideAsk({ plotClosable: true, officerFreed: true }), 'можно закрыть');
+  assert.equal(decideAsk({ plotClosable: true, needsHelp: true }), 'можно закрыть');
   assert.equal(
     decideAsk({ pausedAwaitingConfirmation: true, plotClosable: true }),
     'подтверди паузу',
@@ -168,7 +165,8 @@ test('промпт несёт повод, событие, нить и одну �
     plot: p,
     fact: { text: 'каменщики закрепили опору' },
     occasion: 'дело',
-    ask: 'сановник свободен',
+    ask: 'нет',
+    actor: 'Канцлер Жален',
     day: 0,
     memory: 'покровитель не любит длинных писем',
   });
@@ -180,7 +178,9 @@ test('промпт несёт повод, событие, нить и одну �
   assert.match(text, /подпорки поставлены/);
   assert.match(text, /покровитель: что там со столбом\?/);
   assert.match(text, /покровитель не любит длинных писем/);
-  assert.match(text, /ПРОСЬБА В КОНЦЕ: сановник свободен/);
+  assert.match(text, /ПРОСЬБА В КОНЦЕ: нет/);
+  assert.match(text, /Кто довёл эту работу: Канцлер Жален/);
+  assert.match(text, /Не говори, что он свободен/);
   assert.match(text, /ЗАПИСЬ ЛЕТОПИСИ/, 'жрец пересказывает запись, а не отчитывается о деле');
 });
 

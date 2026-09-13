@@ -174,7 +174,7 @@ const TRACKS = 'свежая лёжка у обрыва и погрызенны�
 const ELDER = 'старейшина нашёл следы и молчит';
 
 function mystery(extra = {}) {
-  // CRISIS, maxDepth 3 → сердцевина открывается на глубине 0.75.
+  // CRISIS, maxDepth 3 → сердцевина открывается на глубине 1.8.
   return plot({
     hiddenAnswer: ANSWER,
     hiddenPremises: [TRACKS, ELDER],
@@ -212,14 +212,14 @@ test('дешёвое дело целится в разгадку, но прин�
 });
 
 test('разгадка открывается, когда набрана целевая глубина', () => {
-  const p = mystery({ depth: 0.6 });
+  const p = mystery({ depth: 1.6 });
   const res = applyDeedToPlot({
     plot: p,
     process: scout({ premiseText: TRACKS, reachesAnswer: true }),
     finish: 'ok',
     rng: () => 0.5,
   });
-  assert.equal(res.answer, ANSWER, '0.6 + 0.25 перевалило 0.75');
+  assert.equal(res.answer, ANSWER, '1.6 + 0.25 перевалило 1.8');
   assert.deepEqual(res.revealed, [], 'дело шло за разгадкой, а не за подступом');
   assert.equal(p.revealedAnswer, ANSWER);
   assert.equal(p.hiddenAnswer, '');
@@ -235,7 +235,7 @@ test('крит вскрывает разгадку досрочно', () => {
     rng: () => 0.5,
   });
   assert.equal(res.answer, ANSWER);
-  assert.ok(p.depth < 0.75, 'порог взят не глубиной, а качеством работы');
+  assert.ok(p.depth < 1.8, 'порог взят не глубиной, а качеством работы');
 });
 
 test('когда подступы исчерпаны, разгадка открыта сама', () => {

@@ -65,6 +65,23 @@ export function toolEndsAgentRun(tool, { soleTool = false } = {}) {
   return /^(submit_|emit_)/.test(String(tool.name || ''));
 }
 
+/** Пинк, когда модель написала речь, но не вызвала итоговый tool. */
+export function noToolNudge({ stillForcing = false, draftedText = '' } = {}) {
+  if (stillForcing) {
+    return 'Ответ без tool недопустим. Сейчас вызови требуемый tool.';
+  }
+  const drafted = String(draftedText || '').trim();
+  if (drafted) {
+    const clip = drafted.length > 800 ? `${drafted.slice(0, 800)}…` : drafted;
+    return (
+      'Игрок этот текст не увидит: речь сдаётся только итоговым tool (submit_… / emit_…). ' +
+      'Вызови его сейчас и передай в text ту же речь — не переписывай и не подменяй формулой «ход не сдан» или «приказа не было»:\n\n' +
+      clip
+    );
+  }
+  return 'Ход ещё не сдан. Вызови итоговый tool (submit_… / emit_…).';
+}
+
 export class AgentRuntime {
   constructor(config) {
     this.config = config;
@@ -313,12 +330,14 @@ export class AgentRuntime {
           if ((stillForcing || waiting) && turn < maxTurns - 1) {
             tlog.warn('agent.nudge.no_tool', {
               expected: stillForcing ? forcedTool : 'deliverable',
+              hasDraft: Boolean(String(message.content || '').trim()),
             });
             messages.push({
               role: 'user',
-              content: stillForcing
-                ? 'Ответ без tool недопустим. Сейчас вызови требуемый tool.'
-                : 'Ход ещё не сдан. Вызови итоговый tool (submit_… / emit_…).',
+              content: noToolNudge({
+                stillForcing,
+                draftedText: message.content,
+              }),
             });
             continue;
           }

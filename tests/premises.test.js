@@ -9,6 +9,7 @@ import {
   revealedAnswer,
   answerDepthTarget,
   answerOpen,
+  speechHintsHidden,
 } from '../src/game/premises.js';
 import { createPlotline, normalizePlotlines } from '../src/game/plotlines.js';
 import { applyEngagement } from '../src/game/plotAlign.js';
@@ -101,19 +102,19 @@ test('разгадка переезжает в раскрытое целиком
 // ──────────────────────── доступ к сердцевине ────────────────────────
 
 test('целевая глубина считается от масштаба истории', () => {
-  assert.equal(answerDepthTarget(story({ maxDepth: 4 })), 1);
-  assert.equal(answerDepthTarget(story({ maxDepth: 1.5 })), 0.38);
+  assert.equal(answerDepthTarget(story({ maxDepth: 4 })), 2.4);
+  assert.equal(answerDepthTarget(story({ maxDepth: 1.5 })), 0.9);
   assert.equal(answerDepthTarget(story({ maxDepth: 0 })), 0);
 });
 
 test('пока подступы целы и работа не набрана, сердцевина закрыта', () => {
-  const p = story({ depth: 0.5 });
+  const p = story({ depth: 2 });
   assert.equal(answerOpen(p), false);
 });
 
 test('набранная глубина открывает сердцевину', () => {
-  assert.equal(answerOpen(story({ depth: 1 })), true);
-  assert.equal(answerOpen(story({ depth: 0.99 })), false);
+  assert.equal(answerOpen(story({ depth: 2.4 })), true);
+  assert.equal(answerOpen(story({ depth: 2.39 })), false);
 });
 
 test('крит открывает сердцевину досрочно', () => {
@@ -216,6 +217,35 @@ test('нераскрытое жрецу не показывают', () => {
   assert.doesNotMatch(prompt, /стая через трещину/);
   assert.doesNotMatch(prompt, /следы крупных лап/);
   assert.doesNotMatch(prompt, /Город это уже выяснил/);
+});
+
+test('речь не может сама назвать скрытую причину даже отрицанием', () => {
+  const p = {
+    title: 'Сочение',
+    synopsis: 'Из коры верхних развилок течёт густая тёмная смола, у смолокуров немеют пальцы.',
+    hiddenAnswer: 'Мелкие паразитические насекомые выходят из-под коры для спаривания.',
+    hiddenPremises: ['В старой развилке видны пустые узкие ходы и тела мелких насекомых.'],
+  };
+  assert.equal(
+    speechHintsHidden(
+      p,
+      'Причину мы пока не установили. О насекомых или иной живности там ничего не знаем.',
+    ),
+    true,
+  );
+  assert.equal(
+    speechHintsHidden(p, 'Это густая тёмная смола из коры. Причину мы пока не установили.'),
+    false,
+  );
+  assert.equal(
+    speechHintsHidden(
+      p,
+      'О насекомых достоверно ничего не знаем.',
+      { alreadySaid: 'это насекомые?' },
+    ),
+    false,
+    'покровитель сам назвал кандидата — повторить можно',
+  );
 });
 
 // ───────────────────────── лестница судьи ─────────────────────────

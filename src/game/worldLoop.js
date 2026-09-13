@@ -33,7 +33,7 @@ import {
   plotConfig,
   countOpen,
 } from './plotlines.js';
-import { activeProcesses, normalizeDomainProcesses } from './processes.js';
+import { normalizeDomainProcesses } from './processes.js';
 import { releaseOfficerProcess } from './officers.js';
 import { normalizeDeed, rollDeedFinish, finishDeed, deedOutcome } from './deeds.js';
 import { applyDeedToPlot } from './deedResolve.js';
@@ -55,6 +55,7 @@ import {
   plotChronicleTail,
   threatTriggerLines,
   writeChronicle,
+  deedActor,
   CHRONICLE_FINALE_MAX,
 } from './chronicler.js';
 import { reconcilePlot } from './reconciler.js';
@@ -290,7 +291,7 @@ export async function resolveDeedEvent({
           }),
       log,
     });
-    text = written?.text || fallbackDeedEntry(process, rolled.finish);
+    text = written?.text || fallbackDeedEntry(process, rolled.finish, { actor: deedActor(domain, process) });
   }
 
   const fact = appendEventFact(domain, world, {
@@ -367,7 +368,7 @@ export async function resolveDeedEvent({
     applied,
     rule,
     closed: Boolean(closed),
-    officerFreed: Boolean(process.officerId),
+    actor: deedActor(domain, process),
     secretVictim,
   };
 }
@@ -691,15 +692,8 @@ export function askForEvent(domain, event, config = null) {
     plot && !event.closed && Number(plot.depth) >= Number(plot.maxDepth) * 0.75 && !liveThreats(plot).length;
   return decideAsk({
     plotClosable: Boolean(closable),
-    officerFreed: Boolean(event?.officerFreed) && canTakeMore(domain, config),
     needsHelp: Boolean(plot) && !event.closed && liveThreats(plot).some((t) => t.known),
   });
-}
-
-function canTakeMore(domain, config) {
-  const officers = (domain?.officers || []).length;
-  const busy = activeProcesses(domain, config).length;
-  return officers ? busy < officers : busy < 4;
 }
 
 /** Первичная заводка домена на непрерывное время: попытка посева и обязательства. */

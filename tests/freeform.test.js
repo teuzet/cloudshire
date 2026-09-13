@@ -43,6 +43,8 @@ import {
   isHollowHiddenPremise,
   keepSeedReveals,
   hasSeedReveal,
+  keepStoryTitle,
+  nameAssembledStory,
 } from '../src/game/freeformAssemble.js';
 import { plantStakedStory } from '../src/game/storyteller.js';
 import { startFreeformStory, normalizeSeedVariant } from '../src/game/freeformStarter.js';
@@ -468,11 +470,24 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformEndings.instructions, /хотя бы по одной/);
   assert.equal(agents.freeformAssemble.model, 'gpt-5.6-luna');
   assert.deepEqual(agents.freeformAssemble.canon, ['world', 'patron', 'ruler', 'time', 'foreign']);
+  assert.deepEqual(agents.freeformAssemble.styles, ['names']);
   assert.match(agents.freeformAssemble.instructions, /submit_freeform_story/);
   assert.match(agents.freeformAssemble.instructions, /whyMoves/);
   assert.match(agents.freeformAssemble.instructions, /На самом деле/);
   assert.match(agents.freeformAssemble.instructions, /неизвестно/);
+  assert.match(agents.freeformAssemble.instructions, /Не схлопывай цепочку/);
+  assert.match(agents.freeformAssemble.instructions, /не месячная заметка/);
+  assert.match(agents.freeformAssemble.instructions, /другой агент по готовой хронике/);
   assert.doesNotMatch(agents.freeformAssemble.instructions, /depth|countdown|urgency|не ставь/i);
+  assert.doesNotMatch(agents.freeformAssemble.instructions, /title — короткое имя/);
+  assert.equal(agents.freeformTitle.model, 'gpt-5.6-luna');
+  assert.equal(agents.freeformTitle.maxTokens, 400);
+  assert.equal(agents.freeformTitle.reasoningEffort, 'low');
+  assert.deepEqual(agents.freeformTitle.canon, []);
+  assert.match(agents.freeformTitle.instructions, /наблюдаемый слой/);
+  assert.match(agents.freeformTitle.instructions, /не домысливай/);
+  assert.match(agents.freeformTitle.instructions, /не сжатая хроника/);
+  assert.match(agents.freeformTitle.instructions, /submit_freeform_title/);
   assert.equal(agents.freeformUrgency.model, 'gpt-5.6-luna');
   assert.equal(agents.freeformUrgency.maxTokens, 400);
   assert.deepEqual(agents.freeformUrgency.canon, ['world']);
@@ -2332,10 +2347,35 @@ test('скрытый слой отрезается от наблюдаемой �
   });
   assert.doesNotMatch(fallback.chronicle, /На самом деле/i);
   assert.match(fallback.whyMoves, /зовёт/);
+  assert.equal(fallback.title, 'История', 'первое предложение хроники в заголовок не копируем');
+  const resin =
+    'На восточном дереве, где стоит храм Ориона, каменщики и смолокуры давно замечали: в верхних развилках кора сочится гуще.';
+  assert.equal(keepStoryTitle(resin, resin), '');
+  assert.equal(keepStoryTitle('На восточном дереве, где стоит храм Ориона', resin), '');
+  assert.equal(keepStoryTitle('Смола восточного дерева', resin), 'Смола восточного дерева');
+  assert.equal(keepStoryTitle('Сапог на площади', 'На площади Грастока двор держит сапог без пары.'), 'Сапог на площади');
   assert.equal(clampFreeformCountdown(0), 1);
   assert.equal(clampFreeformCountdown(9), 8);
   assert.equal(clampFreeformCountdown('3'), 3);
   assert.equal(clampFreeformCountdown('x', 2), 2);
+});
+
+test('имя-агент не принимает пересказ хроники', async () => {
+  const chronicle =
+    'На восточном дереве, где стоит храм Ориона, каменщики и смолокуры давно замечали: кора сочится гуще.';
+  const runtime = {
+    assembleChat: () => ({ systemContent: '', userContent: '' }),
+    async run(opts) {
+      const tool = opts.tools?.[0];
+      const clone = await tool.handler({ title: chronicle });
+      assert.equal(clone.ok, false);
+      const prefix = await tool.handler({ title: 'На восточном дереве, где стоит храм Ориона' });
+      assert.equal(prefix.ok, false);
+      await tool.handler({ title: 'Смола восточного дерева' });
+    },
+  };
+  const named = await nameAssembledStory({ runtime, chronicle, cityName: 'Аллерия' });
+  assert.equal(named.title, 'Смола восточного дерева');
 });
 
 test('конструктор собирает хронику, hidden и whyMoves — без countdown-агента', async () => {
@@ -2349,12 +2389,17 @@ test('конструктор собирает хронику, hidden и whyMoves
       if (!tool) return;
       if (opts.agentId === 'freeformAssemble') {
         await tool.handler({
-          title: 'Чужой сапог',
           chronicle: 'На площади Грастока двор держит сапог без пары.',
           whyMoves: 'Пока сапог лежит, хозяин ищет его дворами.',
           cause: 'Соль сыплется из разлома края, и двор не знает, чей это сапог.',
           hiddenPremises: ['Соль сыплется из разлома края, не из склада.'],
         });
+      } else if (opts.agentId === 'freeformTitle') {
+        const asked = String(opts.userMessages?.[0]?.content || '');
+        assert.match(asked, /площади Грастока/);
+        assert.doesNotMatch(asked, /На самом деле/i);
+        assert.doesNotMatch(asked, /подпилил|скрыт|разгадк/i);
+        await tool.handler({ title: 'Сапог на площади' });
       }
     },
   };
@@ -2371,8 +2416,8 @@ test('конструктор собирает хронику, hidden и whyMoves
     },
     gravity: 'EPISODE',
   });
-  assert.deepEqual(calls, ['freeformAssemble']);
-  assert.equal(out.title, 'Чужой сапог');
+  assert.deepEqual(calls, ['freeformAssemble', 'freeformTitle']);
+  assert.equal(out.title, 'Сапог на площади');
   assert.match(out.chronicle, /площади/);
   assert.doesNotMatch(out.chronicle, /На самом деле/i);
   assert.match(out.whyMoves, /хозяин/);
@@ -2381,7 +2426,12 @@ test('конструктор собирает хронику, hidden и whyMoves
   assert.equal(out.countdown, undefined);
   assert.match(out.assemblePrompt, /submit_freeform_story/);
   assert.match(out.assemblePrompt, /Первопричина/);
+  assert.match(out.assemblePrompt, /Не схлопывай цепочку/);
   assert.doesNotMatch(out.assemblePrompt, /\bdepth\b|countdown|urgency/i);
+  assert.match(out.titlePrompt, /то, что город уже знает/);
+  assert.match(out.titlePrompt, /площади Грастока/);
+  assert.doesNotMatch(out.titlePrompt, /соль сыплется/);
+  assert.doesNotMatch(out.titlePrompt, /hiddenAnswer|hiddenPremises/);
   const plot = createFreeformPlot({
     domain: { plotlines: [] },
     world: { tickIndex: 1 },

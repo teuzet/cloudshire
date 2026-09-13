@@ -397,6 +397,47 @@ const ENDING_KIND_LABEL = {
 };
 
 /**
+ * Скрытый слой двух типов: разгадка и независимые подступы к ней.
+ * Раскрытое переезжает в «город выяснил», но тип у пункта тот же.
+ */
+function plotFactsBlock(p) {
+  const hiddenPremises = Array.isArray(p.hiddenPremises) ? p.hiddenPremises : [];
+  const revealedPremises = Array.isArray(p.revealedPremises) ? p.revealedPremises : [];
+  const hiddenRows = [
+    p.hiddenAnswer ? `<li><b>разгадка:</b> ${esc(p.hiddenAnswer)}</li>` : '',
+    ...hiddenPremises.map((t) => `<li>подступ: ${esc(t)}</li>`),
+  ]
+    .filter(Boolean)
+    .join('');
+  const knownRows = [
+    p.revealedAnswer ? `<li><b>разгадано:</b> ${esc(p.revealedAnswer)}</li>` : '',
+    ...revealedPremises.map((t) => `<li>подступ: ${esc(t)}</li>`),
+  ]
+    .filter(Boolean)
+    .join('');
+  const inspectHasLayer = Array.isArray(p.hiddenPremises) || Boolean(p.hiddenAnswer);
+  return {
+    known: knownRows
+      ? `<div class="muted small">город выяснил:</div><ul class="small">${knownRows}</ul>`
+      : '',
+    hidden: !inspectHasLayer
+      ? ''
+      : hiddenRows
+        ? `<div class="muted small">на самом деле:</div><ul class="small">${hiddenRows}</ul>`
+        : '<p class="muted small">на самом деле: скрытого слоя нет</p>',
+  };
+}
+
+/** Что дело выясняет, если сработает: саму разгадку, подступ, или ничего. */
+function deedSecretAim(p) {
+  const bits = [
+    p.reachesAnswer ? '<p class="muted small">целится в разгадку</p>' : '',
+    p.premiseText ? `<p class="muted small">подступ: ${esc(p.premiseText)}</p>` : '',
+  ].filter(Boolean);
+  return bits.join('');
+}
+
+/**
  * Концовки нити списком. `closeWhen` у нити со ставками — это все её концовки
  * сразу, и склеенные в строку они читались как один длинный исход.
  */
@@ -470,19 +511,15 @@ function plotCard(p) {
         )}</span></li>`,
     )
     .join('');
-  const known = [
-    p.revealedAnswer ? `<li><b>разгадано:</b> ${esc(p.revealedAnswer)}</li>` : '',
-    ...(p.revealedPremises || []).map((t) => `<li>${esc(t)}</li>`),
-  ]
-    .filter(Boolean)
-    .join('');
+  const facts = plotFactsBlock(p);
   return (
     `<article class="ins-card"><h4>${esc(p.title || p.id)}</h4>` +
     (meta ? `<div class="muted small">${esc(meta)}</div>` : '') +
     (p.synopsis ? `<p class="pre">${esc(p.synopsis)}</p>` : '') +
     (p.cause ? `<p class="muted small">первопричина: ${esc(p.cause)}</p>` : '') +
     (p.whyMoves ? `<p class="muted small">если не займутся: ${esc(p.whyMoves)}</p>` : '') +
-    (known ? `<div class="muted small">город выяснил:</div><ul class="small">${known}</ul>` : '') +
+    facts.known +
+    facts.hidden +
     (threats ? `<div class="muted small">нависло:</div><ul class="small">${threats}</ul>` : '') +
     endingsBlock(p) +
     (p.relatedStats?.length ? `<p class="muted small">статы: ${esc(p.relatedStats.join(', '))}</p>` : '') +
@@ -517,6 +554,7 @@ function processCard(p) {
     `<div class="muted small">${esc(meta)}</div>` +
     (p.goal ? `<p class="muted small">цель: ${esc(p.goal)}</p>` : '') +
     (p.detail ? `<p class="pre">${esc(p.detail)}</p>` : '') +
+    deedSecretAim(p) +
     `<p class="muted small">${esc(p.id)}</p></article>`
   );
 }

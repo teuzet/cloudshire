@@ -5,7 +5,7 @@
 
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
-import { clipPlotText, PLOT_TITLE_MAX, PLOT_SUMMARY_MAX } from './plotlines.js';
+import { clipPlotText, PLOT_SUMMARY_MAX } from './plotlines.js';
 import { captureAgentPrompt } from './freeformArchitect.js';
 import { normalizeHiddenPremises } from './suspenseGraph.js';
 import {
@@ -70,10 +70,51 @@ export function splitChronicleHiddenLayer(text) {
   return { chronicle, hiddenPremises };
 }
 
+const TITLE_WORD_MAX = 8;
+const TITLE_CHAR_MAX = 64;
+
+function foldTitleText(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Заголовок, который просто повторяет начало хроники. */
+export function titleRetellsChronicle(title, chronicle) {
+  const t = foldTitleText(title);
+  const c = foldTitleText(chronicle);
+  if (!t || !c) return false;
+  if (c === t) return true;
+  if (c.startsWith(t) && t.split(' ').length >= 3) return true;
+  const head = c.split(' ').slice(0, 4).join(' ');
+  if (head.length >= 8 && (t === head || t.startsWith(`${head} `))) return true;
+  return false;
+}
+
+/**
+ * Короткое имя карточки. Не первое предложение хроники и не пересказ.
+ * Пустая строка — брать нельзя: иначе заголовок совпадает с записью.
+ */
+export function keepStoryTitle(raw, chronicle = '') {
+  const title = String(raw || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^["«']+|["»']+$/g, '');
+  if (!title || title.length > TITLE_CHAR_MAX) return '';
+  if (/[.!?…]|:/.test(title)) return '';
+  const words = title.split(/\s+/).filter(Boolean);
+  if (words.length < 1 || words.length > TITLE_WORD_MAX) return '';
+  if (titleRetellsChronicle(title, chronicle)) return '';
+  return title;
+}
+
 export function fallbackAssembledStory(candidate) {
   const split = splitChronicleHiddenLayer(candidate?.chronicle || candidate?.text || candidate?.hook || '');
   const chronicle = split.chronicle;
-  const title = clipPlotText(candidate?.title, PLOT_TITLE_MAX) || clipPlotText(chronicle, PLOT_TITLE_MAX) || 'История';
+  const title = keepStoryTitle(candidate?.title, chronicle) || 'История';
   // В блоке «На самом деле:» разгадка идёт первой строкой, остальное — подступы.
   const layer = keepSeedReveals(split.hiddenPremises);
   return {
@@ -92,7 +133,6 @@ export function normalizeAssembledStory(raw, candidate, maxChars = PLOT_SUMMARY_
   const split = splitChronicleHiddenLayer(raw?.chronicle || raw?.entry || '');
   const chronicle = clipPlotText(split.chronicle || fallback.chronicle, maxChars);
   if (!chronicle) return null;
-  const title = clipPlotText(raw?.title, PLOT_TITLE_MAX) || fallback.title;
   const whyMoves = clipPlotText(raw?.whyMoves, PLOT_SUMMARY_MAX) || fallback.whyMoves;
   const cause = clipPlotText(raw?.cause, PLOT_SUMMARY_MAX) || fallback.cause;
   const answer = keepSeedAnswer(raw?.hiddenAnswer) || fallback.hiddenAnswer;
@@ -101,7 +141,7 @@ export function normalizeAssembledStory(raw, candidate, maxChars = PLOT_SUMMARY_
     ? hiddenFromTool
     : keepSeedReveals(split.hiddenPremises).filter((item) => item !== answer);
   return {
-    title: title || 'История',
+    title: keepStoryTitle(raw?.title, chronicle) || fallback.title || 'История',
     chronicle,
     synopsis: chronicle,
     whyMoves,
@@ -109,6 +149,67 @@ export function normalizeAssembledStory(raw, candidate, maxChars = PLOT_SUMMARY_
     hiddenAnswer: answer,
     hiddenPremises: hidden,
   };
+}
+
+/**
+ * Имя по наблюдаемому слою. Тайну сюда не кладём: иначе заголовок сам её выдаёт.
+ */
+export async function nameAssembledStory({ runtime, chronicle, cityName, log: parentLog }) {
+  const publicChronicle = String(chronicle || '').trim();
+  if (!publicChronicle || !runtime?.run) return { title: 'История', prompt: '' };
+  const log = (parentLog || getLogger()).child({ scope: 'freeform.title' });
+  const draft = { title: '' };
+  const runOpts = {
+    agentId: 'freeformTitle',
+    tools: [
+      {
+        name: 'submit_freeform_title',
+        description: 'Короткое имя истории: заголовок, не пересказ хроники.',
+        parameters: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['title'],
+          properties: {
+            title: { type: 'string', description: 'Два-шесть слов, не первое предложение записи.' },
+          },
+        },
+        handler: async (args) => {
+          const title = keepStoryTitle(args?.title, publicChronicle);
+          if (!title) {
+            return toolFail(
+              'thin',
+              'Нужно короткое имя из 2–6 слов, не пересказ и не первое предложение хроники.',
+            );
+          }
+          draft.title = title;
+          return { ok: true };
+        },
+      },
+    ],
+    maxTurns: 3,
+    toolChoice: { type: 'function', function: { name: 'submit_freeform_title' } },
+    log,
+    scene: 'freeform_title',
+    userMessages: [
+      {
+        role: 'user',
+        content: [
+          cityName ? `Город: ${cityName}.` : '',
+          'Хроника (то, что город уже знает):',
+          publicChronicle,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      },
+    ],
+  };
+  const prompt = captureAgentPrompt(runtime, runOpts);
+  try {
+    await runtime.run(runOpts);
+  } catch (err) {
+    log.warn('freeform.title_failed', { error: err.message });
+  }
+  return { title: draft.title || 'История', prompt };
 }
 
 export async function constructFreeformStory({
@@ -135,13 +236,14 @@ export async function constructFreeformStory({
           type: 'object',
           additionalProperties: false,
           required: requireMystery
-            ? ['title', 'chronicle', 'cause', 'whyMoves', 'hiddenAnswer', 'hiddenPremises']
-            : ['title', 'chronicle', 'cause', 'whyMoves'],
+            ? ['chronicle', 'cause', 'whyMoves', 'hiddenAnswer', 'hiddenPremises']
+            : ['chronicle', 'cause', 'whyMoves'],
           properties: {
-            title: { type: 'string', description: 'Короткое имя истории.' },
             chronicle: {
               type: 'string',
-              description: 'Стартовая хроника: наблюдаемый слой, посаженный в этот город. Без блока «На самом деле:».',
+              description:
+                'Стартовая хроника: наблюдаемый слой, посаженный в этот город. ' +
+                'Механизм должен читаться: что за вещь, кто действует, что случилось. Без блока «На самом деле:».',
             },
             cause: {
               type: 'string',
@@ -173,7 +275,7 @@ export async function constructFreeformStory({
         },
         handler: async (args) => {
           const card = normalizeAssembledStory(args, candidate, maxChars);
-          if (!card) return toolFail('thin', 'Нужны title, chronicle и whyMoves.');
+          if (!card) return toolFail('thin', 'Нужны chronicle и whyMoves.');
           if (!card.whyMoves) return toolFail('thin', 'Нужен whyMoves: следующий ход ситуации, если ею не занимаются.');
           if (!card.cause) {
             return toolFail(
@@ -207,6 +309,9 @@ export async function constructFreeformStory({
           formatBrainstormCandidateForPrompt(candidate, candidate?.index || 1),
           '',
           'Собери из этой хроники историю в этом городе через submit_freeform_story.',
+          'Имя не твоё: его даст другой агент по готовой хронике.',
+          'Стартовая хроника — первая запись, не месячная заметка: наблюдаемый механизм оставь целым.',
+          'Не схлопывай цепочку «знак → кто его читает → решение». Объявляет человек, не вещь и не тварь.',
           [
             'cause — первопричина: вещь или процесс в мире, из-за которого вопрос стоит.',
             'Проверь себя: если все спорщики разойдутся по домам, cause останется на месте.',
@@ -265,8 +370,15 @@ export async function assembleFreeformLabStory({
   if (requireMystery && !story.hiddenAnswer) {
     return { ...story, hiddenAnswer: '', hiddenPremises: [], ok: false, error: 'no_reveal' };
   }
+  const named = await nameAssembledStory({
+    runtime,
+    chronicle: story.chronicle,
+    cityName: domain?.name,
+    log,
+  });
   return {
     ...story,
+    title: named.title || story.title,
     gravity: parseFreeformGravity(gravity ?? candidate?.gravity),
     cause: story.cause || '',
     arena: candidate?.arena || '',
@@ -276,5 +388,6 @@ export async function assembleFreeformLabStory({
     engine: candidate?.engine || '',
     timing: candidate?.timing || '',
     assemblePrompt: constructed.prompt || '',
+    titlePrompt: named.prompt || '',
   };
 }
