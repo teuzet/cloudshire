@@ -238,20 +238,20 @@ function plotBlock(plot, chronicleTail = []) {
  * то, что уже записано, и город каждый раз находит одну и ту же протечку.
  */
 /**
- * Чужой берег словами мира, а не поручения.
+ * Соседний берег словами мира, а не поручения.
  *
  * Без этого блока хронист знает о месте ровно то, что стояло в приказе, и
  * запись выходит приказом в прошедшем времени: другого материала у неё нет.
+ * Работа не обязательно вылазка — так же идут посольство, торг и дозор.
  */
-function foreignShoreBlock({ partnerName = '', passage = '', pairArchive = '' } = {}) {
-  const lines = ['РАБОТА ШЛА ЧЕРЕЗ ПРОХОД, НА ЧУЖОМ БЕРЕГУ.'];
-  if (partnerName) lines.push(`Чужой берег — «${partnerName}».`);
-  if (passage) lines.push(`По чему шли (место уже описано, другого не выдумывай):\n${passage}`);
+function neighbourBlock({ partnerName = '', passage = '', pairArchive = '' } = {}) {
+  const lines = ['ЭТА РАБОТА ЗАДЕВАЛА ПРОХОД И СОСЕДНИЙ ГОРОД.'];
+  if (partnerName) lines.push(`Сосед за проходом — «${partnerName}».`);
+  if (passage) lines.push(`Место (уже описано, другого не выдумывай):\n${passage}`);
   const archive = archiveBeyondPassage(pairArchive, passage);
   if (archive) {
     lines.push(`Что уже записано об этой встрече (не повторяй как новость и не противоречь):\n${archive}`);
   }
-  lines.push('Пиши по этому месту: что под ногами, что на берегу, куда несли.');
   lines.push('');
   return lines;
 }
@@ -298,7 +298,7 @@ export function formatDeedPrompt({
     '',
     ...plotBlock(plot, chronicleTail),
     '',
-    ...(cross ? foreignShoreBlock({ partnerName, passage, pairArchive }) : []),
+    ...(cross ? neighbourBlock({ partnerName, passage, pairArchive }) : []),
     'Календарную дату в текст не пиши: она стоит на записи отдельно.',
     cross
       ? `Одна связная запись до ${CHRONICLE_FINALE_MAX} символов. Вызови submit_chronicle.`
