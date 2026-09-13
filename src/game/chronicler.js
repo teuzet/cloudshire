@@ -19,6 +19,7 @@
 
 import { getLogger, truncate } from '../log.js';
 import { chronicleEntries } from './models.js';
+import { FINISH_LABELS } from './rolls.js';
 import { findOfficer, officerGender } from './officers.js';
 import { findPlotEnding } from './freeform.js';
 import { livesLeft } from './threats.js';
@@ -33,17 +34,17 @@ export function chronicleEntryLimit(raw) {
   return n > CHRONICLE_ENTRY_MAX ? n : CHRONICLE_ENTRY_MAX;
 }
 
+/** Исход одним токеном и толкованием. Словарь общий с броском, своего не заводим. */
+export function finishForPrompt(finish) {
+  return FINISH_LABELS[finish] || FINISH_LABELS.ok;
+}
+
 /** Поводы для записи. Совпадают с поводами вести, кроме новой истории: её пишет посев. */
 export const CHRONICLE_OCCASIONS = ['дело', 'угроза', 'разрешение'];
 
 /** Сколько прошлых записей истории показать: хвоста хватает, начало живёт в синопсисе. */
 export const CHRONICLE_TAIL = 6;
 
-const FINISH_WORD = {
-  fail: 'ПРОВАЛ: цель не достигнута или достигнута лишь частично',
-  ok: 'УСПЕХ: цель достигнута, возможна небольшая негативная побочка',
-  crit: 'ПОЛНЫЙ УСПЕХ: цель достигнута особенно удачно',
-};
 
 /** Хвост хроники одной истории — чтобы хронист не переоткрывал уже открытое. */
 export function plotChronicleTail(domain, plotId, limit = CHRONICLE_TAIL) {
@@ -292,7 +293,7 @@ export function formatDeedPrompt({
     process?.detail || process?.summary || '—',
     process?.goal ? `По чему мерили успех (это мерка, а не текст записи): ${process.goal}` : null,
     deedActorPrompt(domain, process),
-    `ИСХОД (решено броском, не спорь): ${FINISH_WORD[applied?.finish] || FINISH_WORD.ok}.`,
+    `ИСХОД: ${finishForPrompt(applied?.finish)}`,
     '',
     ...deedConsequenceLines({ plot, applied, threat, closed }),
     '',
@@ -367,7 +368,7 @@ export function deedTriggerLines({ domain, process, applied }) {
     actor
       ? `Кто вёл: ${actor}${officer ? ` (${v.word})` : ''}. Согласуй род (${v.did}).`
       : 'Кто вёл: город сам, без названного лица.',
-    `Исход работы (решён броском, не спорь): ${FINISH_WORD[applied?.finish] || FINISH_WORD.ok}.`,
+    `ИСХОД: ${finishForPrompt(applied?.finish)}`,
     applied?.answer ? `Этой же работой город разгадал, в чём было дело: ${applied.answer}` : null,
     revealed.length ? `Этой работой выяснилось, и город теперь это знает:\n- ${revealed.join('\n- ')}` : null,
   ].filter(Boolean);

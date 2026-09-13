@@ -12,9 +12,11 @@ import {
   formatThreatPrompt,
   threatTriggerLines,
   endingText,
+  finishForPrompt,
   plotChronicleTail,
   writeChronicle,
 } from '../src/game/chronicler.js';
+import { FINISH_LABELS } from '../src/game/rolls.js';
 import { loadConfig } from '../src/config.js';
 
 const silentLog = {
@@ -206,6 +208,27 @@ test('поручение подано как намерение и как мер
   assert.doesNotMatch(text, /ЗАДЕВАЛА ПРОХОД/);
 });
 
+test('исход приходит общим словарём броска, своего у хрониста нет', () => {
+  assert.equal(finishForPrompt('crit'), FINISH_LABELS.crit);
+  assert.equal(finishForPrompt('fail'), FINISH_LABELS.fail);
+  assert.equal(finishForPrompt(undefined), FINISH_LABELS.ok, 'без исхода — успех');
+  for (const finish of ['crit', 'ok', 'fail']) {
+    const text = formatDeedPrompt({ domain: domain(), process: deed, applied: { finish } });
+    assert.match(text, new RegExp(`ИСХОД: ${FINISH_LABELS[finish].replace(/[[\]]/g, '\\$&')}`));
+  }
+});
+
+test('конфиг: три исхода расшифрованы и крит не равен успеху', () => {
+  const cfg = loadConfig();
+  const text = cfg.agents.chronicler.instructions;
+  assert.match(text, /\[КРИТИЧЕСКИЙ УСПЕХ\] — вышло больше, чем просили/);
+  assert.match(text, /\[УСПЕХ\] —/);
+  assert.match(text, /\[ПРОВАЛ\] —/);
+  assert.match(text, /не должна получаться одна и та же запись/);
+  // Исход показывают итогом, а не оценочным словом.
+  assert.match(text, /«удачно»/);
+});
+
 test('промпт беды требует прошедшего времени', () => {
   const text = formatThreatPrompt({
     plot: plot(),
@@ -274,7 +297,7 @@ test('развязка берётся из заготовленных концо
   });
   assert.match(text, /лестница смолкла/);
   assert.match(text, /Канцлер Жален/);
-  assert.match(text, /ПОЛНЫЙ УСПЕХ/);
+  assert.match(text, /\[КРИТИЧЕСКИЙ УСПЕХ\]/);
   assert.match(text, /что-то приобрёл/);
 });
 
