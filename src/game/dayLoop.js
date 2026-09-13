@@ -9,17 +9,21 @@ import { startClock, syncWorldClock, gameDateFromDay } from './gameClock.js';
 import {
   DomainQueue,
   endRulerTurn,
+  mergeWorldJobs,
   pruneJobs,
+  rulerTurnHolds,
   rulerTurnStale,
   worldDay,
   clockIsHeld,
 } from './scheduler.js';
+import { StaleWriteError } from '../storage/revision.js';
 import {
   armDomainSchedule,
   askForEvent,
   attachReport,
   drainDomainJobs,
   scheduleDeedJob,
+  sweepOrphanJobs,
 } from './worldLoop.js';
 import { narrateEvent } from './herald.js';
 import { markPushed, shouldPush } from './notify.js';
@@ -248,6 +252,8 @@ export async function stepDomain({
 
   domain.state = domain.state || {};
   domain.state.lastDay = day;
+  // Пока наложение сопряжения ещё на месте: нити соседа тоже считаются живыми.
+  const orphans = sweepOrphanJobs(world, domain, { conflux, log });
   if (conflux) {
     stampNewBoardItems(domain, conflux);
     stripConfluxView(domain);
@@ -257,8 +263,32 @@ export async function stepDomain({
     events: events.length,
     steward: stewardAct ? stewardAct.summary : null,
     statsScored: scored?.scored ?? 0,
+    orphanJobs: orphans.length,
   });
-  return { events, stewardAct, scored };
+  return { events, stewardAct, scored, orphans };
+}
+
+/**
+ * Записать город, не роняя проход мира.
+ *
+ * Отказ по ревизии означает, что копию города кто-то обогнал. Молчать нельзя —
+ * ровно так в живой партии исчез шаг Керсая, — но и валить весь проход мира
+ * из-за одного города незачем.
+ */
+async function saveDomainOrShout(storage, domain, log, where) {
+  try {
+    await storage.saveDomain(domain);
+    return true;
+  } catch (err) {
+    if (!(err instanceof StaleWriteError)) throw err;
+    log.error('dayLoop.lost_write', {
+      where,
+      domainId: domain?.id || null,
+      mine: err.mine,
+      stored: err.stored,
+    });
+    return false;
+  }
 }
 
 /**
@@ -283,11 +313,12 @@ export async function runDayLoop({
   const world = await storage.getWorld();
   startClock(world, now, config);
 
+  // Зависший ход снимается и в своей копии (чтобы часы этого прохода считались
+  // верно), и в хранилище (чтобы он не держал город вечно).
   if (rulerTurnStale(world, now)) {
     log.warn('dayLoop.turn_failsafe', { turnStartedAt: world.turnStartedAt });
     endRulerTurn(world, now);
-  } else if (world.turnStartedAt != null) {
-    return { day: worldDay(world, { now, config }), skipped: 'ruler_turn', results: [] };
+    await storage.updateWorld((fresh) => endRulerTurn(fresh, now));
   }
 
   if (clockIsHeld(world) && !allowWhileHeld) {
@@ -311,36 +342,48 @@ export async function runDayLoop({
     rng,
     log,
   });
+  const results = [];
+  const jobs = queue || new DomainQueue();
+
   for (const event of pairEvents || []) {
     for (const domain of event.domains || []) {
       const bundled = (event.facts || []).find((f) => f.domainId === domain.id);
       const fact = bundled?.fact || null;
       if (!fact && !event.occasion) continue;
-      await deliverEvent({
-        config,
-        runtime,
-        app,
-        domain,
-        world,
-        event: {
-          occasion: event.occasion,
-          fact,
-          plotId: event.plotId || null,
-        },
-        day,
-        log,
+      await jobs.run(domain.id, async () => {
+        await deliverEvent({
+          config,
+          runtime,
+          app,
+          domain,
+          world,
+          event: {
+            occasion: event.occasion,
+            fact,
+            plotId: event.plotId || null,
+          },
+          day,
+          log,
+        });
+        await saveDomainOrShout(storage, domain, log, 'pair_event');
       });
-      await storage.saveDomain(domain);
     }
   }
 
   const domains = await storage.listDomains();
   const confluxes = await storage.listConfluxes({ status: ['approaching', 'docked'] }).catch(() => []);
-  const results = [];
-  const jobs = queue || new DomainQueue();
 
   for (const stale of domains) {
     if (stale.status && stale.status !== 'playing') continue;
+
+    // Ход правителя важнее прохода мира, но только в своём городе: ждать
+    // минуту, пока жрец думает, остальные города не обязаны.
+    const live = await storage.getWorld();
+    if (rulerTurnHolds(live, stale.id, now) || jobs.busy(stale.id)) {
+      log.info('dayLoop.yield_turn', { domainId: stale.id });
+      results.push({ domainId: stale.id, name: stale.name, skipped: 'ruler_turn' });
+      continue;
+    }
 
     const step = await jobs.run(stale.id, async () => {
       const domain = await storage.getDomain(stale.id);
@@ -380,21 +423,24 @@ export async function runDayLoop({
         });
         said.push(res);
         if (event.secretVictim?.fact && partner) {
-          await deliverEvent({
-            config,
-            runtime,
-            app,
-            domain: partner,
-            world,
-            event: {
-              occasion: 'дело',
-              fact: event.secretVictim.fact,
-              plotId: event.plotId || null,
-            },
-            day,
-            log,
+          // Сосед — чужой город: пишем его под его же замком.
+          await jobs.run(partner.id, async () => {
+            await deliverEvent({
+              config,
+              runtime,
+              app,
+              domain: partner,
+              world,
+              event: {
+                occasion: 'дело',
+                fact: event.secretVictim.fact,
+                plotId: event.plotId || null,
+              },
+              day,
+              log,
+            });
+            await saveDomainOrShout(storage, partner, log, 'secret_victim');
           });
-          await storage.saveDomain(partner);
         }
       }
       await storage.saveDomain(domain);
@@ -409,8 +455,13 @@ export async function runDayLoop({
     results.push(step);
   }
 
-  pruneJobs(world);
-  await storage.saveWorld(world);
+  // Мир держали весь проход, а чат в это время ставил свои задания. Пишем
+  // слиянием: иначе дело, заведённое в разговоре, потеряет срок и не кончится.
+  await storage.updateWorld((fresh) => {
+    mergeWorldJobs(fresh, world);
+    syncWorldClock(fresh, { now, config, day });
+    pruneJobs(fresh);
+  });
 
   log.info('dayLoop.done', {
     day,

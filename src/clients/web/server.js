@@ -26,7 +26,12 @@ import { deriveOnboardingPhase, normalizeOnboardingDraft } from '../../game/onbo
 import { genesisTutorialText } from '../../game/progressBar.js';
 import { miniCityPayload } from '../../game/miniCity.js';
 import { cityRules, proxyText } from '../../game/cityRules.js';
-import { worldDay, clockIsHeld, skipStoredWorldDays } from '../../game/scheduler.js';
+import {
+  worldDay,
+  clockIsHeld,
+  skipStoredWorldDays,
+  commitWorldChanges,
+} from '../../game/scheduler.js';
 import { DAYS_PER_MONTH, gameDateFromDay, parseSkipDays } from '../../game/gameClock.js';
 import { DIFFICULTY_SPEC, DURATION_SPEC, normalizeDifficultyBand } from '../../game/bands.js';
 import { deedDurationBand, deedRemainingBand, deedRemainingDays } from '../../game/deeds.js';
@@ -1327,7 +1332,7 @@ export function createWebServer({ config, app, runtime, storage }) {
       });
       for (const d of domains) await storage.saveDomain(d);
       await storage.saveConflux(conflux);
-      await storage.saveWorld(world);
+      await storage.updateWorld((fresh) => commitWorldChanges(fresh, world));
       const byId = Object.fromEntries(domains.map((d) => [d.id, d]));
       res.json({ ok: true, conflux: confluxSummary(conflux, world, byId) });
     } catch (err) {
@@ -1351,7 +1356,7 @@ export function createWebServer({ config, app, runtime, storage }) {
       });
       for (const d of domains) await storage.saveDomain(d);
       await storage.saveConflux(conflux);
-      await storage.saveWorld(world);
+      await storage.updateWorld((fresh) => commitWorldChanges(fresh, world));
       const byId = Object.fromEntries(domains.map((d) => [d.id, d]));
       res.json({ ok: true, conflux: confluxSummary(conflux, world, byId) });
     } catch (err) {

@@ -114,6 +114,10 @@ function storageOf(domains, world) {
       return world;
     },
     async saveWorld() {},
+    async updateWorld(mutate) {
+      await mutate(world);
+      return world;
+    },
     async listDomains() {
       return [...byId.values()];
     },
@@ -360,10 +364,10 @@ test('проход мира считает день от часов и разб�
   assert.ok(storage.saved.includes('d1'));
 });
 
-test('ход правителя останавливает проход мира', async () => {
+test('ход правителя останавливает проход только своего города', async () => {
   const world = makeWorld();
-  beginRulerTurn(world, Date.now());
-  const storage = storageOf([makeDomain()], world);
+  beginRulerTurn(world, Date.now(), { domainId: 'd1' });
+  const storage = storageOf([makeDomain(), makeDomain({ id: 'd2' })], world);
   const res = await runDayLoop({
     config,
     runtime: heraldRuntime(),
@@ -372,8 +376,10 @@ test('ход правителя останавливает проход мира
     now: Date.now(),
     log: silentLog,
   });
-  assert.equal(res.skipped, 'ruler_turn');
-  assert.deepEqual(res.results, []);
+  const byId = new Map(res.results.map((r) => [r.domainId, r]));
+  assert.equal(byId.get('d1').skipped, 'ruler_turn');
+  assert.equal(byId.get('d2').skipped, undefined);
+  assert.equal(storage.saved.includes('d1'), false);
 });
 
 test('удержанные часы останавливают проход мира', async () => {
@@ -423,6 +429,57 @@ test('зависший ход снимается предохранителем,
   });
   assert.equal(res.skipped, undefined);
   assert.equal(world.turnStartedAt, null);
+});
+
+test('задание на исчезнувшую нить снимается с очереди', async () => {
+  const domain = makeDomain();
+  const world = makeWorld();
+  scheduleJob(world, {
+    domainId: 'd1',
+    kind: 'threat_fire',
+    dueDay: 300,
+    payload: { plotId: 'plot_gone', threatId: 'thr_gone' },
+  });
+  const storage = storageOf([domain], world);
+
+  const res = await runDayLoop({
+    config,
+    runtime: heraldRuntime(),
+    storage,
+    app: fakeApp(),
+    now: 0,
+    log: silentLog,
+  });
+
+  assert.equal(res.results[0].skipped, undefined);
+  const job = world.jobs.find((j) => j.payload?.plotId === 'plot_gone');
+  assert.equal(job.state, 'failed');
+  assert.equal(job.cancelled, true);
+});
+
+test('задание, поставленное в чате во время прохода, не теряется', async () => {
+  const world = makeWorld();
+  const storage = storageOf([makeDomain()], world);
+  // Хранилище живёт своей жизнью: пока цикл идёт, в разговоре завели дело.
+  const disk = { ...world, jobs: [] };
+  scheduleJob(disk, { domainId: 'd1', kind: 'process_finish', dueDay: 40, payload: { processId: 'act_chat' } });
+  storage.updateWorld = async (mutate) => {
+    await mutate(disk);
+    return disk;
+  };
+  scheduleJob(world, { domainId: 'd1', kind: 'seed_attempt', dueDay: 50, payload: {} });
+
+  await runDayLoop({
+    config,
+    runtime: heraldRuntime(),
+    storage,
+    app: fakeApp(),
+    now: 0,
+    log: silentLog,
+  });
+
+  const kinds = disk.jobs.map((j) => j.kind).sort();
+  assert.deepEqual(kinds, ['process_finish', 'seed_attempt']);
 });
 
 test('сопряжённый город идёт тем же дневным движком', async () => {

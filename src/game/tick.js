@@ -95,9 +95,7 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
   void config;
   void runtime;
   void app;
-  const world = await storage.getWorld();
-  syncWorldClock(world);
-  await storage.saveWorld(world);
+  const world = await storage.updateWorld((fresh) => syncWorldClock(fresh));
   return {
     world,
     tickIndex: world.tickIndex,

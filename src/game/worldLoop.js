@@ -162,6 +162,39 @@ export function resyncThreatJobs(world, domain, plot) {
 }
 
 /**
+ * Снять задания, которым не на что срабатывать.
+ *
+ * Нить может исчезнуть — её закрыли, сбросили или потеряли на гонке записи, —
+ * а задание на её угрозу останется ждать своего дня. В живом мире таких
+ * висело два: срок приходил, обработчик не находил нити и молчал, но день
+ * мира всё равно просыпался на них.
+ */
+export function sweepOrphanJobs(world, domain, { conflux = null, log = null } = {}) {
+  if (!world || !domain) return [];
+  const plots = new Set((domain.plotlines || []).map((p) => p.id));
+  if (conflux) {
+    for (const plot of conflux.plotlines || []) plots.add(plot.id);
+    if (conflux.container?.id) plots.add(conflux.container.id);
+  }
+  const deeds = new Set((domain.state?.pendingActions || []).map((a) => a.id));
+  const dropped = cancelJobs(world, (job) => {
+    if (job.domainId !== domain.id) return false;
+    if (job.kind === 'threat_fire') return job.payload?.plotId && !plots.has(job.payload.plotId);
+    if (job.kind === 'process_finish') return job.payload?.processId && !deeds.has(job.payload.processId);
+    return false;
+  });
+  for (const job of dropped) {
+    (log || getLogger()).warn('loop.job_orphan', {
+      domainId: domain.id,
+      kind: job.kind,
+      dueDay: job.dueDay,
+      payload: job.payload || null,
+    });
+  }
+  return dropped;
+}
+
+/**
  * Дозаполнить обязательства нити и поставить их в очередь.
  * Живая история без счётчика — история, которая никогда ничего не породит.
  */

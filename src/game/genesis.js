@@ -15,7 +15,7 @@ import {
 } from './models.js';
 import { formatPlayerBrief, substituteCityName } from './onboarding.js';
 import { enqueueOpeningSeeds } from './seedSchedule.js';
-import { scheduleJob, worldDay } from './scheduler.js';
+import { scheduleJob, worldDay, commitWorldChanges } from './scheduler.js';
 import { ensureCityEntities } from './cityEntities.js';
 import {
   clipCityText,
@@ -659,7 +659,7 @@ export async function generateDomain({
   if (loreFromConcept.length) core.openingLore = loreFromConcept;
   if (frozenConcept.name) core.domainName = frozenConcept.name;
   bindRulerName(world, core, config);
-  await storage.saveWorld(world);
+  await storage.updateWorld((fresh) => commitWorldChanges(fresh, world, { fields: ['namePool'] }));
 
   const aspects = {};
   const batches = chunk(aspectsConfig, batchSize);
@@ -764,7 +764,7 @@ export async function generateDomain({
   await onProgress?.('сановники города');
   await generateOfficers({ domain, world, config, runtime, log });
   domain._officerIntro = formatOfficerIntroSpeech(domain);
-  await storage.saveWorld(world);
+  await storage.updateWorld((fresh) => commitWorldChanges(fresh, world, { fields: ['namePool'] }));
 
   await onProgress?.('бриф города');
   domain.cityBrief = await generateCityBrief({ runtime, domain, log });
@@ -800,7 +800,7 @@ export async function generateDomain({
       payload: { requestId: request.id, source: request.source },
     });
   }
-  await storage.saveWorld(world);
+  await storage.updateWorld((fresh) => commitWorldChanges(fresh, world, { fields: ['namePool'] }));
   await storage.saveDomain(domain);
   log.info('genesis.saved', {
     domainId: domain.id,

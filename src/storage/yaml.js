@@ -6,6 +6,7 @@ import { writeWorldArchive } from './worldArchive.js';
 import { createWipeGuard } from './wipeGuard.js';
 import { attachStoryPoolsFromCatalog } from '../game/annotationCatalog.js';
 import { ensureOfficersFromLore, stripOfficerPortraitPayload } from '../game/officers.js';
+import { nextRevision } from './revision.js';
 
 async function ensureDir(dir) {
   await fs.mkdir(dir, { recursive: true });
@@ -108,19 +109,35 @@ export class YamlStorage {
     return normalized;
   }
 
-  async writeWorldUnlocked(world) {
+  async writeWorldUnlocked(world, { force = false } = {}) {
     if (!this.guard.acceptWorld(world)) {
       this.guard.reject('world', world?.id);
       return world;
     }
     normalizeWorld(world, this.config);
+    const stored = await readYaml(this.worldPath(), null);
+    world.rev = nextRevision('world', world, stored?.rev, { force });
     world.updatedAt = new Date().toISOString();
     await writeYaml(this.worldPath(), world);
     return world;
   }
 
-  async saveWorld(world) {
-    return this.guard.exclusive(() => this.writeWorldUnlocked(world));
+  async saveWorld(world, { force = false } = {}) {
+    return this.guard.exclusive(() => this.writeWorldUnlocked(world, { force }));
+  }
+
+  /**
+   * Взять мир, поменять, отдать — под тем же замком, что и запись.
+   * Единственный безопасный способ править мир, который держат минутами:
+   * очередь заданий у него общая на всех.
+   */
+  async updateWorld(mutate) {
+    return this.guard.exclusive(async () => {
+      const world = await this.getWorld();
+      if (!world) return null;
+      await mutate(world);
+      return this.writeWorldUnlocked(world);
+    });
   }
 
   async getDomain(domainId) {
@@ -131,7 +148,7 @@ export class YamlStorage {
     return domain;
   }
 
-  async writeDomainUnlocked(domain) {
+  async writeDomainUnlocked(domain, { force = false } = {}) {
     if (!this.guard.acceptDomain(domain)) {
       this.guard.reject('domain', domain?.id);
       return domain;
@@ -139,13 +156,25 @@ export class YamlStorage {
     normalizeDomain(domain);
     ensureOfficersFromLore(domain, this.config);
     stripOfficerPortraitPayload(domain);
+    const stored = await readYaml(this.domainPath(domain.id), null);
+    domain.rev = nextRevision('domain', domain, stored?.rev, { force });
     domain.updatedAt = new Date().toISOString();
     await writeYaml(this.domainPath(domain.id), domain);
     return domain;
   }
 
-  async saveDomain(domain) {
-    return this.guard.exclusive(() => this.writeDomainUnlocked(domain));
+  async saveDomain(domain, { force = false } = {}) {
+    return this.guard.exclusive(() => this.writeDomainUnlocked(domain, { force }));
+  }
+
+  /** Взять город, поменять, отдать. Для писателей в чужой город. */
+  async updateDomain(domainId, mutate) {
+    return this.guard.exclusive(async () => {
+      const domain = await this.getDomain(domainId);
+      if (!domain) return null;
+      await mutate(domain);
+      return this.writeDomainUnlocked(domain);
+    });
   }
 
   async deleteDomain(domainId) {
@@ -316,10 +345,11 @@ export class YamlStorage {
       await clearYamlDir(path.join(this.root, 'domains'));
       await clearYamlDir(path.join(this.root, 'users'));
       await clearYamlDir(path.join(this.root, 'confluxes'));
-      await this.writeWorldUnlocked(world);
+      // Ревизии снимка чужие живому хранилищу: откат — не гонка писателей.
+      await this.writeWorldUnlocked(world, { force: true });
       for (const domain of domains) {
         if (!domain?.id) continue;
-        await this.writeDomainUnlocked(domain);
+        await this.writeDomainUnlocked(domain, { force: true });
       }
       for (const binding of users) {
         if (!this.guard.acceptBinding(binding)) continue;

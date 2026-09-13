@@ -10,6 +10,10 @@ test('мировой тик отдаёт world и не двигает кален
       return world;
     },
     async saveWorld() {},
+    async updateWorld(mutate) {
+      await mutate(world);
+      return world;
+    },
     async listDomains() {
       return [];
     },

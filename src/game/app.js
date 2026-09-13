@@ -70,7 +70,17 @@ import {
 } from './onboarding.js';
 import { blessProcess, processOwnedBy } from './processes.js';
 import { spendTurnMana } from './mana.js';
-import { beginRulerTurn, endRulerTurn, worldDay, holdClock, releaseClock, clockIsHeld, cancelJobsForThreat } from './scheduler.js';
+import {
+  DomainQueue,
+  beginRulerTurn,
+  endRulerTurn,
+  worldDay,
+  holdClock,
+  releaseClock,
+  clockIsHeld,
+  cancelJobsForThreat,
+  mergeWorldJobs,
+} from './scheduler.js';
 import { syncWorldClock } from './gameClock.js';
 import { formatBoardForSpeech, warmPlotlines, plotConfig, findPlotline } from './plotlines.js';
 import { plantStakedStory } from './storyteller.js';
@@ -191,6 +201,39 @@ export class GameApp {
     this.seedingUsers = new Set();
     /** Кнопки инспектора: угроза или исход дела — по одному за раз. */
     this.playForcing = false;
+    /**
+     * Один писатель на город. Ход правителя и шаг дневного цикла держат эту
+     * очередь по очереди: иначе тот, кто сохранит вторым, затрёт чужую работу.
+     */
+    this.domainQueue = new DomainQueue();
+  }
+
+  /** Всё, что меняет город, идёт через очередь города. */
+  withDomain(domainId, fn) {
+    return this.domainQueue.run(domainId, fn);
+  }
+
+  /** Город прямо сейчас правит кто-то другой — дневной цикл или ход правителя. */
+  isDomainBusy(domainId) {
+    return this.domainQueue.busy(domainId);
+  }
+
+  /**
+   * Взять замок города и перечитать его: копия, прочитанная до замка, уже
+   * могла устареть, пока ждали своей очереди.
+   */
+  async withFreshDomain(domainId, fn) {
+    return this.withDomain(domainId, async () => {
+      const domain = await this.storage.getDomain(domainId);
+      if (!domain) return { ok: false, error: 'no_domain', message: 'города ещё нет' };
+      normalizeDomain(domain);
+      return fn(domain);
+    });
+  }
+
+  /** Донести до хранилища задания, поставленные в свою копию мира. */
+  async commitWorldJobs(mine) {
+    await this.storage.updateWorld((world) => mergeWorldJobs(world, mine));
   }
 
   beginWorldTick() {
@@ -286,9 +329,9 @@ export class GameApp {
         worldTicking: this.isWorldTicking(),
       });
 
-      if (domain && this.isWorldTicking()) {
+      if (domain && (this.isWorldTicking() || this.isDomainBusy(domain.id))) {
         const label = world.gameDate?.label || 'новый месяц';
-        log.info('chat.busy_ticking');
+        log.info('chat.busy_ticking', { domainBusy: this.isDomainBusy(domain.id) });
         return {
           reply:
             `Сейчас идёт шаг времени (${label}). Правитель занят делами острова — ` +
@@ -314,12 +357,15 @@ export class GameApp {
         return await this.runOnboarding(uid, text, { channel, bootstrap, log });
       }
 
-      try {
-        return await this.runRuler(domain, text, { channel, log, world, replyTo });
-      } catch (err) {
-        log.error('ruler.turn_failed', { error: err.message, stack: err.stack });
-        return await this.persistRulerSystemFail(domain, text, { channel, log });
-      }
+      // Ход держит город целиком: инструменты жреца пишут его же.
+      return await this.withDomain(domain.id, async () => {
+        try {
+          return await this.runRuler(domain, text, { channel, log, world, replyTo });
+        } catch (err) {
+          log.error('ruler.turn_failed', { error: err.message, stack: err.stack });
+          return await this.persistRulerSystemFail(domain, text, { channel, log });
+        }
+      });
     } finally {
       this.busyUsers.delete(uid);
     }
@@ -857,17 +903,20 @@ export class GameApp {
       .join('\n');
   }
 
-  async runRuler(domain, text, { channel, log: parentLog, world: worldArg = null, replyTo = null }) {
+  async runRuler(domainArg, text, { channel, log: parentLog, world: worldArg = null, replyTo = null }) {
     const log = (parentLog || getLogger()).child({
       scope: 'ruler',
-      domainId: domain.id,
-      domainName: domain.name,
+      domainId: domainArg.id,
+      domainName: domainArg.name,
     });
+    // Замок города уже взят, но копия пришла из-до замка: пока её ждали,
+    // дневной цикл мог что-то записать. Читаем заново, иначе затрём.
+    const domain = (await this.storage.getDomain(domainArg.id)) || domainArg;
     const world = worldArg || (await this.storage.getWorld());
     log.info('ruler.turn', { text: truncate(text, 400) });
     normalizeDomain(domain);
     // Пока жрец думает, время города стоит: иначе ответ будет про мир, которого уже нет.
-    await this.holdWorldClock();
+    await this.holdWorldClock(domain.id);
     const conflux = await findActiveConfluxForDomain(this.storage, domain.id);
     let partner = null;
     if (conflux) {
@@ -1117,25 +1166,28 @@ export class GameApp {
     } finally {
       clearTimeout(holdTimer);
       await holdTask;
-      await this.releaseWorldClock();
+      await this.releaseWorldClock(world);
     }
   }
 
   /** Остановить время мира на ход правителя. */
-  async holdWorldClock() {
-    const world = await this.storage.getWorld();
-    beginRulerTurn(world);
-    await this.storage.saveWorld(world);
+  async holdWorldClock(domainId = null) {
+    await this.storage.updateWorld((world) => beginRulerTurn(world, Date.now(), { domainId }));
   }
 
   /**
    * Пустить время дальше и сразу разобрать назревшее: дело на считанные дни,
    * заведённое в разговоре, должно кончиться сразу после него, а не через час.
+   *
+   * Заодно доносим очередь: дело, заведённое в разговоре, ставит своё задание
+   * в копию мира этого хода. Без слияния оно не доезжает до хранилища, и дело
+   * висит вечно — именно так пропали задания на исход в живой партии.
    */
-  async releaseWorldClock() {
-    const world = await this.storage.getWorld();
-    endRulerTurn(world);
-    await this.storage.saveWorld(world);
+  async releaseWorldClock(turnWorld = null) {
+    await this.storage.updateWorld((world) => {
+      if (turnWorld) mergeWorldJobs(world, turnWorld);
+      endRulerTurn(world);
+    });
     if (this.onClockReleased) {
       try {
         await this.onClockReleased('ruler_turn');
@@ -1713,9 +1765,14 @@ export class GameApp {
       return { ok: false, error: 'busy', message: 'город сейчас занят' };
     }
     const world = await this.storage.getWorld();
-    const domain = await this.storage.getDomainForUser(uid, world.id);
-    if (!domain) return { ok: false, error: 'no_domain', message: 'города ещё нет' };
-    normalizeDomain(domain);
+    const own = await this.storage.getDomainForUser(uid, world.id);
+    if (!own) return { ok: false, error: 'no_domain', message: 'города ещё нет' };
+    return this.withFreshDomain(own.id, (domain) =>
+      this.plantForcedStory({ uid, world, domain, gravity, grain, mystery }),
+    );
+  }
+
+  async plantForcedStory({ uid, world, domain, gravity, grain, mystery }) {
     const packed = packPlaySeedGrain(domain, world, {
       grain,
       gravity,
@@ -1752,7 +1809,7 @@ export class GameApp {
         log,
       });
       await this.storage.saveDomain(domain);
-      await this.storage.saveWorld(world);
+      await this.commitWorldJobs(world);
       log.info('play.seed_planted', {
         title: planted.plot.title,
         gravity: planted.plot.gravity,
@@ -1789,9 +1846,12 @@ export class GameApp {
       return { ok: false, error: 'ticking', message: 'сейчас идёт шаг времени' };
     }
     const world = await this.storage.getWorld();
-    const domain = await this.storage.getDomainForUser(uid, world.id);
-    if (!domain) return { ok: false, error: 'no_domain', message: 'города ещё нет' };
-    normalizeDomain(domain);
+    const own = await this.storage.getDomainForUser(uid, world.id);
+    if (!own) return { ok: false, error: 'no_domain', message: 'города ещё нет' };
+    return this.withFreshDomain(own.id, (domain) => this.runForcedEvent({ uid, world, domain, run }));
+  }
+
+  async runForcedEvent({ uid, world, domain, run }) {
     const conflux = await findActiveConfluxForDomain(this.storage, domain.id);
     const { partner } = conflux
       ? await overlayWithPartner(this.storage, domain, conflux)
@@ -1849,7 +1909,7 @@ export class GameApp {
         await this.storage.saveConflux(conflux);
       }
       await this.storage.saveDomain(domain);
-      await this.storage.saveWorld(world);
+      await this.commitWorldJobs(world);
       return publicResult;
     } finally {
       this.playForcing = false;
@@ -1960,22 +2020,23 @@ export class GameApp {
       return { ok: false, error: 'ticking', message: 'сейчас идёт шаг времени' };
     }
     const world = await this.storage.getWorld();
-    const domain = await this.storage.getDomainForUser(uid, world.id);
-    if (!domain) return { ok: false, error: 'no_domain', message: 'города ещё нет' };
-    normalizeDomain(domain);
-    const day = worldDay(world, { config: this.config });
-    const result = applyDropPlayStory(domain, world, id, { day });
-    if (!result.ok) return result;
-    await this.storage.saveDomain(domain);
-    await this.storage.saveWorld(world);
-    getLogger().info('play.story_dropped', {
-      userId: uid,
-      domainId: domain.id,
-      plotId: result.plotId,
-      title: result.title,
-      droppedLore: result.droppedLore,
+    const own = await this.storage.getDomainForUser(uid, world.id);
+    if (!own) return { ok: false, error: 'no_domain', message: 'города ещё нет' };
+    return this.withFreshDomain(own.id, async (domain) => {
+      const day = worldDay(world, { config: this.config });
+      const result = applyDropPlayStory(domain, world, id, { day });
+      if (!result.ok) return result;
+      await this.storage.saveDomain(domain);
+      await this.commitWorldJobs(world);
+      getLogger().info('play.story_dropped', {
+        userId: uid,
+        domainId: domain.id,
+        plotId: result.plotId,
+        title: result.title,
+        droppedLore: result.droppedLore,
+      });
+      return result;
     });
-    return result;
   }
 
   async getChronicle(domainId) {
@@ -1990,15 +2051,16 @@ export class GameApp {
   }
 
   async setClockHeld(held) {
-    const world = await this.storage.getWorld();
-    if (!world) throw new Error('мира нет');
     const now = Date.now();
     const want = Boolean(held);
-    if (want) holdClock(world, now);
-    else releaseClock(world, now);
-    const day = worldDay(world, { now, config: this.config });
-    syncWorldClock(world, { now, config: this.config, day });
-    await this.storage.saveWorld(world);
+    let day = 0;
+    const world = await this.storage.updateWorld((w) => {
+      if (want) holdClock(w, now);
+      else releaseClock(w, now);
+      day = worldDay(w, { now, config: this.config });
+      syncWorldClock(w, { now, config: this.config, day });
+    });
+    if (!world) throw new Error('мира нет');
     if (!want && this.onClockReleased) {
       this.onClockReleased('clock_release').catch(() => {});
     }

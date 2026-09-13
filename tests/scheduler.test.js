@@ -211,6 +211,10 @@ test('промотка из хранилища пишет новый день', 
   const storage = {
     getWorld: async () => w,
     saveWorld: async () => {},
+    updateWorld: async (mutate) => {
+      await mutate(w);
+      return w;
+    },
   };
   const out = await skipStoredWorldDays(storage, 7, { now });
   assert.equal(out.days, 7);

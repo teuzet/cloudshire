@@ -5,6 +5,7 @@ import { createWipeGuard } from './wipeGuard.js';
 import { getLogger } from '../log.js';
 import { attachStoryPoolsFromCatalog } from '../game/annotationCatalog.js';
 import { stripOfficerPortraitPayload } from '../game/officers.js';
+import { nextRevision } from './revision.js';
 
 /**
  * Mongo implementation of the same storage surface as YamlStorage.
@@ -53,20 +54,36 @@ export class MongoStorage {
     return world;
   }
 
-  async writeWorldUnlocked(world) {
+  async writeWorldUnlocked(world, { force = false } = {}) {
     if (!this.guard.acceptWorld(world)) {
       this.guard.reject('world', world?.id);
       return world;
     }
     normalizeWorld(world, this.config);
+    const stored = await this.col('world').findOne({ _id: 'current' }, { projection: { rev: 1 } });
+    world.rev = nextRevision('world', world, stored?.rev, { force });
     world.updatedAt = new Date().toISOString();
     const doc = { ...world, _id: 'current' };
     await this.col('world').replaceOne({ _id: 'current' }, doc, { upsert: true });
     return world;
   }
 
-  async saveWorld(world) {
-    return this.guard.exclusive(() => this.writeWorldUnlocked(world));
+  async saveWorld(world, { force = false } = {}) {
+    return this.guard.exclusive(() => this.writeWorldUnlocked(world, { force }));
+  }
+
+  /**
+   * Взять мир, поменять, отдать — под тем же замком, что и запись.
+   * Единственный безопасный способ править мир, который держат минутами:
+   * очередь заданий у него общая на всех.
+   */
+  async updateWorld(mutate) {
+    return this.guard.exclusive(async () => {
+      const world = await this.getWorld();
+      if (!world) return null;
+      await mutate(world);
+      return this.writeWorldUnlocked(world);
+    });
   }
 
   async getDomain(domainId) {
@@ -76,21 +93,33 @@ export class MongoStorage {
     return normalizeDomain({ id: _id, ...rest });
   }
 
-  async writeDomainUnlocked(domain) {
+  async writeDomainUnlocked(domain, { force = false } = {}) {
     if (!this.guard.acceptDomain(domain)) {
       this.guard.reject('domain', domain?.id);
       return domain;
     }
     normalizeDomain(domain);
     stripOfficerPortraitPayload(domain);
+    const stored = await this.col('domains').findOne({ _id: domain.id }, { projection: { rev: 1 } });
+    domain.rev = nextRevision('domain', domain, stored?.rev, { force });
     domain.updatedAt = new Date().toISOString();
     const { id, ...rest } = domain;
     await this.col('domains').replaceOne({ _id: id }, { _id: id, ...rest }, { upsert: true });
     return domain;
   }
 
-  async saveDomain(domain) {
-    return this.guard.exclusive(() => this.writeDomainUnlocked(domain));
+  async saveDomain(domain, { force = false } = {}) {
+    return this.guard.exclusive(() => this.writeDomainUnlocked(domain, { force }));
+  }
+
+  /** Взять город, поменять, отдать. Для писателей в чужой город. */
+  async updateDomain(domainId, mutate) {
+    return this.guard.exclusive(async () => {
+      const domain = await this.getDomain(domainId);
+      if (!domain) return null;
+      await mutate(domain);
+      return this.writeDomainUnlocked(domain);
+    });
   }
 
   async deleteDomain(domainId) {
@@ -313,10 +342,11 @@ export class MongoStorage {
       await this.col('domains').deleteMany({});
       await this.col('users').deleteMany({});
       await this.col('confluxes').deleteMany({});
-      await this.writeWorldUnlocked(world);
+      // Ревизии снимка чужие живому хранилищу: откат — не гонка писателей.
+      await this.writeWorldUnlocked(world, { force: true });
       for (const domain of domains) {
         if (!domain?.id) continue;
-        await this.writeDomainUnlocked(domain);
+        await this.writeDomainUnlocked(domain, { force: true });
       }
       for (const binding of users) {
         if (!this.guard.acceptBinding(binding)) continue;

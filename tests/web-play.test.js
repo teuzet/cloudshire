@@ -190,6 +190,10 @@ function makeStorage(domain, world) {
     listConfluxes: async () => [],
     saveDomain: async () => {},
     saveWorld: async () => {},
+    updateWorld: async (mutate) => {
+      await mutate(world);
+      return world;
+    },
   };
 }
 

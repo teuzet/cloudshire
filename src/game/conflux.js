@@ -3,7 +3,7 @@ import { createLoreFact, normalizeDomain } from './models.js';
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { gameDateFromDay, worldDateLabel } from './gameClock.js';
-import { scheduleJob, cancelJobs, cancelJobsForPlot } from './scheduler.js';
+import { scheduleJob, cancelJobs, cancelJobsForPlot, commitWorldChanges } from './scheduler.js';
 import {
   confluxConfig,
   hoursToGameDays,
@@ -508,7 +508,7 @@ export async function forceCreateConflux({
     trigger: 'approaching',
     context: `Начинается сопряжение с соседом. ${textA}`,
   });
-  await storage.saveWorld(world);
+  await storage.updateWorld((fresh) => commitWorldChanges(fresh, world));
 
   await storage.saveDomain(a);
   await storage.saveDomain(b);
@@ -682,7 +682,7 @@ export async function maybeMatchmakeConfluxes({
     });
   }
 
-  if (created.length) await storage.saveWorld(world);
+  if (created.length) await storage.updateWorld((fresh) => commitWorldChanges(fresh, world));
   return { notes, created };
 }
 

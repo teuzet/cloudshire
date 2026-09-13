@@ -130,6 +130,50 @@ export function failJob(job, error = '') {
   return true;
 }
 
+const SETTLED = new Set(['done', 'failed']);
+
+/**
+ * Слить очередь заданий: свою правленую копию поверх свежей из хранилища.
+ *
+ * Мир держат минутами — дневной цикл разбирает задания, пока жрец в чате
+ * заводит дело и ставит своё. Кто сохранит последним, тот затрёт чужое, а
+ * потерянное задание означает дело, которое никогда не кончится.
+ *
+ * Правила: отработанное не воскресает (иначе событие выстрелит дважды),
+ * чужие задания остаются, свои новые дописываются.
+ */
+export function mergeWorldJobs(fresh, mine) {
+  const theirs = jobList(fresh);
+  const ours = Array.isArray(mine?.jobs) ? mine.jobs : [];
+  const ourById = new Map(ours.map((job) => [job.id, job]));
+  const merged = theirs.map((job) => {
+    const own = ourById.get(job.id);
+    if (!own) return job;
+    return SETTLED.has(job.state) && !SETTLED.has(own.state) ? job : own;
+  });
+  const known = new Set(theirs.map((j) => j.id));
+  for (const job of ours) {
+    if (!known.has(job.id)) merged.push(job);
+  }
+  fresh.jobs = merged;
+  return fresh;
+}
+
+/**
+ * Отдать свою правку мира, не затирая чужую.
+ *
+ * Мир общий: часы правит движок времени, ход правителя — чат, очередь — все
+ * разом, пул имён — генезис. Тот, кто держал копию минутами и пишет её
+ * целиком, отбирает у остальных всё, что они успели записать. Поэтому писатель
+ * называет, чем владеет, и переносит в свежий мир только это.
+ */
+export function commitWorldChanges(fresh, mine, { fields = [] } = {}) {
+  if (!fresh || !mine) return fresh;
+  mergeWorldJobs(fresh, mine);
+  for (const field of fields) fresh[field] = mine[field];
+  return fresh;
+}
+
 /** Выкинуть отработанное, чтобы очередь не росла вечно. */
 export function pruneJobs(world, { keep = 200 } = {}) {
   const jobs = jobList(world);
@@ -146,9 +190,11 @@ export function pruneJobs(world, { keep = 200 } = {}) {
  * Ход правителя останавливает время домена: пока жрец думает, мир не должен
  * уехать вперёд, иначе ответ будет про мир, которого уже нет.
  */
-export function beginRulerTurn(world, now = Date.now()) {
+export function beginRulerTurn(world, now = Date.now(), { domainId = null } = {}) {
   if (!world || typeof world !== 'object') return world;
   world.turnStartedAt = now;
+  // Чей ход: дневной цикл уступает только этому городу, остальные идут дальше.
+  world.turnDomainId = domainId ? String(domainId) : null;
   return world;
 }
 
@@ -160,7 +206,18 @@ export function endRulerTurn(world, now = Date.now()) {
     world.pausedMs = Math.max(0, Number(world.pausedMs) || 0) + held;
   }
   world.turnStartedAt = null;
+  world.turnDomainId = null;
   return world;
+}
+
+/** Идёт ли прямо сейчас ход правителя этого города. */
+export function rulerTurnHolds(world, domainId, now = Date.now()) {
+  if (openTurnStart(world) == null) return false;
+  if (rulerTurnStale(world, now)) return false;
+  const held = world?.turnDomainId;
+  // Старые миры без пометки города: считаем, что ход держит весь мир.
+  if (!held) return true;
+  return String(held) === String(domainId);
 }
 
 /** Открытый ход, если он есть. `null` и `0` — разные вещи: день 0 тоже день. */
@@ -184,15 +241,16 @@ export function worldDay(world, { now = Date.now(), config = null } = {}) {
 
 /** Промотать живой мир на игровые дни и записать. Пауза часов учитывается. */
 export async function skipStoredWorldDays(storage, days, { config = null, now = Date.now() } = {}) {
-  const world = await storage.getWorld();
-  if (!world) throw new Error('мира нет');
   const jump = Math.max(0, Math.round(Number(days) || 0));
-  const day = skipGameDays(world, jump, {
-    config,
-    now,
-    pausedMs: clockPausedMs(world, now),
+  let day = 0;
+  const world = await storage.updateWorld((fresh) => {
+    day = skipGameDays(fresh, jump, {
+      config,
+      now,
+      pausedMs: clockPausedMs(fresh, now),
+    });
   });
-  await storage.saveWorld(world);
+  if (!world) throw new Error('мира нет');
   return { day, days: jump, world };
 }
 
@@ -248,8 +306,12 @@ export class DomainQueue {
     this.tails = new Map();
   }
 
-  size(domainId) {
-    return this.tails.has(domainId) ? 1 : 0;
+  /**
+   * Занят ли город прямо сейчас. Проверка синхронная, и это важно: между ней
+   * и постановкой в очередь не должно быть await, иначе двое решат, что свободно.
+   */
+  busy(domainId) {
+    return this.tails.has(String(domainId || '_'));
   }
 
   run(domainId, fn) {

@@ -5,7 +5,7 @@ import { startTickScheduler, recordTickCompleted } from './scheduler/ticks.js';
 import { startDayScheduler } from './scheduler/days.js';
 import { runWorldTick } from './game/tick.js';
 import { runDayLoop } from './game/dayLoop.js';
-import { DomainQueue, skipStoredWorldDays } from './game/scheduler.js';
+import { skipStoredWorldDays } from './game/scheduler.js';
 import { DAYS_PER_MONTH } from './game/gameClock.js';
 import { getLogger } from './log.js';
 
@@ -33,8 +33,9 @@ async function main() {
     onTick: ({ reason }) => doTick(reason),
   });
 
-  // Один писатель на город: событие мира и ход правителя не пишут домен разом.
-  const domainQueue = new DomainQueue();
+  // Один писатель на город: очередь живёт в приложении, потому что ход
+  // правителя берёт её же. Две разные очереди защищали бы только от себя.
+  const domainQueue = app.domainQueue;
   const days = startDayScheduler({
     config,
     storage,
