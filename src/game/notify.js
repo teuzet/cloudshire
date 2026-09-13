@@ -25,6 +25,7 @@ export const NOTIFY_TRIGGERS = [
   'plotClosed',
   'priestReport',
   'conflux',
+  'confluxHostile',
 ];
 
 /** Минимальный зазор между пушами в игровых днях, выводится из интенсивности. */
@@ -35,7 +36,7 @@ export const MIN_GAP_BY_INTENSITY = {
 };
 
 /** Что жрец не имеет права отключить сам, даже если попросили. */
-export const PROTECTED_TRIGGERS = ['threatFired'];
+export const PROTECTED_TRIGGERS = ['threatFired', 'confluxHostile'];
 
 const TRIGGERS_BY_INTENSITY = {
   'всё': NOTIFY_TRIGGERS,
@@ -49,8 +50,9 @@ const TRIGGERS_BY_INTENSITY = {
     'plotClosed',
     'priestReport',
     'conflux',
+    'confluxHostile',
   ],
-  'сводка': ['threatFired', 'plotClosed'],
+  'сводка': ['threatFired', 'confluxHostile', 'plotClosed'],
 };
 
 export function parseIntensity(raw, fallback = 'важное') {

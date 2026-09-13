@@ -1435,7 +1435,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
             type: 'object',
             description:
               'Точечные просьбы: { newStory, threatSurfaced, deedDone, deedFailed, errandDone, plotClosed, priestReport, conflux } — ' +
-              'true говорить, false молчать. О сработавшей беде ты молчать не вправе.',
+              'true говорить, false молчать. О сработавшей беде и о враждебном действии соседа ты молчать не вправе.',
           },
           detail: {
             type: 'string',

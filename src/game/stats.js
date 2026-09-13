@@ -1,3 +1,9 @@
+/**
+ * Статы города: бросок, вера, качественные подписи.
+ */
+
+import { seedStartingMana } from './mana.js';
+
 /** Box–Muller normal sample */
 function gaussian(rng = Math.random) {
   let u = 0;
@@ -162,6 +168,7 @@ export function syncFaith(domain) {
   domain.state.faith = vals.length
     ? Math.max(0, Math.min(100, Math.round(vals.reduce((a, b) => a + b, 0) / vals.length)))
     : 55;
+  seedStartingMana(domain);
   return domain.state.faith;
 }
 

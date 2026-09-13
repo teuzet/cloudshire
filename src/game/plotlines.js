@@ -1039,6 +1039,7 @@ export function reopenClosedPlotline(domain, closedOrId) {
     shared: Boolean(closed.shared),
     isMainConflux: Boolean(closed.isMainConflux),
     sharedReason: closed.sharedReason || null,
+    leakedToConfluxAt: closed.leakedToConfluxAt ?? null,
     plotAwareness: normalizePlotAwarenessMap(closed),
     status: 'open',
     createdTick: closed.createdTick == null ? null : Number(closed.createdTick),

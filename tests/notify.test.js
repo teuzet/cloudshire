@@ -54,10 +54,11 @@ test('интенсивность задаёт набор триггеров, н�
   assert.equal(tuned.triggers.newStory, true);
 });
 
-test('сработавшую беду нельзя выключить никакой настройкой', () => {
-  const n = normalizeNotify({ intensity: 'сводка', triggers: { threatFired: false } });
+test('сработавшую беду и удар соседа нельзя выключить никакой настройкой', () => {
+  const n = normalizeNotify({ intensity: 'сводка', triggers: { threatFired: false, confluxHostile: false } });
   assert.equal(n.triggers.threatFired, true);
-  assert.deepEqual(PROTECTED_TRIGGERS, ['threatFired']);
+  assert.equal(n.triggers.confluxHostile, true);
+  assert.deepEqual(PROTECTED_TRIGGERS, ['threatFired', 'confluxHostile']);
 });
 
 test('нормализация чинит битые тихие часы', () => {

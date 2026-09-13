@@ -13,6 +13,7 @@ import {
   canAffordTurn,
   spendMana,
   spendTurnMana,
+  seedStartingMana,
 } from '../src/game/mana.js';
 import { DAYS_PER_YEAR } from '../src/game/gameClock.js';
 import { deedDurationBand } from '../src/game/deeds.js';
@@ -20,6 +21,16 @@ import { deedDurationBand } from '../src/game/deeds.js';
 function domain(faith = 50, mana = 0) {
   return { id: 'd1', state: { faith, mana } };
 }
+
+test('на старте мана равна вере, первое начисление не обнуляет', () => {
+  const d = { state: { faith: 56, mana: 0 } };
+  seedStartingMana(d);
+  assert.equal(currentMana(d), 56);
+  accrueMana(d, 10);
+  assert.equal(currentMana(d), 56, 'якорь часов ставится, запас не сбрасывается');
+  accrueMana(d, 10);
+  assert.equal(currentMana(d), 56);
+});
 
 test('за реальные сутки приходит ровно столько маны, сколько веры', () => {
   const d = domain(50);

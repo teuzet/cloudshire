@@ -153,6 +153,16 @@ test('каждое событие знает свой триггер уведо�
   assert.equal(triggerForEvent({ occasion: 'дело', plotId: 'p1', outcome: { finish: 'ok' } }), 'deedDone');
   assert.equal(triggerForEvent({ occasion: 'дело', outcome: { finish: 'ok' } }), 'errandDone');
   assert.equal(triggerForEvent({ occasion: 'доклад' }), 'priestReport');
+  assert.equal(triggerForEvent({ occasion: 'сопряжение' }), 'conflux');
+  assert.equal(triggerForEvent({ occasion: 'расстыковка' }), 'conflux');
+  assert.equal(
+    triggerForEvent({ occasion: 'дело', fromPair: true }),
+    'conflux',
+  );
+  assert.equal(
+    triggerForEvent({ occasion: 'сопряжение', hostileFromNeighbor: true }),
+    'confluxHostile',
+  );
 });
 
 // ─────────────────────────── рассказ события ───────────────────────────

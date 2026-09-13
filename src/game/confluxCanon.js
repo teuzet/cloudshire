@@ -435,9 +435,10 @@ export async function spreadChronicleToPair({
   }
   if (plot) markLeakedToPair(plot, day);
 
+  const place = placeForBeat({ process, domain, partner });
   const pairFact = appendPairEntry(conflux, world, {
     text: fact.text,
-    place: placeForBeat({ process, domain, partner }),
+    place,
     plotId: plot?.id || null,
     day,
     author: 'conflux-canon',
@@ -461,5 +462,5 @@ export async function spreadChronicleToPair({
     await storage.saveDomain(partner);
     if (storage.saveConflux) await storage.saveConflux(conflux);
   }
-  return { concern, fromData, first, frozen, pairFact, cityFact };
+  return { concern, fromData, first, frozen, pairFact, cityFact, hostile: place === PLACE_PAIR };
 }

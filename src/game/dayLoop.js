@@ -42,6 +42,10 @@ import { getLogger } from '../log.js';
 /** Какая настройка уведомлений отвечает за это событие. */
 export function triggerForEvent(event) {
   if (!event) return 'deedDone';
+  if (event.hostileFromNeighbor) return 'confluxHostile';
+  if (event.fromPair || event.occasion === 'сопряжение' || event.occasion === 'расстыковка' || event.occasion === 'касание') {
+    return 'conflux';
+  }
   if (event.surfaced) return 'threatSurfaced';
   if (event.occasion === 'новая история') return 'newStory';
   if (event.occasion === 'угроза') return 'threatFired';
@@ -423,7 +427,6 @@ export async function runDayLoop({
         });
         said.push(res);
         if (event.secretVictim?.fact && partner) {
-          // Сосед — чужой город: пишем его под его же замком.
           await jobs.run(partner.id, async () => {
             await deliverEvent({
               config,
@@ -432,14 +435,37 @@ export async function runDayLoop({
               domain: partner,
               world,
               event: {
-                occasion: 'дело',
+                occasion: 'сопряжение',
                 fact: event.secretVictim.fact,
                 plotId: event.plotId || null,
+                fromPair: true,
+                hostileFromNeighbor: true,
               },
               day,
               log,
             });
             await saveDomainOrShout(storage, partner, log, 'secret_victim');
+          });
+        }
+        if (event.pairSpread?.cityFact && partner) {
+          await jobs.run(partner.id, async () => {
+            await deliverEvent({
+              config,
+              runtime,
+              app,
+              domain: partner,
+              world,
+              event: {
+                occasion: 'сопряжение',
+                fact: event.pairSpread.cityFact,
+                plotId: event.plotId || null,
+                fromPair: true,
+                hostileFromNeighbor: Boolean(event.pairSpread.hostile),
+              },
+              day,
+              log,
+            });
+            await saveDomainOrShout(storage, partner, log, 'pair_spread');
           });
         }
       }

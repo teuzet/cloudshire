@@ -5,6 +5,7 @@ import { normalizeCityEntities } from './cityEntities.js';
 import { applyClockAlignedCalendar } from './tickClock.js';
 import { normalizeCityModifiers } from './cityContext.js';
 import { emptySeedTemp, normalizeSeedTemp } from './seedTemp.js';
+import { seedStartingMana } from './mana.js';
 import {
   ensureDomainClimates,
   loadStarterMysteryPool,
@@ -52,6 +53,7 @@ export function normalizeDomain(domain) {
     if (!Number.isFinite(Number(domain.state.mana))) domain.state.mana = 0;
     if (!Number.isFinite(Number(domain.state.manaAccrue))) domain.state.manaAccrue = 0;
     domain.state.seedTemp = normalizeSeedTemp(domain.state.seedTemp);
+    seedStartingMana(domain);
   }
   if (!Array.isArray(domain.officers)) domain.officers = [];
   for (const o of domain.officers) {

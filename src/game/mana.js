@@ -45,6 +45,18 @@ export function manaExact(domain) {
   return clampMana(domain?.state?.mana);
 }
 
+/** Пока часы маны ещё не шли — запас равен вере. Первое начисление это не затирает. */
+export function seedStartingMana(domain) {
+  if (!domain?.state) return domain;
+  if (Number.isFinite(Number(domain.state.manaDay))) return domain;
+  const faith = Number(domain.state.faith);
+  if (!Number.isFinite(faith)) return domain;
+  const mana = Number(domain.state.mana);
+  if (Number.isFinite(mana) && mana > 0) return domain;
+  domain.state.mana = store(Math.max(0, Math.min(MANA_MAX, faith)));
+  return domain;
+}
+
 /** То, что видит игрок. */
 export function currentMana(domain) {
   return Math.floor(manaExact(domain));

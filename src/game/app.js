@@ -1893,9 +1893,30 @@ export class GameApp {
             domain: partner,
             world,
             event: {
-              occasion: 'дело',
+              occasion: 'сопряжение',
               fact: event.secretVictim.fact,
               plotId: event.plotId || null,
+              fromPair: true,
+              hostileFromNeighbor: true,
+            },
+            day,
+            log,
+          });
+          await this.storage.saveDomain(partner);
+        }
+        if (event.pairSpread?.cityFact && partner) {
+          await deliverEvent({
+            config: this.config,
+            runtime: this.runtime,
+            app: this,
+            domain: partner,
+            world,
+            event: {
+              occasion: 'сопряжение',
+              fact: event.pairSpread.cityFact,
+              plotId: event.plotId || null,
+              fromPair: true,
+              hostileFromNeighbor: Boolean(event.pairSpread.hostile),
             },
             day,
             log,
