@@ -1941,6 +1941,9 @@ export class GameApp {
         plotId: plot.id,
         threatId: threat.id,
         plot,
+        conflux,
+        partner,
+        storage: this.storage,
         log,
       });
       if (event?.skipped) {

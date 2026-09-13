@@ -664,6 +664,10 @@ function applyPlotShape(p, config = null) {
   p.shared = Boolean(p.shared);
   p.isMainConflux = Boolean(p.isMainConflux);
   p.sharedReason = p.sharedReason ? String(p.sharedReason) : null;
+  p.leakedToConfluxAt =
+    p.leakedToConfluxAt == null || p.leakedToConfluxAt === ''
+      ? null
+      : Math.round(Number(p.leakedToConfluxAt) || 0);
   p.plotAwareness = normalizePlotAwarenessMap(p);
   p.status = 'open';
   p.createdTick = p.createdTick == null ? null : Number(p.createdTick);
@@ -774,6 +778,7 @@ export function createPlotline({
     shared: Boolean(shared),
     isMainConflux: Boolean(isMainConflux),
     sharedReason: null,
+    leakedToConfluxAt: null,
     plotAwareness: {},
     partnerGone: false,
     status: 'open',
@@ -977,6 +982,7 @@ function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } =
     shared: Boolean(plot.shared),
     isMainConflux: Boolean(plot.isMainConflux),
     sharedReason: plot.sharedReason || null,
+    leakedToConfluxAt: plot.leakedToConfluxAt ?? null,
     plotAwareness: normalizePlotAwarenessMap(plot),
     ...storyActState(plot),
     status: 'closed',

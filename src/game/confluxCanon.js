@@ -1,10 +1,21 @@
 /**
- * Канон сопряжения: одно структурное событие → летопись каждого задетого города.
- * Работа субъектификатора, вход — данные, не нейтральная проза.
+ * Канон пары: одно событие — одна нейтральная запись — два взгляда.
+ *
+ * Пометка места обязательна: проход не происходит ни в одном из городов.
+ * Фон архива субъектификатору даётся отдельно от того, что городу можно знать.
  */
 
 import { writeChronicle } from './chronicler.js';
 import { appendChronicle } from './freeform.js';
+import { createLoreFact } from './models.js';
+import { newId } from './ids.js';
+import { plotHostId, plotConcerns } from './confluxBoard.js';
+import { gameDateFromDay } from './gameClock.js';
+import { getLogger } from '../log.js';
+import { toolFail } from '../agents/toolResult.js';
+
+export const PLACE_PAIR = 'pair';
+export const FROZEN_SYNOPSIS_PREFIX = 'Что случилось в этой истории на данный момент:';
 
 export function confluxEvent({
   kind,
@@ -85,6 +96,7 @@ function viewpointPrompt(event, domain, partner) {
 
 /**
  * Записать событие пары. Город, которого оно не коснулось, записи не получает.
+ * Старый вход для стыковки и расстыковки: у них нет городской хроники-источника.
  */
 export async function writePairChronicle({
   runtime,
@@ -122,4 +134,332 @@ export async function writePairChronicle({
     facts.push({ domainId: domain.id, fact });
   }
   return facts;
+}
+
+export function hasLeakedToPair(plot) {
+  return plot?.leakedToConfluxAt != null && plot.leakedToConfluxAt !== '';
+}
+
+export function markLeakedToPair(plot, day = 0) {
+  if (!plot || hasLeakedToPair(plot)) return plot;
+  plot.leakedToConfluxAt = Math.round(Number(day) || 0);
+  return plot;
+}
+
+/**
+ * Один бинарный вопрос: запись касается одного города или обоих.
+ * Судья зовётся только когда ответа нет в данных.
+ */
+export function chronicleConcernFromData({
+  process = null,
+  plot = null,
+  domain = null,
+  partner = null,
+  conflux = null,
+} = {}) {
+  if (!conflux || conflux.status !== 'docked' || !partner || !domain) return 'one';
+  const partnerId = String(partner.id);
+  const domainId = String(domain.id);
+  if (process?.targetDomainId && String(process.targetDomainId) === partnerId) return 'both';
+  if (plot?.isMainConflux) return 'both';
+  const host = plotHostId(plot);
+  if (host && host === partnerId) return 'both';
+  if (plot && plotConcerns(plot, partnerId) && plotConcerns(plot, domainId)) return 'both';
+  if (plot && !plot.isMainConflux) return 'judge';
+  return 'one';
+}
+
+export function placeForBeat({ process = null, domain = null, partner = null } = {}) {
+  if (process?.targetDomainId && partner && String(process.targetDomainId) === String(partner.id)) {
+    return PLACE_PAIR;
+  }
+  return domain?.id ? String(domain.id) : PLACE_PAIR;
+}
+
+function dateLabel(world, day) {
+  if (day != null && day !== '' && Number.isFinite(Number(day))) {
+    return gameDateFromDay(Number(day)).label;
+  }
+  return world?.gameDate?.label || '';
+}
+
+export function appendPairEntry(
+  conflux,
+  world,
+  { text, place, plotId = null, day = null, author = 'conflux-canon', frozen = false, tags = [] } = {},
+) {
+  if (!conflux || !String(text || '').trim()) return null;
+  const fact = createLoreFact({
+    id: newId('lore'),
+    text: String(text).trim(),
+    tags: [
+      'chronicle',
+      'conflux',
+      conflux.id ? `conflux:${conflux.id}` : null,
+      frozen ? 'frozen-synopsis' : 'pair-canon',
+      ...tags,
+    ].filter(Boolean),
+    gameDateLabel: dateLabel(world, day),
+    tick: world?.tickIndex ?? null,
+    day,
+    author,
+    importance: frozen ? 'minor' : 'major',
+    relatedPlotlineIds: plotId ? [plotId] : null,
+    sourcePlotId: plotId || null,
+  });
+  fact.place = place || PLACE_PAIR;
+  if (frozen) fact.frozenSynopsis = true;
+  conflux.lore = Array.isArray(conflux.lore) ? conflux.lore : [];
+  conflux.lore.push(fact);
+  return fact;
+}
+
+export function freezePlotSynopsis(conflux, world, plot, { day = null, hostId = null } = {}) {
+  const synopsis = String(plot?.synopsis || '').trim();
+  if (!synopsis) return null;
+  return appendPairEntry(conflux, world, {
+    text: `${FROZEN_SYNOPSIS_PREFIX} ${synopsis}`,
+    place: hostId || plotHostId(plot) || PLACE_PAIR,
+    plotId: plot.id,
+    day,
+    author: 'conflux-archive',
+    frozen: true,
+  });
+}
+
+function placeCaption(place, domains = []) {
+  if (!place || place === PLACE_PAIR) return 'на проходе';
+  const city = (domains || []).find((d) => String(d.id) === String(place));
+  return city?.name ? `в «${city.name}»` : 'в одном из городов';
+}
+
+/** Полный архив пары с пометкой места. Не выжимка. */
+export function formatPairArchive(conflux, domains = []) {
+  const rows = [];
+  for (const fact of conflux?.lore || []) {
+    if (fact?.secret) continue;
+    const where = placeCaption(fact.place, domains);
+    const frozen = fact.frozenSynopsis ? ' [архив: не новость]' : '';
+    rows.push(`- (${fact.gameDateLabel || '?'}, ${where}${frozen}) ${fact.text}`);
+  }
+  return rows.join('\n');
+}
+
+export async function judgeChronicleLeak({
+  runtime,
+  text,
+  plot,
+  domain,
+  partner,
+  log,
+} = {}) {
+  if (!runtime || !String(text || '').trim()) return 'one';
+  const draft = { both: false };
+  try {
+    await runtime.run({
+      agentId: 'confluxLeak',
+      scene: 'conflux_leak',
+      log,
+      maxTurns: 2,
+      toolChoice: { type: 'function', function: { name: 'submit_leak' } },
+      tools: [
+        {
+          name: 'submit_leak',
+          description: 'Касается ли эта запись только своего города или уже обоих.',
+          parameters: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['both'],
+            properties: {
+              both: {
+                type: 'boolean',
+                description: 'true, если случившееся задело соседний город, проход или его берег.',
+              },
+            },
+          },
+          handler: async (args) => {
+            draft.both = Boolean(args?.both);
+            return { ok: true };
+          },
+        },
+      ],
+      extraSystem:
+        'Ты решаешь одно: эта запись хроники касается только своего города или уже обоих. ' +
+        'both=true, если событие пересекло проход, выдавило беду на чужой берег, задело чужую кромку. ' +
+        'both=false, если всё осталось внутри своего острова. Не выдумывай пересечения. Верни submit_leak.',
+      userMessages: [
+        {
+          role: 'user',
+          content: [
+            `Свой город: «${domain?.name || '?'}». Сосед: «${partner?.name || '?'}».`,
+            plot?.title ? `История: «${plot.title}».` : '',
+            plot?.synopsis ? `Суть до записи: ${plot.synopsis}` : '',
+            `Запись:\n${String(text).trim()}`,
+          ]
+            .filter(Boolean)
+            .join('\n'),
+        },
+      ],
+    });
+  } catch (err) {
+    (log || getLogger()).warn('conflux.leak_judge_failed', { error: err.message });
+    return 'one';
+  }
+  return draft.both ? 'both' : 'one';
+}
+
+async function renderCityView({
+  runtime,
+  world,
+  conflux,
+  domain,
+  partner,
+  plot,
+  sourceText,
+  archive,
+  day,
+  log,
+}) {
+  const knows = String(sourceText || '').trim();
+  if (!knows) return null;
+  let text = knows;
+  if (runtime) {
+    const draft = { text: null };
+    try {
+      await runtime.run({
+        agentId: 'subjectificator',
+        scene: 'conflux_subjectify',
+        log,
+        domainId: domain.id,
+        maxTurns: 4,
+        toolChoice: { type: 'function', function: { name: 'submit_chronicle' } },
+        tools: [
+          {
+            name: 'submit_chronicle',
+            description: `Запись в летопись «${domain.name}».`,
+            parameters: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['text'],
+              properties: { text: { type: 'string' } },
+            },
+            handler: async (args) => {
+              const body = String(args?.text || '').trim();
+              if (body.length < 8) return toolFail('too_short', 'Нужна связная запись.');
+              draft.text = body;
+              return { ok: true };
+            },
+          },
+        ],
+        extraSystem: [
+          `Ты пишешь летопись ТОЛЬКО города «${domain.name}». Сосед — «${partner?.name || '?'}».`,
+          'Соседа не делай «нами». Не переворачивай стороны.',
+        ].join(' '),
+        userMessages: [
+          {
+            role: 'user',
+            content: [
+              `ЭТО ЛЕТОПИСЬ ГОРОДА «${domain.name}».`,
+              `Что этому городу можно знать и записать:\n${knows}`,
+              archive
+                ? `Фон архива пары — имей в виду для связности, но не пересказывай и не раскрывай то, чего этот берег не видел:\n${archive}`
+                : '',
+              plot?.title ? `История, из которой это пришло: «${plot.title}».` : '',
+              'Вызови submit_chronicle.',
+            ]
+              .filter(Boolean)
+              .join('\n'),
+          },
+        ],
+      });
+    } catch (err) {
+      (log || getLogger()).warn('conflux.subjectify_failed', { error: err.message, domainId: domain.id });
+    }
+    if (draft.text) text = draft.text;
+  }
+  const fact = createLoreFact({
+    id: newId('lore'),
+    text,
+    tags: ['chronicle', 'conflux', conflux?.id ? `conflux:${conflux.id}` : null, 'subjective'].filter(Boolean),
+    gameDateLabel: dateLabel(world, day),
+    tick: world?.tickIndex ?? null,
+    day,
+    author: 'subjectificator',
+    importance: 'major',
+    relatedPlotlineIds: plot?.id ? [plot.id] : null,
+    sourcePlotId: plot?.id || null,
+  });
+  domain.lore = domain.lore || [];
+  domain.lore.push(fact);
+  return fact;
+}
+
+/**
+ * После того как хозяин уже записал свою хронику: если она касается обоих,
+ * нейтральный слепок идёт в архив пары, сосед получает свой взгляд.
+ */
+export async function spreadChronicleToPair({
+  runtime,
+  world,
+  conflux,
+  domain,
+  partner,
+  plot = null,
+  process = null,
+  fact = null,
+  day = null,
+  log = null,
+  storage = null,
+} = {}) {
+  if (!fact?.text || fact.secret) return null;
+  if (!conflux || conflux.status !== 'docked' || !partner || !domain) return null;
+
+  let concern = chronicleConcernFromData({ process, plot, domain, partner, conflux });
+  const fromData = concern;
+  if (concern === 'judge') {
+    concern = await judgeChronicleLeak({
+      runtime,
+      text: fact.text,
+      plot,
+      domain,
+      partner,
+      log,
+    });
+  }
+  if (concern !== 'both') return { concern, fromData };
+
+  const first = Boolean(plot) && !hasLeakedToPair(plot);
+  let frozen = null;
+  if (first && fromData === 'judge') {
+    frozen = freezePlotSynopsis(conflux, world, plot, { day, hostId: domain.id });
+  }
+  if (plot) markLeakedToPair(plot, day);
+
+  const pairFact = appendPairEntry(conflux, world, {
+    text: fact.text,
+    place: placeForBeat({ process, domain, partner }),
+    plotId: plot?.id || null,
+    day,
+    author: 'conflux-canon',
+  });
+
+  const archive = formatPairArchive(conflux, [domain, partner]);
+  const cityFact = await renderCityView({
+    runtime,
+    world,
+    conflux,
+    domain: partner,
+    partner: domain,
+    plot,
+    sourceText: fact.text,
+    archive,
+    day,
+    log,
+  });
+
+  if (storage) {
+    await storage.saveDomain(partner);
+    if (storage.saveConflux) await storage.saveConflux(conflux);
+  }
+  return { concern, fromData, first, frozen, pairFact, cityFact };
 }

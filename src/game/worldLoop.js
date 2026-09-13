@@ -76,7 +76,7 @@ import { plantStakedStory } from './storyteller.js';
 import { accrueMana } from './mana.js';
 import { countEvent, markReported, pickReportSubject } from './priestOrders.js';
 import { decideAsk } from './herald.js';
-import { writePairChronicle, confluxEvent } from './confluxCanon.js';
+import { writePairChronicle, confluxEvent, spreadChronicleToPair } from './confluxCanon.js';
 import { secretRevealTexts } from './deedConflux.js';
 import { releasePassageHold } from './passage.js';
 import { getLogger } from '../log.js';
@@ -338,6 +338,23 @@ export async function resolveDeedEvent({
     secretForDomainId: process.secret ? domain.id : null,
   });
 
+  const pairSpread =
+    process.secret
+      ? null
+      : await spreadChronicleToPair({
+          runtime,
+          world,
+          conflux,
+          domain,
+          partner,
+          plot,
+          process,
+          fact,
+          day,
+          log,
+          storage,
+        });
+
   let secretVictim = null;
   if (process.secret) {
     process.secretRevealed = true;
@@ -403,6 +420,7 @@ export async function resolveDeedEvent({
     closed: Boolean(closed),
     actor: deedActor(domain, process),
     secretVictim,
+    pairSpread,
   };
 }
 
@@ -422,6 +440,9 @@ export async function fireThreatEvent({
   rng = Math.random,
   log: parentLog,
   plot: givenPlot = null,
+  conflux = null,
+  partner = null,
+  storage = null,
 } = {}) {
   const log = (parentLog || getLogger()).child({ scope: 'loop.threat', domainId: domain?.id, plotId });
   const plot = givenPlot || findPlotline(domain, plotId);
@@ -471,6 +492,19 @@ export async function fireThreatEvent({
     importance: 'major',
   });
 
+  const pairSpread = await spreadChronicleToPair({
+    runtime,
+    world,
+    conflux,
+    domain,
+    partner,
+    plot,
+    fact,
+    day,
+    log,
+    storage,
+  });
+
   let closed = null;
   if (res.closes) {
     closed = closePlotWithJobs(domain, world, plot, {
@@ -500,6 +534,7 @@ export async function fireThreatEvent({
     occasion,
     closed: Boolean(closed),
     severity: res.severity,
+    pairSpread,
   };
 }
 
