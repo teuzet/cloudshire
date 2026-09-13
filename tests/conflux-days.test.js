@@ -413,7 +413,7 @@ test('расставание: судьба оборванного дела по�
   const runtime = {
     async run({ tools, userMessages, agentId }) {
       const text = userMessages?.map((m) => m.content).join('\n') || '';
-      if (agentId === 'confluxResolver') {
+      if (agentId === 'undockChronicle') {
         seen = text;
         const submit = tools.find((t) => t.name === 'submit_undock');
         await submit.handler({

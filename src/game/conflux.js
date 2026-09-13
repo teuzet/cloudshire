@@ -765,7 +765,7 @@ export async function flagPassageDeeds({ runtime, domain, partner, log } = {}) {
       tools: [
         {
           name: 'submit_passage_needs',
-          description: 'Какие из этих дел теряют смысл без живого прохода к соседу.',
+          description: 'Какие из этих работ имеют смысл только пока есть проход к другому городу.',
           parameters: {
             type: 'object',
             additionalProperties: false,
@@ -781,17 +781,19 @@ export async function flagPassageDeeds({ runtime, domain, partner, log } = {}) {
         },
       ],
       extraSystem:
-        'Ты решаешь, каким делам нужен живой проход к соседнему острову. ' +
-        'needsPassage=true, если дело готовит встречу, оборону к сопряжению, посольство, переход, удар по соседу — даже если цель не названа. ' +
-        'Локальные дела своего острова не трогай. Верни submit_passage_needs.',
+        'Острова расходятся, проход пропадает. ' +
+        'Отметь работы, которым без прохода нечего делать: посольство, переход, удар по другому городу, встреча или оборона у стыка. ' +
+        'Ремонт своей цистерны, урожай, храм, площадь, запасы, стража своего края — не отмечай, даже если другой город рядом. ' +
+        'Верни submit_passage_needs: id в processIds, или пустой список.',
       userMessages: [
         {
           role: 'user',
           content: [
-            `Город «${domain.name}». Сосед «${partner?.name || '?'}» уходит.`,
-            'Идущие дела:',
+            `Город «${domain.name}». Соседний город «${partner?.name || '?'}».`,
+            'Острова расходятся, проход между ними пропадает.',
+            'Идущие работы:',
             candidates.map((p) => `- ${p.id}: ${p.summary || ''} ${p.detail ? `— ${p.detail}` : ''}`).join('\n'),
-            'Верни id тех дел, которым без прохода нечего делать.',
+            'Положи в processIds id тех работ, которым без прохода нечего делать. Если таких нет — пустой список.',
           ].join('\n'),
         },
       ],
@@ -1021,7 +1023,7 @@ async function generateUndockChronicle({ runtime, conflux, domains, world, log, 
   const draft = { text: null };
   const forecast = conflux.forecast || {};
   const forecastLines = [
-    forecast.neutral ? `Нейтральный прогноз, который теперь факт: ${forecast.neutral}` : '',
+    forecast.neutral ? `Общая сводка, теперь это случилось: ${forecast.neutral}` : '',
     ...domains.map((d) => (forecast[d.id] ? `Для «${d.name}»: ${forecast[d.id]}` : '')),
   ]
     .filter(Boolean)
@@ -1032,8 +1034,7 @@ async function generateUndockChronicle({ runtime, conflux, domains, world, log, 
   const tools = [
     {
       name: 'submit_undock',
-      description:
-        'Большая хроника конца сопряжения: острова разошлись, прогноз стал фактом, оборванные дела получили судьбу.',
+      description: 'Одна запись о том, что острова разошлись. Оба города названы. Пути больше нет.',
       parameters: {
         type: 'object',
         required: ['text'],
@@ -1041,10 +1042,11 @@ async function generateUndockChronicle({ runtime, conflux, domains, world, log, 
           text: {
             type: 'string',
             description:
-              `3–6 предложений. ОБЯЗАТЕЛЬНО «${nameA}» и «${nameB}». ` +
-              'Главное: два летающих острова разошлись в небе; пути между ними больше нет. ' +
-              'Прогноз впиши как случившееся. Судьбы оборванных дел — в эту же запись, не шаблоном. ' +
-              'НЕ своди к обвалу моста — мост исчезает потому, что острова ушли.',
+              `3–6 предложений. Обязательно имена «${nameA}» и «${nameB}». ` +
+              'Острова разошлись в небе; пути между ними нет. ' +
+              'Остаток «если разойдутся» впиши как уже случившееся. ' +
+              'Судьбы оборванных работ — в эту же запись, не списком. ' +
+              'Не своди к обвалу моста: переход исчезает потому, что острова ушли.',
           },
         },
       },
@@ -1074,34 +1076,43 @@ async function generateUndockChronicle({ runtime, conflux, domains, world, log, 
     },
   ];
 
-  const contactHint = conflux.contact
-    ? `Бывший контакт: ${formatContactForPrompt(conflux.contact)}`
-    : '';
+  const contactHint = (() => {
+    const desc = String(conflux.contact?.description || '').trim();
+    if (desc) return `Каким был проход, пока края стояли вместе: ${desc}`;
+    return '';
+  })();
 
   if (runtime?.run) {
     try {
       await runtime.run({
-        agentId: 'confluxResolver',
+        agentId: 'undockChronicle',
         tools,
         maxTurns: 5,
         toolChoice: { type: 'function', function: { name: 'submit_undock' } },
         log,
         scene: 'conflux_undock',
         domainId: `${domains[0].id}+${domains[1].id}`,
+        extraSystem:
+          'Есть два города на летающих островах. Края стояли вместе, был проход. ' +
+          'Сейчас острова расходятся в небе, проход пропадает. ' +
+          'Напиши одну общую запись об этом моменте. Остаток «если разойдутся» — уже факт. ' +
+          'Оборванные работы вплети событиями, не списком. Не выдумывай сверх данного. ' +
+          'Не своди к обвалу моста. Верни submit_undock.',
         userMessages: [
           {
             role: 'user',
             content: [
-              `Сопряжение кончается. Дата: ${world?.gameDate?.label || ''}.`,
-              `Летающие острова городов «${nameA}» и «${nameB}» расходятся.`,
+              world?.gameDate?.label ? `Сейчас ${world.gameDate.label}.` : '',
+              `Города «${nameA}» и «${nameB}». Их летающие острова расходятся, прохода больше нет.`,
               contactHint,
-              forecastLines,
-              abortedLines ? `Оборванные дела (впиши их судьбы в хронику, не копируй шаблон):\n${abortedLines}` : '',
-              '',
-              'Вызови submit_undock. Одна каноническая запись.',
-              `Обязательный смысл: «${nameA} и ${nameB} разошлись в небе — между ними снова нет никакого пути».`,
-              'ЗАПРЕЩЕНО сводить событие к «мостик обвалился». Мост/переход кончается потому, что острова ушли.',
-              'Не пиши голый номер игрового дня.',
+              forecastLines
+                ? `Что уже было сказано как остаток, если разойдутся сейчас (это теперь случилось):\n${forecastLines}`
+                : '',
+              abortedLines
+                ? `Работы, которые оборвались, и судьба людей на них:\n${abortedLines}`
+                : '',
+              'Вызови submit_undock. Одна запись на оба города.',
+              `В тексте обязательно «${nameA}» и «${nameB}», и что острова разошлись в небе.`,
             ]
               .filter(Boolean)
               .join('\n'),

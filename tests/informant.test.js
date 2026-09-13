@@ -107,3 +107,66 @@ test('новый факт о соседе лежит у соседа, у спр�
   assert.equal(link.text, original.text);
   assert.ok((link.tags || []).includes('informant-link'));
 });
+
+test('сведения информатора без тегов, статов и канона', async () => {
+  const asker = city('a', 'Аллерия');
+  const partner = city('b', 'Керсай', {
+    cityBrief: 'Город у обрыва.\n\nНеизвестно (канон):\n- Откуда гул в цистерне',
+    modifiers: [{ text: 'На площади тишина по ночам.' }],
+  });
+  partner.lore = [
+    createLoreFact({
+      id: 'lore_f',
+      text: 'На площади рынок.',
+      tags: ['fact'],
+      importance: 'major',
+      sourcePlotId: 'plot_x',
+      statChanges: { food: { from: 40, to: 38 } },
+    }),
+    createLoreFact({
+      id: 'lore_c',
+      text: 'Починили мост.',
+      tags: ['chronicle'],
+      importance: 'major',
+    }),
+  ];
+  const conflux = { id: 'cf1', status: 'docked', domainIds: ['a', 'b'], lore: [] };
+  const storage = {
+    async getWorld() {
+      return { gameDate: { label: 'Год 1, месяц 2, день 3' }, tickIndex: 1 };
+    },
+    async getDomain(id) {
+      return id === 'b' ? partner : asker;
+    },
+    async saveDomain() {},
+    async saveConflux() {},
+  };
+  let payload = null;
+  const runtime = {
+    async run({ tools }) {
+      const read = tools.find((t) => t.name === 'read_neighbor');
+      payload = await read.handler();
+    },
+  };
+  await askInformant({
+    runtime,
+    storage,
+    domain: asker,
+    questions: ['Что у них?'],
+    conflux,
+  });
+  assert.ok(payload);
+  assert.equal('cosmology' in payload, false);
+  assert.equal('neighborId' in payload, false);
+  assert.match(payload.description, /Город у обрыва/);
+  assert.equal(payload.description.includes('канон'), false);
+  assert.match(payload.unknowns || '', /гул/);
+  assert.match(payload.facts, /На площади рынок/);
+  assert.equal(payload.facts.includes('статы'), false);
+  assert.equal(payload.facts.includes('plot_x'), false);
+  assert.equal(payload.facts.includes('[fact'), false);
+  assert.match(payload.past, /Починили мост/);
+  assert.equal(payload.past.includes('major'), false);
+  assert.equal(payload.past.includes('ХРОНИКА'), false);
+  assert.match(payload.description, /тишина по ночам/);
+});

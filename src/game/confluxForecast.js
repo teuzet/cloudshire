@@ -18,7 +18,7 @@ function archiveForForecast(conflux, domains = []) {
     .map((f) => {
       const where =
         !f.place || f.place === 'pair' ? 'на проходе' : names.get(String(f.place)) || 'в городе';
-      const frozen = f.frozenSynopsis ? ' [архив]' : '';
+      const frozen = f.frozenSynopsis ? ', уже отошло' : '';
       return `- (${f.gameDateLabel || '?'}, ${where}${frozen}) ${f.text}`;
     })
     .join('\n');
@@ -142,8 +142,7 @@ export async function refreshPairForecast({
       tools: [
         {
           name: 'submit_forecast',
-          description:
-            'Что останется каждому городу, если острова разойдутся сейчас. Игроку это не показывают.',
+          description: 'Что останется каждому городу, если острова разойдутся сейчас.',
           parameters: {
             type: 'object',
             additionalProperties: false,
@@ -162,7 +161,7 @@ export async function refreshPairForecast({
               },
               neutral: {
                 type: 'string',
-                description: 'Нейтральное объединение для архива, без суда кто прав.',
+                description: 'Короткая нейтральная сводка без суда, кто прав.',
               },
             },
           },
@@ -180,19 +179,22 @@ export async function refreshPairForecast({
         },
       ],
       extraSystem:
-        'Ты пишешь внутренний прогноз сопряжения: что станет фактом, если острова разойдутся СЕЙЧАС. ' +
-        'Для каждого города — свой текст: одно и то же событие для одного беда, для другого удача. ' +
-        'neutral — сухая сводка без суда. Не пиши хронику. Не датируй голым номером дня. Верни submit_forecast.',
+        'Если края островов разойдутся прямо сейчас — что из УЖЕ случившегося останется фактом каждому городу? ' +
+        'Для каждого свой текст с его берега; не выворачивай оценки, если этого нет в данном. ' +
+        'Плюс короткая нейтральная сводка. Новых событий не выдумывай. Если случившегося нет — так и скажи. Верни submit_forecast.',
       userMessages: [
         {
           role: 'user',
           content: [
             world?.gameDate?.label ? `Сейчас ${world.gameDate.label}.` : '',
-            `Города: ${pair.map((d) => `«${d.name}» (${d.id})`).join(' и ')}.`,
-            'Полный архив пары:',
-            archiveForForecast(conflux, pair) || '(пусто)',
-            conflux.forecast?.neutral ? `Прежний нейтральный прогноз: ${conflux.forecast.neutral}` : '',
-            'Если острова разойдутся прямо сейчас — что останется каждому? Вызови submit_forecast.',
+            `Города: ${pair.map((d) => `«${d.name}» (id: ${d.id})`).join(' и ')}.`,
+            'Пока края были вместе, случилось:',
+            archiveForForecast(conflux, pair) || '(ещё ничего — не выдумывай)',
+            'Строки с «уже отошло» — старый фон, не сегодняшняя новость.',
+            conflux.forecast?.neutral
+              ? `Прежняя сводка «если бы разошлись тогда»: ${conflux.forecast.neutral}`
+              : '',
+            'Если острова разойдутся прямо сейчас — что останется каждому? У каждого города в списке укажи его id из скобок. Вызови submit_forecast.',
           ]
             .filter(Boolean)
             .join('\n'),

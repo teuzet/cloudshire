@@ -1,15 +1,12 @@
 /**
- * Информатор: справка о соседе во время стыковки.
- * Близнец лормастера: те же add/refine/drop, другой предмет и правило
- * «не знаешь — так и скажи».
+ * Информатор: ответы на вопросы о другом городе, пока края островов вместе.
  */
 
 import { newId } from './ids.js';
-import { createLoreFact, formatCastForPrompt } from './models.js';
-import { formatFullChronicleForPrompt, formatFactsForPrompt } from './memory.js';
+import { createLoreFact, formatCastForPrompt, chronicleEntries } from './models.js';
 import { findActiveConfluxForDomain } from './conflux.js';
 import { cityRules } from './cityRules.js';
-import { formatCityForAgents, parseCityBrief, formatCanonicalUnknownsForPrompt } from './cityContext.js';
+import { parseCityBrief, normalizeCanonicalUnknowns } from './cityContext.js';
 import { formatPairArchive } from './confluxCanon.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
@@ -26,11 +23,63 @@ export function visibleNeighborLore(lore) {
 
 export function formatNeighborPlotList(plots = []) {
   const list = (plots || []).filter((p) => p && p.kind !== 'errand' && !p.isMainConflux);
-  if (!list.length) return 'Открытых историй у соседа нет.';
+  if (!list.length) return 'Открытых бед и дел у того города нет.';
   return [
-    'Нити соседа — только список. Канон истины и скрытые посылки не даны. Не решай их.',
+    'Текущие беды и дела того города — коротко, без скрытых подробностей:',
     ...list.map((p) => `- ${p.id} «${p.title || 'история'}»: ${p.synopsis || ''}`),
   ].join('\n');
+}
+
+function formatUnknownsForInformant(unknowns = []) {
+  const items = normalizeCanonicalUnknowns(unknowns);
+  if (!items.length) return '';
+  return [
+    'В этом городе есть установленные пробелы — их не раскрывай и не выдумывай причину:',
+    ...items.map((u) => `- ${u}`),
+  ].join('\n');
+}
+
+function formatCityForInformant(domain) {
+  const raw = String(domain?.cityBrief || '').trim();
+  const body = raw
+    ? String(parseCityBrief(raw).body || '').trim()
+    : String(domain?.description || '').trim();
+  const mods = (domain?.modifiers || [])
+    .map((m) => String(m?.text || '').trim())
+    .filter(Boolean)
+    .map((text) => `- ${text}`);
+  const parts = [body || '(описание пусто)'];
+  if (mods.length) parts.push('Постоянный порядок:', ...mods);
+  return parts.join('\n');
+}
+
+function formatChronicleForInformant(lore) {
+  const chron = chronicleEntries(lore);
+  if (!chron.length) return '(записей о прошлом нет)';
+  return chron
+    .map((e) => `- ${e.gameDateLabel || 'без даты'}: ${String(e.text || '').trim()}`)
+    .join('\n');
+}
+
+function formatFactsForInformant(lore) {
+  const facts = (lore || []).filter((f) => {
+    const tags = f?.tags || [];
+    if (!tags.includes('fact')) return false;
+    if (tags.includes('chronicle')) return false;
+    return true;
+  });
+  if (!facts.length) return '(коротких фактов пока нет — смотри описание и записи о прошлом)';
+  return facts
+    .map((f) => `- ${f.id} (${f.gameDateLabel || 'без даты'}): ${String(f.text || '').trim()}`)
+    .join('\n');
+}
+
+function formatTogetherForInformant(conflux, domains) {
+  const raw = (formatPairArchive(conflux, domains) || '').replace(
+    / \[архив: не новость\]/g,
+    ', уже отошло',
+  );
+  return raw || '(ещё ничего не случилось, пока острова вместе)';
 }
 
 function linkFactOnAsker(asker, original, { world, askerTag }) {
@@ -99,8 +148,7 @@ export async function askInformant({
   const addedLinks = [];
   let answers = null;
   const visible = visibleNeighborLore(partner.lore);
-  const canonicalUnknowns = parseCityBrief(partner.cityBrief).unknowns;
-  const unknownsPrompt = formatCanonicalUnknownsForPrompt(canonicalUnknowns);
+  const unknownsPrompt = formatUnknownsForInformant(parseCityBrief(partner.cityBrief).unknowns);
 
   const persistPartner = async () => {
     if (!storage?.updateDomain) {
@@ -129,42 +177,41 @@ export async function askInformant({
   const tools = [
     {
       name: 'read_neighbor',
-      description: 'Прочитать то, что об этом соседе уже известно: описание, публичные факты, летопись, люди, порядки, нити списком.',
+      description: 'Открывает сведения о другом городе — том, о котором тебя спрашивают. Только чтение.',
       parameters: { type: 'object', properties: {} },
       handler: async () => ({
         ok: true,
-        cosmology: config?.world?.cosmology,
-        gameDate: world?.gameDate,
-        neighborName: partner.name,
-        neighborId: partner.id,
+        gameDate: world?.gameDate?.label || null,
+        cityName: partner.name,
         ruler: partner.characters?.[0]?.name,
-        description: formatCityForAgents(partner),
-        chronicle: formatFullChronicleForPrompt({ ...partner, lore: visible }),
-        facts: formatFactsForPrompt(visible, { limit: 60 }),
+        description: formatCityForInformant(partner),
+        past: formatChronicleForInformant(visible),
+        facts: formatFactsForInformant(visible),
         knownPeople: formatCastForPrompt(visible, { limit: 30 }),
         standingRules: cityRules(partner).map((m) => m.text),
         currentEvents: (partner.state?.events || []).map((e) => (typeof e === 'string' ? e : e?.text)),
-        neighborPlots: formatNeighborPlotList(partner.plotlines),
-        pairArchive: formatPairArchive(conflux, [domain, partner]),
-        canonicalUnknowns: unknownsPrompt,
+        currentTroubles: formatNeighborPlotList(partner.plotlines),
+        whileTogether: formatTogetherForInformant(conflux, [domain, partner]),
+        unknowns: unknownsPrompt || undefined,
         reminder:
-          'Это ЧУЖОЙ город. Не знаешь — так и скажи в submit_answers. Пробелы не заполняй. ' +
-          'Тайные факты, скрытые посылки и канон истины нитей тебе не даны — не выдумывай их. ' +
-          'Нити — только список, чтобы можно было назначить дело. ' +
-          'Новый факт пиши через add_fact: он ляжет у соседа, спросившему уйдёт ссылка. ' +
-          (unknownsPrompt ? ' canonicalUnknowns соседа не раскрывай.' : ''),
+          'Это сведения о другом городе, не о том, кто спрашивает. ' +
+          'Если чего-то нет — так и скажи в submit_answers, не заполняй пробелы. ' +
+          'Людей называй только из этих сведений. ' +
+          'Список бед — чтобы указать одну по id, если спросят. Разгадок там нет. ' +
+          'add_fact — только то, что здесь уже сказано прямо. ' +
+          (unknownsPrompt ? 'То, что помечено неизвестным, не раскрывай.' : ''),
       }),
     },
     {
       name: 'add_fact',
-      description: 'Зафиксировать факт О СОСЕДЕ. Запись живёт у соседа; спросивший получает ссылку.',
+      description: 'Записывает сухой факт о том городе, о котором спрашивают. Только то, что уже есть в сведениях.',
       parameters: {
         type: 'object',
         required: ['text'],
         properties: {
           text: {
             type: 'string',
-            description: 'Сухой факт о соседнем городе. Незнание в факт не пишется.',
+            description: 'Сухой факт о том городе. Незнание в факт не пишется.',
           },
         },
       },
@@ -191,12 +238,12 @@ export async function askInformant({
         addedLinks.push(link);
         await persistPartner();
         log.info('informant.add_fact', { factId: fact.id, text: truncate(body, 300) });
-        return { ok: true, factId: fact.id, linkedFactId: link.id };
+        return { ok: true, factId: fact.id };
       },
     },
     {
       name: 'update_fact',
-      description: 'Переписать устаревший факт соседа. factId — id из facts соседа.',
+      description: 'Переписать устаревший факт о том городе. factId — из списка фактов.',
       parameters: {
         type: 'object',
         required: ['factId', 'text'],
@@ -209,7 +256,7 @@ export async function askInformant({
       handler: async ({ factId, text, reason }) => {
         const body = String(text || '').trim();
         const fact = (partner.lore || []).find((f) => f.id === factId);
-        if (!fact) return toolFail('fact_not_found', 'Факт с таким id у соседа не найден.');
+        if (!fact) return toolFail('fact_not_found', 'Факт с таким id у того города не найден.');
         if (body.length < 3) return toolFail('too_short', 'Новая формулировка слишком короткая.');
         fact.previousText = fact.text;
         fact.text = body;
@@ -223,7 +270,7 @@ export async function askInformant({
     },
     {
       name: 'retire_fact',
-      description: 'Снять факт соседа, который больше не верен.',
+      description: 'Снять факт о том городе, который больше не верен.',
       parameters: {
         type: 'object',
         required: ['factId'],
@@ -234,7 +281,7 @@ export async function askInformant({
       },
       handler: async ({ factId, reason }) => {
         const fact = (partner.lore || []).find((f) => f.id === factId);
-        if (!fact) return toolFail('fact_not_found', 'Факт с таким id у соседа не найден.');
+        if (!fact) return toolFail('fact_not_found', 'Факт с таким id у того города не найден.');
         fact.retiredAt = new Date().toISOString();
         fact.retiredTick = world?.tickIndex;
         if (reason) fact.retireReason = String(reason).slice(0, 300);
@@ -260,7 +307,6 @@ export async function askInformant({
               properties: {
                 question: { type: 'string' },
                 answer: { type: 'string' },
-                invented: { type: 'boolean' },
               },
             },
           },
@@ -283,14 +329,13 @@ export async function askInformant({
         {
           role: 'user',
           content: [
-            `Спрашивает: ${asker}`,
-            `Свой город: ${domain.name}. Предмет вопроса — сосед «${partner.name}».`,
+            `Город «${domain.name}» спрашивает о городе «${partner.name}».`,
+            'Края островов сейчас вместе, между ними есть проход.',
             '',
             'Вопросы:',
             qText || '(нет вопросов)',
             '',
-            'Порядок: read_neighbor → при нужде add_fact / update_fact / retire_fact → submit_answers.',
-            'Не знаешь — так и скажи. Пробелы не заполняй. Тайны нитей соседа не раскрывай.',
+            'Сначала read_neighbor. Если не знаешь — так и скажи. Пробелы не заполняй. Тайны того города не выдумывай.',
           ].join('\n'),
         },
       ],
@@ -319,7 +364,7 @@ export async function askInformant({
     addedLinks,
     partnerId: partner.id,
     loreTextForAsker: (answers || [])
-      .map((a) => `Q: ${a.question}\nA: ${a.answer}${a.invented ? ' (уточнено)' : ''}`)
+      .map((a) => `Q: ${a.question}\nA: ${a.answer}`)
       .join('\n\n'),
   };
 }

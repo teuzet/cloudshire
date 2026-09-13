@@ -249,7 +249,6 @@ export function formatPairArchive(conflux, domains = []) {
 export async function judgeChronicleLeak({
   runtime,
   text,
-  plot,
   domain,
   partner,
   log,
@@ -266,7 +265,7 @@ export async function judgeChronicleLeak({
       tools: [
         {
           name: 'submit_leak',
-          description: 'Касается ли эта запись только своего города или уже обоих.',
+          description: 'Затрагивает ли событие второй город напрямую.',
           parameters: {
             type: 'object',
             additionalProperties: false,
@@ -274,7 +273,8 @@ export async function judgeChronicleLeak({
             properties: {
               both: {
                 type: 'boolean',
-                description: 'true, если случившееся задело соседний город, проход или его берег.',
+                description:
+                  'true, если событие напрямую коснулось второго города, прохода между островами или берега второго острова.',
               },
             },
           },
@@ -285,17 +285,17 @@ export async function judgeChronicleLeak({
         },
       ],
       extraSystem:
-        'Ты решаешь одно: эта запись хроники касается только своего города или уже обоих. ' +
-        'both=true, если событие пересекло проход, выдавило беду на чужой берег, задело чужую кромку. ' +
-        'both=false, если всё осталось внутри своего острова. Не выдумывай пересечения. Верни submit_leak.',
+        'Смотри только текст события, не сюжет вокруг. ' +
+        'both=true, если оно напрямую коснулось второго города, прохода между островами или берега второго острова. ' +
+        'Намёка недостаточно. Иначе both=false. Верни submit_leak.',
       userMessages: [
         {
           role: 'user',
           content: [
-            `Свой город: «${domain?.name || '?'}». Сосед: «${partner?.name || '?'}».`,
-            plot?.title ? `История: «${plot.title}».` : '',
-            plot?.synopsis ? `Суть до записи: ${plot.synopsis}` : '',
-            `Запись:\n${String(text).trim()}`,
+            `Первый город: «${domain?.name || '?'}». Второй город: «${partner?.name || '?'}».`,
+            'Событие связано с первым городом. Решай только по тексту ниже, не по догадке о теме.',
+            `Событие:\n${String(text).trim()}`,
+            'Затрагивает ли это второй город, проход или берег второго острова напрямую? Вызови submit_leak.',
           ]
             .filter(Boolean)
             .join('\n'),
