@@ -321,11 +321,21 @@ test('взгляд жертвы не переворачивает, кто нап
 test('удар с чужого берега помечает след для статов жертвы', () => {
   const fact = { id: 'lore_v' };
   stampPairImpact(fact, {
-    process: { finishKind: 'crit', objectiveDays: 27 },
+    process: {
+      finishKind: 'crit',
+      objectiveDays: 27,
+      crossIsland: true,
+      durationBand: 'WEEKS',
+      difficulty: 'SEVERE',
+    },
     actorId: 'a',
     hostile: true,
   });
   assert.equal(fact.pairImpact.hostile, true);
   assert.equal(fact.pairImpact.finish, 'crit');
   assert.equal(fact.pairImpact.objectiveDays, 27);
+  // Полосы нужны жертве: своего дела у неё нет, а цену считают по ним.
+  assert.equal(fact.pairImpact.crossIsland, true);
+  assert.equal(fact.pairImpact.durationBand, 'WEEKS');
+  assert.equal(fact.pairImpact.difficulty, 'SEVERE');
 });

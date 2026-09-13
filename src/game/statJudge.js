@@ -3,7 +3,8 @@
  * записи хроники и ставит, какие стороны города задеты. Величину считает движок.
  */
 
-import { findPlotline, plotStatForce } from './plotlines.js';
+import { defaultFreeformMaxDepth, findPlotline, GRAVITY_STAT_BUDGET, plotStatForce } from './plotlines.js';
+import { depthGain } from './deedMath.js';
 import { worldDateLabel } from './gameClock.js';
 import { resolveStatDeltas } from './plotEngine.js';
 import { applyStatDeltasToDomain, statEpithet } from './stats.js';
@@ -36,11 +37,47 @@ function closedPlotForFact(domain, fact) {
 }
 
 /**
+ * Встреча двух островов идёт по цене разрыва: единица её глубины стоит
+ * столько же, сколько единица глубины RUPTURE-истории. Курс выводим из
+ * тех же чисел, а не задаём отдельно, чтобы он поехал вслед за ними.
+ */
+const CONFLUX_GRAVITY = 'RUPTURE';
+
+export function confluxStatRate() {
+  return GRAVITY_STAT_BUDGET[CONFLUX_GRAVITY] / defaultFreeformMaxDepth(CONFLUX_GRAVITY);
+}
+
+/**
+ * Цена дела через проход: та же формула, что вклад дела в историю, переведённая
+ * по курсу. Пула нет — дела не вычерпывают друг друга, пятый удар стоит как первый.
+ *
+ * Провал не пустой. Отбитый штурм — это и потеря нападавшего, и победа
+ * защищавшегося, только дешевле удавшегося удара и без критовой надбавки.
+ */
+function crossIslandStatBudget(process, config, finish) {
+  const rate = confluxStatRate();
+  const spent = finish === 'fail' ? 'ok' : finish;
+  // Разброс глушим: жребий уже брошен на исходе, второй раз кости не нужны.
+  const gain = depthGain({
+    durationBand: process.durationBand,
+    difficulty: process.difficulty,
+    gravity: CONFLUX_GRAVITY,
+    finish: spent,
+    spread: 0,
+  });
+  const share = finish === 'fail' ? Number(config?.tick?.crossIslandFailShare ?? 0.6) : 1;
+  return Math.max(1, Math.round(gain * rate * share));
+}
+
+/**
  * Бюджет errand-дела: пропорционален объёму работы, а не числу месяцев.
  * Полгода возни столпа не должны стоить столько же, сколько закрытая CRISIS.
  */
-export function deedStatBudget(process, config = null) {
+export function deedStatBudget(process, config = null, { finish = null } = {}) {
   if (!process) return 1;
+  if (process.crossIsland) {
+    return crossIslandStatBudget(process, config, finish || process.finishKind || 'ok');
+  }
   const perDay = Number(config?.tick?.officerStatPerDay ?? 0.02);
   const days = Math.max(1, Number(process.objectiveDays) || 0);
   const cap = Math.max(1, Number(config?.tick?.officerStatCap ?? 8));
@@ -90,17 +127,31 @@ function polarityOf(fact) {
   return 'any';
 }
 
-function absBudgetForFact(domain, fact, config) {
+export function absBudgetForFact(domain, fact, config) {
   if (fact?.author === 'storyteller:quiet') return 0;
   // Правило города — не подвиг: постоянный порядок сам статов не даёт.
   if (fact?.author === 'engine:rule') return 0;
-  const impactDays = Number(fact?.pairImpact?.objectiveDays);
+  const impact = fact?.pairImpact;
+  if (impact?.crossIsland) {
+    // Полосы приходят со следом: своего дела у задетого города нет.
+    return deedStatBudget(
+      {
+        crossIsland: true,
+        durationBand: impact.durationBand,
+        difficulty: impact.difficulty,
+        objectiveDays: impact.objectiveDays,
+      },
+      config,
+      { finish: impact.finish },
+    );
+  }
+  const impactDays = Number(impact?.objectiveDays);
   if (Number.isFinite(impactDays) && impactDays > 0) {
     return deedStatBudget({ objectiveDays: impactDays }, config);
   }
   if (fact?.processFinish) {
     const proc = (domain.state?.pendingActions || []).find((a) => a.id === fact.relatedPendingId);
-    return deedStatBudget(proc, config);
+    return deedStatBudget(proc, config, { finish: fact.processFinish });
   }
   const plot = plotForFact(domain, fact) || closedPlotForFact(domain, fact);
   if (!plot || plot.kind === 'errand') return 0;

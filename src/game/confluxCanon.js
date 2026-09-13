@@ -359,6 +359,9 @@ export function stampPairImpact(fact, { process = null, actorId = null, hostile 
     finish: process.finishKind || null,
     objectiveDays: Number.isFinite(days) && days > 0 ? days : 0,
     actorDomainId: actorId ? String(actorId) : null,
+    crossIsland: Boolean(process.crossIsland) || Boolean(hostile),
+    durationBand: process.durationBand || null,
+    difficulty: process.difficulty || null,
   };
   return fact;
 }
