@@ -14,12 +14,9 @@ import { spanBandLabel } from './gameClock.js';
 
 export function isCrossIslandDeed(process, conflux, domainId) {
   if (!process || !conflux || conflux.status !== 'docked') return false;
-  if (process.crossIsland || process.targetDomainId) return true;
-  const others = (conflux.domainIds || []).filter((id) => id !== domainId);
-  if (process.plotlineId && conflux.containerPlotId === process.plotlineId) return true;
-  if (process.plotlineId && conflux.container?.id === process.plotlineId) return true;
-  void others;
-  return Boolean(process.confluxId);
+  if (process.crossIsland) return true;
+  if (process.targetDomainId && String(process.targetDomainId) !== String(domainId)) return true;
+  return false;
 }
 
 export function remainingWindowBand(conflux, day) {
@@ -51,8 +48,10 @@ export function applyCrossIslandJudged(judged, {
 
   const opposed = process.opposedStat || judged.opposedStat || null;
   if (opposed && actor && target) {
-    const own = Number(actor.stats?.[opposed] ?? actor.stats?.[process.linkedStats?.[0]] ?? 50);
-    const theirs = Number(target.stats?.[opposed] ?? 50);
+    const ownKey = (process.linkedStats || [])[0] || null;
+    const ownRaw = ownKey != null ? actor.stats?.[ownKey] : 50;
+    const own = Number.isFinite(Number(ownRaw)) ? Number(ownRaw) : 50;
+    const theirs = Number.isFinite(Number(target.stats?.[opposed])) ? Number(target.stats[opposed]) : 50;
     const delta = own - theirs;
     if (delta <= -20) {
       durationBand = shiftDurationBand(durationBand, 1);

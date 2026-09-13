@@ -163,30 +163,9 @@ function loreLinkedToPlot(lore, plot) {
   });
 }
 
-function partnerBrief(partner, viewerDomainId) {
-  const desc = String(partner.description || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 400);
-  const visible = visibleLoreForDomain(partner.lore, viewerDomainId);
-  // Partner's own secrets must never leak — only public entries (no secret flag)
-  const publicOnly = (visible || []).filter((f) => !f.secret);
-  const chron = chronicleEntries(publicOnly).slice(-6);
-  return {
-    id: partner.id,
-    name: partner.name,
-    ruler: partner.characters?.[0]?.name || null,
-    population: partner.population,
-    descriptionBrief: desc || '(нет)',
-    recentPublicChronicle: chron.length
-      ? chron.map((f) => `- (${f.gameDateLabel || '?'}) ${f.text}`).join('\n')
-      : '(пусто)',
-  };
-}
-
 /**
  * Лормастер: отвечает на вопросы, при необходимости дописывает факты (тег fact).
- * В фазе docked: shared lore + урезанный partner brief без чужих secret.
+ * Соседа не читает — для него есть информатор.
  */
 export async function askLoremaster({
   config,
@@ -304,15 +283,8 @@ export async function askLoremaster({
             payload.conflux.contact = conflux.contact;
             payload.conflux.monthsDocked = conflux.monthsDocked || 0;
             payload.conflux.durationMonths = conflux.durationMonths || null;
-            payload.conflux.sharedLoreRecent = (conflux.sharedLore || []).slice(-8).map((f) => ({
-              date: f.gameDateLabel,
-              text: f.text,
-            }));
-            if (partner) {
-              payload.partner = partnerBrief(partner, working.id);
-              payload.reminder +=
-                ' Соседний остров при сопряжении — реальный; чужие secret тебе не видны. Не выдумывай третий остров.';
-            }
+            payload.reminder +=
+              ' Соседний остров при сопряжении реален. О его внутренней жизни спрашивай информатора, не лормастера. Не выдумывай третий остров.';
           } else {
             payload.conflux.monthsUntilDock = monthsUntilDock(conflux, world);
             payload.reminder +=
@@ -500,7 +472,7 @@ export async function askLoremaster({
           '',
           `Сейчас сопряжение (conflux ${conflux.id}) с соседом` +
             (partner ? ` «${partner.name}»` : '') +
-            '. В read_lore есть contact и краткий partner brief без чужих тайн.',
+            '. Проход и имя соседа — факты мира. Внутреннюю жизнь соседа читает информатор, не ты.',
         ].join('\n')
       : [
           '',

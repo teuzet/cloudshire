@@ -15,6 +15,8 @@ import {
   normalizeRulerAttitudes,
 } from './stats.js';
 import { askLoremaster } from './loremaster.js';
+import { askInformant } from './informant.js';
+import { applyCrossIslandJudged, remainingWindowBand, isCrossIslandDeed } from './deedConflux.js';
 import { newId } from './ids.js';
 import {
   overlayConfluxView,
@@ -65,7 +67,6 @@ import {
   setProxyText,
 } from './cityRules.js';
 import { applyPriestNotifyChange, notifySettings, setQuietHours } from './notify.js';
-import { applyCrossIslandJudged, remainingWindowBand } from './deedConflux.js';
 import { holdPassageShut } from './passage.js';
 import {
   MAX_PRIEST_ORDERS,
@@ -639,6 +640,54 @@ export function buildRulerTools(domain, storage, character, ctx) {
       },
     },
     {
+      name: 'consult_informant',
+      description:
+        'Справка о СОСЕДНЕМ городе во время сопряжения: устройство, летопись, люди, порядки, список его историй. ' +
+        'Доступен только пока острова состыкованы. Если не состыкованы — информатора нет, так и скажи. ' +
+        'Не путай с consult_loremaster: лормастер знает свой город, информатор — соседа.',
+      parameters: {
+        type: 'object',
+        required: ['questions'],
+        properties: {
+          questions: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '1–5 конкретных вопросов о соседе',
+          },
+        },
+      },
+      handler: async ({ questions }) => {
+        const result = await askInformant({
+          config: ctx.config,
+          runtime: ctx.runtime,
+          storage,
+          domain,
+          questions: questions || [],
+          asker: `ruler:${character.name}`,
+          conflux: ctx.conflux || null,
+          maxTurns: 8,
+        });
+        if (result.error === 'no_informant') {
+          return {
+            ok: false,
+            error: 'no_informant',
+            agentMessage:
+              'Информатора нет: острова не состыкованы. О внутренней жизни соседа сведений нет — так и скажи покровителю, не выдумывай.',
+          };
+        }
+        return {
+          ok: true,
+          answers: result.answers,
+          summary: result.loreTextForAsker,
+          newFactsCount: (result.addedFacts || []).length,
+          newFactTexts: (result.addedFacts || []).map((f) => f.text),
+          hint:
+            'Перескажи суть своими словами. Новый факт о соседе уже записан у него; у нас — ссылка на ту же формулировку. ' +
+            'Если информатор сказал, что не знает — не додумывай.',
+        };
+      },
+    },
+    {
       name: 'declare_process',
       description:
         'Дело: стройка, суд, поход, снабжение, а также объявление или отмена постоянного правила (через rule). ' +
@@ -710,9 +759,17 @@ export function buildRulerTools(domain, storage, character, ctx) {
             description:
               'id живой истории, которую покровитель этим делом пытается сдвинуть. ' +
               'Смотри на замысел из разговора, не на общее место и не на «единственную открытую» нить. ' +
+              'Пока острова состыкованы, можно передать id нити соседа (из ответа информатора). ' +
+              'Нить сопряжения — не история: на неё дело не ставь. ' +
               'Закрытую историю не подставляй: продолжение закрытого — пустой plotId, своё поручение. ' +
               'Если неясно, про какую беду речь или это вообще новое хозяйство — спроси (commitment=clarify), не гадай. ' +
               'Если приказ не про живую историю — оставь пустым, дело заведёт свою нить само.',
+          },
+          targetDomainId: {
+            type: 'string',
+            description:
+              'id соседнего города, если дело идёт через проход на его берег (нападение, посольство, кража). ' +
+              'Не для дел у себя.',
           },
           chronicleId: {
             type: 'string',
@@ -755,6 +812,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
         secret = false,
         guardPassage = false,
         abortOutcome = null,
+        targetDomainId = null,
         goal,
         office = null,
         randomOfficer = false,
@@ -869,10 +927,18 @@ export function buildRulerTools(domain, storage, character, ctx) {
         if (plotId) {
           targetPlot =
             findPlotline(domain, String(plotId)) ||
+            (ctx.partner ? findPlotline(ctx.partner, String(plotId)) : null) ||
             (ctx.conflux?.plotlines || []).find((p) => String(p.id) === String(plotId)) ||
             null;
         } else if (chronicleId && ctx.conflux) {
           targetPlot = findPlotByChronicleId(ctx.conflux, String(chronicleId), partners);
+        }
+        if (targetPlot?.isMainConflux) {
+          return toolFail(
+            'pair_thread_no_deeds',
+            'Нить сопряжения — состояние отношений, не история. Дело в неё ставить нельзя. ' +
+              'Назначь дело в свою нить, в нить соседа (id из информатора) или оставь без plotId.',
+          );
         }
         if (wantIntel) {
           if (!ctx.conflux) {
@@ -946,14 +1012,18 @@ export function buildRulerTools(domain, storage, character, ctx) {
               judged.difficulty = 'HARD';
             }
           }
-          if (ctx.conflux?.status === 'docked') {
-            const towardPartner =
-              Boolean(wantIntel) ||
-              Boolean(action.secret) ||
-              Boolean(action.passageGuard) ||
-              Boolean(targetPlot?.isMainConflux) ||
-              (targetPlot && ctx.partner && (targetPlot.concernsDomainIds || []).includes(ctx.partner.id));
-            if (towardPartner) {
+          if (ctx.conflux?.status === 'docked' && ctx.partner) {
+            const namedTarget = String(targetDomainId || '').trim();
+            if (namedTarget && namedTarget === String(ctx.partner.id)) {
+              action.targetDomainId = ctx.partner.id;
+            }
+            if (targetPlot && plotHostId(targetPlot) === String(ctx.partner.id)) {
+              action.targetDomainId = ctx.partner.id;
+            }
+            if (wantIntel || action.secret || action.passageGuard) {
+              action.targetDomainId = action.targetDomainId || ctx.partner.id;
+            }
+            if (isCrossIslandDeed(action, ctx.conflux, domain.id)) {
               action.opposedStat = judged.opposedStat || null;
               const applied = applyCrossIslandJudged(judged, {
                 process: action,

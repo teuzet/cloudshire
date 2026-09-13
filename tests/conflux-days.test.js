@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createConfluxRecord, beginConfluxOwnership, dockConfluxNow, schedulePairJobs, monthsUntilDock, abortCrossIslandDeeds } from '../src/game/conflux.js';
+import { createConfluxRecord, beginConfluxOwnership, dockConfluxNow, schedulePairJobs, monthsUntilDock, abortCrossIslandDeeds, undockConfluxNow } from '../src/game/conflux.js';
 import { hoursToGameDays, pickPrepDelayHours, confluxConfig, remainingDockDays, rollConfluxSpan, stampGenesisConfluxBan, confluxDue } from '../src/game/confluxTime.js';
 import { seedDockMeet, DOCK_MEET_EVENT } from '../src/game/confluxBoard.js';
 import { fireThreat } from '../src/game/threats.js';
 import { hourInTimeZone, noteRulerActivity, emptyActivity } from '../src/game/activity.js';
 import { inQuietHours, setQuietHours, pushVerdict } from '../src/game/notify.js';
-import { applyCrossIslandJudged, secretRevealTexts } from '../src/game/deedConflux.js';
+import { applyCrossIslandJudged, secretRevealTexts, isCrossIslandDeed } from '../src/game/deedConflux.js';
 import { takeDomainBoardIntoConflux, createEmptyContainer, overlayConfluxView, stripConfluxView } from '../src/game/confluxBoard.js';
 import { createPlotline, ensurePlotStatBudget } from '../src/game/plotlines.js';
 import { confluxEvent, writePairChronicle } from '../src/game/confluxCanon.js';
@@ -204,6 +204,52 @@ test('ускорение вдвое влезает в окно, где без н
   assert.ok(process.abortOutcome);
 });
 
+test('дело с целью за проходом — через проход, нить пары сама по себе — нет', () => {
+  const conflux = {
+    status: 'docked',
+    domainIds: ['a', 'b'],
+    containerPlotId: 'plot_pair',
+    container: { id: 'plot_pair' },
+  };
+  assert.equal(isCrossIslandDeed({ targetDomainId: 'b' }, conflux, 'a'), true);
+  assert.equal(isCrossIslandDeed({ plotlineId: 'plot_pair', confluxId: 'cf1' }, conflux, 'a'), false);
+  assert.equal(isCrossIslandDeed({ confluxId: 'cf1' }, conflux, 'a'), false);
+});
+
+test('штурм сравнивает профильный стат дела с обороной соседа', () => {
+  const conflux = { status: 'docked', dockEndDay: 400, domainIds: ['a', 'b'] };
+  const strong = applyCrossIslandJudged(
+    { durationBand: 'WEEKS', difficulty: 'HARD', opposedStat: 'security' },
+    {
+      process: { linkedStats: ['security'] },
+      actor: { stats: { security: 42, prosperity: 80 } },
+      target: { id: 'b', stats: { security: 77, prosperity: 20 } },
+      conflux,
+      day: 10,
+      config,
+      rng: () => 0,
+    },
+  );
+  assert.equal(strong.error, null);
+  assert.equal(strong.judged.durationBand, 'SEASON');
+  assert.equal(strong.judged.difficulty, 'SEVERE');
+
+  const weak = applyCrossIslandJudged(
+    { durationBand: 'WEEKS', difficulty: 'HARD', opposedStat: 'security' },
+    {
+      process: { linkedStats: ['security'] },
+      actor: { stats: { security: 77, prosperity: 20 } },
+      target: { id: 'b', stats: { security: 42, prosperity: 80 } },
+      conflux,
+      day: 10,
+      config,
+      rng: () => 0,
+    },
+  );
+  assert.equal(weak.judged.durationBand, 'DAYS');
+  assert.equal(weak.judged.difficulty, 'PLAIN');
+});
+
 test('сановники на месте после обрыва: список не меняется', () => {
   const a = city('a', 'Астра');
   const officers = [...a.officers];
@@ -316,6 +362,76 @@ test('обрыв дела через проход отпускает санов�
   assert.equal(officer.processId, null);
   assert.equal(a.officers[0].id, officer.id);
   assert.equal(a.officers.length, 1);
+});
+
+test('дело без флага, но с needsPassage, обрывается при расставании', () => {
+  const a = city('a', 'Астра');
+  const officer = a.officers[0];
+  const process = {
+    id: 'act_def',
+    summary: 'Подготовить оборону к сопряжению с Берил',
+    status: 'active',
+    officerId: officer.id,
+    needsPassage: true,
+  };
+  a.state.pendingActions = [process];
+  bindOfficerProcess(a, officer, process);
+  abortCrossIslandDeeds(a, { day: 10, reason: 'undock' });
+  assert.equal(process.finishKind, 'abort');
+  assert.equal(officer.processId, null);
+});
+
+test('расставание: судьба оборванного дела попадает в большую хронику, архив остаётся', async () => {
+  const w = world(100);
+  w.gameDate = { label: 'Год 1, месяц 4, день 10' };
+  const a = city('a', 'Астра');
+  const b = city('b', 'Берил');
+  a.stats = { security: 40, prosperity: 40 };
+  b.stats = { security: 40, prosperity: 40 };
+  const c = createConfluxRecord({
+    domainIds: ['a', 'b'],
+    world: w,
+    prepStartDay: 0,
+    dockStartDay: 10,
+    dockEndDay: 100,
+  });
+  c.status = 'docked';
+  c.container = createEmptyContainer({ a, b, conflux: c, world: w, config });
+  c.forecast = { a: 'Астра в руинах.', b: 'Берил уходит с добычей.', neutral: 'Один берег занял другой.' };
+  const officer = a.officers[0];
+  const process = {
+    id: 'act_x',
+    crossIsland: true,
+    status: 'active',
+    officerId: officer.id,
+    summary: 'Маршал у прохода',
+    abortOutcome: 'успеть вернуться с тем, что вынесли',
+  };
+  a.state.pendingActions = [process];
+  bindOfficerProcess(a, officer, process);
+  let seen = '';
+  const runtime = {
+    async run({ tools, userMessages, agentId }) {
+      const text = userMessages?.map((m) => m.content).join('\n') || '';
+      if (agentId === 'confluxResolver') {
+        seen = text;
+        const submit = tools.find((t) => t.name === 'submit_undock');
+        await submit.handler({
+          text:
+            'Астра и Берил разошлись в небе: чужой край ушёл в даль, пути больше нет. ' +
+            'Маршал Астры успел вернуться с тем, что вынесли с прохода. Астра в руинах.',
+        });
+      }
+    },
+  };
+  await undockConfluxNow({ runtime, conflux: c, domains: [a, b], world: w, day: 100, config, rng: () => 0 });
+  assert.match(seen, /Маршал у прохода/);
+  assert.equal(c.status, 'ended');
+  assert.ok((c.lore || []).some((f) => /разошлись/.test(f.text)));
+  assert.equal(c.container, null);
+  assert.ok((c.closedPlotlines || []).length >= 1);
+  assert.equal(process.finishKind, 'abort');
+  assert.ok((w.jobs || []).some((j) => j.kind === 'seed_appear'));
 });
 
 test('после кристаллизации контейнер получает бюджет RUPTURE/CRISIS', async () => {

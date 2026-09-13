@@ -471,6 +471,7 @@ export function createLoreFact({
   statChanges = null,
   secret = false,
   secretForDomainId = null,
+  leakedFromId = null,
   location = null,
   concernsDomainIds = null,
   concernsDomainNames = null,
@@ -505,6 +506,7 @@ export function createLoreFact({
     fact.secret = true;
     if (secretForDomainId) fact.secretForDomainId = String(secretForDomainId);
   }
+  if (leakedFromId) fact.leakedFromId = String(leakedFromId);
   if (location) fact.location = String(location).trim();
   if (Array.isArray(concernsDomainIds) && concernsDomainIds.length) {
     fact.concernsDomainIds = concernsDomainIds.map(String);
