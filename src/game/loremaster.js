@@ -4,7 +4,7 @@ import { formatFullChronicleForPrompt, formatFactsForPrompt } from './memory.js'
 import { findActiveConfluxForDomain, monthsUntilDock } from './conflux.js';
 import { attachFactToPlotlines } from './plotlines.js';
 import { cityRules } from './cityRules.js';
-import { overlayConfluxView, stampNewBoardItems, stripConfluxView, plotVisibleToRuler } from './confluxBoard.js';
+import { overlayConfluxView, stampNewBoardItems, stripConfluxView } from './confluxBoard.js';
 import { formatTruthGraphForPrompt } from './mysteryGraph.js';
 import { formatLadderForPrompt } from './suspenseGraph.js';
 import { revealedPremises, revealedAnswer, hiddenAnswer } from './premises.js';
@@ -25,17 +25,10 @@ function visibleLoreForDomain(lore, domainId) {
 }
 
 export function storiesForLoremaster(domain, conflux = null) {
+  void conflux;
   const byId = new Map();
   for (const p of domain?.plotlines || []) {
     if (p) byId.set(p.id, p);
-  }
-  if (conflux) {
-    for (const p of conflux.plotlines || []) {
-      if (!p) continue;
-      if (plotVisibleToRuler(p, domain.id, conflux)) {
-        if (!byId.has(p.id)) byId.set(p.id, p);
-      }
-    }
   }
   return [...byId.values()];
 }

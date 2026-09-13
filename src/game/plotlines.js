@@ -1889,21 +1889,16 @@ export function formatBoardForSpeech(domain, { statsFeel = null, max = 8, viewer
     .map((p) => {
       const feel =
         statsFeel && p.relatedStats.length ? ` Упирается в: ${statsFeel(p.relatedStats)}.` : '';
-      const viewerKnows = Boolean(p.plotAwareness?.[viewer]);
-      const foreign =
-        Boolean(p.confluxId) &&
-        !p.isMainConflux &&
-        (p.concernsDomainIds || []).length > 0 &&
-        !(p.concernsDomainIds || []).includes(viewer);
+      const viewerOwns =
+        String(p.hostDomainId || '') === String(viewer) ||
+        (p.concernsDomainIds || []).map(String).includes(String(viewer));
       const kind = p.kind === 'errand'
         ? 'поручение'
         : p.isMainConflux
           ? 'сопряжение'
-          : p.shared && viewerKnows
+          : p.shared && viewerOwns
             ? 'общая история'
-            : foreign && viewerKnows
-              ? 'история соседа'
-              : 'история';
+            : 'история';
       const duty = plotHasLiveProcess(domain, p)
         ? 'дело уже идёт'
         : p.kind === 'errand'

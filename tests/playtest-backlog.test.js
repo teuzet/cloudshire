@@ -10,8 +10,7 @@ import {
   splitTickNews,
 } from '../src/game/newsSchedule.js';
 import { pauseProcess, resumeProcess, applyEngineProgress, normalizeProcess } from '../src/game/processes.js';
-import { resolveConfluxSharedMonth } from '../src/game/confluxMonth.js';
-import { createPlotline } from '../src/game/plotlines.js';
+import { createPlotline, plotConfig, advancePlotClocks } from '../src/game/plotlines.js';
 import { ageDomainPeople, stampPersonAge } from '../src/game/ages.js';
 
 test('пул имён копируется в мир и вынимается', () => {
@@ -92,31 +91,11 @@ test('пауза не тикает и не занимает слот', () => {
   assert.equal(process.status, 'active');
 });
 
-test('часы нитей сопряжения тикают даже без shared', async () => {
+test('часы нити тикают каждый месяц', () => {
   const local = createPlotline({ title: 'Чужая печать', kind: 'story', maxAgeMonths: 8 });
-  local.shared = false;
-  local.concernsDomainIds = ['a'];
-  const conflux = {
-    id: 'c1',
-    domainIds: ['a', 'b'],
-    status: 'approaching',
-    plotlines: [local],
-    processes: [],
-    lore: [],
-    awareness: {},
-    knownLoreIds: {},
-  };
-  await resolveConfluxSharedMonth({
-    config: { tick: { plot: { temperature: { decayPerTick: 8 } } } },
-    runtime: { run: async () => ({}) },
-    conflux,
-    domains: [
-      { id: 'a', name: 'А', lore: [], stats: {} },
-      { id: 'b', name: 'Б', lore: [], stats: {} },
-    ],
-    world: { tickIndex: 3, gameDate: { label: 'Год 1, месяц 3' } },
-  });
-  assert.equal(conflux.plotlines[0].ageMonths, 1);
+  const domain = { plotlines: [local] };
+  advancePlotClocks(domain, plotConfig({ tick: { plot: { temperature: { decayPerTick: 8 } } } }));
+  assert.equal(domain.plotlines[0].ageMonths, 1);
 });
 
 test('пустой пол имён сразу наполняется из файла, чужой пол не трогаем', () => {

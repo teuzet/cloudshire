@@ -8,6 +8,7 @@ import {
   resolveLoremasterStory,
   cityTextForLoremaster,
 } from '../src/game/loremaster.js';
+import { overlayConfluxView } from '../src/game/confluxBoard.js';
 import { attachFactToPlotlines, closePlotline, createPlotline, normalizePlotlines } from '../src/game/plotlines.js';
 
 const mystery = {
@@ -79,23 +80,23 @@ test('фокус на саспенсе показывает hiddenPremises це�
   assert.match(text, /не в fact/);
 });
 
-test('resolve: только открытая история с доски или видимая с конфлюкса', () => {
+test('resolve: открытая история с доски плюс контейнер пары после наложения', () => {
   const domain = {
     id: 'a',
     plotlines: [{ id: 'loc', title: 'Гул', kind: 'story', synopsis: 'Гудит вода.' }],
     closedPlotlines: [{ id: 'dead', kind: 'story', synopsis: 'Уже разгадали.', status: 'closed' }],
   };
   const conflux = {
-    plotlines: [
-      {
-        id: 'main',
-        title: 'Сопряжение',
-        kind: 'story',
-        isMainConflux: true,
-        synopsis: 'Острова сближаются.',
-      },
-    ],
+    container: {
+      id: 'main',
+      title: 'Сопряжение',
+      kind: 'story',
+      isMainConflux: true,
+      synopsis: 'Острова сближаются.',
+    },
+    plotlines: [],
   };
+  overlayConfluxView(domain, conflux);
   const list = storiesForLoremaster(domain, conflux);
   assert.equal(list.some((p) => p.id === 'loc'), true);
   assert.equal(list.some((p) => p.id === 'main'), true);

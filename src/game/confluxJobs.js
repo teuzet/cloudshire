@@ -42,17 +42,6 @@ async function savePair(storage, conflux, domains) {
   await storage.saveConflux(conflux);
 }
 
-function recordTouch(conflux, { day, domainId, kind, deedId = null }) {
-  conflux.touches = Array.isArray(conflux.touches) ? conflux.touches : [];
-  conflux.touches.push({
-    day: Math.round(Number(day) || 0),
-    domainId: domainId ? String(domainId) : null,
-    kind: String(kind || 'touch'),
-    deedId: deedId || null,
-  });
-  return conflux.touches;
-}
-
 export async function crystallizeContainer({ runtime, conflux, domains, world, day, log }) {
   const plot = conflux?.container;
   if (!plot || plot.crystallized) return plot;
@@ -99,9 +88,7 @@ export async function crystallizeContainer({ runtime, conflux, domains, world, d
             content: [
               `Города: ${domains.map((d) => d.name).join(' и ')}`,
               conflux.passage?.text ? `Проход: ${conflux.passage.text}` : '',
-              (conflux.touches || []).length
-                ? `Касания:\n${(conflux.touches || []).map((t) => `- день ${t.day}: ${t.kind}`).join('\n')}`
-                : 'Касаний от игроков не было — посей первое столкновение сам.',
+              'Контейнер пары ещё пуст: напиши первое развитие отношений, если игроки молчат.',
             ]
               .filter(Boolean)
               .join('\n'),
@@ -161,35 +148,6 @@ export async function crystallizeContainer({ runtime, conflux, domains, world, d
   return plot;
 }
 
-function pairHasPlayerDeeds(conflux, domains = []) {
-  if ((conflux?.touches || []).some((t) => t.kind === 'deed' || t.deedId)) return true;
-  for (const d of domains) {
-    for (const p of d.state?.pendingActions || []) {
-      if (!p.crossIsland && !p.targetDomainId && !p.confluxId) continue;
-      if (p.status && p.status !== 'active' && p.status !== 'paused') continue;
-      return true;
-    }
-  }
-  return false;
-}
-
-export async function maybeCrystallizeFromTouch({
-  runtime,
-  conflux,
-  domains,
-  world,
-  day,
-  log,
-  touch,
-} = {}) {
-  if (!conflux || conflux.status !== 'docked') return null;
-  recordTouch(conflux, touch || { day, kind: 'deed' });
-  if (conflux.container && !conflux.container.crystallized) {
-    await crystallizeContainer({ runtime, conflux, domains, world, day, log });
-  }
-  return conflux.container;
-}
-
 const HANDLERS = {
   async conflux_dock(ctx) {
     const loaded = await loadPair(ctx.storage, ctx.job.payload?.confluxId);
@@ -245,37 +203,10 @@ const HANDLERS = {
     await savePair(ctx.storage, conflux, domains);
     return { occasion: 'расстыковка', confluxId: conflux.id, domains, facts };
   },
-  async conflux_contact(ctx) {
-    const loaded = await loadPair(ctx.storage, ctx.job.payload?.confluxId);
-    if (!loaded) return { skipped: 'gone' };
-    const { conflux, domains } = loaded;
-    if (conflux.status !== 'docked') return { skipped: 'not_docked' };
-    if ((conflux.touches || []).length) return { skipped: 'already_touched' };
-    if (pairHasPlayerDeeds(conflux, domains)) return { skipped: 'has_deeds' };
-    recordTouch(conflux, { day: ctx.day, kind: 'seed' });
-    await crystallizeContainer({
-      runtime: ctx.runtime,
-      conflux,
-      domains,
-      world: ctx.world,
-      day: ctx.day,
-      log: ctx.log,
-    });
-    const facts = await writePairChronicle({
-      runtime: ctx.runtime,
-      world: ctx.world,
-      conflux,
-      domains,
-      event: confluxEvent({
-        kind: 'contact_seed',
-        day: ctx.day,
-        plotId: conflux.container?.id,
-        textHint: 'На проходе случилось первое столкновение без приказа с берегов.',
-      }),
-      log: ctx.log,
-    });
-    await savePair(ctx.storage, conflux, domains);
-    return { occasion: 'касание', confluxId: conflux.id, domains, facts, plotId: conflux.container?.id };
+  async conflux_contact() {
+    // Контейнер больше не куётся в историю по тишине или касанию.
+    // Угрозы от молчания сажает §7; этот слот оставлен, чтобы старые задания не зависали.
+    return { skipped: 'no_auto_crystal' };
   },
   async conflux_beat(ctx) {
     const loaded = await loadPair(ctx.storage, ctx.job.payload?.confluxId);
@@ -344,8 +275,6 @@ export async function drainConfluxJobs({
   }
   return events;
 }
-
-export { recordTouch };
 
 export async function activeConfluxOf(storage, domainId) {
   return findActiveConfluxForDomain(storage, domainId);

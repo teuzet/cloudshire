@@ -4,7 +4,7 @@ import { formatOfficersCastHint, formatProcessOfficerHint } from './officers.js'
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { attachChronicleToPlotlines, clipPlotText, PLOT_HOOK_MAX } from './plotlines.js';
-import { mixedChronicleForPrompt, knownPartnerLore, pushInternalChronicle, chronicleReceiversForBeat, isContested } from './confluxBoard.js';
+import { mixedChronicleForPrompt, pushInternalChronicle, chronicleReceiversForBeat, isContested } from './confluxBoard.js';
 import { priorPlotChronicle } from './storyteller.js';
 import { TINT_LABELS, formatFinishForPrompt } from './rolls.js';
 import { formatContactForPrompt } from './conflux.js';
@@ -412,7 +412,7 @@ async function subjectifyEntry({
   world,
   log,
 }) {
-  const known = partner ? knownPartnerLore(partner, conflux, domain.id) : [];
+  const known = (partner?.lore || []).filter((f) => !f.secret);
   const draft = { text: null };
   const maxChars = chronicleMaxChars(config);
 

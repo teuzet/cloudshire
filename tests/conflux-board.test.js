@@ -6,11 +6,8 @@ import {
   stampNewBoardItems,
   stripConfluxView,
   sharePlotWithDomain,
-  maybeLeakPlot,
-  leakChanceFromImportance,
-  revealKnownLore,
   returnBoardsOnUndock,
-  createMainConfluxPlot,
+  createEmptyContainer,
   approachingAnnounceText,
   isSharedPlot,
   chronicleReceiversForBeat,
@@ -34,8 +31,6 @@ function conflux(extra = {}) {
     id: 'conflux_1',
     domainIds: ['a', 'b'],
     status: extra.status || 'docked',
-    awareness: { a: extra.awA ?? 0, b: extra.awB ?? 0 },
-    knownLoreIds: { a: [], b: [] },
     plotlines: [],
     closedPlotlines: [],
     processes: [],
@@ -74,38 +69,7 @@ test('дело на чужой не-shared нити делает её shared', (
   assert.equal(plot.sharedReason, 'process');
 });
 
-test('шанс просачивания: 30≈0, 100≈60% при полной информированности', () => {
-  assert.equal(leakChanceFromImportance(30, 100), 0);
-  assert.ok(Math.abs(leakChanceFromImportance(100, 100) - 0.6) < 1e-9);
-  assert.ok(Math.abs(leakChanceFromImportance(100, 50) - 0.3) < 1e-9);
-});
-
-test('просачивание не работает до стыковки и при нулевой информированности', () => {
-  const plot = createPlotline({ title: 'Тайна', kind: 'story' });
-  plot.concernsDomainIds = ['a'];
-  const approaching = conflux({ status: 'approaching', awA: 80, awB: 80 });
-  assert.equal(maybeLeakPlot(plot, approaching, 'b', () => 0), false);
-  const docked = conflux({ status: 'docked', awA: 0, awB: 0 });
-  assert.equal(maybeLeakPlot(plot, docked, 'b', () => 0), false);
-});
-
-test('известные факты монотонны и не берут secret', () => {
-  const c = conflux({ status: 'docked', awA: 100 });
-  const partner = domain('b', {
-    lore: [
-      { id: 'lore_1', text: 'На рынке дешевле хлеб.', tags: ['chronicle'] },
-      { id: 'lore_2', text: 'Тайный ход', tags: ['chronicle'], secret: true },
-    ],
-  });
-  const first = revealKnownLore({ conflux: c, viewerId: 'a', partner, rng: () => 0 });
-  assert.equal(first.revealed, 1);
-  assert.deepEqual(c.knownLoreIds.a, ['lore_1']);
-  const second = revealKnownLore({ conflux: c, viewerId: 'a', partner, rng: () => 0 });
-  assert.equal(second.revealed, 0);
-  assert.deepEqual(c.knownLoreIds.a, ['lore_1']);
-});
-
-test('гидратация правителя не показывает чужую нить из одной известной хроники', () => {
+test('карточка нити соседа на доску не попадает', () => {
   const plot = createPlotline({ title: 'Чужой храм', kind: 'story' });
   plot.concernsDomainIds = ['b'];
   plot.hostDomainId = 'b';
@@ -114,7 +78,6 @@ test('гидратация правителя не показывает чужу
   plot.plotAwareness = { b: true };
   const c = conflux({ status: 'docked' });
   c.plotlines = [plot];
-  c.knownLoreIds.a = ['lore_1'];
   const a = domain('a');
   overlayConfluxView(a, c);
   assert.equal(a.plotlines.some((p) => p.id === plot.id), false);
@@ -124,7 +87,7 @@ test('гидратация правителя не показывает чужу
   assert.equal(c.plotlines.length, 1);
 });
 
-test('гидратация правителя показывает нить после plotAwareness', () => {
+test('гидратация правителя не показывает чужую нить даже с plotAwareness', () => {
   const plot = createPlotline({ title: 'Чужой храм', kind: 'story' });
   plot.concernsDomainIds = ['b'];
   plot.hostDomainId = 'b';
@@ -134,12 +97,12 @@ test('гидратация правителя показывает нить по
   c.plotlines = [plot];
   const a = domain('a');
   overlayConfluxView(a, c);
-  assert.equal(a.plotlines.some((p) => p.id === plot.id), true);
+  assert.equal(a.plotlines.some((p) => p.id === plot.id), false);
 });
 
 test('главная нить стыка задевает оба города', () => {
   const c = conflux();
-  const main = createMainConfluxPlot({
+  const main = createEmptyContainer({
     a: domain('a'),
     b: domain('b'),
     conflux: c,

@@ -427,7 +427,6 @@ function renderCityTab(d) {
             ['повторная', c.rematch ? 'да' : 'нет'],
             ['проход', c.contact ? `${c.contact.kind || '?'} — ${c.contact.description || ''}` : null],
             ['контроль прохода', c.contact?.control || null],
-            ['наша информированность', c.awareness ? `${c.awareness.ours}/100` : null],
           ])
         : `<p class="muted">сейчас остров идёт один</p>`,
     ) +
@@ -665,16 +664,6 @@ function loreCards(list, empty = 'пусто') {
       );
     })
     .join('');
-}
-
-function awarenessMeter(label, value) {
-  const n = Math.max(0, Math.min(100, Number(value) || 0));
-  return (
-    `<div>` +
-    `<div class="kv"><span class="muted">${esc(label)}</span><span>${n}/100</span></div>` +
-    `<div class="meter" title="${n} из 100"><span style="width:${n}%"></span></div>` +
-    `</div>`
-  );
 }
 
 function seedFormHtml() {

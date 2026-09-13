@@ -21,7 +21,7 @@ import { FINISH_SHORT } from '../../game/rolls.js';
 import { resolveIslandImage } from '../../game/islandImage.js';
 import { resolveOfficerPortrait } from '../../game/officerImage.js';
 import { domainHasIslandImage, officerHasPortrait } from '../../storage/r2.js';
-import { knownPartnerLore, overlayWithPartner } from '../../game/confluxBoard.js';
+import { overlayWithPartner } from '../../game/confluxBoard.js';
 import { deriveOnboardingPhase, normalizeOnboardingDraft } from '../../game/onboarding.js';
 import { genesisTutorialText } from '../../game/progressBar.js';
 import { miniCityPayload } from '../../game/miniCity.js';
@@ -165,7 +165,7 @@ function inspectConfluxBoard(conflux, domain, partner, world, day) {
   const names = Object.fromEntries(
     (conflux.domainIds || []).map((id) => [String(id), nameForDomain(id, domain, partner) || String(id)]),
   );
-  const known = partner ? knownPartnerLore(partner, conflux, viewerId) : [];
+  const known = (partner?.lore || []).filter((f) => !f.secret);
   const byTick = (a, b) => (Number(b.tick) || 0) - (Number(a.tick) || 0);
   const boardLore = [...(conflux.lore || []), ...(domain.lore || []), ...(partner?.lore || [])];
   return {

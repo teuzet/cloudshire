@@ -22,7 +22,7 @@ import {
   stampNewBoardItems,
   sharePlotWithDomain,
   plotConcerns,
-  cityKnowsPlot,
+  plotHostId,
   findPlotByChronicleId,
 } from './confluxBoard.js';
 import {
@@ -66,7 +66,6 @@ import {
 } from './cityRules.js';
 import { applyPriestNotifyChange, notifySettings, setQuietHours } from './notify.js';
 import { applyCrossIslandJudged, remainingWindowBand } from './deedConflux.js';
-import { maybeCrystallizeFromTouch } from './confluxJobs.js';
 import { holdPassageShut } from './passage.js';
 import {
   MAX_PRIEST_ORDERS,
@@ -885,7 +884,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
               'Для intel=true нужен plotId нити или chronicleId известной записи.',
             );
           }
-          if (cityKnowsPlot(targetPlot, domain.id)) {
+          if (plotHostId(targetPlot) === String(domain.id) || plotConcerns(targetPlot, domain.id) || targetPlot.isMainConflux) {
             return toolFail(
               'intel_already_known',
               'Эта история уже известна городу как линия. intel не нужен — заведи обычное дело, если вмешиваетесь.',
@@ -976,22 +975,6 @@ export function buildRulerTools(domain, storage, character, ctx) {
         startDeed(action, { day, judged });
         if (paceShift) applyPace(action, paceShift, { day });
         scheduleDeedJob(world, domain, action);
-        if (action.crossIsland && ctx.conflux) {
-          await maybeCrystallizeFromTouch({
-            runtime: ctx.runtime,
-            conflux: ctx.conflux,
-            domains: [domain, ctx.partner].filter(Boolean),
-            world,
-            day,
-            log: ctx.log,
-            touch: {
-              day,
-              domainId: domain.id,
-              kind: action.secret ? 'secret_deed' : action.passageGuard ? 'passage_guard' : 'deed',
-              deedId: action.id,
-            },
-          });
-        }
         if (action.passageGuard && ctx.conflux) {
           await holdPassageShut({
             runtime: ctx.runtime,
