@@ -5,7 +5,7 @@
  * событие, ни выдать его дважды. Поэтому `claim` отделён от `complete`.
  */
 
-import { currentDay, realTimeOfDay } from './gameClock.js';
+import { currentDay, realTimeOfDay, skipGameDays } from './gameClock.js';
 
 export const JOB_KINDS = [
   'threat_fire',
@@ -101,10 +101,10 @@ export function nextJobDay(world, { domainId = null } = {}) {
 }
 
 /** Реальный момент, когда стоит проснуться. */
-export function nextWakeAt(world, { config = null, domainId = null } = {}) {
+export function nextWakeAt(world, { config = null, domainId = null, now = Date.now() } = {}) {
   const day = nextJobDay(world, { domainId });
   if (day == null) return null;
-  return realTimeOfDay(world, day, { config, pausedMs: world?.pausedMs || 0 });
+  return realTimeOfDay(world, day, { config, pausedMs: clockPausedMs(world, now) });
 }
 
 export function claimJob(job) {
@@ -179,12 +179,62 @@ export function rulerTurnStale(world, now = Date.now()) {
 }
 
 export function worldDay(world, { now = Date.now(), config = null } = {}) {
-  let pausedMs = Math.max(0, Number(world?.pausedMs) || 0);
+  return currentDay(world, { now, config, pausedMs: clockPausedMs(world, now) });
+}
+
+/** Промотать живой мир на игровые дни и записать. Пауза часов учитывается. */
+export async function skipStoredWorldDays(storage, days, { config = null, now = Date.now() } = {}) {
+  const world = await storage.getWorld();
+  if (!world) throw new Error('мира нет');
+  const jump = Math.max(0, Math.round(Number(days) || 0));
+  const day = skipGameDays(world, jump, {
+    config,
+    now,
+    pausedMs: clockPausedMs(world, now),
+  });
+  await storage.saveWorld(world);
+  return { day, days: jump, world };
+}
+
+function clockHeldAt(world) {
+  const raw = world?.clockHeldAt;
+  if (raw == null) return null;
+  const held = Number(raw);
+  return Number.isFinite(held) ? held : null;
+}
+
+/** Сколько реального времени часы мира уже не тикали. */
+export function clockPausedMs(world, now = Date.now()) {
+  let paused = Math.max(0, Number(world?.pausedMs) || 0);
   const started = openTurnStart(world);
   if (started != null) {
-    pausedMs += Math.min(RULER_TURN_FAILSAFE_MS, Math.max(0, now - started));
+    paused += Math.min(RULER_TURN_FAILSAFE_MS, Math.max(0, now - started));
   }
-  return currentDay(world, { now, config, pausedMs });
+  const held = clockHeldAt(world);
+  if (held != null) paused += Math.max(0, now - held);
+  return paused;
+}
+
+export function clockIsHeld(world) {
+  return clockHeldAt(world) != null;
+}
+
+/** Остановить ход игрового времени: дела и истории сами не наступают. */
+export function holdClock(world, now = Date.now()) {
+  if (!world || typeof world !== 'object') return world;
+  if (clockHeldAt(world) != null) return world;
+  world.clockHeldAt = now;
+  return world;
+}
+
+/** Снова пустить время. Накопленную паузу складываем в pausedMs. */
+export function releaseClock(world, now = Date.now()) {
+  if (!world || typeof world !== 'object') return world;
+  const held = clockHeldAt(world);
+  if (held == null) return world;
+  world.pausedMs = Math.max(0, Number(world.pausedMs) || 0) + Math.max(0, now - held);
+  world.clockHeldAt = null;
+  return world;
 }
 
 // ─────────────────────── один писатель на домен ───────────────────────

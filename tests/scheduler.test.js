@@ -17,11 +17,16 @@ import {
   endRulerTurn,
   rulerTurnStale,
   worldDay,
+  holdClock,
+  releaseClock,
+  clockIsHeld,
+  clockPausedMs,
+  skipStoredWorldDays,
   RULER_TURN_FAILSAFE_MS,
   DomainQueue,
   LockSet,
 } from '../src/game/scheduler.js';
-import { startClock } from '../src/game/gameClock.js';
+import { startClock, skipGameDays, DAYS_PER_MONTH } from '../src/game/gameClock.js';
 
 function world() {
   const w = { jobs: [] };
@@ -172,6 +177,45 @@ test('закрытие незапущенного хода безвредно', 
   endRulerTurn(w, 1000);
   assert.equal(w.pausedMs ?? 0, 0);
   assert.equal(w.turnStartedAt, null);
+});
+
+test('удержание часов останавливает день без предохранителя', () => {
+  const w = world();
+  const start = 40 * 60 * 1000;
+  assert.equal(worldDay(w, { now: start }), 10);
+  holdClock(w, start);
+  assert.equal(clockIsHeld(w), true);
+  assert.equal(worldDay(w, { now: start + 8 * 60 * 1000 }), 10);
+  releaseClock(w, start + 8 * 60 * 1000);
+  assert.equal(clockIsHeld(w), false);
+  assert.equal(w.pausedMs, 8 * 60 * 1000);
+  assert.equal(worldDay(w, { now: start + 8 * 60 * 1000 }), 10);
+  assert.equal(worldDay(w, { now: start + 8 * 60 * 1000 + 4 * 60 * 1000 }), 11);
+});
+
+test('промотка на паузе прыгает от замороженного дня, а не от стены часов', () => {
+  const w = world();
+  const start = 40 * 60 * 1000;
+  holdClock(w, start);
+  const later = start + 8 * 60 * 1000;
+  skipGameDays(w, DAYS_PER_MONTH, { now: later, pausedMs: clockPausedMs(w, later) });
+  assert.equal(worldDay(w, { now: later }), 10 + DAYS_PER_MONTH);
+  releaseClock(w, later);
+  assert.equal(worldDay(w, { now: later }), 10 + DAYS_PER_MONTH);
+  assert.equal(worldDay(w, { now: later + 4 * 60 * 1000 }), 11 + DAYS_PER_MONTH);
+});
+
+test('промотка из хранилища пишет новый день', async () => {
+  const w = world();
+  const now = 40 * 60 * 1000;
+  const storage = {
+    getWorld: async () => w,
+    saveWorld: async () => {},
+  };
+  const out = await skipStoredWorldDays(storage, 7, { now });
+  assert.equal(out.days, 7);
+  assert.equal(out.day, 17);
+  assert.equal(worldDay(w, { now }), 17);
 });
 
 // ─────────────────────── один писатель на домен ───────────────────────

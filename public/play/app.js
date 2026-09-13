@@ -16,7 +16,7 @@ $('userId').value = userId;
 async function api(path, opts) {
   const res = await fetch(path, opts);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || data.message || res.statusText);
+  if (!res.ok) throw new Error(data.message || data.error || res.statusText);
   return data;
 }
 
@@ -169,10 +169,43 @@ function setBanner(text) {
   el.classList.remove('hidden');
 }
 
+async function renderSaves() {
+  const box = $('saveList');
+  if (!box || $('savesBox').classList.contains('hidden')) return;
+  try {
+    const data = await api('/api/play/snapshots');
+    const list = data.snapshots || [];
+    if (!list.length) {
+      box.innerHTML = '<p class="muted small">Снимков пока нет.</p>';
+      return;
+    }
+    box.innerHTML = list
+      .map((s) => {
+        const title = s.label || s.worldName || s.dateLabel || s.id;
+        const islands =
+          typeof s.domainCount === 'number' ? `островов: ${s.domainCount}` : (s.cityNames || []).join(', ');
+        const meta = [s.dateLabel, islands].filter(Boolean).join(' · ');
+        return (
+          `<div class="save-row" data-id="${esc(s.id)}">` +
+          `<div><div>${esc(title)}</div><div class="meta">${esc(meta)}</div></div>` +
+          `<div class="actions">` +
+          `<button type="button" class="ghost" data-load="${esc(s.id)}">загрузить</button>` +
+          `<button type="button" class="ghost danger" data-drop="${esc(s.id)}">удалить</button>` +
+          `</div></div>`
+        );
+      })
+      .join('');
+  } catch (err) {
+    box.textContent = err.message;
+  }
+}
+
 async function refresh({ force = false } = {}) {
   try {
     const state = await api(`/api/play/state?userId=${encodeURIComponent(userId)}`);
-    $('gameDate').textContent = state.gameDate?.label || '';
+    $('gameDate').textContent = state.clockHeld
+      ? `${state.gameDate?.label || ''} · пауза`
+      : (state.gameDate?.label || '');
     if (state.domain) {
       $('cityName').textContent = state.domain.name;
       $('rulerName').textContent = state.domain.ruler
@@ -206,13 +239,22 @@ async function refresh({ force = false } = {}) {
       lastGenerating = Boolean(state.generating);
     }
 
-    $('btnTick').classList.toggle('hidden', !state.canForceTick);
+    $('skipBox').classList.toggle('hidden', !state.canForceTick);
     $('btnTick').disabled = Boolean(state.ticking || state.generating);
+    $('skipDays').disabled = Boolean(state.ticking || state.generating);
+    $('btnClock').classList.toggle('hidden', !state.canForceTick);
+    $('btnClock').disabled = Boolean(state.ticking || state.generating);
+    $('btnClock').textContent = state.clockHeld ? 'время' : 'пауза';
+    $('btnClock').title = state.clockHeld
+      ? 'Снова пустить игровое время'
+      : 'Остановить время: дела и истории сами не наступают';
     $('btnSeed').classList.toggle('hidden', !state.canForceTick);
     $('btnSeed').disabled = Boolean(state.ticking || state.generating);
     $('btnWipe').classList.toggle('hidden', !state.canWipe);
     $('wipeNote').hidden = !state.canWipe;
+    $('savesBox').classList.toggle('hidden', !state.canWipe);
     $('btnWipe').disabled = Boolean(state.ticking);
+    if (state.canWipe && !$('slots').classList.contains('hidden')) await renderSaves();
     renderIslands(state.islands || []);
     const nextDev = Boolean(state.canForceTick);
     if (nextDev !== canDev) {
@@ -225,6 +267,7 @@ async function refresh({ force = false } = {}) {
     if (state.generating) {
       setBanner(state.generatingProgress || 'Остров создаётся — правитель напишет сам, это минута-две.');
     } else if (state.ticking) setBanner('Идёт шаг времени на сопряжении.');
+    else if (state.clockHeld) setBanner('Время стоит. Дела и истории сами не тикают; промотать — вручную.');
     else setBanner('');
 
     // Справочник перечитываем, когда мир реально сдвинулся на день, а не по таймеру.
@@ -415,6 +458,47 @@ const ENDING_KIND_LABEL = {
 };
 
 /**
+ * Скрытый слой двух типов: разгадка и независимые подступы к ней.
+ * Раскрытое переезжает в «город выяснил», но тип у пункта тот же.
+ */
+function plotFactsBlock(p) {
+  const hiddenPremises = Array.isArray(p.hiddenPremises) ? p.hiddenPremises : [];
+  const revealedPremises = Array.isArray(p.revealedPremises) ? p.revealedPremises : [];
+  const hiddenRows = [
+    p.hiddenAnswer ? `<li><b>разгадка:</b> ${esc(p.hiddenAnswer)}</li>` : '',
+    ...hiddenPremises.map((t) => `<li>подступ: ${esc(t)}</li>`),
+  ]
+    .filter(Boolean)
+    .join('');
+  const knownRows = [
+    p.revealedAnswer ? `<li><b>разгадано:</b> ${esc(p.revealedAnswer)}</li>` : '',
+    ...revealedPremises.map((t) => `<li>подступ: ${esc(t)}</li>`),
+  ]
+    .filter(Boolean)
+    .join('');
+  const inspectHasLayer = Array.isArray(p.hiddenPremises) || Boolean(p.hiddenAnswer);
+  return {
+    known: knownRows
+      ? `<p class="small muted">город выяснил:</p><ul class="small">${knownRows}</ul>`
+      : '',
+    hidden: !inspectHasLayer
+      ? ''
+      : hiddenRows
+        ? `<p class="small muted">на самом деле:</p><ul class="small">${hiddenRows}</ul>`
+        : '<p class="small muted">на самом деле: скрытого слоя нет</p>',
+  };
+}
+
+/** Что дело выясняет, если сработает: саму разгадку, подступ, или ничего. */
+function deedSecretAim(p) {
+  const bits = [
+    p.reachesAnswer ? '<p class="small muted">целится в разгадку</p>' : '',
+    p.premiseText ? `<p class="small muted">подступ: ${esc(p.premiseText)}</p>` : '',
+  ].filter(Boolean);
+  return bits.join('');
+}
+
+/**
  * Концовки — список вариантов, а не одна строка.
  *
  * `closeWhen` у нити со ставками — это все её концовки сразу. Склеенные через
@@ -528,32 +612,7 @@ function plotCard(p, names = {}) {
       return `<li>${esc(t.text)} <span class="muted small">${esc(bits)}</span>${fire}</li>`;
     })
     .join('');
-  const hidden = Array.isArray(p.hiddenPremises) ? p.hiddenPremises : null;
-  const hiddenRows =
-    hidden == null
-      ? null
-      : [
-          p.hiddenAnswer ? `<li><b>разгадка:</b> ${esc(p.hiddenAnswer)}</li>` : '',
-          ...hidden.map((t) => `<li>подступ: ${esc(t)}</li>`),
-        ]
-          .filter(Boolean)
-          .join('');
-  const hiddenBlock =
-    hiddenRows == null
-      ? ''
-      : hiddenRows
-        ? `<p class="small muted">на самом деле:</p><ul class="small">${hiddenRows}</ul>`
-        : '<p class="small muted">на самом деле: скрытого слоя нет</p>';
-  const known = Array.isArray(p.revealedPremises) ? p.revealedPremises : [];
-  const knownRows = [
-    p.revealedAnswer ? `<li><b>разгадано:</b> ${esc(p.revealedAnswer)}</li>` : '',
-    ...known.map((t) => `<li>${esc(t)}</li>`),
-  ]
-    .filter(Boolean)
-    .join('');
-  const knownBlock = knownRows
-    ? `<p class="small muted">город выяснил:</p><ul class="small">${knownRows}</ul>`
-    : '';
+  const facts = plotFactsBlock(p);
   const ladder = (p.discoveryLadder || [])
     .map((r) => {
       const label = r.promise || r.text || r.id || '';
@@ -569,8 +628,8 @@ function plotCard(p, names = {}) {
     (p.synopsis ? `<p class="pre">${esc(p.synopsis)}</p>` : '') +
     (p.cause ? `<p class="small muted">первопричина: ${esc(p.cause)}</p>` : '') +
     (p.whyMoves ? `<p class="small muted">если не займутся: ${esc(p.whyMoves)}</p>` : '') +
-    knownBlock +
-    hiddenBlock +
+    facts.known +
+    facts.hidden +
     truth +
     (ladder ? `<p class="small muted">лестница:</p><ul class="small">${ladder}</ul>` : '') +
     (threats ? `<p class="small muted">нависло:</p><ul class="small threats">${threats}</ul>` : '') +
@@ -844,6 +903,7 @@ function processCard(p, opts = {}) {
     `<div class="muted small">${esc(meta)}</div>` +
     (p.goal ? `<p class="muted small">цель: ${esc(p.goal)}</p>` : '') +
     (p.detail ? `<p class="pre">${esc(p.detail)}</p>` : '') +
+    deedSecretAim(p) +
     `<p class="small muted">${esc(p.id)}</p>` +
     (actions ? `<div class="row-actions">${actions}</div>` : '') +
     `</article>`
@@ -1142,17 +1202,41 @@ $('btnSeed').addEventListener('click', async () => {
 });
 
 $('btnTick').addEventListener('click', async () => {
+  const days = Math.round(Number($('skipDays').value));
+  if (!Number.isFinite(days) || days < 1 || days > 360) {
+    setBanner('Сколько дней промотать: целое от 1 до 360.');
+    return;
+  }
   $('btnTick').disabled = true;
+  $('skipDays').disabled = true;
   try {
     await api('/api/play/tick', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId }),
+      body: JSON.stringify({ userId, days }),
     });
-    setBanner('Промотали игровой месяц: что назрело, придёт в чат само.');
+    setBanner(`Промотали ${days} дн.: что назрело, придёт в чат само.`);
   } catch (err) {
     setBanner(err.message);
     $('btnTick').disabled = false;
+    $('skipDays').disabled = false;
+  }
+});
+
+$('btnClock').addEventListener('click', async () => {
+  $('btnClock').disabled = true;
+  try {
+    const held = $('btnClock').textContent !== 'время';
+    await api('/api/play/clock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, held }),
+    });
+    await refresh({ force: true });
+  } catch (err) {
+    setBanner(err.message);
+  } finally {
+    $('btnClock').disabled = false;
   }
 });
 
@@ -1178,7 +1262,60 @@ $('btnWipe').addEventListener('click', async () => {
   }
 });
 
-$('btnSlots').addEventListener('click', () => $('slots').classList.toggle('hidden'));
+$('btnSave').addEventListener('click', async () => {
+  $('btnSave').disabled = true;
+  try {
+    const result = await api('/api/play/snapshots', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, label: $('saveLabel').value }),
+    });
+    $('saveLabel').value = '';
+    setBanner(`Состояние мира сохранено${result.label ? `: ${result.label}` : ''}.`);
+    await renderSaves();
+  } catch (err) {
+    setBanner(err.message);
+  } finally {
+    $('btnSave').disabled = false;
+  }
+});
+
+$('saveList').addEventListener('click', async (e) => {
+  const loadId = e.target?.dataset?.load;
+  const dropId = e.target?.dataset?.drop;
+  if (loadId) {
+    if (!confirm('Загрузить состояние мира? Текущее будет заменено.')) return;
+    try {
+      await api('/api/play/snapshots/load', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, id: loadId }),
+      });
+      lastStats = {};
+      inspectData = null;
+      renderedCount = -1;
+      setBanner('Состояние мира загружено.');
+      await refresh({ force: true });
+    } catch (err) {
+      setBanner(err.message);
+    }
+    return;
+  }
+  if (dropId) {
+    if (!confirm('Удалить этот снимок?')) return;
+    try {
+      await api(`/api/play/snapshots/${encodeURIComponent(dropId)}`, { method: 'DELETE' });
+      await renderSaves();
+    } catch (err) {
+      setBanner(err.message);
+    }
+  }
+});
+
+$('btnSlots').addEventListener('click', () => {
+  $('slots').classList.toggle('hidden');
+  if (!$('slots').classList.contains('hidden')) void renderSaves();
+});
 
 $('btnSwitch').addEventListener('click', () => void switchTo($('userId').value.trim()));
 

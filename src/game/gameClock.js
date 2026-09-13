@@ -68,6 +68,20 @@ export function startClock(world, now = Date.now(), config = null) {
 }
 
 /**
+ * После загрузки снимка якорь надо поставить заново: иначе стена часов
+ * уехала вперёд, и сохранённый день сразу станет прошлым.
+ */
+export function reanchorClock(world, { day, now = Date.now(), config = null, held = false } = {}) {
+  if (!world || typeof world !== 'object') return world;
+  const d = Math.max(0, Math.round(Number(day) || 0));
+  world.epochAt = new Date(now - gameDaysToRealMs(d, config)).toISOString();
+  world.pausedMs = 0;
+  world.turnStartedAt = null;
+  world.clockHeldAt = held ? now : null;
+  return syncWorldClock(world, { now, config, day: d });
+}
+
+/**
  * Подтянуть dayIndex / tickIndex / gameDate из якоря и реального времени.
  * Календарь больше не инкрементируется полуночным тиком.
  */
@@ -106,6 +120,21 @@ export function realTimeOfDay(world, day, { config = null, pausedMs = 0 } = {}) 
   return epoch + Math.max(0, Number(pausedMs) || 0) + Math.round(Number(day) * realMsPerGameDay(config));
 }
 
+/** Сколько дней тестовый клиент может промотать за раз: год, не десятилетия. */
+export const MAX_SKIP_DAYS = DAYS_PER_YEAR;
+
+/**
+ * Разобрать число дней для ручной промотки.
+ * Пустое значение → fallback (месяц у старого «промотать»). Иначе 1…max или null.
+ */
+export function parseSkipDays(raw, { fallback = null, max = MAX_SKIP_DAYS } = {}) {
+  if (raw == null || raw === '') return fallback;
+  const n = Math.round(Number(raw));
+  const cap = Math.max(1, Math.round(Number(max) || MAX_SKIP_DAYS));
+  if (!Number.isFinite(n) || n < 1 || n > cap) return null;
+  return n;
+}
+
 /**
  * Промотать часы вперёд на игровые дни.
  *
@@ -114,16 +143,18 @@ export function realTimeOfDay(world, day, { config = null, pausedMs = 0 } = {}) 
  * заданий, будильник — узнаёт о скачке само, без второго календаря.
  * Нужно ручному force_tick и плейтесту; в обычной игре не вызывается.
  */
-export function skipGameDays(world, days, { config = null, now = Date.now() } = {}) {
+export function skipGameDays(world, days, { config = null, now = Date.now(), pausedMs = 0 } = {}) {
   if (!world || typeof world !== 'object') return 0;
   startClock(world, now, config);
   const jump = Math.max(0, Math.round(Number(days) || 0));
-  if (!jump) return currentDay(world, { now, config });
+  const held = Math.max(0, Number(pausedMs) || 0);
+  if (!jump) return currentDay(world, { now, config, pausedMs: held });
   const shift = gameDaysToRealMs(jump, config);
   // Якорь месячного планировщика не трогаем: сдвинув его, мы бы заодно
   // объявили просроченными все пропущенные тики сопряжения.
   world.epochAt = new Date(Date.parse(world.epochAt) - shift).toISOString();
-  syncWorldClock(world, { now, config });
+  const day = currentDay(world, { now, config, pausedMs: held });
+  syncWorldClock(world, { now, config, day });
   return world.dayIndex;
 }
 

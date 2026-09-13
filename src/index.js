@@ -5,8 +5,8 @@ import { startTickScheduler, recordTickCompleted } from './scheduler/ticks.js';
 import { startDayScheduler } from './scheduler/days.js';
 import { runWorldTick } from './game/tick.js';
 import { runDayLoop } from './game/dayLoop.js';
-import { DomainQueue } from './game/scheduler.js';
-import { DAYS_PER_MONTH, skipGameDays } from './game/gameClock.js';
+import { DomainQueue, skipStoredWorldDays } from './game/scheduler.js';
+import { DAYS_PER_MONTH } from './game/gameClock.js';
 import { getLogger } from './log.js';
 
 async function main() {
@@ -45,6 +45,7 @@ async function main() {
         storage,
         app,
         queue: domainQueue,
+        allowWhileHeld: reason === 'play-force' || reason === 'manual',
         log: getLogger().child({ scope: 'dayLoop', reason }),
       }),
   });
@@ -55,11 +56,9 @@ async function main() {
    * город — часами: без промотки часов ему в дневном цикле нечего разбирать,
    * и force_tick выглядел бы сломанным.
    */
-  web.set('runTick', async (reason = 'manual') => {
-    const world = await storage.getWorld();
-    const day = skipGameDays(world, DAYS_PER_MONTH, { config });
-    await storage.saveWorld(world);
-    getLogger().info('tick.skip_days', { reason, days: DAYS_PER_MONTH, day });
+  web.set('runTick', async (reason = 'manual', { days = DAYS_PER_MONTH } = {}) => {
+    const skipped = await skipStoredWorldDays(storage, days, { config });
+    getLogger().info('tick.skip_days', { reason, days: skipped.days, day: skipped.day });
 
     const result = scheduler.triggerNow
       ? await scheduler.triggerNow(reason)
@@ -69,11 +68,11 @@ async function main() {
           return r;
         })();
     await days.triggerNow(reason);
-    return result;
+    return { ...result, skippedDays: skipped.days, day: skipped.day };
   });
   web.set('resyncScheduler', async () => {
-    if (typeof scheduler.resync === 'function') return scheduler.resync();
-    return null;
+    if (typeof scheduler.resync === 'function') await scheduler.resync();
+    if (typeof days.resync === 'function') await days.resync();
   });
 
   const server = web.listen(port, host, () => {

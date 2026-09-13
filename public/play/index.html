@@ -15,7 +15,11 @@
       </div>
       <div class="when">
         <span id="gameDate" class="muted"></span>
-        <button type="button" id="btnTick" class="ghost hidden" title="Промотать игровой месяц вручную">промотать</button>
+        <button type="button" id="btnClock" class="ghost hidden" title="Остановить время: дела и истории сами не наступают">пауза</button>
+        <span id="skipBox" class="skip-days hidden">
+          <input id="skipDays" type="number" min="1" max="360" value="1" inputmode="numeric" title="Сколько игровых дней промотать" />
+          <button type="button" id="btnTick" class="ghost" title="Промотать столько игровых дней: дела и истории, чей срок настал, придут в чат">промотать</button>
+        </span>
         <button type="button" id="btnSeed" class="ghost hidden" title="Посеять историю: описание, хроника или пустота">посев</button>
         <button type="button" id="btnCity" class="ghost" title="Справочник города — то же, что мини-аппка в Telegram">город</button>
         <button type="button" id="btnInspect" class="ghost" title="Все данные города, включая скрытые">данные</button>
@@ -46,6 +50,14 @@
       <p class="muted small" id="wipeNote" hidden>
         Вайп сносит все города и заводит новый мир: прежний уходит в архив.
       </p>
+      <div id="savesBox" class="saves hidden">
+        <p class="muted small">Снимок — состояние мира целиком: часы, очередь, каталоги, все острова. Не выбранный город. Загрузка откатывает текущее.</p>
+        <div class="row">
+          <input id="saveLabel" placeholder="подпись снимка" autocomplete="off" />
+          <button type="button" id="btnSave">Сохранить</button>
+        </div>
+        <div id="saveList"></div>
+      </div>
     </div>
 
     <main id="messages" class="messages"></main>

@@ -49,7 +49,24 @@ body {
 .small { font-size: 0.78rem; }
 .hidden { display: none !important; }
 
-.when { display: flex; align-items: center; gap: 0.6rem; font-size: 0.85rem; }
+.when { display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem; font-size: 0.85rem; }
+
+.skip-days {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.skip-days input {
+  width: 3.4rem;
+  padding: 0.2rem 0.35rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.8rem;
+}
+.skip-days input:focus { outline: none; border-color: var(--accent); }
 
 .island-bar {
   display: flex;
@@ -145,6 +162,20 @@ body {
 }
 
 .row { display: flex; gap: 0.5rem; margin: 0.6rem 0 0.4rem; }
+
+.saves { margin-top: 0.8rem; padding-top: 0.6rem; border-top: 1px solid var(--line); }
+.saves .row { align-items: center; }
+.save-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.82rem;
+}
+.save-row .meta { color: var(--muted); font-size: 0.75rem; }
+.save-row .actions { display: flex; gap: 0.35rem; flex-shrink: 0; }
 
 button {
   font: inherit;

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { triggerForEvent, deliverEvent, stepDomain, runDayLoop } from '../src/game/dayLoop.js';
 import { wakeDelayMs, MIN_WAKE_MS, MAX_WAKE_MS } from '../src/scheduler/days.js';
-import { scheduleJob, beginRulerTurn, RULER_TURN_FAILSAFE_MS } from '../src/game/scheduler.js';
+import { scheduleJob, beginRulerTurn, holdClock, RULER_TURN_FAILSAFE_MS } from '../src/game/scheduler.js';
 import { scheduleDeedJob } from '../src/game/worldLoop.js';
 import { startDeed } from '../src/game/deeds.js';
 import { notifySettings, markPushed } from '../src/game/notify.js';
@@ -376,6 +376,38 @@ test('ход правителя останавливает проход мира
   assert.deepEqual(res.results, []);
 });
 
+test('удержанные часы останавливают проход мира', async () => {
+  const world = makeWorld();
+  holdClock(world, Date.now());
+  const storage = storageOf([makeDomain()], world);
+  const res = await runDayLoop({
+    config,
+    runtime: heraldRuntime(),
+    storage,
+    app: fakeApp(),
+    now: Date.now(),
+    log: silentLog,
+  });
+  assert.equal(res.skipped, 'clock_held');
+  assert.deepEqual(res.results, []);
+});
+
+test('ручной проход идёт и при удержанных часах', async () => {
+  const world = makeWorld();
+  holdClock(world, Date.now());
+  const storage = storageOf([makeDomain()], world);
+  const res = await runDayLoop({
+    config,
+    runtime: heraldRuntime(),
+    storage,
+    app: fakeApp(),
+    now: Date.now(),
+    allowWhileHeld: true,
+    log: silentLog,
+  });
+  assert.equal(res.skipped, undefined);
+});
+
 test('зависший ход снимается предохранителем, и мир идёт дальше', async () => {
   const now = Date.now();
   const world = makeWorld();
@@ -443,5 +475,12 @@ test('во время хода правителя будильник ждёт п
   const world = makeWorld();
   scheduleJob(world, { domainId: 'd1', kind: 'process_finish', dueDay: 0, payload: {} });
   beginRulerTurn(world, Date.now());
+  assert.equal(wakeDelayMs(world, { now: Date.now() }), MAX_WAKE_MS);
+});
+
+test('удержанные часы не будят мир к сроку дел', () => {
+  const world = makeWorld();
+  scheduleJob(world, { domainId: 'd1', kind: 'process_finish', dueDay: 0, payload: {} });
+  holdClock(world, Date.now());
   assert.equal(wakeDelayMs(world, { now: Date.now() }), MAX_WAKE_MS);
 });

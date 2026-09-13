@@ -26,8 +26,8 @@ import { deriveOnboardingPhase, normalizeOnboardingDraft } from '../../game/onbo
 import { genesisTutorialText } from '../../game/progressBar.js';
 import { miniCityPayload } from '../../game/miniCity.js';
 import { cityRules, proxyText } from '../../game/cityRules.js';
-import { worldDay } from '../../game/scheduler.js';
-import { gameDateFromDay } from '../../game/gameClock.js';
+import { worldDay, clockIsHeld, skipStoredWorldDays } from '../../game/scheduler.js';
+import { DAYS_PER_MONTH, gameDateFromDay, parseSkipDays } from '../../game/gameClock.js';
 import { DIFFICULTY_SPEC, DURATION_SPEC, normalizeDifficultyBand } from '../../game/bands.js';
 import { deedDurationBand, deedRemainingBand, deedRemainingDays } from '../../game/deeds.js';
 import { paceLabel } from '../../game/deedMath.js';
@@ -588,6 +588,7 @@ export function createWebServer({ config, app, runtime, storage }) {
           generatingProgress: app.generatingProgress.get(String(userId)) || null,
           genesisTutorial: app.isGenerating(userId) ? genesisTutorialText(config) || null : null,
           ticking: app.isWorldTicking(),
+          clockHeld: clockIsHeld(world),
           canForceTick: playDevEnabled,
           canWipe: playDevEnabled,
           islands,
@@ -773,20 +774,25 @@ export function createWebServer({ config, app, runtime, storage }) {
         if (app.isWorldTicking()) {
           return res.status(409).json({ error: 'already_ticking', message: 'Шаг времени уже идёт.' });
         }
+        const days = parseSkipDays(req.body?.days, { fallback: DAYS_PER_MONTH });
+        if (days == null) {
+          return res.status(400).json({ error: 'bad_days', message: 'дни: целое от 1 до 360' });
+        }
         const runTick = req.app.get('runTick');
         const start = async () => {
-          if (typeof runTick === 'function') return runTick('play-force');
+          if (typeof runTick === 'function') return runTick('play-force', { days });
+          await skipStoredWorldDays(storage, days, { config });
           const result = await runWorldTick({ config, runtime, storage, app });
           await recordTickCompleted(storage, config);
           return result;
         };
-        getLogger().info('play.force_tick', { userId: String(req.body?.userId || '') });
+        getLogger().info('play.force_tick', { userId: String(req.body?.userId || ''), days });
         setImmediate(() => {
           start().catch((err) =>
             getLogger().error('play.force_tick.failed', { error: err.message, stack: err.stack }),
           );
         });
-        res.json({ ok: true, started: true });
+        res.json({ ok: true, started: true, days });
       });
 
       // Вайп мира из клиента: тот же путь, что в админке, но с явным подтверждением.
@@ -806,6 +812,94 @@ export function createWebServer({ config, app, runtime, storage }) {
           if (typeof resync === 'function') await resync();
           getLogger().warn('play.wipe', { userId: String(req.body?.userId || ''), status });
           res.json({ ok: true, status });
+        } catch (err) {
+          req.log?.error('http.error', { error: err.message, stack: err.stack });
+          res.status(500).json({ error: err.message });
+        }
+      });
+
+      server.post('/api/play/clock', async (req, res) => {
+        try {
+          const held = req.body?.held;
+          if (typeof held !== 'boolean') {
+            return res.status(400).json({ error: 'held_required', message: 'нужно held: true или false' });
+          }
+          const result = await app.setClockHeld(held);
+          getLogger().info('play.clock', {
+            userId: String(req.body?.userId || ''),
+            clockHeld: result.clockHeld,
+            day: result.day,
+          });
+          res.json(result);
+        } catch (err) {
+          req.log?.error('http.error', { error: err.message, stack: err.stack });
+          res.status(500).json({ error: err.message });
+        }
+      });
+
+      server.get('/api/play/snapshots', async (_req, res) => {
+        try {
+          res.json({ ok: true, snapshots: await app.listPlaySnapshots() });
+        } catch (err) {
+          _req.log?.error('http.error', { error: err.message });
+          res.status(500).json({ error: err.message });
+        }
+      });
+
+      server.post('/api/play/snapshots', async (req, res) => {
+        try {
+          const result = await app.savePlaySnapshot({ label: req.body?.label });
+          if (!result.ok) {
+            const status = result.error === 'too_many' ? 409 : 400;
+            return res.status(status).json(result);
+          }
+          getLogger().info('play.snapshot_save', {
+            userId: String(req.body?.userId || ''),
+            id: result.id,
+            label: result.label,
+          });
+          res.json(result);
+        } catch (err) {
+          req.log?.error('http.error', { error: err.message, stack: err.stack });
+          res.status(500).json({ error: err.message });
+        }
+      });
+
+      server.post('/api/play/snapshots/load', async (req, res) => {
+        try {
+          const id = String(req.body?.id || '').trim();
+          const result = await app.loadPlaySnapshot(id);
+          if (!result.ok) {
+            const status =
+              result.error === 'ticking' || result.error === 'busy'
+                ? 409
+                : result.error === 'not_found'
+                  ? 404
+                  : 400;
+            return res.status(status).json(result);
+          }
+          const resync = req.app.get('resyncScheduler');
+          if (typeof resync === 'function') await resync();
+          getLogger().info('play.snapshot_load', {
+            userId: String(req.body?.userId || ''),
+            id,
+            worldId: result.worldId,
+          });
+          res.json(result);
+        } catch (err) {
+          req.log?.error('http.error', { error: err.message, stack: err.stack });
+          res.status(500).json({ error: err.message });
+        }
+      });
+
+      server.delete('/api/play/snapshots/:id', async (req, res) => {
+        try {
+          const result = await app.deletePlaySnapshot(req.params.id);
+          if (!result.ok) {
+            const status = result.error === 'not_found' ? 404 : 400;
+            return res.status(status).json(result);
+          }
+          res.json(result);
         } catch (err) {
           req.log?.error('http.error', { error: err.message, stack: err.stack });
           res.status(500).json({ error: err.message });

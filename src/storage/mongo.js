@@ -306,6 +306,43 @@ export class MongoStorage {
     });
   }
 
+  async replaceLiveWorld({ world, domains = [], users = [], confluxes = [], catalogs = null } = {}) {
+    if (!world?.id) throw new Error('snapshot has no world');
+    return this.guard.exclusive(async () => {
+      this.guard.setLiveWorld(world.id);
+      await this.col('domains').deleteMany({});
+      await this.col('users').deleteMany({});
+      await this.col('confluxes').deleteMany({});
+      await this.writeWorldUnlocked(world);
+      for (const domain of domains) {
+        if (!domain?.id) continue;
+        await this.writeDomainUnlocked(domain);
+      }
+      for (const binding of users) {
+        if (!this.guard.acceptBinding(binding)) continue;
+        const uid = binding.userId ?? binding.id;
+        if (!uid) continue;
+        binding.updatedAt = new Date().toISOString();
+        await this.col('users').replaceOne(
+          { userId: String(uid) },
+          { ...binding, userId: String(uid) },
+          { upsert: true },
+        );
+      }
+      for (const conflux of confluxes) {
+        if (!conflux?.id || !this.guard.acceptConflux(conflux)) continue;
+        conflux.updatedAt = new Date().toISOString();
+        const { id, ...rest } = conflux;
+        await this.col('confluxes').replaceOne({ _id: id }, { _id: id, ...rest }, { upsert: true });
+      }
+      if (catalogs) {
+        await this.saveAnnotationCatalog(catalogs.mystery, 'mystery');
+        await this.saveAnnotationCatalog(catalogs.suspense, 'suspense');
+      }
+      return { ok: true, driver: 'mongo', worldId: world.id };
+    });
+  }
+
   async close() {
     if (this.client) await this.client.close();
   }

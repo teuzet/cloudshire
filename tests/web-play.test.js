@@ -91,7 +91,9 @@ function makeDomain() {
         depth: 1,
         maxDepth: 3,
         relatedProcessIds: ['act_1'],
+        hiddenAnswer: 'кладку клали не городские, а чужие',
         hiddenPremises: ['под срубом чужая кладка, не городская'],
+        revealedAnswer: 'воду ведёт подземный ход за межой',
         revealedPremises: ['воду мутит не сруб, а подземный сток'],
         discoveryLadder: [{ id: 'rung_1', promise: 'кто клал камень', revealed: false }],
         endings: [
@@ -167,6 +169,9 @@ function makeDomain() {
           status: 'active',
           officerId: 'off_m',
           linkedStats: ['security'],
+          plotEngagement: 'DIRECT',
+          premiseText: 'под срубом чужая кладка, не городская',
+          reachesAnswer: true,
         },
       ],
       priestOrders: [{ id: 'po_1', subject: 'как идут дела в порту', lastEventNo: null }],
@@ -192,7 +197,7 @@ function makeApp(calls = [], hooks = {}) {
   return {
     onOutbound() {},
     isGenerating: () => false,
-    isWorldTicking: () => false,
+    isWorldTicking: () => Boolean(hooks.ticking),
     generatingProgress: new Map(),
     handleUserMessage: async (userId, text, opts) => {
       calls.push({ kind: 'chat', userId, text, opts });
@@ -226,6 +231,44 @@ function makeApp(calls = [], hooks = {}) {
       calls.push({ kind: 'force-deed', userId, ...opts });
       if (hooks.forcePlayDeed) return hooks.forcePlayDeed(userId, opts);
       return { ok: true, processId: opts.processId, finish: opts.finish, summary: 'Укрепить колодец', closed: false };
+    },
+    setClockHeld: async (held) => {
+      calls.push({ kind: 'clock', held });
+      if (hooks.world) hooks.world.clockHeldAt = held ? Date.now() : null;
+      return { ok: true, clockHeld: Boolean(held), day: WORLD_DAY };
+    },
+    savePlaySnapshot: async ({ label = '' } = {}) => {
+      calls.push({ kind: 'save', label });
+      return {
+        ok: true,
+        id: 'save_abc',
+        label: String(label || ''),
+        savedAt: '2026-09-12T00:00:00.000Z',
+        dayIndex: WORLD_DAY,
+        dateLabel: 'Год 1, месяц 5, день 6',
+        cityNames: ['Саркум'],
+        domainCount: 1,
+      };
+    },
+    listPlaySnapshots: async () => hooks.snapshots || [],
+    loadPlaySnapshot: async (id) => {
+      calls.push({ kind: 'load', id });
+      if (hooks.ticking) return { ok: false, error: 'ticking', message: 'сейчас идёт шаг времени' };
+      if (hooks.loadPlaySnapshot) return hooks.loadPlaySnapshot(id);
+      return {
+        ok: true,
+        id,
+        worldId: 'w1',
+        clockHeld: false,
+        dayIndex: WORLD_DAY,
+        dateLabel: 'Год 1, месяц 5, день 6',
+        cityNames: ['Саркум'],
+        domainCount: 1,
+      };
+    },
+    deletePlaySnapshot: async (id) => {
+      calls.push({ kind: 'delete-save', id });
+      return { ok: true, id };
     },
   };
 }
@@ -266,6 +309,10 @@ test('страница клиента открывает справочник г
     assert.match(html, /id="cityFrame"/, 'мини-аппка встроена, а не переписана заново');
     assert.match(html, /id="btnInspect"/, 'отладочные данные — отдельной кнопкой');
     assert.match(html, /id="btnSeed"/, 'принудительный посев — отдельной кнопкой');
+    assert.match(html, /id="btnClock"/, 'пауза времени на месте');
+    assert.match(html, /id="skipDays"/, 'промотка на заданные дни');
+    assert.match(html, /id="savesBox"/, 'снимки мира в слотах');
+    assert.match(html, /состояние мира целиком/);
   });
 });
 
@@ -277,6 +324,7 @@ test('состояние клиента приходит с дневной да�
     assert.equal(state.tickDate.label, 'Год 1, месяц 6', 'месячная метка остаётся для сопряжения');
     assert.equal(state.domain.name, 'Саркум');
     assert.equal(state.canForceTick, true);
+    assert.equal(state.clockHeld, false);
   });
 });
 
@@ -290,6 +338,9 @@ test('инспектор показывает дела в полосах и дн
     assert.equal(deed.difficultyLabel, 'трудное');
     assert.equal(deed.paceLabel, 'обычно');
     assert.equal(deed.blessCost, 8);
+    assert.equal(deed.plotEngagement, 'DIRECT');
+    assert.equal(deed.premiseText, 'под срубом чужая кладка, не городская');
+    assert.equal(deed.reachesAnswer, true);
   });
 });
 
@@ -306,7 +357,9 @@ test('инспектор показывает и скрытое нависшее
     );
     assert.equal(plot.depth, 1);
     assert.equal(plot.canDrop, false, 'на нити живое дело — снимать нельзя');
+    assert.equal(plot.hiddenAnswer, 'кладку клали не городские, а чужие');
     assert.deepEqual(plot.hiddenPremises, ['под срубом чужая кладка, не городская']);
+    assert.equal(plot.revealedAnswer, 'воду ведёт подземный ход за межой');
     assert.deepEqual(plot.revealedPremises, ['воду мутит не сруб, а подземный сток']);
     assert.equal(plot.discoveryLadder[0].promise, 'кто клал камень');
     assert.deepEqual(
@@ -361,8 +414,20 @@ test('клиент рисует концовки списком с пометк�
     assert.match(js, /data-finish/);
     assert.match(js, /на самом деле:/);
     assert.match(js, /город выяснил:/);
+    assert.match(js, /разгадка:/);
+    assert.match(js, /разгадано:/);
+    assert.match(js, /подступ:/);
+    assert.match(js, /целится в разгадку/);
     assert.match(js, /хроника нити/);
     assert.match(js, /function plotChroniclesBlock/);
+    assert.match(js, /\/api\/play\/clock/);
+    assert.match(js, /\/api\/play\/snapshots/);
+    assert.match(js, /skipDays/);
+    assert.match(js, /Промотали \$\{days\} дн/);
+    assert.match(js, /Время стоит/);
+    assert.match(js, /островов:/);
+    assert.match(js, /Состояние мира сохранено/);
+    assert.match(js, /Загрузить состояние мира/);
   });
 });
 
@@ -531,6 +596,20 @@ test('без playDev посев и снятие не торчат', async () => 
         body: JSON.stringify({ userId: 'local-user', processId: 'act_1', finish: 'ok' }),
       });
       assert.equal(deed.status, 404);
+      const clock = await fetch(`${base}/api/play/clock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: 'local-user', held: true }),
+      });
+      assert.equal(clock.status, 404);
+      const snaps = await fetch(`${base}/api/play/snapshots`);
+      assert.equal(snaps.status, 404);
+      const tick = await fetch(`${base}/api/play/tick`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: 'local-user', days: 3 }),
+      });
+      assert.equal(tick.status, 404);
     },
     { playDev: false },
   );
@@ -564,5 +643,102 @@ test('кнопки инспектора срабатывают угрозу и �
   );
   assert.equal(calls[0].threatId, 'thr_hidden');
   assert.equal(calls[1].finish, 'crit');
+});
+
+test('пауза времени и снимки мира доступны тестовому клиенту', async () => {
+  const calls = [];
+  const hooks = {
+    snapshots: [
+      {
+        id: 'save_abc',
+        label: 'перед развилкой',
+        savedAt: '2026-09-12T00:00:00.000Z',
+        dayIndex: WORLD_DAY,
+        dateLabel: 'Год 1, месяц 5, день 6',
+        cityNames: ['Саркум'],
+        domainCount: 1,
+      },
+    ],
+  };
+  await withServer(
+    async ({ base, world }) => {
+      const paused = await fetch(`${base}/api/play/clock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: 'local-user', held: true }),
+      });
+      assert.equal(paused.status, 200);
+      assert.equal((await paused.json()).clockHeld, true);
+      assert.ok(world.clockHeldAt);
+
+      const state = await get(base, '/api/play/state?userId=local-user');
+      assert.equal(state.clockHeld, true);
+
+      const listed = await get(base, '/api/play/snapshots');
+      assert.equal(listed.snapshots[0].id, 'save_abc');
+
+      const saved = await fetch(`${base}/api/play/snapshots`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: 'local-user', label: 'перед развилкой' }),
+      });
+      assert.equal(saved.status, 200);
+      assert.equal((await saved.json()).id, 'save_abc');
+
+      const loaded = await fetch(`${base}/api/play/snapshots/load`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: 'local-user', id: 'save_abc' }),
+      });
+      assert.equal(loaded.status, 200);
+      assert.equal((await loaded.json()).worldId, 'w1');
+
+      const dropped = await fetch(`${base}/api/play/snapshots/save_abc`, { method: 'DELETE' });
+      assert.equal(dropped.status, 200);
+    },
+    { calls, hooks },
+  );
+  assert.deepEqual(
+    calls.map((c) => c.kind),
+    ['clock', 'save', 'load', 'delete-save'],
+  );
+  assert.equal(calls[0].held, true);
+  assert.equal(calls[1].label, 'перед развилкой');
+  assert.equal(calls[2].id, 'save_abc');
+});
+
+test('тестовый клиент проматывает заданное число дней', async () => {
+  await withServer(async ({ base, world }) => {
+    const bad = await fetch(`${base}/api/play/tick`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: 'local-user', days: 0 }),
+    });
+    assert.equal(bad.status, 400);
+    const started = await fetch(`${base}/api/play/tick`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: 'local-user', days: 7 }),
+    });
+    assert.equal(started.status, 200);
+    assert.equal((await started.json()).days, 7);
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(world.dayIndex, WORLD_DAY + 7);
+  });
+});
+
+test('загрузка снимка во время шага времени отклоняется', async () => {
+  await withServer(
+    async ({ base }) => {
+      const res = await fetch(`${base}/api/play/snapshots/load`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: 'local-user', id: 'save_abc' }),
+      });
+      assert.equal(res.status, 409);
+      assert.equal((await res.json()).error, 'ticking');
+    },
+    { hooks: { ticking: true } },
+  );
 });
 

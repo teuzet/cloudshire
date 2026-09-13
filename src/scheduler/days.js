@@ -19,6 +19,7 @@ export const MIN_WAKE_MS = 5_000;
 export const MAX_WAKE_MS = 4 * 60 * 1000;
 
 export function wakeDelayMs(world, { config = null, now = Date.now() } = {}) {
+  if (world?.clockHeldAt != null) return MAX_WAKE_MS;
   // Ход правителя держит часы: смысла просыпаться раньше предохранителя нет.
   if (world?.turnStartedAt != null && !rulerTurnStale(world, now)) return MAX_WAKE_MS;
   const at = nextWakeAt(world, { config });
@@ -28,7 +29,7 @@ export function wakeDelayMs(world, { config = null, now = Date.now() } = {}) {
 
 export function startDayScheduler({ config, storage, onDay }) {
   if (config?.time?.enabled === false) {
-    return { stop() {}, triggerNow: async () => null };
+    return { stop() {}, triggerNow: async () => null, resync: async () => null };
   }
 
   const log = getLogger().child({ scope: 'dayScheduler' });
@@ -73,6 +74,19 @@ export function startDayScheduler({ config, storage, onDay }) {
   void runOne('boot');
   log.info('dayScheduler.start', { minWakeMs: MIN_WAKE_MS, maxWakeMs: MAX_WAKE_MS });
 
+  async function resync() {
+    if (stopped) return;
+    try {
+      const world = await storage.getWorld();
+      normalizeWorld(world, config);
+      startClock(world);
+      arm(wakeDelayMs(world, { config }));
+    } catch (err) {
+      log.error('dayScheduler.resync_failed', { error: err.message });
+      arm(MAX_WAKE_MS);
+    }
+  }
+
   return {
     stop() {
       stopped = true;
@@ -82,5 +96,6 @@ export function startDayScheduler({ config, storage, onDay }) {
     async triggerNow(reason = 'manual') {
       return runOne(reason);
     },
+    resync,
   };
 }

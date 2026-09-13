@@ -12,6 +12,7 @@ import {
   pruneJobs,
   rulerTurnStale,
   worldDay,
+  clockIsHeld,
 } from './scheduler.js';
 import {
   armDomainSchedule,
@@ -276,6 +277,7 @@ export async function runDayLoop({
   now = Date.now(),
   rng = Math.random,
   log: parentLog,
+  allowWhileHeld = false,
 } = {}) {
   const log = (parentLog || getLogger()).child({ scope: 'dayLoop' });
   const world = await storage.getWorld();
@@ -286,6 +288,10 @@ export async function runDayLoop({
     endRulerTurn(world, now);
   } else if (world.turnStartedAt != null) {
     return { day: worldDay(world, { now, config }), skipped: 'ruler_turn', results: [] };
+  }
+
+  if (clockIsHeld(world) && !allowWhileHeld) {
+    return { day: worldDay(world, { now, config }), skipped: 'clock_held', results: [] };
   }
 
   const day = worldDay(world, { now, config });

@@ -308,5 +308,38 @@ export class YamlStorage {
     });
   }
 
+  /** Заменить живой мир снимком. Тот же worldId, без архива. */
+  async replaceLiveWorld({ world, domains = [], users = [], confluxes = [], catalogs = null } = {}) {
+    if (!world?.id) throw new Error('snapshot has no world');
+    return this.guard.exclusive(async () => {
+      this.guard.setLiveWorld(world.id);
+      await clearYamlDir(path.join(this.root, 'domains'));
+      await clearYamlDir(path.join(this.root, 'users'));
+      await clearYamlDir(path.join(this.root, 'confluxes'));
+      await this.writeWorldUnlocked(world);
+      for (const domain of domains) {
+        if (!domain?.id) continue;
+        await this.writeDomainUnlocked(domain);
+      }
+      for (const binding of users) {
+        if (!this.guard.acceptBinding(binding)) continue;
+        const uid = binding.userId ?? binding.id;
+        if (!uid) continue;
+        binding.updatedAt = new Date().toISOString();
+        await writeYaml(this.userPath(String(uid)), { ...binding, userId: String(uid) });
+      }
+      for (const conflux of confluxes) {
+        if (!conflux?.id || !this.guard.acceptConflux(conflux)) continue;
+        conflux.updatedAt = new Date().toISOString();
+        await writeYaml(this.confluxPath(conflux.id), conflux);
+      }
+      if (catalogs) {
+        await this.saveAnnotationCatalog(catalogs.mystery, 'mystery');
+        await this.saveAnnotationCatalog(catalogs.suspense, 'suspense');
+      }
+      return { ok: true, driver: 'yaml', worldId: world.id };
+    });
+  }
+
   async close() {}
 }

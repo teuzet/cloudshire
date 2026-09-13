@@ -70,7 +70,8 @@ import {
 } from './onboarding.js';
 import { blessProcess, processOwnedBy } from './processes.js';
 import { spendTurnMana } from './mana.js';
-import { beginRulerTurn, endRulerTurn, worldDay, cancelJobsForThreat } from './scheduler.js';
+import { beginRulerTurn, endRulerTurn, worldDay, holdClock, releaseClock, clockIsHeld, cancelJobsForThreat } from './scheduler.js';
+import { syncWorldClock } from './gameClock.js';
 import { formatBoardForSpeech, warmPlotlines, plotConfig, findPlotline } from './plotlines.js';
 import { plantStakedStory } from './storyteller.js';
 import { ensurePlotObligations, fireThreatEvent, resolveDeedEvent, cancelDeedJobs } from './worldLoop.js';
@@ -81,6 +82,14 @@ import {
   dropPlayStory as applyDropPlayStory,
   parsePlayDeedFinish,
 } from './playDev.js';
+import {
+  captureLiveWorld,
+  writePlaySnapshot,
+  listPlaySnapshots,
+  readPlaySnapshot,
+  deletePlaySnapshot,
+  restoreLiveWorld,
+} from './playSnapshot.js';
 import { islandDeleteCheck } from '../clients/telegram/access.js';
 import { generateIslandImage, removeIslandImage } from './islandImage.js';
 import { generateOfficerPortraits, removeOfficerPortraits } from './officerImage.js';
@@ -1978,6 +1987,59 @@ export class GameApp {
       entries: chronicleEntries(domain.lore),
       facts: (domain.lore || []).filter((f) => (f.tags || []).includes('fact')),
     };
+  }
+
+  async setClockHeld(held) {
+    const world = await this.storage.getWorld();
+    if (!world) throw new Error('мира нет');
+    const now = Date.now();
+    const want = Boolean(held);
+    if (want) holdClock(world, now);
+    else releaseClock(world, now);
+    const day = worldDay(world, { now, config: this.config });
+    syncWorldClock(world, { now, config: this.config, day });
+    await this.storage.saveWorld(world);
+    if (!want && this.onClockReleased) {
+      this.onClockReleased('clock_release').catch(() => {});
+    }
+    return {
+      ok: true,
+      clockHeld: clockIsHeld(world),
+      day,
+    };
+  }
+
+  async savePlaySnapshot({ label = '' } = {}) {
+    const bundle = await captureLiveWorld(this.storage, { config: this.config });
+    return writePlaySnapshot(this.config, bundle, { label });
+  }
+
+  async listPlaySnapshots() {
+    return listPlaySnapshots(this.config);
+  }
+
+  async loadPlaySnapshot(id) {
+    if (this.isWorldTicking()) {
+      return { ok: false, error: 'ticking', message: 'сейчас идёт шаг времени' };
+    }
+    if (this.playForcing) {
+      return { ok: false, error: 'busy', message: 'сейчас разбирается дело или беда' };
+    }
+    const bundle = await readPlaySnapshot(this.config, id);
+    if (!bundle) return { ok: false, error: 'not_found', message: 'такого снимка нет' };
+    const result = await restoreLiveWorld(this.storage, bundle, { config: this.config });
+    if (result.ok) {
+      const worldId = result.worldId;
+      if (worldId) {
+        setLoggerWorldId(worldId);
+        initUsageRecording(this.config, worldId, this.storage);
+      }
+    }
+    return result;
+  }
+
+  async deletePlaySnapshot(id) {
+    return deletePlaySnapshot(this.config, id);
   }
 
   async wipeAll() {

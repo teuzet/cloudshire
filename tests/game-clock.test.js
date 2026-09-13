@@ -17,6 +17,9 @@ import {
   humanSpan,
   realWaitLabel,
   skipGameDays,
+  parseSkipDays,
+  MAX_SKIP_DAYS,
+  reanchorClock,
 } from '../src/game/gameClock.js';
 
 const HOUR = 60 * 60 * 1000;
@@ -126,6 +129,48 @@ test('промотка на ноль дней только сообщает те
   const anchor = world.epochAt;
   assert.equal(skipGameDays(world, 0, { now: 8 * 60 * 1000 }), 2);
   assert.equal(world.epochAt, anchor);
+});
+
+test('промотка с паузой считает от замороженного дня', () => {
+  const world = {};
+  startClock(world, 0);
+  const now = 40 * 60 * 1000;
+  const pausedMs = 8 * 60 * 1000;
+  assert.equal(currentDay(world, { now, pausedMs }), 8);
+  assert.equal(skipGameDays(world, DAYS_PER_MONTH, { now, pausedMs }), 8 + DAYS_PER_MONTH);
+});
+
+test('промотка в клиенте принимает 1…год и пустое как fallback', () => {
+  assert.equal(parseSkipDays(7), 7);
+  assert.equal(parseSkipDays('12'), 12);
+  assert.equal(parseSkipDays(1.8), 2);
+  assert.equal(parseSkipDays(0), null);
+  assert.equal(parseSkipDays(MAX_SKIP_DAYS + 1), null);
+  assert.equal(parseSkipDays('', { fallback: DAYS_PER_MONTH }), DAYS_PER_MONTH);
+  assert.equal(parseSkipDays(null, { fallback: DAYS_PER_MONTH }), DAYS_PER_MONTH);
+});
+
+test('переякорь после загрузки не даёт стене часов уехать вперёд', () => {
+  const world = {};
+  startClock(world, 0);
+  syncWorldClock(world, { now: 40 * 60 * 1000 });
+  assert.equal(world.dayIndex, 10);
+  const later = 24 * HOUR;
+  reanchorClock(world, { day: 10, now: later });
+  assert.equal(currentDay(world, { now: later }), 10);
+  assert.equal(world.dayIndex, 10);
+  assert.equal(world.pausedMs, 0);
+  assert.equal(world.clockHeldAt, null);
+  assert.equal(currentDay(world, { now: later + 4 * 60 * 1000 }), 11);
+});
+
+test('переякорь удерживает паузу, если снимок был на паузе', () => {
+  const world = {};
+  const later = 24 * HOUR;
+  reanchorClock(world, { day: 10, now: later, held: true });
+  assert.equal(world.clockHeldAt, later);
+  assert.equal(currentDay(world, { now: later }), 10);
+  assert.equal(currentDay(world, { now: later + 8 * 60 * 1000, pausedMs: 8 * 60 * 1000 }), 10);
 });
 
 test('календарь: 360 дней в году, 30 в месяце', () => {
