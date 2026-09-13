@@ -237,6 +237,39 @@ function plotBlock(plot, chronicleTail = []) {
  * `chronicleTail` — хвост хроники этой истории: без него агент пишет заново
  * то, что уже записано, и город каждый раз находит одну и ту же протечку.
  */
+/**
+ * Чужой берег словами мира, а не поручения.
+ *
+ * Без этого блока хронист знает о месте ровно то, что стояло в приказе, и
+ * запись выходит приказом в прошедшем времени: другого материала у неё нет.
+ */
+function foreignShoreBlock({ partnerName = '', passage = '', pairArchive = '' } = {}) {
+  const lines = ['РАБОТА ШЛА ЧЕРЕЗ ПРОХОД, НА ЧУЖОМ БЕРЕГУ.'];
+  if (partnerName) lines.push(`Чужой берег — «${partnerName}».`);
+  if (passage) lines.push(`По чему шли (место уже описано, другого не выдумывай):\n${passage}`);
+  const archive = archiveBeyondPassage(pairArchive, passage);
+  if (archive) {
+    lines.push(`Что уже записано об этой встрече (не повторяй как новость и не противоречь):\n${archive}`);
+  }
+  lines.push('Пиши по этому месту: что под ногами, что на берегу, куда несли.');
+  lines.push('');
+  return lines;
+}
+
+/** Описание прохода уже отдано отдельно — в архиве оно только съедает окно. */
+function archiveBeyondPassage(pairArchive, passage) {
+  const place = String(passage || '').trim();
+  if (!place) return String(pairArchive || '').trim();
+  return String(pairArchive || '')
+    .split('\n')
+    .filter((line) => {
+      const body = line.replace(/^-\s*\([^)]*\)\s*/, '').trim();
+      return body && !place.includes(body);
+    })
+    .join('\n')
+    .trim();
+}
+
 export function formatDeedPrompt({
   domain,
   plot,
@@ -246,15 +279,18 @@ export function formatDeedPrompt({
   closed = false,
   chronicleTail = [],
   dateLabel = '',
+  partnerName = '',
+  passage = '',
+  pairArchive = '',
 }) {
   void dateLabel;
   const cross = Boolean(process?.crossIsland);
   return [
     'ПОВОД: закончилась работа, которую город вёл по воле покровителя.',
     '',
-    'ЧТО БЫЛО ПОРУЧЕНО (служебная формулировка, в запись её не переписывай):',
+    'ЧТО СОБИРАЛИСЬ СДЕЛАТЬ (намерение, записанное заранее; в летопись его не переписывай):',
     process?.detail || process?.summary || '—',
-    process?.goal ? `Чего добивались: ${process.goal}` : null,
+    process?.goal ? `По чему мерили успех (это мерка, а не текст записи): ${process.goal}` : null,
     deedActorPrompt(domain, process),
     `ИСХОД (решено броском, не спорь): ${FINISH_WORD[applied?.finish] || FINISH_WORD.ok}.`,
     '',
@@ -262,13 +298,10 @@ export function formatDeedPrompt({
     '',
     ...plotBlock(plot, chronicleTail),
     '',
+    ...(cross ? foreignShoreBlock({ partnerName, passage, pairArchive }) : []),
     'Календарную дату в текст не пиши: она стоит на записи отдельно.',
     cross
-      ? [
-          'Это работа через проход, на чужом берегу или против соседнего города.',
-          'Пиши сцену, не сводку цели: где шли, кого встретили, что взяли или не взяли, что осталось на берегу.',
-          `Одна связная запись до ${CHRONICLE_FINALE_MAX} символов. Вызови submit_chronicle.`,
-        ].join('\n')
+      ? `Одна связная запись до ${CHRONICLE_FINALE_MAX} символов. Вызови submit_chronicle.`
       : 'Напиши одну запись хроники о том, что случилось в городе. Вызови submit_chronicle.',
   ]
     .filter((l) => l != null)

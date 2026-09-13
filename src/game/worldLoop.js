@@ -77,7 +77,8 @@ import { plantStakedStory } from './storyteller.js';
 import { accrueMana } from './mana.js';
 import { countEvent, markReported, pickReportSubject } from './priestOrders.js';
 import { decideAsk } from './herald.js';
-import { writePairChronicle, confluxEvent, spreadChronicleToPair } from './confluxCanon.js';
+import { writePairChronicle, confluxEvent, spreadChronicleToPair, formatPairArchive } from './confluxCanon.js';
+import { formatPassageForPrompt } from './passage.js';
 import { secretRevealTexts } from './deedConflux.js';
 import { releasePassageHold } from './passage.js';
 import { getLogger } from '../log.js';
@@ -321,6 +322,12 @@ export async function resolveDeedEvent({
             threat: plot ? findThreat(plot, applied.threatId) : null,
             closed: false,
             chronicleTail: plotChronicleTail(domain, plot?.id),
+            partnerName: process.crossIsland ? partner?.name || '' : '',
+            passage: process.crossIsland && conflux ? formatPassageForPrompt(conflux) : '',
+            pairArchive:
+              process.crossIsland && conflux
+                ? formatPairArchive(conflux, [domain, partner].filter(Boolean))
+                : '',
           }),
       log,
     });

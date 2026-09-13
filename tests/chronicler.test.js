@@ -165,15 +165,43 @@ test('сановница в промпте хрониста — женский �
   assert.doesNotMatch(text, /Назови его в записи/);
 });
 
-test('кросс-островное дело просит сцену, не сводку цели', () => {
+test('кросс-островному делу дают чужой берег, а не только поручение', () => {
   const text = formatDeedPrompt({
     domain: domain(),
     process: { ...deed, crossIsland: true },
     applied: { finish: 'crit' },
+    partnerName: 'Аллерия',
+    passage: 'Проход сейчас: края легли берег в берег, спуск по осыпи.',
+    pairArchive: '- (на проходе) Острова сошлись.',
   });
-  assert.match(text, /через проход/);
-  assert.match(text, /сцену/);
+  assert.match(text, /через проход/i);
+  assert.match(text, /«Аллерия»/);
+  assert.match(text, /спуск по осыпи/, 'место берётся из прохода, а не из приказа');
+  assert.match(text, /Острова сошлись/, 'архив встречи виден хронисту');
   assert.match(text, new RegExp(`до ${CHRONICLE_FINALE_MAX} символов`));
+});
+
+test('описание прохода не приезжает дважды — отдельно и внутри архива', () => {
+  const passage = 'Проход сейчас: края легли берег в берег, спуск по осыпи.\nСостояние прохода: открыт.';
+  const text = formatDeedPrompt({
+    domain: domain(),
+    process: { ...deed, crossIsland: true },
+    applied: { finish: 'crit' },
+    partnerName: 'Аллерия',
+    passage,
+    pairArchive: '- (на проходе) края легли берег в берег, спуск по осыпи.\n- (на проходе) Ночью увели зерно.',
+  });
+  assert.equal(text.match(/спуск по осыпи/g).length, 1, 'место названо один раз');
+  assert.match(text, /Ночью увели зерно/, 'остальной архив остаётся');
+});
+
+test('поручение подано как намерение и как мерка, а не как текст записи', () => {
+  const text = formatDeedPrompt({ domain: domain(), process: deed, applied: { finish: 'ok' } });
+  assert.match(text, /ЧТО СОБИРАЛИСЬ СДЕЛАТЬ/);
+  assert.match(text, /в летопись его не переписывай/);
+  assert.match(text, /это мерка, а не текст записи/);
+  // Своему берегу чужого места не показывают: выдумывать проход не с чего.
+  assert.doesNotMatch(text, /ЧУЖОМ БЕРЕГУ/);
 });
 
 test('промпт беды требует прошедшего времени', () => {
