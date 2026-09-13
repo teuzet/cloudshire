@@ -125,7 +125,7 @@ export function buildSummaryMarkdown({
       }
       if (t.tickNews) {
         lines.push('');
-        lines.push(`**Новости месяца:** ${mdEscape(t.tickNews)}`);
+        lines.push(`**Письмо:** ${mdEscape(t.tickNews)}`);
       }
       lines.push('');
       continue;

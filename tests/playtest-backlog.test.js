@@ -2,13 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createWorldFromConfig, createCharacterRecord, formatCastForPrompt, firstMentionHintForSpeech } from '../src/game/models.js';
 import { takeName, takeNameAtRandom, offerNames, bindCharacterNames, seedWorldNamePool } from '../src/game/names.js';
-import {
-  defaultNewsSchedule,
-  normalizeNewsSchedule,
-  shouldSendTickNews,
-  setNewsSchedule,
-  splitTickNews,
-} from '../src/game/newsSchedule.js';
 import { pauseProcess, resumeProcess, applyEngineProgress, normalizeProcess } from '../src/game/processes.js';
 import { createPlotline, plotConfig, advancePlotClocks } from '../src/game/plotlines.js';
 import { ageDomainPeople, stampPersonAge } from '../src/game/ages.js';
@@ -44,26 +37,6 @@ test('агент берёт предложенное имя, чужое заме
   assert.equal(bound.list[0].name, 'Кален');
   assert.match(bound.texts[0], /Кален/);
   assert.doesNotMatch(bound.texts[0], /Иван/);
-});
-
-test('расписание писем: массив месяцев и critical в поле хроники', () => {
-  const domain = { state: {} };
-  setNewsSchedule(domain, { months: [1, 4, 8], alsoOnCritical: true, detail: 'essence' });
-  const sched = normalizeNewsSchedule(domain.state.newsSchedule);
-  assert.deepEqual(sched.months, [1, 4, 8]);
-  assert.equal(shouldSendTickNews(domain, { month: 4 }, []), true);
-  assert.equal(shouldSendTickNews(domain, { month: 2 }, []), false);
-  assert.equal(
-    shouldSendTickNews(domain, { month: 2 }, [{ importance: 'critical', text: 'беда' }]),
-    true,
-  );
-  assert.equal(shouldSendTickNews(domain, { month: 2 }, [{ importance: 'minor' }]), false);
-  const def = defaultNewsSchedule();
-  assert.equal(def.months.length, 12);
-  assert.equal(def.detail, 'essence');
-  assert.equal(def.clickbait, true);
-  assert.equal(def.ask, true);
-  assert.equal(splitTickNews('Первый абзац достаточно длинный.\n\nВторой абзац тоже не короткий.').length, 2);
 });
 
 test('пауза не тикает и не занимает слот', () => {

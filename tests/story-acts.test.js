@@ -89,8 +89,8 @@ test('story — город со ставками, freeform — главная н
   assert.equal(createPlotline({ title: 'Тайна', kind: 'story', storyType: 'mystery' }).storyType, 'story');
   assert.equal(createPlotline({ title: 'Саспенс', kind: 'story', storyType: 'suspense' }).storyType, 'story');
   assert.equal(createPlotline({ title: 'Лаба', kind: 'story', storyType: 'freeform' }).storyType, 'story');
-  assert.equal(plotBeatAgentId({ kind: 'errand' }), 'storyBeat');
-  assert.equal(plotBeatAgentId({ kind: 'story', isMainConflux: true }), 'storyBeat');
+  assert.equal(plotBeatAgentId({ kind: 'errand' }), 'freeformTell');
+  assert.equal(plotBeatAgentId({ kind: 'story', isMainConflux: true }), 'freeformTell');
   assert.equal(plotBeatAgentId(city), 'freeformTell');
   assert.equal(storyTypeOf({ kind: 'story' }), 'default');
   assert.equal(storyTypeOf({ kind: 'story', storyType: 'freeform' }), 'story');

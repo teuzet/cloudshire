@@ -1,7 +1,8 @@
 import { newId } from './ids.js';
 import { createLoreFact, formatCastForPrompt, chronicleEntries, formatChroniclePriestMark } from './models.js';
 import { formatFullChronicleForPrompt, formatFactsForPrompt } from './memory.js';
-import { findActiveConfluxForDomain, monthsUntilDock } from './conflux.js';
+import { findActiveConfluxForDomain } from './conflux.js';
+import { daysUntilDock } from './confluxTime.js';
 import { attachFactToPlotlines } from './plotlines.js';
 import { cityRules } from './cityRules.js';
 import { overlayConfluxView, stampNewBoardItems, stripConfluxView } from './confluxBoard.js';
@@ -22,6 +23,15 @@ function visibleLoreForDomain(lore, domainId) {
     if (!f?.secret) return true;
     return String(f.secretForDomainId || '') === String(domainId);
   });
+}
+
+function approachingSoonText(conflux, world) {
+  const days = world?.dayIndex != null ? daysUntilDock(conflux, world.dayIndex) : 0;
+  if (days <= 2) return 'сопряжение уже на днях';
+  if (days <= 10) return 'до сопряжения считанные дни';
+  if (days <= 24) return 'до сопряжения около недели или двух';
+  if (days <= 50) return 'до сопряжения около месяца';
+  return 'до сопряжения ещё недели и месяцы';
 }
 
 export function storiesForLoremaster(domain, conflux = null) {
@@ -217,44 +227,35 @@ export async function askLoremaster({
         const visible = visibleLoreForDomain(working.lore, working.id);
         const payload = {
           ok: true,
-          cosmology: config.world.cosmology,
-          gameDate: world.gameDate,
+          gameDate: world.gameDate?.label || null,
           domainName: working.name,
           ruler: working.characters?.[0]?.name,
           description,
-          // Лормастеру нужна вся история: часть фактов выводится только из неё.
           chronicle: formatFullChronicleForPrompt({ ...working, lore: visible }),
           facts: formatFactsForPrompt(visible, { limit: 60 }),
-          // Каст — такой же источник, как хроника: там живут судьбы названных людей.
           knownPeople: formatCastForPrompt(visible, { limit: 30 }),
-          // Без состояния лормастер противоречит сам себе («переписи нет», пока процесс идёт).
           standingRules: cityRules(working).map((m) => m.text),
           currentEvents: (working.state?.events || []).map((e) =>
             typeof e === 'string' ? e : e?.text,
           ),
           activeProcesses: (working.state?.pendingActions || [])
             .filter((a) => a.status === 'active')
-            .map((a) => ({
-              summary: a.summary,
-              monthsLeft: a.monthsLeft,
-              expectedMonths: a.expectedMonths,
-            })),
+            .map((a) => a.summary)
+            .filter(Boolean),
           openStories: formatOpenStoriesBrief(openStories),
           canonicalUnknowns: unknownsPrompt,
           reminder: focusPlot
             ? 'Хроника — главный источник произошедшего; ты её только читаешь. Инструмент — факты. ' +
-              'focusStory — идущая нить, о которой спросили: канон дан, чтобы не противоречить и не разрушить повествование. ' +
-              'Дописывай только мелкие детали фона. Не заводи новое направление сюжета. Скрытое не раскрывай и не пиши в fact. ' +
-              'Новый fact по этой нити система сама привяжет к истории.' +
+              'focusStory — идущая история, о которой спросили: дано, чтобы не противоречить. ' +
+              'Дописывай только мелкие детали фона. Не заводи новое направление. Скрытое не раскрывай и не пиши в факт. ' +
+              'Новый факт по этой истории система сама привяжет.' +
               unknownsLock
-            : 'Хроника приложена целиком — это твой главный источник, рядом с ним knownPeople. Ты хронику только читаешь: ' +
-              'писать её нельзя, инструмент — факты. ' +
-              'openStories — краткие карточки идущих историй без канона истины. Не решай их и не выдумывай скрытое. ' +
+            : 'Хроника — главный источник, рядом с ним известные люди. Хронику только читаешь. ' +
+              'Открытые истории — краткие карточки без скрытой разгадки. Не решай их. ' +
               'Сыгранную историю читай только по хронике. ' +
-              'Если у записи есть пометка [ЭТА ЗАПИСЬ ЗАКРЫЛА ПРОБЛЕМУ] — история закрыта этой записью; не описывай её как текущую беду. ' +
-              'Если хроника упоминает явление без деталей и это не пункт canonicalUnknowns и не скрытое живой нити — add_fact. ' +
-              '«Неизвестно» — только для пункта canonicalUnknowns, скрытого открытой нити или если факт противоречил бы канону. ' +
-              'Не защищай всю тему вокруг пункта: дату, место обычного набега, имя поста — можно установить. ' +
+              'Если у записи есть пометка, что она закрыла историю — не описывай её как текущую беду. ' +
+              'Если хроника упоминает явление без деталей и это не пункт установленных пробелов и не скрытое живой истории — add_fact. ' +
+              '«Неизвестно» — только для пункта пробелов, скрытого открытой истории или если факт противоречил бы канону. ' +
               'Факт, противоречащий хронике или состоянию, — устарел: update_fact или retire_fact.' +
               unknownsLock,
         };
@@ -280,17 +281,15 @@ export async function askLoremaster({
             rematch: Boolean(conflux.rematch),
           };
           if (docked) {
-            payload.conflux.contact = conflux.contact;
-            payload.conflux.monthsDocked = conflux.monthsDocked || 0;
-            payload.conflux.durationMonths = conflux.durationMonths || null;
+            payload.conflux.contact = conflux.contact?.description || conflux.contact || null;
             payload.reminder +=
-              ' Соседний остров при сопряжении реален. О его внутренней жизни спрашивай информатора, не лормастера. Не выдумывай третий остров.';
+              ' Соседний остров при сопряжении реален. О его внутренней жизни не отвечай — это не твой предмет. Не выдумывай третий остров.';
           } else {
-            payload.conflux.monthsUntilDock = monthsUntilDock(conflux, world);
+            payload.conflux.untilDock = approachingSoonText(conflux, world);
             payload.reminder +=
-              ` СБЛИЖЕНИЕ ПОДТВЕРЖДЕНО: чужой остров${partner?.name ? ` «${partner.name}»` : ''}` +
-              ` реально приближается, сопряжение примерно через ${monthsUntilDock(conflux, world)} мес.` +
-              ' Это факт мира, а не слух. Отвечать «не подтверждено» ЗАПРЕЩЕНО.' +
+              ` Сближение подтверждено: чужой остров${partner?.name ? ` «${partner.name}»` : ''}` +
+              ` реально приближается, ${approachingSoonText(conflux, world)}.` +
+              ' Это факт мира, а не слух. Отвечать «не подтверждено» нельзя.' +
               ' Про внутреннюю жизнь соседа сведений пока нет — только сам факт и срок.';
           }
         }
@@ -300,7 +299,7 @@ export async function askLoremaster({
     },
     {
       name: 'add_fact',
-      description: 'Зафиксировать новый выведенный факт (не хроника событий месяца)',
+      description: 'Зафиксировать новый выведенный факт (не запись о случившемся)',
       parameters: {
         type: 'object',
         required: ['text'],
@@ -470,15 +469,15 @@ export async function askLoremaster({
     : docked
       ? [
           '',
-          `Сейчас сопряжение (conflux ${conflux.id}) с соседом` +
+          `Сейчас края островов вместе с городом` +
             (partner ? ` «${partner.name}»` : '') +
-            '. Проход и имя соседа — факты мира. Внутреннюю жизнь соседа читает информатор, не ты.',
+            '. Проход и имя соседа — факты мира. Внутреннюю жизнь соседа не рассказывай.',
         ].join('\n')
       : [
           '',
-          `К острову ПОДТВЕРЖДЁННО приближается чужой остров${partner ? ` «${partner.name}»` : ''}; ` +
-            `сопряжение примерно через ${monthsUntilDock(conflux, world)} мес. Это факт мира.`,
-          'Отвечать «сближение не подтверждено» или «таких сведений нет» ЗАПРЕЩЕНО.',
+          `К острову подтверждённо приближается чужой остров${partner ? ` «${partner.name}»` : ''}; ` +
+            `${approachingSoonText(conflux, world)}. Это факт мира.`,
+          'Отвечать «сближение не подтверждено» или «таких сведений нет» нельзя.',
           'О внутренней жизни соседа сведений пока нет — только факт сближения и срок.',
         ].join('\n');
 

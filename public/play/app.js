@@ -63,7 +63,7 @@ function renderHistory(history, tutorial = null) {
     if (m.role === 'user') {
       box.appendChild(bubble('user', m.content));
     } else if (m.kind === 'tick_news') {
-      box.appendChild(bubble('news', m.content, 'письмо о месяце'));
+      box.appendChild(bubble('news', m.content, 'письмо'));
     } else if (m.kind === 'conflux_announce') {
       box.appendChild(bubble('news', m.content, 'сопряжение на горизонте'));
     } else if (m.kind === 'conflux_approach') {

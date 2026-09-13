@@ -437,14 +437,6 @@ export function approachingAnnounceText(domain, partner, remaining, rematch) {
     .join(' ');
 }
 
-export function approachMonthText(partnerName, remaining, rematch) {
-  const rematchHint = rematch ? ' Это повторный конфлюкс — острова уже сходились.' : '';
-  return (
-    `Остров соседа («${partnerName}») ближе: в разрывах тумана уже угадывают край чужой земли. ` +
-    `До сопряжения осталось около ${remaining} мес.${rematchHint}`
-  );
-}
-
 export function mixedChronicleForPrompt(domains, { limit = 40 } = {}) {
   const rows = [];
   for (const domain of domains || []) {

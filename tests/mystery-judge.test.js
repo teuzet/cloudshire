@@ -168,12 +168,10 @@ test('конфиг каскада и агенты judge на месте', () => 
   assert.equal(config.agents.mysteryPresentation.model, 'gpt-5.6-luna');
   assert.equal(config.agents.mysteryPresentationJudge.model, 'gpt-5.6-luna');
   assert.equal(config.agents.suspenseJudge.model, 'gpt-5.6-luna');
-  assert.equal(config.agents.mysteryStart.reasoningEffort, undefined);
   assert.equal(config.agents.mysteryPresentation.reasoningEffort, undefined);
   assert.equal(config.agents.mysteryPresentationJudge.reasoningEffort, undefined);
   assert.equal(config.agents.suspenseJudge.reasoningEffort, undefined);
-  assert.match(config.agents.mysteryStart.instructions, /X САМ ДОСТАТОЧЕН/);
-  assert.match(config.agents.mysteryStart.instructions, /Антецедент не имеет права жить/);
+  assert.match(config.agents.mysteryPresentation.instructions, /Антецедент не имеет права жить/);
   assert.match(config.agents.mysteryPresentation.instructions, /дыра экспозиции/);
   assert.match(config.agents.mysteryJudge.instructions, /DANGLING_REFERENT/);
   assert.match(config.agents.mysteryJudgeTerra.instructions, /DANGLING_REFERENT/);

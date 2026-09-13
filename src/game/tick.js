@@ -1,17 +1,12 @@
 import { syncWorldClock } from './gameClock.js';
-import { monthsUntilDock } from './conflux.js';
+import { daysUntilDock } from './confluxTime.js';
 import { otherDomainId } from './confluxBoard.js';
-import { resolveIslandImage } from './islandImage.js';
 
-/** Игровая дата шапкой у письма месяца (только в отправке, не в dialogHistory). */
+/** Игровая дата шапкой у вести (только в отправке, не в dialogHistory). */
 function withDateHeader(text, world) {
   const label = world?.gameDate?.label;
   if (!label) return text;
   return `— ${label} —\n\n${text}`;
-}
-
-function withoutSeed(entries) {
-  return (entries || []).filter((f) => !(f.tags || []).includes('seed'));
 }
 
 export async function runWorldTick({ config, runtime, storage, app }) {
@@ -39,7 +34,9 @@ export async function emitConfluxAnnouncements({ app, storage, items }) {
         null;
       const partner = partnerId ? await storage.getDomain(partnerId) : null;
       const remaining =
-        conflux && world ? monthsUntilDock(conflux, world) : item.etaMonths;
+        conflux && world?.dayIndex != null
+          ? daysUntilDock(conflux, world.dayIndex)
+          : Math.max(0, Math.round(Number(item.etaMonths || 0) * 30));
       const letter = await app.narrateConfluxSighting(domain, {
         kind: 'announce',
         fact: text,
@@ -52,40 +49,6 @@ export async function emitConfluxAnnouncements({ app, storage, items }) {
         agent: 'ruler',
         domainId: domain.id,
         kind: 'conflux_announce',
-      });
-    }
-  }
-}
-
-async function emitApproachPhotos({ app, storage, config, notes }) {
-  const world = await storage.getWorld();
-  for (const note of notes || []) {
-    if (!note?.photoSoon || !note.confluxId) continue;
-    const conflux = await storage.getConflux(note.confluxId);
-    if (!conflux) continue;
-    for (const domainId of conflux.domainIds || []) {
-      const domain = await storage.getDomain(domainId);
-      const partnerId = otherDomainId(conflux, domainId);
-      const partner = partnerId ? await storage.getDomain(partnerId) : null;
-      if (!domain?.ownerUserId || !partner) continue;
-      const remaining = monthsUntilDock(conflux, world);
-      const fact = `Чужой остров «${partner.name}» уже близко — до сопряжения около месяца.`;
-      const letter = await app.narrateConfluxSighting(domain, {
-        kind: 'approach',
-        fact,
-        partnerName: partner.name,
-        remaining,
-        rematch: Boolean(conflux.rematch),
-      });
-      const picture = await resolveIslandImage({ domain: partner, config });
-      await app.persistDialog(domain, 'assistant', letter, { kind: 'conflux_approach' });
-      await app.emitOutbound(domain.ownerUserId, withDateHeader(letter, world), {
-        agent: 'ruler',
-        domainId: domain.id,
-        kind: 'conflux_approach',
-        photoUrl: partner.imageUrl || null,
-        photoPath: picture?.abs || null,
-        photoBuffer: picture?.buffer || null,
       });
     }
   }
@@ -105,4 +68,3 @@ async function runWorldTickInner({ config, runtime, storage, app }) {
     confluxNotes: [],
   };
 }
-

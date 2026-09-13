@@ -24,18 +24,12 @@ export async function decideUndockContinuation({
     title: plot?.title,
     synopsis: plot?.synopsis,
     closeWhen: plot?.closeWhen,
-    storyType: plot?.storyType,
     hostDomainId: plot?.hostDomainId,
     concernsDomainIds: plot?.concernsDomainIds,
-    source: plot?.source,
-    situation: plot?.situation,
   });
-  const hidden =
-    plot?.storyType === 'mystery'
-      ? plot.truthGraph || plot.truth || null
-      : plot?.storyType === 'suspense'
-        ? { hiddenPremises: plot.hiddenPremises, discoveryLadder: plot.discoveryLadder }
-        : null;
+  const hidden = Array.isArray(plot?.hiddenPremises) && plot.hiddenPremises.length
+    ? plot.hiddenPremises.join('; ')
+    : null;
 
   try {
     await runtime.run({
@@ -69,24 +63,25 @@ export async function decideUndockContinuation({
       log,
       scene: 'conflux_undock_keep',
       domainId: domain.id,
+      extraSystem:
+        'Есть два города на летающих островах. Проход только что исчез: острова разошлись. ' +
+        'Может ли уже идущая история продолжаться в названном городе без соседа? Верни submit_continuation.',
       userMessages: [
         {
           role: 'user',
           content: [
-            `Дата: ${world?.gameDate?.label || ''}.`,
-            `Город, о котором вопрос: «${domain.name}» (id ${domain.id}).`,
-            partner ? `Сосед, который уходит: «${partner.name}».` : null,
-            `История «${publicPlot.title}». Тип: ${publicPlot.storyType || 'story'}.`,
+            world?.gameDate?.label ? `Сейчас ${world.gameDate.label}.` : '',
+            `Город, о котором вопрос: «${domain.name}».`,
+            partner ? `Соседний город уходит: «${partner.name}».` : null,
+            `История «${publicPlot.title}».`,
             `Сейчас: ${publicPlot.synopsis || ''}`,
             publicPlot.closeWhen ? `Закроется, когда: ${publicPlot.closeWhen}` : null,
-            publicPlot.hostDomainId === domain.id ? 'Этот город был хозяином нити.' : 'Этот город не хозяин нити.',
-            hidden
-              ? `Внутренний канон (игроку не отдавать, только для суждения локальности): ${JSON.stringify(hidden)}`
-              : null,
-            'Спроси себя: может ли эта предпосылка продолжаться ЗДЕСЬ, если соседнего острова больше нет?',
-            'Да: холодный ход в скале этого острова, местный культ, местный спор.',
-            'Нет: украденную соседом вещь хозяин уже не держит; мост между островами; общий двор, который распался.',
-            'Хозяин не значит «да». Смотри причинную локальность, не титул.',
+            publicPlot.hostDomainId === domain.id ? 'Этот город вёл историю.' : 'Этот город историю не вёл.',
+            hidden ? `Скрытый слой (только чтобы судить, живёт ли причина здесь): ${hidden}` : null,
+            'Может ли эта причина продолжаться ЗДЕСЬ, если соседнего острова больше нет?',
+            'Да: место, люди, вещь, обряд этого острова.',
+            'Нет: вещь, которую унёс сосед; проход между островами; общий двор, которого больше нет.',
+            'Тот, кто вёл историю, не получает «да» автоматически.',
             'Вызови submit_continuation.',
           ]
             .filter(Boolean)

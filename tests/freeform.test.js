@@ -455,7 +455,7 @@ test('конфиг freeform читается из YAML', () => {
   assert.equal(new Set(authors.map((a) => a.id)).size, authors.length);
   assert.ok(authors.some((a) => a.name.includes('По')));
   assert.equal(agents.freeformArchitectTell.model, 'claude-haiku-4-5');
-  assert.deepEqual(agents.freeformArchitectTell.canon, ['world', 'time']);
+  assert.deepEqual(agents.freeformArchitectTell.canon, ['world']);
   assert.match(agents.freeformArchitectTell.instructions, /один абзац/);
   assert.doesNotMatch(agents.freeformArchitectTell.instructions, /ХОДА|whatHappens|closeWhen|situationNow|архитектор/);
   assert.equal(Boolean(agents.freeformArchitect), false);
@@ -469,15 +469,15 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformArchitectTell.instructions, /НА САМОМ ДЕЛЕ/);
   assert.match(agents.freeformEndings.instructions, /хотя бы по одной/);
   assert.equal(agents.freeformAssemble.model, 'gpt-5.6-luna');
-  assert.deepEqual(agents.freeformAssemble.canon, ['world', 'patron', 'ruler', 'time', 'foreign']);
-  assert.deepEqual(agents.freeformAssemble.styles, ['names']);
+  assert.deepEqual(agents.freeformAssemble.canon, ['world']);
+  assert.deepEqual(agents.freeformAssemble.styles, []);
   assert.match(agents.freeformAssemble.instructions, /submit_freeform_story/);
   assert.match(agents.freeformAssemble.instructions, /whyMoves/);
   assert.match(agents.freeformAssemble.instructions, /На самом деле/);
   assert.match(agents.freeformAssemble.instructions, /неизвестно/);
   assert.match(agents.freeformAssemble.instructions, /Не схлопывай цепочку/);
-  assert.match(agents.freeformAssemble.instructions, /не месячная заметка/);
-  assert.match(agents.freeformAssemble.instructions, /другой агент по готовой хронике/);
+  assert.match(agents.freeformAssemble.instructions, /не краткая заметка за срок/);
+  assert.match(agents.freeformAssemble.instructions, /Имя истории ставится отдельно по готовой хронике/);
   assert.doesNotMatch(agents.freeformAssemble.instructions, /depth|countdown|urgency|не ставь/i);
   assert.doesNotMatch(agents.freeformAssemble.instructions, /title — короткое имя/);
   assert.equal(agents.freeformTitle.model, 'gpt-5.6-luna');
@@ -495,7 +495,7 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformUrgency.instructions, /FAST/);
   assert.doesNotMatch(agents.freeformUrgency.instructions, /\bdepth\b/i);
   assert.equal(agents.freeformEndings.model, 'gpt-5.6-luna');
-  assert.deepEqual(agents.freeformEndings.canon, ['world', 'time']);
+  assert.deepEqual(agents.freeformEndings.canon, ['world']);
   assert.match(agents.freeformEndings.instructions, /submit_freeform_endings/);
   assert.match(agents.freeformEndings.instructions, /GOOD_ENDING/);
   assert.match(agents.freeformEndings.instructions, /вопрос в городе больше не стоит/);

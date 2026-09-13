@@ -8,18 +8,15 @@ import { normalizeRevealedPremises } from './premises.js';
 
 /**
  * Сюжетные нити — ядро мира: событий вне нитей не бывает.
- * Здесь только модель и формат; отбор битов, окраска и часы — в движке тика.
+ * Здесь только модель и формат; события пишет дневной цикл.
  *
  * Механика (см. docs/PLOTS.md):
  *   gravity     — enum масштаба (SITUATION / EPISODE / CRISIS / RUPTURE);
  *                 бюджет статов с него: 5 / 10 / 15 / 20; вес доски = бюджет × 5
-
- *   urgency     — шанс, что история сама сдвинется в месяц без дела
- *   temperature — интерес (старые нити, указы, сопряжение; греет внимание игрока)
- *   maxAgeMonths / ageMonths — сколько месяцев история живёт без внимания;
- *     срок сам по себе не развязка: выдохшаяся нить гаснет, только если нет дел и упоминаний
+ *
+ *   temperature — поле карточки оставляем, не ведём
  *   closeWhen — успешный исход; mootWhen — когда задача потеряла смысл
- *   relatedStats — какие стороны города сейчас в игре (по ним кидается окраска бита)
+ *   relatedStats — какие стороны города сейчас в игре
  */
 
 function clamp100(n, fallback = 0) {
@@ -195,9 +192,8 @@ export function plotScale(plot) {
 }
 
 export function plotBeatAgentId(plot) {
-  const t = storyTypeOf(plot);
-  if (t === 'story') return 'freeformTell';
-  return 'storyBeat';
+  void plot;
+  return 'freeformTell';
 }
 
 export const FREEFORM_GRAVITY = ['SITUATION', 'EPISODE', 'CRISIS', 'RUPTURE'];

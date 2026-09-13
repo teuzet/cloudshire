@@ -53,9 +53,8 @@ async function main() {
   app.onClockReleased = (reason) => days.triggerNow(reason);
 
   /**
-   * Ручной сдвиг времени. Месячная доска сопряжения ходит тиком, одиночный
-   * город — часами: без промотки часов ему в дневном цикле нечего разбирать,
-   * и force_tick выглядел бы сломанным.
+   * Ручной сдвиг времени. Промотка часов, затем дневной цикл разбирает
+   * накопившиеся сроки. Отдельного месячного календаря пары нет.
    */
   web.set('runTick', async (reason = 'manual', { days = DAYS_PER_MONTH } = {}) => {
     const skipped = await skipStoredWorldDays(storage, days, { config });

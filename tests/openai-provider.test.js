@@ -24,13 +24,12 @@ test('явный reasoningEffort агента перекрывает дефол�
   assert.equal(resolveReasoningEffort({ reasoningEffort: 'wat' }), undefined);
 });
 
-test('mysteryStart, presentation и литературные судьи без reasoningEffort', () => {
+test('presentation, аннотации и литературные судьи без reasoningEffort', () => {
   const config = loadConfig();
-  assert.equal(config.agents.mysteryStart.reasoningEffort, undefined);
   assert.equal(config.agents.mysteryPresentation.reasoningEffort, undefined);
   assert.equal(config.agents.mysteryPresentationJudge.reasoningEffort, undefined);
   assert.equal(config.agents.suspenseJudge.reasoningEffort, undefined);
-  assert.equal(config.agents.mysteryStart.model, 'gpt-5.6-terra');
+  assert.equal(config.agents.mysteryPresentation.model, 'gpt-5.6-luna');
   assert.equal(config.agents.mysteryAnnotation.reasoningEffort, undefined);
   assert.equal(config.agents.mysteryAnnotation.model, 'claude-sonnet-4-6');
   assert.equal(config.agents.mysteryAnnotation.provider, 'anthropic');

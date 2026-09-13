@@ -532,32 +532,6 @@ export async function forceCreateConflux({
 }
 
 /**
- * Счётчики жизни: docked = конфлюкс; approaching и соло = соло.
- * Цель — треть жизни в docked / (docked+solo).
- */
-export async function advanceConfluxLifetimeCounters({ storage, world }) {
-  const active = await storage.listConfluxes({ status: ['approaching', 'docked'] });
-  const dockedIds = new Set();
-  for (const c of active) {
-    if (c.status !== 'docked') continue;
-    for (const id of c.domainIds || []) dockedIds.add(id);
-  }
-
-  const domains = await storage.listDomains();
-  for (const domain of domains) {
-    if (domain.status && domain.status !== 'playing') continue;
-    if (domain.worldId && world?.id && domain.worldId !== world.id) continue;
-    normalizeDomain(domain);
-    if (dockedIds.has(domain.id)) {
-      domain.confluxMonthsDocked = Number(domain.confluxMonthsDocked || 0) + 1;
-    } else {
-      domain.confluxMonthsSolo = Number(domain.confluxMonthsSolo || 0) + 1;
-    }
-    await storage.saveDomain(domain);
-  }
-}
-
-/**
  * Авто-матчмейкинг: частота cadenceHours, окно в активные часы пары.
  */
 export async function maybeMatchmakeConfluxes({
@@ -972,39 +946,6 @@ function seedUndockAftermath({ pair, conflux, world, day, rng }) {
   }
 }
 
-function trackChronicleAdd(map, domainId, fact) {
-  if (!map.has(domainId)) map.set(domainId, []);
-  map.get(domainId).push(fact);
-}
-
-/**
- * Before resolves: approaching prelude / dock transition.
- * Does NOT advance monthsDocked / end — call `advanceDockedConfluxes` after pair resolve.
- *
- * @returns {{
- *   dockedDomainIds: Set<string>,
- *   dockedConfluxes: object[],
- *   chronicleAddsByDomain: Map<string, object[]>,
- *   notes: object[],
- * }}
- */
-export async function processConfluxApproachingPhase({
-  config,
-  runtime,
-  storage,
-  world,
-}) {
-  void config;
-  void runtime;
-  void storage;
-  void world;
-  return { dockedDomainIds: new Set(), dockedConfluxes: [], chronicleAddsByDomain: new Map(), notes: [] };
-}
-
-export async function advanceDockedConfluxes() {
-  return { notes: [], undockAddsByDomain: new Map() };
-}
-
 /** Active docked conflux containing this domain, or null. */
 export async function findDockedConfluxForDomain(storage, domainId) {
   const list = await storage.listConfluxes({ status: ['docked'] });
@@ -1258,24 +1199,26 @@ async function generateContact({ config, runtime, conflux, domains, world, log }
       log,
       scene: 'conflux_contact',
       domainId: `${domains[0].id}+${domains[1].id}`,
+      extraSystem:
+        'Есть два города на летающих островах. Края только что сошлись, появляется проход. ' +
+        'Ширину и рельеф уже выбрали — опиши, как проход выглядит. ' +
+        'Оба имени городов обязательны. Не меняй ширину и рельеф. Не выдумывай ворота, если их нет. ' +
+        'Верни submit_contact.',
       userMessages: [
         {
           role: 'user',
           content: [
-            `Внеочередное событие сопряжения. Дата: ${world.gameDate?.label || ''}.`,
-            `Острова городов «${nameA}» и «${nameB}» сошлись краями.`,
-            '',
-            `Ширина прохода УЖЕ ВЫБРАНА системой: kind=${kind} («${meta.label}»).`,
-            `Опиши именно это: ${meta.hint}`,
-            `Рельеф УЖЕ ВЫБРАН: ${relief.label} — ${relief.hint}`,
-            `Можно ли закрыть или перекрыть этот проход: ${meta.control}`,
-            'Это правда геометрии — впиши в описание своими словами и не противоречь. Не выдумывай ворота, створы и засовы, если их здесь быть не может.',
-            'НЕ меняй ширину и рельеф на другие. Встречу называй сопряжением.',
+            world.gameDate?.label ? `Сейчас ${world.gameDate.label}.` : '',
+            `Города «${nameA}» и «${nameB}». Их острова сошлись краями, между ними появляется проход.`,
+            `Ширина уже выбрана: ${meta.label}. ${meta.hint}`,
+            `Рельеф уже выбран: ${relief.label} — ${relief.hint}`,
+            `Можно ли закрыть проход людьми: ${meta.control}`,
+            'Впиши это в описание своими словами и не противоречь. Не выдумывай ворота и засовы, если их здесь быть не может.',
+            'Не меняй ширину и рельеф на другие. Встречу островов называй сопряжением.',
             rematchLine,
-            '',
             'Вызови submit_contact только с description.',
-            `В тексте ОБЯЗАТЕЛЬНО оба имени: «${nameA}» и «${nameB}».`,
-            'Конкретно, по-русски. Не выдумывай третий остров. Это одна запись на оба города.',
+            `В тексте обязательно оба имени: «${nameA}» и «${nameB}».`,
+            'Конкретно, по-русски. Не выдумывай третий остров. Это одно описание на оба города.',
           ]
             .filter(Boolean)
             .join('\n'),

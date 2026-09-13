@@ -1,11 +1,11 @@
 /**
  * Долгая память без раздувания промптов:
  * - сырая хроника в lore не трогается;
- * - в LLM: rolling digest старых месяцев + хвост recent;
+ * - в LLM: rolling digest старых записей + хвост recent;
  * - плотлайны — короткие rolling summary (режиссёр переписывает).
  */
 
-import { chronicleEntries, loreToPromptText, formatChroniclePriestMark } from './models.js';
+import { chronicleEntries, formatChroniclePriestMark } from './models.js';
 
 export function memoryConfig(config) {
   const m = config?.tick?.memory || {};
@@ -25,6 +25,11 @@ function oneLine(text, max = 110) {
   return `${s.slice(0, max - 1)}…`;
 }
 
+function chronicleLine(e, max) {
+  const label = e.gameDateLabel || 'без даты';
+  return `${label}: ${oneLine(e.text, max)}${formatChroniclePriestMark(e)}`;
+}
+
 /**
  * Пересобрать chronicleDigest из записей старше хвоста recent.
  * Оригиналы в lore остаются.
@@ -38,11 +43,7 @@ export function refreshChronicleDigest(domain, config = null) {
     return domain;
   }
   const older = chron.slice(0, -chronicleRecent);
-  const lines = older.map((e) => {
-    const label = e.gameDateLabel || `тик ${e.tick ?? '?'}`;
-    const closed = e.plotClosed ? ' [закрыла проблему]' : '';
-    return `${label}: ${oneLine(e.text, 100)}${closed}`;
-  });
+  const lines = older.map((e) => chronicleLine(e, 100));
   domain.chronicleDigest = lines.slice(-chronicleDigestMaxLines).join('\n');
   const lastOlder = older[older.length - 1];
   domain.chronicleDigestThroughTick =
@@ -64,7 +65,7 @@ export function formatChroniclePromptBlock(domain, config = null) {
   }
   parts.push(
     recent.length
-      ? `НЕДАВНЯЯ ХРОНИКА (последние ${recent.length}):\n${loreToPromptText(recent)}`
+      ? `НЕДАВНЯЯ ХРОНИКА (последние ${recent.length}):\n${recent.map((e) => chronicleLine(e, 220)).join('\n')}`
       : 'НЕДАВНЯЯ ХРОНИКА: (пусто)',
   );
   return parts.join('\n\n');
@@ -82,15 +83,9 @@ export function formatFullChronicleForPrompt(
   const chron = chronicleEntries(domain.lore || []);
   if (!chron.length) return '(хроника пуста)';
 
-  const line = (e, max) => {
-    const label = e.gameDateLabel || `тик ${e.tick ?? '?'}`;
-    const imp = e.importance && e.importance !== 'minor' ? ` {${e.importance}}` : '';
-    return `${label}${imp}: ${oneLine(e.text, max)}${formatChroniclePriestMark(e)}`;
-  };
-
   const recent = chron.slice(-recentFull);
   const older = chron.slice(0, Math.max(0, chron.length - recentFull));
-  const recentLines = recent.map((e) => line(e, perEntryFull));
+  const recentLines = recent.map((e) => chronicleLine(e, perEntryFull));
   let budget = maxChars - recentLines.reduce((a, s) => a + s.length + 1, 0);
 
   // Сначала важное (оно держит канон), потом мелочи — и то и другое от новых к старым.
@@ -100,7 +95,7 @@ export function formatFullChronicleForPrompt(
       const e = entries[i];
       const idx = older.indexOf(e);
       if (kept.has(idx)) continue;
-      const text = line(e, max);
+      const text = chronicleLine(e, max);
       if (text.length + 1 > budget) continue;
       kept.set(idx, text);
       budget -= text.length + 1;
@@ -134,7 +129,9 @@ export function formatFactsForPrompt(lore = [], { limit = 40 } = {}) {
   });
   const slice = facts.slice(-limit);
   if (!slice.length) return '(устойчивых фактов пока мало — смотри описание и хронику)';
-  return loreToPromptText(slice);
+  return slice
+    .map((f) => `- ${f.id} (${f.gameDateLabel || 'без даты'}): ${String(f.text || '').trim()}`)
+    .join('\n');
 }
 
 /**
@@ -156,7 +153,7 @@ export function dialogHistoryForPrompt(dialogHistory = [], config = null) {
     const role = m.role === 'assistant' ? 'assistant' : 'user';
     let content = String(m.content || '');
     if (m.kind === 'tick_news' && ageFromEnd >= compressTickNewsOlderThan) {
-      content = `[письмо о месяце, сжато] ${oneLine(content, 180)}`;
+      content = `[письмо, сжато] ${oneLine(content, 180)}`;
     }
     return { role, content };
   });

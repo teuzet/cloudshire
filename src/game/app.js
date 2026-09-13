@@ -1,14 +1,10 @@
 import { buildOnboardingTools } from './onboardingTools.js';
 import {
   chronicleEntries,
-  newsChronicleEntries,
-  filterChronicleForDomain,
-  formatChronicleScope,
   formatChroniclePriestMark,
   normalizeDomain,
   formatCastForPrompt,
   firstMentionHintForSpeech,
-  peopleNamedInTexts,
   inferRulerGender,
 } from './models.js';
 import {
@@ -20,7 +16,7 @@ import {
 } from './stats.js';
 import { noteRulerActivity } from './activity.js';
 import { confluxConfig, daysUntilDock, remainingDockDays } from './confluxTime.js';
-import { assertsIslandsParted, findActiveConfluxForDomain, formatContactForPrompt } from './conflux.js';
+import { findActiveConfluxForDomain, formatContactForPrompt } from './conflux.js';
 import {
   overlayConfluxView,
   overlayWithPartner,
@@ -82,7 +78,7 @@ import {
   mergeWorldJobs,
 } from './scheduler.js';
 import { syncWorldClock } from './gameClock.js';
-import { formatBoardForSpeech, warmPlotlines, plotConfig, findPlotline } from './plotlines.js';
+import { formatBoardForSpeech, findPlotline } from './plotlines.js';
 import { plantStakedStory } from './storyteller.js';
 import { ensurePlotObligations, fireThreatEvent, resolveDeedEvent, cancelDeedJobs } from './worldLoop.js';
 import { deliverEvent, settleEvents } from './dayLoop.js';
@@ -104,26 +100,18 @@ import { islandDeleteCheck } from '../clients/telegram/access.js';
 import { generateIslandImage, removeIslandImage } from './islandImage.js';
 import { generateOfficerPortraits, removeOfficerPortraits } from './officerImage.js';
 import { generateDomain } from './genesis.js';
-import { formatOfficersForPrompt, formatOfficersBriefForNews } from './officers.js';
+import { formatOfficersForPrompt } from './officers.js';
 import { formatIslandReveal } from './islandReveal.js';
 import { formatProgressBar, genesisTutorialText } from './progressBar.js';
 import { genesisDateMessage } from './tickClock.js';
 import { dialogHistoryForPrompt } from './memory.js';
-import {
-  newsScheduleOf,
-  tickNewsStyleHint,
-} from './newsSchedule.js';
 import {
   formatRulerVoiceForPrompt,
   shouldRulerAskPatron,
   markRulerAsked,
 } from './rulerMemory.js';
 import { resolveReply, formatReplyForPrompt, rememberPush } from './replyContext.js';
-import {
-  shouldAskPatronPresence,
-  markPatronPresenceAsked,
-  clearPatronPresenceAsked,
-} from './steward.js';
+import { clearPatronPresenceAsked } from './steward.js';
 import { getLogger, truncate, setLoggerWorldId } from '../log.js';
 import { initUsageRecording } from '../llm/usage.js';
 import { purgeDomainMedia } from '../storage/r2.js';
@@ -963,13 +951,6 @@ export class GameApp {
     });
 
     const askNow = shouldRulerAskPatron(domain, world);
-    const newsSched = newsScheduleOf(domain);
-    const newsMonths =
-      newsSched.months.length === 12
-        ? 'каждый месяц'
-        : newsSched.months.length
-          ? `в месяцы ${newsSched.months.join(', ')}`
-          : 'не по календарю';
 
     // Здесь только данные хода. Правила поведения живут в instructions агента.
     const extraSystem = [
@@ -978,9 +959,7 @@ export class GameApp {
       patronLine,
       confluxCanon,
       undockCanon,
-      `Письма о месяце (движок шлёт сам): ${newsMonths}` +
-        `${newsSched.alsoOnCritical ? '; также если случится совсем важное' : ''}. ` +
-        'Покровитель просит иначе — set_news_schedule. Сближение островов не глуши.',
+      'Вести о случившемся приходят сами, по одной. Сближение островов не глуши.',
       askNow
         ? 'В ЭТОЙ реплике задай покровителю один короткий живой вопрос: о его воле, о страхе за нынешнее или о том, как жить. Не лекцию и не каждый раз — сейчас как раз тот случай.'
         : '',
@@ -1114,16 +1093,9 @@ export class GameApp {
       reply = stripSpeakerPrefix(reply, character.name);
 
       const fresh = await this.storage.getDomain(domain.id);
-      const plotCfg = plotConfig(this.config);
-      const warmed = warmPlotlines(fresh, turn.meta?.touchedPlotIds || [], plotCfg);
-      let warmedConflux = [];
       const liveConflux = conflux
         ? (await this.storage.getConflux(conflux.id)) || conflux
         : null;
-      if (liveConflux) {
-        warmedConflux = warmPlotlines(liveConflux, turn.meta?.touchedPlotIds || [], plotCfg);
-        if (warmedConflux.length) await this.storage.saveConflux(liveConflux);
-      }
       if (turn.meta?.dayNote) {
         fresh.state.monthLog = Array.isArray(fresh.state.monthLog) ? fresh.state.monthLog : [];
         fresh.state.monthLog.push({
@@ -1145,7 +1117,7 @@ export class GameApp {
       log.info('ruler.reply', {
         mana: spent.ok ? spent.mana : 'empty',
         replyPreview: truncate(reply, 400),
-        touchedPlots: [...warmed, ...warmedConflux].map((w) => `${w.id}:${w.from}→${w.to}`),
+        touchedPlots: turn.meta?.touchedPlotIds || [],
         dayNote: turn.meta?.dayNote || null,
         requestKind: turn.meta?.requestKind || null,
         commitment: turn.meta?.commitment || null,
@@ -1197,305 +1169,6 @@ export class GameApp {
     }
   }
 
-  async narrateTickNews(domain, chronicleAdds, gameDate, opts = {}) {
-    const character = domain.characters[0];
-    const forNews = filterChronicleForDomain(
-      newsChronicleEntries(chronicleAdds),
-      domain.id,
-    );
-    if (!character) {
-      return forNews.map((c) => c.text).join('\n');
-    }
-    if (!forNews.length) {
-      return 'Покровитель, месяц прошёл тихо — рассказывать почти нечего.';
-    }
-
-    // Дела соседа — не новости города: их можно упомянуть слухом, но не отчитываться о них.
-    const isForeign = (c) => {
-      const ids = Array.isArray(c.concernsDomainIds) ? c.concernsDomainIds.map(String) : [];
-      return ids.length > 0 && !ids.includes(String(domain.id));
-    };
-    const mine = forNews.filter((c) => !isForeign(c));
-    const foreign = forNews.filter(isForeign);
-    const quietOnly = mine.length > 0 && mine.every((c) => c.author === 'storyteller:quiet');
-    const schedule = newsScheduleOf(domain);
-    const styleHint = tickNewsStyleHint(schedule);
-
-    const named = peopleNamedInTexts(
-      domain.lore,
-      (mine.length ? mine : forNews).map((c) => c.text),
-    );
-    const peopleHint = named.length
-      ? [
-          'ЛЮДИ ЭТОГО МЕСЯЦА (первое имя в письме — с должностью, покровитель их не помнит наизусть):',
-          ...named.map((c) => {
-            const bits = [c.name, Number.isFinite(Number(c.ageYears)) ? `${c.ageYears} лет` : null, c.role, c.about]
-              .filter(Boolean);
-            return `- ${bits.join(', ')}`;
-          }),
-        ].join('\n')
-      : '';
-    const facts = (mine.length ? mine : forNews)
-      .map((c) => `- [${c.importance || 'event'}] ${formatChronicleScope(c)}${c.text}${formatChroniclePriestMark(c)}`)
-      .join('\n');
-    const foreignBlock = foreign.length
-      ? [
-          'ЧУЖОЙ ГОРОД (это НЕ новости твоего города):',
-          ...foreign.map((c) => `- ${formatChronicleScope(c)}${c.text}${formatChroniclePriestMark(c)}`),
-        ].join('\n')
-      : '';
-    const patronName = domain.state?.patronName || null;
-    const patronGenderWord =
-      domain.state?.patronGender === 'female'
-        ? 'женщина'
-        : domain.state?.patronGender === 'male'
-          ? 'мужчина'
-          : null;
-    const addressHint = patronName
-      ? `Обращайся к покровителю как «${patronName}»${patronGenderWord ? ` (${patronGenderWord})` : ''}. Не подменяй чужим именем бога.`
-      : 'Имя покровителя неизвестно — обратись «покровитель», без выдуманных имён.';
-
-    const scopeHint = foreign.length
-      ? [
-          'Пиши о своём городе.',
-          'О соседнем — только если там произошло действительно важное: угроза, разрыв, общая беда, крупный переворот, то, что нельзя не заметить с вашего берега.',
-          'Чужие рутинные дела, мелкие поручения и быт соседа не пересказывай и не разбирай подробно.',
-        ].join(' ')
-      : '';
-
-    // Эмоциональный регистр письма: тяжесть месяца + отношение к покровителю.
-    const worstDrop = forNews.reduce((min, c) => {
-      if (!c.statChanges) return min;
-      for (const v of Object.values(c.statChanges)) {
-        const delta = Number(v?.to) - Number(v?.from);
-        if (Number.isFinite(delta) && delta < min) min = delta;
-      }
-      return min;
-    }, 0);
-    const hasCritical = mine.some((c) => c.importance === 'critical');
-    const loyalty = Number(character.loyalty ?? 50);
-    const terror = Number(character.terror ?? 50);
-    const moodHint = [
-      hasCritical || worstDrop <= -6
-        ? 'Месяц тяжёлый: пиши тяжело, без утешительных формул и сглаживания.'
-        : 'Месяц без катастроф: тон спокойнее, но не безразличный.',
-      loyalty >= 70
-        ? 'Ты преданно любишь покровителя — пиши теплее и откровеннее, можно личное признание.'
-        : loyalty <= 30
-          ? 'Ты разочарован в покровителе — суше, с горечью, без лести.'
-          : '',
-      terror >= 70
-        ? 'Ты боишься его гнева — осторожность, оглядка, страх сказать лишнее.'
-        : terror <= 25
-          ? 'Ты почти не трепещешь — говоришь прямее, местами устало.'
-          : '',
-      'Смени зачин: не начинай так же, как в прошлых письмах.',
-    ]
-      .filter(Boolean)
-      .join(' ');
-
-    // С третьего тихого письма — один раз спросить, куда делся покровитель.
-    const presence = shouldAskPatronPresence(domain, this.config);
-    const unanswered = presence.silent;
-    const askPresence = presence.ok;
-    const stewardActs = (opts.stewardActs || []).filter((a) => a && a.kind && a.kind !== 'none');
-    const stewardHint = stewardActs.length
-      ? [
-          'В этом месяце, пока покровитель молчал, действовал сановник — не ты сам. Назови его должность и имя.',
-          ...stewardActs.map((a) =>
-            a.kind === 'process'
-              ? `- ${a.office ? `${a.office} ` : ''}${a.officerName || ''} взялся за дело: ${a.summary}`
-              : `- ${a.kind}: ${a.summary || a.text || ''}`,
-          ),
-          'Не приписывай решение себе. Жрец только передаёт, что сановник распорядился.',
-        ].join('\n')
-      : '';
-    const silenceAngles = [
-      'спроси, слышит ли он тебя ещё',
-      'скажи, что люди спрашивают, не отвернулся ли покровитель, и ты не знаешь, что отвечать',
-      'скажи, что вёл уже начатые дела и ждал его голоса',
-      'скажи, что оставил у алтаря знак и ждёшь ответа',
-      'обмолвись, что давно не слышал его голоса, и вернись к делам',
-    ];
-    const presenceHint = askPresence
-      ? [
-          `ОБЯЗАТЕЛЬНО: покровитель молчит ${unanswered} месяца подряд. Ты его теряешь.`,
-          `В конце письма отдельной фразой-вопросом: ${
-            silenceAngles[Math.floor(Math.random() * silenceAngles.length)]
-          }.`,
-          'Нужен именно вопрос к нему (со знаком вопроса), своими словами. Без истерики, 1–2 предложения.',
-        ].join(' ')
-      : '';
-
-    // Записи про стыковку (сближение/стык) — главная нить письма, если они есть.
-    const confluxAdds = forNews.filter((c) => (c.tags || []).includes('conflux'));
-    const confluxLead = confluxAdds.length && !opts.undock
-      ? [
-          'ГЛАВНОЕ СОБЫТИЕ МЕСЯЦА — чужой летающий остров (сближение или сопряжение).',
-          'Начни письмо с него и говори прямо: назови город соседа и срок в игровых месяцах.',
-          'Не переводи срок в часы и не оговаривайся, что это «не слух» или «не примета».',
-          'Прочие дела — коротко, после.',
-        ].join(' ')
-      : '';
-
-    const seedAdds = mine.filter((c) => c.author === 'storyteller:seed');
-    const seedLead = seedAdds.length
-      ? [
-          'В этом месяце НАЧАЛАСЬ новая история.',
-          'Представь её с нуля, будто покровитель ничего о ней не слышал.',
-          'Крючок, не очередь и не новый порядок.',
-        ].join(' ')
-      : '';
-
-    // Развязка, катастрофа или взятая цель сезона — с этого письмо и начинается.
-    const highlight = opts.highlight;
-    const highlightLead = highlight
-      ? [
-          `ГЛАВНОЕ СОБЫТИЕ МЕСЯЦА — ${highlight.note || `история «${highlight.title}» дошла до конца`}.`,
-          'Начни письмо с него и дай ему место: кто был, что сделали, чем это кончилось.',
-          highlight.kind === 'catastrophe'
-            ? 'Не смягчай: покровитель должен понять, что город потерял.'
-            : 'Не отчитывайся о работах — расскажи, чем дело кончилось для людей.',
-          'Прочие дела — коротко, после.',
-        ].join(' ')
-      : '';
-
-    const partner = opts.partnerName ? `«${opts.partnerName}»` : 'чужой город';
-    const undockHint = opts.undock
-      ? [
-          'ГЛАВНОЕ СОБЫТИЕ МЕСЯЦА — острова разошлись: сопряжение кончилось.',
-          `Чужой остров (${partner}) УЛЕТЕЛ / ушёл в небо: пути между вами больше нет.`,
-          'В письме ОБЯЗАТЕЛЬНО скажи прямо: острова разошлись в небе; силуэт чужого края ушёл в даль.',
-          'Мост/переход можно упомянуть только как следствие: он исчез, ПОТОМУ ЧТО острова разъехались.',
-          'ЗАПРЕЩЕНО оставлять впечатление, будто «просто мостик обвалился», а острова на месте.',
-          `Назови ${partner} или «чужой остров» и глагол ухода (ушёл, улетел, растворился вдали, разошлись).`,
-        ].join(' ')
-      : '';
-
-    const undockSystem = opts.undock
-      ? [
-          'Этот месяц — конец сопряжения: два летающих острова РАЗОШЛИСЬ.',
-          'Письмо покровителю должно сделать это очевидным с первого абзаца.',
-          'Нельзя звучать так, будто рухнул только мост, а соседний остров всё ещё рядом.',
-        ].join(' ')
-      : '';
-
-    const runLetter = async (extraUserNote = '') => {
-      const result = await this.runtime.run({
-        agentId: 'tickNews',
-        userMessages: [
-          {
-            role: 'user',
-            content: [
-              `Прошёл месяц (${gameDate.label}). Ниже — ЧТО ДЕЙСТВИТЕЛЬНО СЛУЧИЛОСЬ в городе за этот месяц.`,
-              'Это не слухи и не донесения, ждущие проверки: так было. Не сомневайся в записях, ' +
-                'не проси подтверждений и не отказывайся о них говорить — просто расскажи об этом покровителю.',
-              'Напиши покровителю письмо о месяце — живую речь, НЕ сводку и НЕ отчёт.',
-              styleHint,
-              undockHint
-                ? 'Сделай уход чужого острова в небо центральной нитью письма.'
-                : confluxLead
-                  ? 'Сделай чужой остров центральной нитью письма.'
-                  : highlightLead
-                    ? 'Главное событие месяца веди первым и подробнее прочего.'
-                    : seedLead
-                      ? 'Новую историю представь так, чтобы покровитель понял её без прошлого письма.'
-                      : 'Только самое важное. Мелочь опусти.',
-              'ОБЯЗАТЕЛЬНО упомяни каждую [critical] запись СВОЕГО города — такое не заметить нельзя.',
-              schedule.detail === 'essence'
-                ? 'Один короткий абзац, лучше два-три предложения. Можно два крошечных абзаца, как пишет человек.'
-                : schedule.detail === 'brief'
-                  ? 'Коротко: один абзац о главном, второй только если нужно.'
-                  : 'Связная проза от первого лица, 1–3 коротких абзаца.',
-              'Без списков, markdown, нумерации, канцелярита.',
-              `Не начинай с «${character.name}:» — сразу текст письма.`,
-              'Хроника нарочно сухая — это заметки, а не письмо. Оживи их своей речью, ' +
-                'но не додумывай событий и не копируй формулировки. Статы и механики не упоминай.',
-              addressHint,
-              moodHint,
-              stewardHint,
-              presenceHint,
-              scopeHint,
-              quietOnly
-                ? 'Месяц без сюжета: не называй людей по имени. Ремесло, место, случай — достаточно.'
-                : '',
-              confluxLead || undockHint ? '' : highlightLead || seedLead,
-              confluxLead,
-              undockHint,
-              extraUserNote,
-              '',
-              facts,
-              foreignBlock,
-            ]
-              .filter(Boolean)
-              .join('\n'),
-          },
-        ],
-        tools: [],
-        maxTurns: 1,
-        extraSystem: [
-          formatRulerVoiceForPrompt(domain, { writable: false }),
-          addressHint,
-          undockSystem,
-          'Ты пишешь покровителю новости месяца живой речью, как человек, а не сводку событий.',
-          'Если у записи есть пометка [ЭТА ЗАПИСЬ ЗАКРЫЛА ПРОБЛЕМУ] — эта хроника закрыла историю. ' +
-            'Начни с исхода как с завершения, не как с текущей работы. Пометку вслух не произноси. ' +
-            'Бытовой вопрос после закрытия — последствия, не продолжение беды.',
-          firstMentionHintForSpeech(),
-          peopleHint,
-          formatOfficersBriefForNews(domain),
-          `Не начинай письмо с «${character.name}:».`,
-          (() => {
-            const board = formatBoardForSpeech(domain, {
-              statsFeel: (ids) => statEpithetsShort(domain.stats || {}, this.config, ids),
-            });
-            return board
-              ? `Живые нити города (для памяти, не пересказывай списком; в речи без заголовков в кавычках):\n${board}`
-              : '';
-          })(),
-        ]
-          .filter(Boolean)
-          .join('\n'),
-        scene: opts.undock ? 'tick_news_undock' : 'tick_news',
-        domainId: domain.id,
-      });
-      return stripSpeakerPrefix(
-        result.text || 'Покровитель, за месяц многое сдвинулось.',
-        character.name,
-      );
-    };
-
-    let letter = await runLetter();
-    if (askPresence && !/[?]/.test(letter)) {
-      letter = await runLetter(
-        'ПЕРЕПИСИ: в черновике не было вопроса покровителю. Добавь в конец прямой вопрос: слышит ли он ещё, куда делся.',
-      );
-    }
-    if (askPresence && !/[?]/.test(letter)) {
-      letter = `${letter.trim()} Слышишь ли ты меня ещё? Город ждёт твоего слова.`;
-    }
-    if (askPresence) markPatronPresenceAsked(domain);
-    if (opts.undock && !assertsIslandsParted(letter)) {
-      letter = await runLetter(
-        'ПЕРЕПИСИ: в прошлом черновике событие звучало как обвал моста. ' +
-          `Нужно ясно: остров ${partner} ушёл в небо, края разошлись, пути нет. ` +
-          'Мост — только следствие ухода островов.',
-      );
-    }
-    if (opts.undock && !assertsIslandsParted(letter) && opts.partnerName) {
-      // Жёсткий хвост, если модель снова свела к мосту
-      letter = `${letter.trim()} Чужой остров «${opts.partnerName}» ушёл в небо — края разошлись, и пути между нами больше нет.`;
-    } else if (opts.undock && !assertsIslandsParted(letter)) {
-      letter = `${letter.trim()} Чужой остров ушёл в небо — края разошлись, и пути между нами больше нет.`;
-    }
-
-    return stripSpeakerPrefix(letter, character.name);
-  }
-
-  /**
-   * Отдельное слово правителя покровителю: на горизонте чужой остров
-   * или он уже близко. Не письмо месяца — тот же голос.
-   */
   async narrateConfluxSighting(domain, { kind, fact, partnerName, remaining, rematch } = {}) {
     const character = domain.characters?.[0];
     const fallback = String(fact || '').trim();
@@ -1510,18 +1183,22 @@ export class GameApp {
     const addressHint = patronName
       ? `Обращайся к покровителю как «${patronName}»${patronGenderWord ? ` (${patronGenderWord})` : ''}. Не подменяй чужим именем бога.`
       : 'Имя покровителя неизвестно — обратись «покровитель», без выдуманных имён.';
-    const months = Math.max(0, Math.round(Number(remaining) || 0));
+    const days = Math.max(0, Math.round(Number(remaining) || 0));
     const when =
-      months <= 0
-        ? 'сопряжение уже в этом месяце'
-        : months === 1
-          ? 'до сопряжения около месяца'
-          : `до сопряжения примерно ${months} мес.`;
+      days <= 2
+        ? 'сопряжение уже на днях'
+        : days <= 10
+          ? 'до сопряжения считанные дни'
+          : days <= 24
+            ? 'до сопряжения около недели или двух'
+            : days <= 50
+              ? 'до сопряжения около месяца'
+              : `до сопряжения ещё недели и месяцы`;
     const partner = partnerName ? `«${partnerName}»` : 'чужой город';
     const firstSight = kind !== 'approach';
     try {
       const result = await this.runtime.run({
-        agentId: 'tickNews',
+        agentId: 'herald',
         tools: [],
         maxTurns: 1,
         scene: firstSight ? 'conflux_announce' : 'conflux_approach',
@@ -1539,15 +1216,15 @@ export class GameApp {
             role: 'user',
             content: [
               firstSight
-                ? 'Это не письмо месяца. Срочное слово покровителю: на горизонте впервые виден чужой летающий остров, сопряжение неизбежно.'
-                : 'Это не письмо месяца. Срочное слово покровителю: чужой остров уже близко. Край чужой земли уже различим.',
+                ? 'Срочное слово покровителю: на горизонте впервые виден чужой летающий остров, сопряжение неизбежно.'
+                : 'Срочное слово покровителю: чужой остров уже близко. Край чужой земли уже различим.',
               `Соседний город зовут ${partner}.`,
-              `Срок в игровых месяцах: ${when}. Не переводи в часы и не называй реальное время.`,
+              `Срок, как его назовут люди: ${when}. Не называй точное число дней и не переводи в часы.`,
               rematch ? 'Острова уже сходились с этим соседом раньше — город это помнит.' : '',
               'Что уже известно городу:',
               fallback,
               'Напиши короткое живое письмо от первого лица: 1–2 коротких абзаца.',
-              `Назови ${partner} и срок в месяцах прямо. Не оговаривайся, что это «не слух» или «не примета».`,
+              `Назови ${partner} и срок словами прямо. Не оговаривайся, что это «не слух» или «не примета».`,
               'Внутренней жизни соседа ещё не видно — не выдумывай, что у них там происходит.',
               'Не заканчивай служебной формулой. Без списков, markdown, механики.',
               addressHint,

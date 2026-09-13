@@ -7,32 +7,31 @@ src/index.js
   bootstrap.createAppContext     config, storage, AgentRuntime, GameApp
   clients/web/server.js          /play /mini /admin /freeform
   scheduler/days.js              будильник по сроку ближайшего задания (одиночный город)
-  scheduler/ticks.js             clock-aligned interval (сопряжённая пара)
+  scheduler/ticks.js             часовой будильник / force-tick (часы, не сюжет пары)
   clients/telegram/bot.js        polling → GameApp.handleUserMessage
 
 чат → GameApp
   нет домена → onboarding → genesis.generateDomain
   есть домен → runRuler (тулы в rulerTools.js); на время хода часы мира стоят
 
-день → dayLoop.runDayLoop         города вне стыка
+день → dayLoop.runDayLoop         соло и пара
   armDomainSchedule               завести сроки: посев, угрозы, дела
   drainDomainJobs                 разобрать назревшее (worldLoop.js)
     process_finish → исход дела → бит нити → разбор остальных обязательств
     threat_fire    → срабатывание угрозы или разрешение
     seed_attempt / seed_appear → посев истории
+  drainConfluxJobs                стыковка, расстыковка, описание прохода
   chronicler                      запись летописи о случившемся (в обработчике)
   herald                          весть покровителю об одном событии
   statJudge, keepStories
 
-тик → tick.runWorldTick           только города в стыке
-  матчмейкинг сопряжений
-  resolveConfluxSharedMonth / resolveDomainMonth
-  письмо месяца (tickNews)
+тик → tick.runWorldTick           синхронизация производных часов
+  месяц как отдельный игровой цикл больше не ходит
 ```
 
-Два будильника — не дублирование, а граница: у одиночного города календаря нет,
-у пары он общий и пока месячный. Кто кого пропускает, описано в
-[REFACTOR_CONTINUOUS_TIME.md](REFACTOR_CONTINUOUS_TIME.md) §16.
+Два будильника — не два календаря: день считает сюжет и очередь заданий,
+часовой тик только держит `tickIndex` и вход `force_tick`. Кто что делает,
+описано в [REFACTOR_CONTINUOUS_TIME.md](REFACTOR_CONTINUOUS_TIME.md) §16.
 
 Принцип: **движок считает, агент говорит.** Броски, слоты, очередь дел, отбор битов — код. Модель получает готовый факт и пишет текст.
 

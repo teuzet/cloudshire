@@ -13,21 +13,19 @@ import { addCityEntity } from '../src/game/cityEntities.js';
 
 const ACTS = { acts: { maxEscalations: 3, worsenMin: 1.1, worsenMax: 1.1, dampMin: 0.9, dampMax: 0.9 } };
 
-test('gravity посева: пустая доска 20–100, полная доска уже, сиквел не ниже оригинала', () => {
+test('gravity посева: пустая доска 20–100, живой масштаб сужает верх, сиквел не ниже оригинала', () => {
   const empty = sampleSuspenseGravity({ plotlines: [] }, { rng: () => 0 });
   const emptyHigh = sampleSuspenseGravity({ plotlines: [] }, { rng: () => 0.999 });
   assert.equal(empty, 20);
   assert.equal(emptyHigh, 100);
 
   const busy = {
-    plotlines: [
-      { kind: 'story', storyType: 'suspense', gravity: 80 },
-    ],
+    plotlines: [{ kind: 'story', storyType: 'story', gravity: 'RUPTURE' }],
   };
   const lo = sampleSuspenseGravity(busy, { rng: () => 0 });
   const hi = sampleSuspenseGravity(busy, { rng: () => 0.999 });
   assert.equal(lo, 20);
-  assert.equal(hi, 70);
+  assert.equal(hi, 50);
 
   const sequel = sampleSuspenseGravity(busy, { fromClosed: { gravity: 80 }, rng: () => 0 });
   const sequelHi = sampleSuspenseGravity(busy, { fromClosed: { gravity: 80 }, rng: () => 0.999 });
@@ -118,7 +116,7 @@ test('бюджет hiddenPremises: depth 1 не больше одной посы
   );
 });
 
-test('auto-tick deepening не эскалирует сразу, после двух холостых — да', () => {
+test('трёхтактный ход по живой карточке — no-op', () => {
   assert.equal(autoTickPrefersDeepen('deepening', { unattendedBeats: 0 }), true);
   assert.equal(autoTickPrefersDeepen('deepening', { unattendedBeats: 2 }), false);
   assert.equal(autoTickPrefersDeepen('deadline', { unattendedBeats: 0 }), false);
@@ -139,13 +137,12 @@ test('auto-tick deepening не эскалирует сразу, после дв�
     ],
   });
   const m1 = applyStoryActMove(plot, { trigger: 'auto', rng: () => 0, config: ACTS });
-  assert.equal(m1.progress, 'DEEPEN');
-  assert.equal(plot.escalationLevel, 0);
-  assert.equal(plot.discoveryLadder[0].revealed, false);
+  assert.equal(m1.progress, 'NO_PLOT_CHANGE');
+  assert.equal(plot.escalationLevel, undefined);
   applyStoryActMove(plot, { trigger: 'auto', rng: () => 0, config: ACTS });
   const m3 = applyStoryActMove(plot, { trigger: 'auto', rng: () => 0, config: ACTS });
-  assert.equal(m3.progress, 'SETBACK');
-  assert.equal(plot.escalationLevel, 1);
+  assert.equal(m3.progress, 'NO_PLOT_CHANGE');
+  assert.equal(plot.escalationLevel, undefined);
 });
 
 test('занятость персонажей считает только открытые нити', () => {

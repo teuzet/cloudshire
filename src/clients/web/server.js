@@ -809,7 +809,7 @@ export function createWebServer({ config, app, runtime, storage }) {
           if (app.isWorldTicking()) {
             return res
               .status(409)
-              .json({ error: 'ticking', message: 'Идёт шаг времени — дождись конца месяца.' });
+              .json({ error: 'ticking', message: 'Идёт шаг времени — дождись его конца.' });
           }
           const status = await app.wipeAll();
           pushLogs.clear();

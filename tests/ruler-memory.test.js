@@ -53,10 +53,11 @@ test('общий голос: персоналия плюс память; пус�
   assert.match(voice, /только чтение/);
 });
 
-test('ruler и tickNews делят стиль priestVoice; письмо без инструментов памяти', () => {
+test('ruler и herald делят стиль priestVoice; письмо — одно событие', () => {
   const config = loadConfig();
   assert.ok(config.styles.priestVoice.includes('один голос'));
   assert.deepEqual(config.agents.ruler.styles, ['names', 'priestVoice']);
-  assert.deepEqual(config.agents.tickNews.styles, ['names', 'priestVoice']);
-  assert.match(config.agents.tickNews.instructions, /Память в письме только читай/);
+  assert.deepEqual(config.agents.herald.styles, ['priestVoice']);
+  assert.match(config.agents.herald.instructions, /ОДНОМ/);
+  assert.match(config.agents.herald.instructions, /Одна весть/);
 });

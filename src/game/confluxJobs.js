@@ -6,7 +6,6 @@
 import { dueJobs, claimJob, completeJob, failJob, LockSet } from './scheduler.js';
 import { findActiveConfluxForDomain, dockConfluxNow, undockConfluxNow } from './conflux.js';
 import { normalizeDomain } from './models.js';
-import { writePairChronicle, confluxEvent } from './confluxCanon.js';
 import { attemptPairSilence } from './confluxForecast.js';
 import { ensurePlotStatBudget } from './plotlines.js';
 import { createThreat, attachThreat } from './threats.js';
@@ -80,8 +79,8 @@ export async function crystallizeContainer({ runtime, conflux, domains, world, d
           },
         ],
         extraSystem:
-          'Ты кристаллизуешь пустую нить сопряжения двух городов в историю. ' +
-          'Не бойся решительно менять расстановку сил: сюжета ещё нет, его пишут игроки. ' +
+          'Есть два города на летающих островах. Края сошлись, проход есть, общей истории ещё нет. ' +
+          'По тому, что уже случилось у прохода, сложи краткую историю, которая теперь висит над обоими. ' +
           'Верни submit_crystal.',
         userMessages: [
           {
@@ -225,27 +224,8 @@ const HANDLERS = {
     if (out.skipped) return { skipped: out.skipped, nextAttemptDay: out.nextAttemptDay || null };
     return { occasion: 'сопряжение', confluxId: conflux.id, domains, threatId: out.threat?.id || null };
   },
-  async conflux_beat(ctx) {
-    const loaded = await loadPair(ctx.storage, ctx.job.payload?.confluxId);
-    if (!loaded) return { skipped: 'gone' };
-    const { conflux, domains } = loaded;
-    if (conflux.status !== 'docked') return { skipped: 'not_docked' };
-    if (!conflux.container?.crystallized) return { skipped: 'empty' };
-    const facts = await writePairChronicle({
-      runtime: ctx.runtime,
-      world: ctx.world,
-      conflux,
-      domains,
-      event: confluxEvent({
-        kind: 'beat',
-        day: ctx.day,
-        plotId: conflux.container.id,
-        textHint: conflux.container.synopsis || 'Общая нить сопряжения сдвинулась.',
-      }),
-      log: ctx.log,
-    });
-    await savePair(ctx.storage, conflux, domains);
-    return { occasion: 'сопряжение', confluxId: conflux.id, domains, facts, plotId: conflux.container.id };
+  async conflux_beat() {
+    return { skipped: 'retired' };
   },
   async conflux_transfer(ctx) {
     return HANDLERS.conflux_undock(ctx);
