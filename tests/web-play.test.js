@@ -427,7 +427,10 @@ test('клиент рисует концовки списком с пометк�
     assert.match(js, /\/api\/play\/clock/);
     assert.match(js, /\/api\/play\/snapshots/);
     assert.match(js, /skipDays/);
-    assert.match(js, /Промотали \$\{days\} дн/);
+    assert.match(js, /function daysWord/);
+    assert.match(js, /до сопряжения, дн\./);
+    assert.match(js, /осталось в сопряжении, дн\./);
+    assert.doesNotMatch(js, /до сопряжения, мес\./);
     assert.match(js, /Время стоит/);
     assert.match(js, /островов:/);
     assert.match(js, /Состояние мира сохранено/);

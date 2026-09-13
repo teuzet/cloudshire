@@ -143,6 +143,7 @@ export function buildHeraldContext({
   reportSubject = '',
   closed = false,
   actor = '',
+  actorGender = null,
 } = {}) {
   const history = plot ? threadHistory(domain, plot.id) : { facts: [], truncated: false };
   const isClosed = Boolean(closed) || parseOccasion(occasion) === 'развязка';
@@ -157,6 +158,7 @@ export function buildHeraldContext({
     memory: String(memory || '').slice(0, 1200),
     reportSubject: String(reportSubject || '').slice(0, 200),
     actor: String(actor || '').trim(),
+    actorGender: actorGender === 'female' || actorGender === 'male' ? actorGender : null,
   };
 }
 
@@ -184,9 +186,12 @@ export function formatHeraldPrompt(ctx) {
     );
   }
   if (ctx.actor) {
+    const female = ctx.actorGender === 'female';
     lines.push(
-      `Кто довёл эту работу: ${ctx.actor}. Назови должность и имя.`,
-      'Не говори, что он свободен, и не спрашивай, чем его занять или кого занять делом.',
+      `Кто довёл эту работу: ${ctx.actor}${female ? ' (женщина)' : ctx.actorGender === 'male' ? ' (мужчина)' : ''}. Назови должность и имя, согласуй род.`,
+      female
+        ? 'Не говори, что она свободна, и не спрашивай, чем её занять или кого занять делом.'
+        : 'Не говори, что он свободен, и не спрашивай, чем его занять или кого занять делом.',
     );
   }
   if (ctx.thread) {

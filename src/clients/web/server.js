@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'node:path';
 import { projectRoot, hasAdminCredentials } from '../../config.js';
 import { runWorldTick, emitConfluxAnnouncements } from '../../game/tick.js';
+import { runDayLoop } from '../../game/dayLoop.js';
 import { recordTickCompleted } from '../../scheduler/ticks.js';
 import { domainSummary } from '../../game/genesis.js';
 import {
@@ -33,6 +34,7 @@ import {
   commitWorldChanges,
 } from '../../game/scheduler.js';
 import { DAYS_PER_MONTH, gameDateFromDay, parseSkipDays } from '../../game/gameClock.js';
+import { daysUntilDock, daysUntilUndock } from '../../game/confluxTime.js';
 import { DIFFICULTY_SPEC, DURATION_SPEC, normalizeDifficultyBand } from '../../game/bands.js';
 import { deedDurationBand, deedRemainingBand, deedRemainingDays } from '../../game/deeds.js';
 import { paceLabel } from '../../game/deedMath.js';
@@ -169,10 +171,15 @@ function inspectConfluxBoard(conflux, domain, partner, world, day) {
   const byTick = (a, b) => (Number(b.tick) || 0) - (Number(a.tick) || 0);
   const boardLore = [...(conflux.lore || []), ...(domain.lore || []), ...(partner?.lore || [])];
   return {
-    ...confluxSummary(conflux, world, {
-      [domain.id]: domain,
-      ...(partner ? { [partner.id]: partner } : {}),
-    }),
+    ...confluxSummary(
+      conflux,
+      world,
+      {
+        [domain.id]: domain,
+        ...(partner ? { [partner.id]: partner } : {}),
+      },
+      day,
+    ),
     partnerName: partner?.name || partnerId,
     mainPlotId: conflux.mainPlotId || null,
     knownAboutPartner: [...known].sort(byTick).map(slimLore),
@@ -252,7 +259,10 @@ function onboardingArchive(binding, { userId = null, domainId = null, generating
 }
 
 /** Острова текущего мира для переключателя тестового клиента. */
-async function listPlayIslands(storage, world) {
+async function listPlayIslands(storage, world, day) {
+  const nowDay = Number.isFinite(Number(day))
+    ? Math.round(Number(day))
+    : Math.round(Number(world?.dayIndex) || 0);
   const domains = await storage.listDomains();
   const bindings = await storage.listUserBindings();
   const confluxes = await storage.listConfluxes({ status: ['approaching', 'docked'] }).catch(() => []);
@@ -286,8 +296,10 @@ async function listPlayIslands(storage, world) {
             partnerUserId: partner
               ? String(partner.ownerUserId || partnerOwner?.userId || '')
               : null,
+            daysUntilDock: cf.status === 'approaching' ? daysUntilDock(cf, nowDay) : null,
+            remainingDockDays: cf.status === 'docked' ? daysUntilUndock(cf, nowDay) : null,
             monthsUntilDock:
-              cf.status === 'approaching' ? monthsUntilDock(cf, world) : null,
+              cf.status === 'approaching' ? monthsUntilDock(cf, world, nowDay) : null,
           }
         : null,
     });
@@ -580,10 +592,8 @@ export function createWebServer({ config, app, runtime, storage }) {
           kind: m.kind || (domain ? null : 'onboarding'),
           at: m.at || null,
         }));
-        const islands = await listPlayIslands(storage, world);
-        // Одиночный город живёт днями: показывать ему месяц тика — значит
-        // показывать чужой календарь. Месячная метка остаётся для сопряжения.
         const day = worldDay(world, { config });
+        const islands = await listPlayIslands(storage, world, day);
         res.json({
           userId,
           gameDate: { ...(world.gameDate || {}), ...gameDateFromDay(day), day },
@@ -787,9 +797,14 @@ export function createWebServer({ config, app, runtime, storage }) {
         const start = async () => {
           if (typeof runTick === 'function') return runTick('play-force', { days });
           await skipStoredWorldDays(storage, days, { config });
-          const result = await runWorldTick({ config, runtime, storage, app });
-          await recordTickCompleted(storage, config);
-          return result;
+          return runDayLoop({
+            config,
+            runtime,
+            storage,
+            app,
+            allowWhileHeld: true,
+            log: getLogger().child({ scope: 'dayLoop', reason: 'play-force' }),
+          });
         };
         getLogger().info('play.force_tick', { userId: String(req.body?.userId || ''), days });
         setImmediate(() => {
@@ -1212,6 +1227,7 @@ export function createWebServer({ config, app, runtime, storage }) {
   server.get('/api/confluxes', async (req, res) => {
     try {
       const world = await storage.getWorld();
+      const day = worldDay(world, { config });
       const domains = await storage.listDomains();
       const byId = Object.fromEntries(domains.map((d) => [d.id, d]));
       const activeOnly = req.query.all !== '1';
@@ -1219,7 +1235,7 @@ export function createWebServer({ config, app, runtime, storage }) {
         activeOnly ? { status: ['approaching', 'docked'] } : {},
       );
       res.json({
-        confluxes: list.map((c) => confluxSummary(c, world, byId)),
+        confluxes: list.map((c) => confluxSummary(c, world, byId, day)),
       });
     } catch (err) {
       req.log?.error('http.error', { error: err.message });

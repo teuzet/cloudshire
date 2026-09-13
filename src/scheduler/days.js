@@ -34,31 +34,28 @@ export function startDayScheduler({ config, storage, onDay }) {
 
   const log = getLogger().child({ scope: 'dayScheduler' });
   let timer = null;
-  let running = false;
   let stopped = false;
+  // Промотка не должна теряться, если цикл уже идёт: очередь дождётся
+  // текущего прохода и разберёт просроченные стыковки на новом дне.
+  let tail = Promise.resolve();
 
   function arm(delay) {
     if (stopped) return;
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
-      void runOne('schedule');
+      void enqueue('schedule');
     }, Math.max(MIN_WAKE_MS, delay));
     if (typeof timer.unref === 'function') timer.unref();
   }
 
   async function runOne(reason) {
     if (stopped) return null;
-    // Второй проход поверх идущего только продублировал бы события.
-    if (running) return null;
-    running = true;
     try {
-      const result = await onDay({ reason });
-      return result;
+      return await onDay({ reason });
     } catch (err) {
       log.error('dayScheduler.failed', { reason, error: err.message, stack: err.stack });
       return null;
     } finally {
-      running = false;
       try {
         const world = await storage.getWorld();
         normalizeWorld(world, config);
@@ -71,7 +68,16 @@ export function startDayScheduler({ config, storage, onDay }) {
     }
   }
 
-  void runOne('boot');
+  function enqueue(reason) {
+    const run = tail.then(() => runOne(reason));
+    tail = run.then(
+      () => {},
+      () => {},
+    );
+    return run;
+  }
+
+  void enqueue('boot');
   log.info('dayScheduler.start', { minWakeMs: MIN_WAKE_MS, maxWakeMs: MAX_WAKE_MS });
 
   async function resync() {
@@ -93,8 +99,8 @@ export function startDayScheduler({ config, storage, onDay }) {
       if (timer) clearTimeout(timer);
       timer = null;
     },
-    async triggerNow(reason = 'manual') {
-      return runOne(reason);
+    triggerNow(reason = 'manual') {
+      return enqueue(reason);
     },
     resync,
   };

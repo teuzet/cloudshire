@@ -184,6 +184,21 @@ test('промпт несёт повод, событие, нить и одну �
   assert.match(text, /ЗАПИСЬ ЛЕТОПИСИ/, 'жрец пересказывает запись, а не отчитывается о деле');
 });
 
+test('жрец согласует род сановницы', () => {
+  const ctx = buildHeraldContext({
+    domain: domain(),
+    fact: { text: 'отряд прошёл к складам' },
+    occasion: 'дело',
+    ask: 'нет',
+    actor: 'Маршал Орена',
+    actorGender: 'female',
+  });
+  const text = formatHeraldPrompt(ctx);
+  assert.match(text, /Маршал Орена \(женщина\)/);
+  assert.match(text, /она свободна/);
+  assert.doesNotMatch(text, /он свободен/);
+});
+
 test('без просьбы жрецу прямо запрещают спрашивать', () => {
   const ctx = buildHeraldContext({ domain: domain(), fact: { text: 'что-то случилось' }, ask: 'нет' });
   assert.match(formatHeraldPrompt(ctx), /Ничего не проси/);

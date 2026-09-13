@@ -317,18 +317,10 @@ export class DomainQueue {
   run(domainId, fn) {
     const key = String(domainId || '_');
     const prev = this.tails.get(key) || Promise.resolve();
-    const next = prev.then(fn, fn);
-    this.tails.set(
-      key,
-      next.then(
-        () => {
-          if (this.tails.get(key) === next) this.tails.delete(key);
-        },
-        () => {
-          if (this.tails.get(key) === next) this.tails.delete(key);
-        },
-      ),
-    );
+    const next = prev.then(fn, fn).finally(() => {
+      if (this.tails.get(key) === next) this.tails.delete(key);
+    });
+    this.tails.set(key, next);
     return next;
   }
 }

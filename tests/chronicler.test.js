@@ -139,13 +139,41 @@ test('промпт дела несёт исход, исполнителя и х�
     dateLabel: 'Год 1, месяц 5, день 18',
   });
   assert.match(text, /Канцлер Жален/, 'без исполнителя запись обезличена');
+  assert.match(text, /мужчина/);
   assert.match(text, /Назови его в записи/);
+  assert.match(text, /согласуй род/);
   assert.match(text, /свободен и чем заняться дальше — не пиши/);
   assert.match(text, /УСПЕХ/);
   assert.match(text, /Узнать причину гула/);
   assert.match(text, /осенью ступени начали гудеть/);
   assert.match(text, /в запись не выноси/, 'название истории служебное');
-  assert.match(text, /Год 1, месяц 5, день 18/);
+  assert.doesNotMatch(text, /Год 1, месяц 5, день 18/, 'дату в текст не кладём');
+  assert.match(text, /Календарную дату в текст не пиши/);
+});
+
+test('сановница в промпте хрониста — женский род, не «назови его»', () => {
+  const text = formatDeedPrompt({
+    domain: domain({
+      officers: [{ id: 'o1', office: 'marshal', title: 'Маршал', name: 'Орена', gender: 'female' }],
+    }),
+    process: { ...deed, officerId: 'o1', office: 'marshal' },
+    applied: { finish: 'crit' },
+  });
+  assert.match(text, /Маршал Орена \(женщина\)/);
+  assert.match(text, /Назови её в записи/);
+  assert.match(text, /провела, закончила, не довела/);
+  assert.doesNotMatch(text, /Назови его в записи/);
+});
+
+test('кросс-островное дело просит сцену, не сводку цели', () => {
+  const text = formatDeedPrompt({
+    domain: domain(),
+    process: { ...deed, crossIsland: true },
+    applied: { finish: 'crit' },
+  });
+  assert.match(text, /через проход/);
+  assert.match(text, /сцену/);
+  assert.match(text, new RegExp(`до ${CHRONICLE_FINALE_MAX} символов`));
 });
 
 test('промпт беды требует прошедшего времени', () => {
@@ -258,6 +286,10 @@ test('запасная запись не называет ни дела, ни и
   assert.match(
     fallbackDeedEntry(deed, 'ok', { actor: 'Канцлер Жален' }),
     /Канцлер Жален закончил/,
+  );
+  assert.match(
+    fallbackDeedEntry(deed, 'ok', { actor: 'Маршал Орена', gender: 'female' }),
+    /Маршал Орена закончила/,
   );
 });
 

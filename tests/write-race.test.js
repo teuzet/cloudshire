@@ -104,6 +104,7 @@ test('очередь города пускает писателей по одн�
 
     await Promise.all([slow, fast]);
     assert.deepEqual(order, ['цикл', 'ход']);
+    assert.equal(queue.busy('domain_kersai'), false, 'после шага город снова свободен');
 
     const stored = await storage.getDomain('domain_kersai');
     assert.equal(stored.plotlines.length, 1, 'посев цикла не потерян');

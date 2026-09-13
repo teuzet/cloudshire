@@ -5,7 +5,7 @@
  * Фон архива субъектификатору даётся отдельно от того, что городу можно знать.
  */
 
-import { writeChronicle } from './chronicler.js';
+import { writeChronicle, CHRONICLE_FINALE_MAX } from './chronicler.js';
 import { appendChronicle } from './freeform.js';
 import { createLoreFact } from './models.js';
 import { newId } from './ids.js';
@@ -14,6 +14,8 @@ import { gameDateFromDay } from './gameClock.js';
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { afterPairLoreWrite } from './confluxForecast.js';
+import { scoreChronicleStats } from './statJudge.js';
+import { findOfficer, officerGender } from './officers.js';
 
 export const PLACE_PAIR = 'pair';
 export const FROZEN_SYNOPSIS_PREFIX = 'Что случилось в этой истории на данный момент:';
@@ -161,16 +163,18 @@ export function chronicleConcernFromData({
   if (!conflux || conflux.status !== 'docked' || !partner || !domain) return 'one';
   const partnerId = String(partner.id);
   const domainId = String(domain.id);
+  if (process?.crossIsland) return 'both';
   if (process?.targetDomainId && String(process.targetDomainId) === partnerId) return 'both';
   if (plot?.isMainConflux) return 'both';
   const host = plotHostId(plot);
   if (host && host === partnerId) return 'both';
   if (plot && plotConcerns(plot, partnerId) && plotConcerns(plot, domainId)) return 'both';
-  if (plot && !plot.isMainConflux) return 'judge';
-  return 'one';
+  // Стыковка есть, пометки «через проход» нет: судья читает уже написанную хронику.
+  return 'judge';
 }
 
 export function placeForBeat({ process = null, domain = null, partner = null } = {}) {
+  if (process?.crossIsland) return PLACE_PAIR;
   if (process?.targetDomainId && partner && String(process.targetDomainId) === String(partner.id)) {
     return PLACE_PAIR;
   }
@@ -241,7 +245,7 @@ export function formatPairArchive(conflux, domains = []) {
     if (fact?.secret) continue;
     const where = placeCaption(fact.place, domains);
     const frozen = fact.frozenSynopsis ? ' [архив: не новость]' : '';
-    rows.push(`- (${fact.gameDateLabel || '?'}, ${where}${frozen}) ${fact.text}`);
+    rows.push(`- (${where}${frozen}) ${fact.text}`);
   }
   return rows.join('\n');
 }
@@ -309,6 +313,56 @@ export async function judgeChronicleLeak({
   return draft.both ? 'both' : 'one';
 }
 
+export function formatCityViewPrompt({
+  viewerName,
+  neighborName,
+  sourceText,
+  archive = '',
+  actorName = '',
+  actorPerson = '',
+  hostile = false,
+} = {}) {
+  const viewer = String(viewerName || '').trim() || 'этот город';
+  const neighbor = String(neighborName || '').trim() || 'сосед';
+  const actor = String(actorName || '').trim();
+  const person = String(actorPerson || '').trim();
+  const hitUs = Boolean(hostile && actor && actor !== viewer);
+  return [
+    `Это летопись города «${viewer}». «Мы» и «наш берег» — только «${viewer}».`,
+    `Сосед — «${neighbor}». Соседа не делай «нами».`,
+    actor
+      ? `В источнике действовал город «${actor}». Стороны не меняй: кто напал или ходил, тот и ходил; кто принял удар, тот принял.`
+      : '',
+    person
+      ? `Человек в источнике: ${person}. Согласуй род глаголов. Пол в скобках в текст не пиши.`
+      : '',
+    hitUs
+      ? `Это удар по «${viewer}». Пиши: к нам пришли, нас ударили, у нас взяли. Не пиши, что мы ходили на «${neighbor}».`
+      : '',
+    `Что произошло (взгляд другого берега — перескажи со своего, не копируй):\n${String(sourceText || '').trim()}`,
+    archive
+      ? `Фон архива пары (для связности; не пересказывай как новость и даты из скобок не копируй):\n${archive}`
+      : '',
+    'Календарную дату в текст не пиши: она стоит на записи отдельно.',
+    'Напиши живую запись: место, люди, что видно с этого берега. Не сводку в два предложения.',
+    'Вызови submit_chronicle.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+export function stampPairImpact(fact, { process = null, actorId = null, hostile = false } = {}) {
+  if (!fact || !process) return fact;
+  const days = Number(process.objectiveDays);
+  fact.pairImpact = {
+    hostile: Boolean(hostile),
+    finish: process.finishKind || null,
+    objectiveDays: Number.isFinite(days) && days > 0 ? days : 0,
+    actorDomainId: actorId ? String(actorId) : null,
+  };
+  return fact;
+}
+
 export async function renderCityView({
   runtime,
   world,
@@ -320,6 +374,9 @@ export async function renderCityView({
   archive,
   day,
   log,
+  actorName = '',
+  actorPerson = '',
+  hostile = false,
 }) {
   const knows = String(sourceText || '').trim();
   if (!knows) return null;
@@ -337,7 +394,7 @@ export async function renderCityView({
         tools: [
           {
             name: 'submit_chronicle',
-            description: `Запись в летопись «${domain.name}».`,
+            description: `Запись в летопись «${domain.name}», до ${CHRONICLE_FINALE_MAX} символов.`,
             parameters: {
               type: 'object',
               additionalProperties: false,
@@ -347,7 +404,7 @@ export async function renderCityView({
             handler: async (args) => {
               const body = String(args?.text || '').trim();
               if (body.length < 8) return toolFail('too_short', 'Нужна связная запись.');
-              draft.text = body;
+              draft.text = body.slice(0, CHRONICLE_FINALE_MAX);
               return { ok: true };
             },
           },
@@ -355,22 +412,21 @@ export async function renderCityView({
         extraSystem: [
           `Есть два города на летающих островах. Края вместе, между ними проход.`,
           `Пиши летопись ТОЛЬКО города «${domain.name}». Сосед — «${partner?.name || '?'}».`,
-          'Соседа не делай «нами». Не переворачивай стороны.',
+          'Соседа не делай «нами». Не переворачивай, кто напал и кто принял удар.',
+          'Календарную дату в текст не пиши.',
         ].join(' '),
         userMessages: [
           {
             role: 'user',
-            content: [
-              `Это летопись города «${domain.name}».`,
-              `Что этому городу можно знать и записать:\n${knows}`,
-              archive
-                ? `Уже известное этому берегу о времени, пока острова вместе (не пересказывай чужое):\n${archive}`
-                : '',
-              plot?.title ? `История, из которой это пришло: «${plot.title}».` : '',
-              'Вызови submit_chronicle.',
-            ]
-              .filter(Boolean)
-              .join('\n'),
+            content: formatCityViewPrompt({
+              viewerName: domain.name,
+              neighborName: partner?.name,
+              sourceText: knows,
+              archive,
+              actorName: actorName || '',
+              actorPerson,
+              hostile,
+            }),
           },
         ],
       });
@@ -412,6 +468,7 @@ export async function spreadChronicleToPair({
   day = null,
   log = null,
   storage = null,
+  config = null,
 } = {}) {
   if (!fact?.text || fact.secret) return null;
   if (!conflux || conflux.status !== 'docked' || !partner || !domain) return null;
@@ -438,6 +495,7 @@ export async function spreadChronicleToPair({
   if (plot) markLeakedToPair(plot, day);
 
   const place = placeForBeat({ process, domain, partner });
+  const hostile = place === PLACE_PAIR || Boolean(process?.crossIsland);
   const pairFact = appendPairEntry(conflux, world, {
     text: fact.text,
     place,
@@ -447,6 +505,12 @@ export async function spreadChronicleToPair({
   });
 
   const archive = formatPairArchive(conflux, [domain, partner]);
+  const officer = process
+    ? findOfficer(domain, { officerId: process.officerId, office: process.office })
+    : null;
+  const actorPerson = officer?.name
+    ? `${officer.title} ${officer.name} (${officerGender(officer) === 'female' ? 'женщина' : 'мужчина'})`
+    : '';
   const cityFact = await renderCityView({
     runtime,
     world,
@@ -458,7 +522,27 @@ export async function spreadChronicleToPair({
     archive,
     day,
     log,
+    actorName: domain.name,
+    actorPerson,
+    hostile,
   });
+  if (cityFact) {
+    stampPairImpact(cityFact, {
+      process,
+      actorId: domain.id,
+      hostile,
+    });
+    if (runtime && config) {
+      await scoreChronicleStats({
+        config,
+        runtime,
+        domain: partner,
+        world,
+        chronicleAdds: [cityFact],
+        log,
+      });
+    }
+  }
 
   if (storage) {
     await storage.saveDomain(partner);
@@ -475,7 +559,7 @@ export async function spreadChronicleToPair({
     cityFacts,
     log,
   });
-  return { concern, fromData, first, frozen, pairFact, cityFact, hostile: place === PLACE_PAIR };
+  return { concern, fromData, first, frozen, pairFact, cityFact, hostile };
 }
 
 /**

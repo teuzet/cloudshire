@@ -1855,11 +1855,21 @@ export function formatPlotTagsForPrompt(tags, { soft = false } = {}) {
   return `всё мягко, ассоциации, не указания — ${body}`;
 }
 
+/** Нить сопряжения — состояние отношений: жрец, лормастер и сановник её не видят. */
+export function isPairThread(plot) {
+  return Boolean(plot?.isMainConflux);
+}
+
+export function plotsForPriest(plots = []) {
+  return (plots || []).filter((p) => p && !isPairThread(p));
+}
+
 /** Служебный вид доски — для движка и логов, не для речи. */
 export function formatBoardForPrompt(domain) {
   normalizePlotlines(domain);
-  if (!domain.plotlines.length) return '(нитей нет)';
-  return domain.plotlines
+  const list = plotsForPriest(domain.plotlines);
+  if (!list.length) return '(нитей нет)';
+  return list
     .map((p) => {
       const stats = p.relatedStats.length ? ` | в игре: ${p.relatedStats.join('+')}` : '';
       const liveIds = liveRelatedProcessIds(domain, p);
@@ -1885,7 +1895,7 @@ export function formatBoardForPrompt(domain) {
  */
 export function formatBoardForSpeech(domain, { statsFeel = null, max = 8, viewerId = null } = {}) {
   normalizePlotlines(domain);
-  const list = (domain.plotlines || []).slice(0, max);
+  const list = plotsForPriest(domain.plotlines).slice(0, max);
   if (!list.length) return '';
   const viewer = viewerId || domain.id;
   return list
@@ -1897,16 +1907,12 @@ export function formatBoardForSpeech(domain, { statsFeel = null, max = 8, viewer
         (p.concernsDomainIds || []).map(String).includes(String(viewer));
       const kind = p.kind === 'errand'
         ? 'поручение'
-        : p.isMainConflux
-          ? 'сопряжение'
-          : p.shared && viewerOwns
-            ? 'общая история'
-            : 'история';
+        : p.shared && viewerOwns
+          ? 'общая история'
+          : 'история';
       const duty = plotHasLiveProcess(domain, p)
         ? 'дело уже идёт'
-        : p.isMainConflux
-          ? 'отношения'
-          : p.kind === 'errand'
+        : p.kind === 'errand'
             ? 'дела нет'
             : 'поручения ещё нет';
       const syn = clipText(p.synopsis || 'только началось', 180);

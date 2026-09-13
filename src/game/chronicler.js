@@ -19,7 +19,7 @@
 
 import { getLogger, truncate } from '../log.js';
 import { chronicleEntries } from './models.js';
-import { findOfficer } from './officers.js';
+import { findOfficer, officerGender } from './officers.js';
 import { findPlotEnding } from './freeform.js';
 import { livesLeft } from './threats.js';
 import { toolFail } from '../agents/toolResult.js';
@@ -61,28 +61,65 @@ export function plotChronicleTail(domain, plotId, limit = CHRONICLE_TAIL) {
 }
 
 /** Запасная запись, если модель не ответила. Без названий дел и историй. */
-export function fallbackDeedEntry(process, finish, { actor } = {}) {
+export function fallbackDeedEntry(process, finish, { actor, gender } = {}) {
   const what = String(process?.goal || process?.detail || '').trim();
   const tail = what ? `: ${what}` : '.';
   const who = String(actor || '').trim();
+  const female = gender === 'female';
   if (finish === 'fail') {
     return who
-      ? `${who} не довёл порученную работу${tail}`
+      ? `${who} не ${female ? 'довела' : 'довёл'} порученную работу${tail}`
       : `Порученную работу довести не удалось${tail}`;
   }
   return who
-    ? `${who} закончил порученную работу${tail}`
+    ? `${who} ${female ? 'закончила' : 'закончил'} порученную работу${tail}`
     : `Порученную работу закончили${tail}`;
 }
 
+export function findDeedOfficer(domain, process) {
+  return (
+    findOfficer(domain, {
+      officerId: process?.officerId,
+      office: process?.office,
+    }) || null
+  );
+}
+
 export function deedActor(domain, process) {
-  const officer = findOfficer(domain, {
-    officerId: process?.officerId,
-    office: process?.office,
-  });
+  const officer = findDeedOfficer(domain, process);
   if (officer?.name) return `${officer.title} ${officer.name}`;
   if (process?.characterName) return String(process.characterName);
   return null;
+}
+
+export function deedActorGender(domain, process) {
+  const officer = findDeedOfficer(domain, process);
+  return officer ? officerGender(officer) : null;
+}
+
+function actorVoice(officer) {
+  const female = officer && officerGender(officer) === 'female';
+  return female
+    ? { word: 'женщина', them: 'её', free: 'она свободна', did: 'провела, закончила, не довела' }
+    : { word: 'мужчина', them: 'его', free: 'он свободен', did: 'провёл, закончил, не довёл' };
+}
+
+/** Строка для хрониста: сан, имя, пол — род глаголов, скобки в летопись не копировать. */
+export function deedActorPrompt(domain, process) {
+  const officer = findDeedOfficer(domain, process);
+  const name = officer?.name
+    ? `${officer.title} ${officer.name}`
+    : process?.characterName
+      ? String(process.characterName)
+      : null;
+  if (!name) return 'Кто вёл: город сам, без названного лица.';
+  const v = actorVoice(officer);
+  const genderBit = officer ? ` (${v.word})` : '';
+  return (
+    `Кто вёл: ${name}${genderBit}. ` +
+    `Назови ${v.them} в записи, согласуй род глаголов (${v.did}). Пол в скобках в текст не пиши. ` +
+    `Что ${v.free} и чем заняться дальше — не пиши.`
+  );
 }
 
 /**
@@ -210,24 +247,29 @@ export function formatDeedPrompt({
   chronicleTail = [],
   dateLabel = '',
 }) {
-  const actor = deedActor(domain, process);
+  void dateLabel;
+  const cross = Boolean(process?.crossIsland);
   return [
     'ПОВОД: закончилась работа, которую город вёл по воле покровителя.',
-    dateLabel ? `Когда: ${dateLabel}.` : null,
     '',
     'ЧТО БЫЛО ПОРУЧЕНО (служебная формулировка, в запись её не переписывай):',
     process?.detail || process?.summary || '—',
     process?.goal ? `Чего добивались: ${process.goal}` : null,
-    actor
-      ? `Кто вёл: ${actor}. Назови его в записи. Что он свободен и чем заняться дальше — не пиши.`
-      : 'Кто вёл: город сам, без названного лица.',
+    deedActorPrompt(domain, process),
     `ИСХОД (решено броском, не спорь): ${FINISH_WORD[applied?.finish] || FINISH_WORD.ok}.`,
     '',
     ...deedConsequenceLines({ plot, applied, threat, closed }),
     '',
     ...plotBlock(plot, chronicleTail),
     '',
-    'Напиши одну запись хроники о том, что случилось в городе. Вызови submit_chronicle.',
+    'Календарную дату в текст не пиши: она стоит на записи отдельно.',
+    cross
+      ? [
+          'Это работа через проход, на чужом берегу или против соседнего города.',
+          'Пиши сцену, не сводку цели: где шли, кого встретили, что взяли или не взяли, что осталось на берегу.',
+          `Одна связная запись до ${CHRONICLE_FINALE_MAX} символов. Вызови submit_chronicle.`,
+        ].join('\n')
+      : 'Напиши одну запись хроники о том, что случилось в городе. Вызови submit_chronicle.',
   ]
     .filter((l) => l != null)
     .join('\n');
@@ -248,9 +290,9 @@ export function formatThreatPrompt({
   chronicleTail = [],
   dateLabel = '',
 }) {
+  void dateLabel;
   return [
     'ПОВОД: город не успел, и то, чего боялись, случилось.',
-    dateLabel ? `Когда: ${dateLabel}.` : null,
     '',
     'ЭТО БЫЛО НАПИСАНО ЗАРАНЕЕ, В БУДУЩЕМ ВРЕМЕНИ. Теперь оно произошло:',
     threat?.text || '—',
@@ -261,6 +303,7 @@ export function formatThreatPrompt({
     '',
     ...plotBlock(plot, chronicleTail),
     '',
+    'Календарную дату в текст не пиши: она стоит на записи отдельно.',
     'Напиши одну запись хроники. Вызови submit_chronicle.',
   ]
     .filter((l) => l != null)
@@ -282,11 +325,15 @@ const ENDING_KIND_LINE = {
 /** Ввод финальной записи, когда историю закрыло дело города. */
 export function deedTriggerLines({ domain, process, applied }) {
   const actor = deedActor(domain, process);
+  const officer = findDeedOfficer(domain, process);
+  const v = actorVoice(officer);
   const revealed = Array.isArray(applied?.revealed) ? applied.revealed : [];
   return [
     `Город вёл работу по воле покровителя: ${process?.detail || process?.summary || '—'}`,
     process?.goal ? `Чего добивались: ${process.goal}` : null,
-    actor ? `Кто вёл: ${actor}.` : 'Кто вёл: город сам, без названного лица.',
+    actor
+      ? `Кто вёл: ${actor}${officer ? ` (${v.word})` : ''}. Согласуй род (${v.did}).`
+      : 'Кто вёл: город сам, без названного лица.',
     `Исход работы (решён броском, не спорь): ${FINISH_WORD[applied?.finish] || FINISH_WORD.ok}.`,
     applied?.answer ? `Этой же работой город разгадал, в чём было дело: ${applied.answer}` : null,
     revealed.length ? `Этой работой выяснилось, и город теперь это знает:\n- ${revealed.join('\n- ')}` : null,
@@ -319,13 +366,13 @@ export function formatFinalePrompt({
   dateLabel = '',
   entryMax = CHRONICLE_FINALE_MAX,
 }) {
+  void dateLabel;
   const resolved = findPlotEnding(plot, ending?.endingId) || null;
   const kind = ending?.kind || resolved?.kind || 'NEUTRAL_ENDING';
   const text = endingText(plot, ending);
   const limit = chronicleEntryLimit(entryMax);
   return [
     'ПОВОД: этим история кончается. Это последняя запись о ней.',
-    dateLabel ? `Когда: ${dateLabel}.` : null,
     '',
     'ЧТО ПРИВЕЛО К РАЗВЯЗКЕ:',
     ...triggerLines,
@@ -340,6 +387,7 @@ export function formatFinalePrompt({
     '',
     ...plotBlock(plot, chronicleTail),
     '',
+    'Календарную дату в текст не пиши: она стоит на записи отдельно.',
     `Одна связная запись до ${limit} символов. Вызови submit_chronicle.`,
   ]
     .filter((l) => l != null)
@@ -396,7 +444,12 @@ export async function writeChronicle({
       log,
       scene: `chronicle_${occasion}`,
       domainId: domain?.id,
-      extraSystem: domain?.name ? `Город «${domain.name}».` : null,
+      extraSystem: [
+        domain?.name ? `Город «${domain.name}».` : '',
+        'Календарную дату в текст не пиши: она стоит на записи отдельно.',
+      ]
+        .filter(Boolean)
+        .join(' ') || null,
       userMessages: [{ role: 'user', content: prompt }],
     });
   } catch (err) {

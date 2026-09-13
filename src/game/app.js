@@ -1642,6 +1642,7 @@ export class GameApp {
         conflux,
         partner,
         storage: this.storage,
+        config: this.config,
         log,
       });
       if (event?.skipped) {

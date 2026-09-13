@@ -136,7 +136,7 @@ test('расстыковка: общая нить остаётся у хозяи
 test('сообщение о старте конфлюкса — отдельный шаблон, не письмо месяца', () => {
   const text = approachingAnnounceText(domain('a'), domain('b'), 8, false);
   assert.match(text, /Берил/);
-  assert.match(text, /8 мес/);
+  assert.match(text, /8 дн/);
   assert.doesNotMatch(text, /Покровитель/);
   assert.doesNotMatch(text, /примета|слух|час/);
 });
@@ -323,4 +323,23 @@ test('речь не считает законченное дело живым', 
   });
   assert.match(speech, /поручения ещё нет/);
   assert.equal(speech.includes('дело уже идёт'), false);
+});
+
+test('речь правителя не видит нить сопряжения', () => {
+  const story = createPlotline({
+    title: 'Гул',
+    kind: 'story',
+    synopsis: 'Ночами гудит вода.',
+  });
+  const pair = createPlotline({
+    title: 'Сопряжение',
+    kind: 'story',
+    isMainConflux: true,
+    synopsis: 'Острова сошлись у кромки.',
+  });
+  const speech = formatBoardForSpeech({ plotlines: [pair, story] });
+  assert.match(speech, /гудит вода/);
+  assert.equal(speech.includes(pair.id), false);
+  assert.doesNotMatch(speech, /сопряжение/i);
+  assert.doesNotMatch(speech, /кромки/);
 });

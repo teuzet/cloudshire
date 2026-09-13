@@ -193,6 +193,49 @@ test('мусор от оценщика нормализуется', async () => 
   assert.equal(res.difficulty, 'PLAIN');
 });
 
+test('при соседе оценщик решает, кросс-островное ли дело', async () => {
+  const runtime = fakeRuntime({
+    submit_deed: {
+      duration: 'WEEKS',
+      difficulty: 'HARD',
+      note: 'идти через проход ночью',
+      crossIsland: true,
+      opposedStat: 'security',
+    },
+  });
+  const res = await judgeDeed({
+    runtime,
+    domain,
+    summary: 'Ночное нападение на Аллерию',
+    partnerName: 'Аллерия',
+    rng: () => 0.5,
+  });
+  assert.equal(res.crossIsland, true);
+  assert.equal(res.opposedStat, 'security');
+  assert.match(String(runtime.calls[0].prompt), /Аллерия/);
+  assert.match(String(runtime.calls[0].prompt), /crossIsland/);
+});
+
+test('местное дело при соседе не кросс-островное', async () => {
+  const runtime = fakeRuntime({
+    submit_deed: {
+      duration: 'WEEKS',
+      difficulty: 'PLAIN',
+      note: 'свои камни',
+      crossIsland: false,
+      opposedStat: 'none',
+    },
+  });
+  const res = await judgeDeed({
+    runtime,
+    domain,
+    summary: 'починить северную стену',
+    partnerName: 'Аллерия',
+  });
+  assert.equal(res.crossIsland, false);
+  assert.equal(res.opposedStat, null);
+});
+
 // ───────────────────────────── разбор нити ─────────────────────────────
 
 function withDeeds(p, deeds) {

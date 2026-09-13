@@ -90,6 +90,7 @@ export async function deliverEvent({
     closed: Boolean(event.closed),
     ask: askForEvent(domain, event, config),
     actor: event.actor || '',
+    actorGender: event.actorGender || null,
     day,
     memory: formatRulerVoiceForPrompt(domain),
     reportSubject: event.reportSubject || '',
@@ -243,7 +244,7 @@ export async function stepDomain({
   // Сановник ходит сам только в тишину: если события есть, покровителю и так есть что читать.
   let stewardAct = null;
   if (!events.length && stewardOffCooldown(domain, day, config)) {
-    const acted = await runOfficerAct({ config, runtime, domain, world, day, rng, log });
+    const acted = await runOfficerAct({ config, runtime, domain, world, day, rng, log, conflux, partner });
     if (acted?.act?.kind === 'process') {
       markStewardRan(domain, day);
       stewardAct = acted.act;
@@ -485,7 +486,11 @@ export async function runDayLoop({
   // слиянием: иначе дело, заведённое в разговоре, потеряет срок и не кончится.
   await storage.updateWorld((fresh) => {
     mergeWorldJobs(fresh, world);
-    syncWorldClock(fresh, { now, config, day });
+    // Промотка двигает якорь, пока этот проход ещё идёт. Нельзя записать
+    // день начала шага поверх уже перемотанных часов: иначе календарь в
+    // шапке уедет, а сроки сопряжения останутся на старом dayIndex.
+    const live = worldDay(fresh, { now, config });
+    syncWorldClock(fresh, { now, config, day: Math.max(day, live) });
     pruneJobs(fresh);
   });
 

@@ -16,7 +16,11 @@ import {
 } from './stats.js';
 import { askLoremaster } from './loremaster.js';
 import { askInformant } from './informant.js';
-import { applyCrossIslandJudged, remainingWindowBand, isCrossIslandDeed } from './deedConflux.js';
+import {
+  applyCrossIslandJudged,
+  remainingWindowBand,
+  isConflictOfInterestDeed,
+} from './deedConflux.js';
 import { newId } from './ids.js';
 import {
   overlayConfluxView,
@@ -94,7 +98,7 @@ import {
   pausedProcesses,
 } from './processes.js';
 import {
-  formatBoardForSpeech,
+  plotsForPriest,
   warmPlotlines,
   plotConfig,
   findPlotline,
@@ -130,6 +134,33 @@ import { toolFail } from '../agents/toolResult.js';
 /** Полоса срока словами — единственное, что жрец знает о времени дела. */
 function bandWord(band) {
   return DURATION_SPEC[normalizeDurationBand(band)].label;
+}
+
+/** На постановке: конфликт интересов → кросс-островное, цель — сосед, без id от жреца. */
+function applyDockedDeedClassification(judged, { action, domain, ctx, day, targetPlot = null }) {
+  if (ctx.conflux?.status !== 'docked' || !ctx.partner) return { judged, error: null };
+  const partnerHostedPlot = Boolean(
+    targetPlot && plotHostId(targetPlot) === String(ctx.partner.id),
+  );
+  if (
+    !isConflictOfInterestDeed({
+      judged,
+      process: action,
+      partnerName: ctx.partner.name,
+      partnerHostedPlot,
+    })
+  ) {
+    return { judged, error: null };
+  }
+  action.opposedStat = judged?.opposedStat || action.opposedStat || null;
+  return applyCrossIslandJudged(judged, {
+    process: action,
+    actor: domain,
+    target: ctx.partner,
+    conflux: ctx.conflux,
+    day,
+    config: ctx.config,
+  });
 }
 
 function difficultyWord(band) {
@@ -479,12 +510,12 @@ export function buildRulerTools(domain, storage, character, ctx) {
         })),
         recentlyClosed: recentlyClosedProcesses(domain, world?.tickIndex, { day }),
         processSlots: canStartProcess(domain, ctx.config),
-        plots: (domain.plotlines || []).map((p) => ({
+        plots: plotsForPriest(domain.plotlines).map((p) => ({
           id: p.id,
           title: p.title,
           kind: p.kind === 'errand' ? 'errand' : 'story',
           hasProcess: plotHasLiveProcess(domain, p),
-          shared: Boolean(p.shared || p.isMainConflux),
+          shared: Boolean(p.shared),
           // Нависшее, о чём город знает: формулировка и полоса остатка, без дней.
           threats: knownThreatsForSpeech(p, day).map((t) => ({
             kind: t.kind,
@@ -493,7 +524,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
             ending: t.endingText || null,
           })),
           dread: dreadFlag(p, day),
-          foreign: Boolean(ctx.conflux && !p.isMainConflux && !plotConcerns(p, domain.id)),
+          foreign: Boolean(ctx.conflux && !plotConcerns(p, domain.id)),
         })),
         standingRules: cityRules(domain).map((m) => ({ id: m.id, text: m.text, since: m.sinceLabel })),
         proxyText: proxyText(domain) || null,
@@ -760,16 +791,9 @@ export function buildRulerTools(domain, storage, character, ctx) {
               'id живой истории, которую покровитель этим делом пытается сдвинуть. ' +
               'Смотри на замысел из разговора, не на общее место и не на «единственную открытую» нить. ' +
               'Пока острова состыкованы, можно передать id нити соседа (из ответа информатора). ' +
-              'Нить сопряжения — не история: на неё дело не ставь. ' +
               'Закрытую историю не подставляй: продолжение закрытого — пустой plotId, своё поручение. ' +
               'Если неясно, про какую беду речь или это вообще новое хозяйство — спроси (commitment=clarify), не гадай. ' +
               'Если приказ не про живую историю — оставь пустым, дело заведёт свою нить само.',
-          },
-          targetDomainId: {
-            type: 'string',
-            description:
-              'id соседнего города, если дело идёт через проход на его берег (нападение, посольство, кража). ' +
-              'Не для дел у себя.',
           },
           chronicleId: {
             type: 'string',
@@ -812,7 +836,6 @@ export function buildRulerTools(domain, storage, character, ctx) {
         secret = false,
         guardPassage = false,
         abortOutcome = null,
-        targetDomainId = null,
         goal,
         office = null,
         randomOfficer = false,
@@ -1000,7 +1023,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
             goal: action.goal || '',
             remainingWindowBand:
               ctx.conflux?.status === 'docked' ? remainingWindowBand(ctx.conflux, day) : '',
-            crossIsland: ctx.conflux?.status === 'docked',
+            partnerName: ctx.partner?.name || '',
             log: ctx.log,
           });
           if (judged.note) action.durationNote = judged.note;
@@ -1012,35 +1035,19 @@ export function buildRulerTools(domain, storage, character, ctx) {
               judged.difficulty = 'HARD';
             }
           }
-          if (ctx.conflux?.status === 'docked' && ctx.partner) {
-            const namedTarget = String(targetDomainId || '').trim();
-            if (namedTarget && namedTarget === String(ctx.partner.id)) {
-              action.targetDomainId = ctx.partner.id;
-            }
-            if (targetPlot && plotHostId(targetPlot) === String(ctx.partner.id)) {
-              action.targetDomainId = ctx.partner.id;
-            }
-            if (wantIntel || action.secret || action.passageGuard) {
-              action.targetDomainId = action.targetDomainId || ctx.partner.id;
-            }
-            if (isCrossIslandDeed(action, ctx.conflux, domain.id)) {
-              action.opposedStat = judged.opposedStat || null;
-              const applied = applyCrossIslandJudged(judged, {
-                process: action,
-                actor: domain,
-                target: ctx.partner,
-                conflux: ctx.conflux,
-                day,
-                config: ctx.config,
-              });
-              if (applied.error === 'window') {
-                domain.state.pendingActions = (domain.state.pendingActions || []).filter((p) => p.id !== action.id);
-                releaseOfficerProcess(domain, action);
-                return toolFail('window', applied.message);
-              }
-              judged = applied.judged;
-            }
+          const applied = applyDockedDeedClassification(judged, {
+            action,
+            domain,
+            ctx,
+            day,
+            targetPlot,
+          });
+          if (applied.error === 'window') {
+            domain.state.pendingActions = (domain.state.pendingActions || []).filter((p) => p.id !== action.id);
+            releaseOfficerProcess(domain, action);
+            return toolFail('window', applied.message);
           }
+          judged = applied.judged;
         }
         startDeed(action, { day, judged });
         if (paceShift) applyPace(action, paceShift, { day });
@@ -1239,14 +1246,36 @@ export function buildRulerTools(domain, storage, character, ctx) {
         );
         // Переписанное дело — другая работа: срок и трудность считаются заново.
         if (revised.rewritten && !isRuleDeed(action)) {
-          const judged = await judgeDeed({
+          if (ctx.conflux?.status === 'docked') {
+            action.crossIsland = false;
+            action.targetDomainId = null;
+            action.opposedStat = null;
+          }
+          let judged = await judgeDeed({
             runtime: ctx.runtime,
             domain,
             summary: action.summary,
             detail: action.detail,
             goal: action.goal || '',
+            remainingWindowBand:
+              ctx.conflux?.status === 'docked' ? remainingWindowBand(ctx.conflux, day) : '',
+            partnerName: ctx.partner?.name || '',
             log: ctx.log,
           });
+          const rewritePlot =
+            findPlotline(domain, action.plotlineId) ||
+            (ctx.partner ? findPlotline(ctx.partner, action.plotlineId) : null);
+          const applied = applyDockedDeedClassification(judged, {
+            action,
+            domain,
+            ctx,
+            day,
+            targetPlot: rewritePlot,
+          });
+          if (applied.error === 'window') {
+            return toolFail('window', applied.message);
+          }
+          judged = applied.judged;
           startDeed(action, { day, judged });
           if (judged.note) action.durationNote = judged.note;
           scheduleDeedJob(world, domain, action);

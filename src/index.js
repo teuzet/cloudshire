@@ -36,7 +36,7 @@ async function main() {
   // Один писатель на город: очередь живёт в приложении, потому что ход
   // правителя берёт её же. Две разные очереди защищали бы только от себя.
   const domainQueue = app.domainQueue;
-  const days = startDayScheduler({
+  const dayScheduler = startDayScheduler({
     config,
     storage,
     onDay: ({ reason }) =>
@@ -46,18 +46,18 @@ async function main() {
         storage,
         app,
         queue: domainQueue,
-        allowWhileHeld: reason === 'play-force' || reason === 'manual',
+        allowWhileHeld: reason !== 'schedule' && reason !== 'boot',
         log: getLogger().child({ scope: 'dayLoop', reason }),
       }),
   });
-  app.onClockReleased = (reason) => days.triggerNow(reason);
+  app.onClockReleased = (reason) => dayScheduler.triggerNow(reason);
 
   /**
    * Ручной сдвиг времени. Промотка часов, затем дневной цикл разбирает
    * накопившиеся сроки. Отдельного месячного календаря пары нет.
    */
-  web.set('runTick', async (reason = 'manual', { days = DAYS_PER_MONTH } = {}) => {
-    const skipped = await skipStoredWorldDays(storage, days, { config });
+  web.set('runTick', async (reason = 'manual', { days: skipDays = DAYS_PER_MONTH } = {}) => {
+    const skipped = await skipStoredWorldDays(storage, skipDays, { config });
     getLogger().info('tick.skip_days', { reason, days: skipped.days, day: skipped.day });
 
     const result = scheduler.triggerNow
@@ -67,12 +67,12 @@ async function main() {
           await recordTickCompleted(storage, config);
           return r;
         })();
-    await days.triggerNow(reason);
+    await dayScheduler.triggerNow(reason);
     return { ...result, skippedDays: skipped.days, day: skipped.day };
   });
   web.set('resyncScheduler', async () => {
     if (typeof scheduler.resync === 'function') await scheduler.resync();
-    if (typeof days.resync === 'function') await days.resync();
+    if (typeof dayScheduler.resync === 'function') await dayScheduler.resync();
   });
 
   const server = web.listen(port, host, () => {
@@ -100,7 +100,7 @@ async function main() {
   const shutdown = async () => {
     log.info('session.shutdown');
     scheduler.stop();
-    days.stop();
+    dayScheduler.stop();
     await telegram.stop?.();
     server.close();
     await storage.close();

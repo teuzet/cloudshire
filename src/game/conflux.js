@@ -8,6 +8,9 @@ import {
   confluxConfig,
   hoursToGameDays,
   daysUntilDock,
+  daysUntilUndock,
+  pairRemainingDays,
+  dockSpanDays,
   pairPrimaryId,
   pickPrepDelayHours,
   confluxDue,
@@ -308,9 +311,9 @@ export function createConfluxRecord({
   };
 }
 
-export function monthsUntilDock(conflux, world) {
-  if (conflux?.dockStartDay != null && world?.dayIndex != null) {
-    return Math.max(0, Math.ceil(daysUntilDock(conflux, world.dayIndex) / 30));
+export function monthsUntilDock(conflux, world, day = world?.dayIndex) {
+  if (conflux?.dockStartDay != null && day != null) {
+    return Math.max(0, Math.ceil(daysUntilDock(conflux, day) / 30));
   }
   const at = conflux.dockAtTick ?? (conflux.createdTick || 0) + (conflux.etaMonths || 1);
   return Math.max(0, at - (world.tickIndex || 0));
@@ -355,9 +358,9 @@ export function beginConfluxOwnership({ a, b, conflux, world, config }) {
     resyncThreatJobs(world, primary, conflux.container);
   }
 
-  const months = monthsUntilDock(conflux, world);
-  const textA = approachingAnnounceText(a, b, months, conflux.rematch);
-  const textB = approachingAnnounceText(b, a, months, conflux.rematch);
+  const left = daysUntilDock(conflux, world?.dayIndex ?? 0);
+  const textA = approachingAnnounceText(a, b, left, conflux.rematch);
+  const textB = approachingAnnounceText(b, a, left, conflux.rematch);
   const tags = conflux.rematch ? ['approaching', 'seed', 'rematch'] : ['approaching', 'seed'];
   pushPublicChronicle(a, world, textA, conflux, tags);
   pushPublicChronicle(b, world, textB, conflux, tags);
@@ -665,9 +668,15 @@ export async function maybeMatchmakeConfluxes({
   return { notes, created };
 }
 
-export function confluxSummary(c, world, domainsById = {}) {
+export function confluxSummary(c, world, domainsById = {}, day = null) {
   const names = (c.domainIds || []).map((id) => domainsById[id]?.name || id);
-  const remainingDock = world?.dayIndex != null ? daysUntilDock(c, world.dayIndex) : null;
+  const d = Number.isFinite(Number(day))
+    ? Math.round(Number(day))
+    : world?.dayIndex != null
+      ? Math.round(Number(world.dayIndex))
+      : null;
+  const untilDock = d != null ? daysUntilDock(c, d) : null;
+  const untilUndock = d != null ? daysUntilUndock(c, d) : null;
   return {
     id: c.id,
     status: c.status,
@@ -677,10 +686,13 @@ export function confluxSummary(c, world, domainsById = {}) {
     prepStartDay: c.prepStartDay ?? null,
     dockStartDay: c.dockStartDay ?? null,
     dockEndDay: c.dockEndDay ?? null,
-    remainingDockDays: remainingDock,
+    daysUntilDock: untilDock,
+    daysUntilUndock: untilUndock,
+    remainingDockDays: d != null ? pairRemainingDays(c, d) : null,
+    dockSpanDays: dockSpanDays(c),
     etaMonths: c.etaMonths,
     dockAtTick: c.dockAtTick,
-    monthsUntilDock: world ? monthsUntilDock(c, world) : null,
+    monthsUntilDock: world ? monthsUntilDock(c, world, d) : null,
     durationMonths: c.durationMonths,
     monthsDocked: c.monthsDocked || 0,
     rematch: Boolean(c.rematch),

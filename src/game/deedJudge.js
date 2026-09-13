@@ -33,39 +33,58 @@ export async function judgeDeed({
   detail = '',
   goal = '',
   remainingWindowBand = '',
-  crossIsland = false,
+  partnerName = '',
   log: parentLog,
   rng = Math.random,
 }) {
   const log = (parentLog || getLogger()).child({ scope: 'deed.judge' });
-  const draft = { duration: null, difficulty: null, note: '', opposedStat: null };
+  const neighbor = String(partnerName || '').trim();
+  const draft = { duration: null, difficulty: null, note: '', opposedStat: null, crossIsland: false };
+  const properties = {
+    duration: { type: 'string', enum: [...DURATION_BANDS] },
+    difficulty: { type: 'string', enum: [...DIFFICULTY_BANDS] },
+    note: { type: 'string', description: 'Одна бытовая фраза без механики.' },
+  };
+  const required = ['duration', 'difficulty', 'note'];
+  if (neighbor) {
+    properties.crossIsland = {
+      type: 'boolean',
+      description:
+        'true, если поручение касается соседнего города или любого конфликта интересов с ним ' +
+        '(нападение, посольство, кража, разведка, охрана прохода, вмешательство). ' +
+        'false, если работа только у себя.',
+    };
+    properties.opposedStat = {
+      type: 'string',
+      enum: [...OPPOSED_STATS, 'none'],
+      description:
+        'Если crossIsland=true — какой стат соседа противостоит делу (security/prosperity/knowledge/influence). ' +
+        'Нет противодействия или дело своё — none. Чисел статов не знаешь и не проси.',
+    };
+    required.push('crossIsland');
+  }
   const runOpts = {
     agentId: 'deedJudge',
     tools: [
       {
         name: 'submit_deed',
-        description: 'Полоса срока, полоса сложности и одна бытовая причина.',
+        description: neighbor
+          ? 'Полосы срока и сложности, crossIsland по тексту поручения, opposedStat если дело через проход.'
+          : 'Полоса срока, полоса сложности и одна бытовая причина.',
         parameters: {
           type: 'object',
           additionalProperties: false,
-          required: ['duration', 'difficulty', 'note'],
-          properties: {
-            duration: { type: 'string', enum: [...DURATION_BANDS] },
-            difficulty: { type: 'string', enum: [...DIFFICULTY_BANDS] },
-            note: { type: 'string', description: 'Одна бытовая фраза без механики.' },
-            opposedStat: {
-              type: 'string',
-              enum: [...OPPOSED_STATS, 'none'],
-              description:
-                'Какой стат соседа противостоит делу (security/prosperity/knowledge/influence). Нет противодействия — none. Чисел статов не знаешь и не проси.',
-            },
-          },
+          required,
+          properties,
         },
         handler: async (args) => {
           draft.duration = normalizeDurationBand(args?.duration, null);
           draft.difficulty = normalizeDifficultyBand(args?.difficulty, null);
           draft.note = String(args?.note || '').trim().slice(0, 300);
-          draft.opposedStat = normalizeOpposedStat(args?.opposedStat);
+          if (neighbor) {
+            draft.crossIsland = args?.crossIsland === true || args?.crossIsland === 'true';
+            draft.opposedStat = draft.crossIsland ? normalizeOpposedStat(args?.opposedStat) : null;
+          }
           return { ok: true };
         },
       },
@@ -85,8 +104,13 @@ export async function judgeDeed({
           remainingWindowBand
             ? `До расхождения островов осталось примерно: ${remainingWindowBand}. Если работа длиннее окна — бери более короткую полосу или это не успеть.`
             : '',
-          crossIsland
-            ? 'Дело через проход: назови opposedStat — какой стат соседа ему противостоит. Чисел не знаешь.'
+          neighbor
+            ? [
+                `Соседний город за проходом: «${neighbor}».`,
+                'По тексту поручения реши crossIsland: true, если дело касается этого города или конфликта интересов с ним',
+                '(нападение, посольство, кража, разведка, охрана прохода, вмешательство). false — работа только в своём городе.',
+                'Если crossIsland=true — opposedStat: какой стат соседа противостоит делу. Чисел не знаешь.',
+              ].join(' ')
             : '',
         ]
           .filter(Boolean)
@@ -104,7 +128,7 @@ export async function judgeDeed({
   const duration = draft.duration || 'WEEKS';
   const difficulty = draft.difficulty || 'PLAIN';
   const objectiveDays = Math.max(1, rollDurationDays(duration, rng));
-  log.info('deed.judge', { summary, duration, difficulty });
+  log.info('deed.judge', { summary, duration, difficulty, crossIsland: draft.crossIsland });
   return {
     durationBand: duration,
     difficulty,
@@ -114,6 +138,7 @@ export async function judgeDeed({
     impossible: isImpossible(difficulty),
     note: draft.note,
     opposedStat: draft.opposedStat,
+    crossIsland: Boolean(draft.crossIsland),
     prompt,
     fallback: !draft.duration || !draft.difficulty,
   };

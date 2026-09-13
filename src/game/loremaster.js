@@ -3,7 +3,7 @@ import { createLoreFact, formatCastForPrompt, chronicleEntries, formatChronicleP
 import { formatFullChronicleForPrompt, formatFactsForPrompt } from './memory.js';
 import { findActiveConfluxForDomain } from './conflux.js';
 import { daysUntilDock } from './confluxTime.js';
-import { attachFactToPlotlines } from './plotlines.js';
+import { attachFactToPlotlines, isPairThread } from './plotlines.js';
 import { cityRules } from './cityRules.js';
 import { overlayConfluxView, stampNewBoardItems, stripConfluxView } from './confluxBoard.js';
 import { formatTruthGraphForPrompt } from './mysteryGraph.js';
@@ -38,7 +38,7 @@ export function storiesForLoremaster(domain, conflux = null) {
   void conflux;
   const byId = new Map();
   for (const p of domain?.plotlines || []) {
-    if (p) byId.set(p.id, p);
+    if (p && !isPairThread(p)) byId.set(p.id, p);
   }
   return [...byId.values()];
 }
@@ -51,15 +51,16 @@ export function resolveLoremasterStory(domain, plotId, conflux = null) {
 }
 
 export function formatOpenStoriesBrief(plots = []) {
-  if (!plots.length) return 'Открытых историй нет.';
-  const lines = plots.map((p) => {
+  const visible = (plots || []).filter((p) => p && !isPairThread(p));
+  if (!visible.length) return 'Открытых историй нет.';
+  const lines = visible.map((p) => {
     const kind =
       p.storyType === 'mystery'
         ? 'тайна'
         : p.kind === 'errand'
           ? 'поручение'
-          : p.isMainConflux || p.shared
-            ? 'общая история сопряжения'
+          : p.shared
+            ? 'общая история'
             : 'история';
     const syn = p.synopsis ? ` — ${p.synopsis}` : '';
     return `- ${p.id} (${kind})${syn}`;

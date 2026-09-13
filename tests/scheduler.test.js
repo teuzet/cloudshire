@@ -234,8 +234,9 @@ test('очередь домена не даёт задачам перемеша�
   const fast = q.run('a', async () => {
     order.push('вторая');
   });
-  await Promise.all([slow, fast]);
-  assert.deepEqual(order, ['первая', 'вторая']);
+    await Promise.all([slow, fast]);
+    assert.deepEqual(order, ['первая', 'вторая']);
+    assert.equal(q.busy('a'), false, 'после шага город снова свободен');
 });
 
 test('разные домены не блокируют друг друга', async () => {
@@ -259,6 +260,7 @@ test('упавшая задача не рвёт очередь домена', as
     throw new Error('сломалось');
   });
   await assert.rejects(bad);
+  assert.equal(q.busy('a'), false, 'упавшее тоже отпускает город');
   await q.run('a', async () => order.push('дальше'));
   assert.deepEqual(order, ['дальше']);
 });

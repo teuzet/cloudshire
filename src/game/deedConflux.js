@@ -19,6 +19,39 @@ export function isCrossIslandDeed(process, conflux, domainId) {
   return false;
 }
 
+/** Имя соседа в тексте, включая русские падежи («на Аллерию» ← «Аллерия»). */
+export function deedMentionsPartner(texts, partnerName) {
+  const name = String(partnerName || '').trim();
+  if (!name) return false;
+  const blob = (Array.isArray(texts) ? texts : [texts])
+    .map((t) => String(t || ''))
+    .join('\n')
+    .toLowerCase();
+  const n = name.toLowerCase();
+  if (blob.includes(n)) return true;
+  if (n.length >= 5) {
+    const stem = n.slice(0, Math.max(4, n.length - 2));
+    if (stem.length >= 4 && blob.includes(stem)) return true;
+  }
+  return false;
+}
+
+/**
+ * Конфликт интересов с соседом: оценщик так решил, текст называет город,
+ * дело стоит в его нити, или это разведка / тайна / охрана прохода.
+ */
+export function isConflictOfInterestDeed({
+  judged = null,
+  process = null,
+  partnerName = '',
+  partnerHostedPlot = false,
+} = {}) {
+  if (judged?.crossIsland) return true;
+  if (partnerHostedPlot) return true;
+  if (process?.intel || process?.secret || process?.passageGuard) return true;
+  return deedMentionsPartner([process?.summary, process?.detail, process?.goal], partnerName);
+}
+
 export function remainingWindowBand(conflux, day) {
   return spanBandLabel(remainingDockDays(conflux, day));
 }

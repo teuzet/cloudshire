@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createConfluxRecord, beginConfluxOwnership, dockConfluxNow, schedulePairJobs, monthsUntilDock, abortCrossIslandDeeds, undockConfluxNow } from '../src/game/conflux.js';
+import { createConfluxRecord, beginConfluxOwnership, dockConfluxNow, schedulePairJobs, monthsUntilDock, abortCrossIslandDeeds, undockConfluxNow, confluxSummary } from '../src/game/conflux.js';
 import { hoursToGameDays, pickPrepDelayHours, confluxConfig, remainingDockDays, rollConfluxSpan, stampGenesisConfluxBan, confluxDue } from '../src/game/confluxTime.js';
 import { seedDockMeet, DOCK_MEET_EVENT } from '../src/game/confluxBoard.js';
 import { fireThreat } from '../src/game/threats.js';
 import { hourInTimeZone, noteRulerActivity, emptyActivity } from '../src/game/activity.js';
 import { inQuietHours, setQuietHours, pushVerdict } from '../src/game/notify.js';
-import { applyCrossIslandJudged, secretRevealTexts, isCrossIslandDeed } from '../src/game/deedConflux.js';
+import { applyCrossIslandJudged, secretRevealTexts, isCrossIslandDeed, deedMentionsPartner, isConflictOfInterestDeed } from '../src/game/deedConflux.js';
 import { takeDomainBoardIntoConflux, createEmptyContainer, overlayConfluxView, stripConfluxView } from '../src/game/confluxBoard.js';
 import { createPlotline, ensurePlotStatBudget } from '../src/game/plotlines.js';
 import { confluxEvent, writePairChronicle } from '../src/game/confluxCanon.js';
@@ -72,6 +72,25 @@ test('запись сопряжения держит сроки в днях и �
   assert.equal(jobs.find((j) => j.kind === 'conflux_undock').dueDay, 190);
 });
 
+test('сводка пары считает остаток в днях, а не в месяцах', () => {
+  const c = createConfluxRecord({
+    domainIds: ['a', 'b'],
+    world: world(10),
+    prepStartDay: 10,
+    dockStartDay: 40,
+    dockEndDay: 100,
+  });
+  const approaching = confluxSummary(c, world(20), {}, 20);
+  assert.equal(approaching.daysUntilDock, 20);
+  assert.equal(approaching.remainingDockDays, 20);
+  assert.equal(approaching.dockSpanDays, 60);
+  c.status = 'docked';
+  const docked = confluxSummary(c, world(50), {}, 50);
+  assert.equal(docked.daysUntilDock, 0);
+  assert.equal(docked.daysUntilUndock, 50);
+  assert.equal(docked.remainingDockDays, 50);
+});
+
 test('нити при сближении остаются на домене', () => {
   const w = world(0);
   const a = city('a', 'Астра');
@@ -88,7 +107,7 @@ test('нити при сближении остаются на домене', ()
   assert.equal(c.container.endings.some((e) => e.id === 'end_parting'), true);
   assert.equal((c.container.threats || []).some((t) => t.endingId === 'end_parting'), true);
   assert.match(a.lore[0].text, /Берил/);
-  assert.match(a.lore[0].text, /мес/);
+  assert.match(a.lore[0].text, /90 дн/);
   assert.doesNotMatch(a.lore[0].text, /~\d/);
   assert.doesNotMatch(a.lore[0].text, /слух|примета/);
 });
@@ -212,8 +231,38 @@ test('дело с целью за проходом — через проход, 
     container: { id: 'plot_pair' },
   };
   assert.equal(isCrossIslandDeed({ targetDomainId: 'b' }, conflux, 'a'), true);
+  assert.equal(isCrossIslandDeed({ crossIsland: true }, conflux, 'a'), true);
   assert.equal(isCrossIslandDeed({ plotlineId: 'plot_pair', confluxId: 'cf1' }, conflux, 'a'), false);
   assert.equal(isCrossIslandDeed({ confluxId: 'cf1' }, conflux, 'a'), false);
+});
+
+test('конфликт интересов читается из текста и из решения оценщика, не из id города', () => {
+  assert.equal(deedMentionsPartner('Ночное нападение на Аллерию', 'Аллерия'), true);
+  assert.equal(deedMentionsPartner('Починить северную стену', 'Аллерия'), false);
+  assert.equal(
+    isConflictOfInterestDeed({
+      judged: { crossIsland: true },
+      process: { summary: 'Починить стену' },
+      partnerName: 'Аллерия',
+    }),
+    true,
+  );
+  assert.equal(
+    isConflictOfInterestDeed({
+      judged: { crossIsland: false },
+      process: { summary: 'Ночное нападение на Аллерию' },
+      partnerName: 'Аллерия',
+    }),
+    true,
+  );
+  assert.equal(
+    isConflictOfInterestDeed({
+      judged: { crossIsland: false },
+      process: { summary: 'Починить северную стену' },
+      partnerName: 'Аллерия',
+    }),
+    false,
+  );
 });
 
 test('штурм сравнивает профильный стат дела с обороной соседа', () => {

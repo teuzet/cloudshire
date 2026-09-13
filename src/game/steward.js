@@ -13,6 +13,8 @@ import {
 } from './processes.js';
 import { judgeDeed } from './deedJudge.js';
 import { startDeed, deedRemainingBand } from './deeds.js';
+import { applyCrossIslandJudged, remainingWindowBand, isConflictOfInterestDeed } from './deedConflux.js';
+import { plotHostId } from './confluxBoard.js';
 import { gameDateFromDay } from './gameClock.js';
 import { scheduleDeedJob } from './worldLoop.js';
 import { DURATION_SPEC } from './bands.js';
@@ -26,6 +28,7 @@ import { proxyText } from './cityRules.js';
 import {
   pickRandomFreeOfficer,
   bindOfficerProcess,
+  releaseOfficerProcess,
   isOffPortfolio,
   formatOfficersForPrompt,
   officeStrategy,
@@ -114,7 +117,16 @@ function rememberOfficerInitiative(domain, { text, world, officer, day = 0 }) {
   return fact;
 }
 
-async function applyProcess(domain, args, { config, runtime, world, officer, day = 0, log }) {
+async function applyProcess(domain, args, {
+  config,
+  runtime,
+  world,
+  officer,
+  day = 0,
+  log,
+  conflux = null,
+  partner = null,
+}) {
   const slots = canStartProcess(domain, config);
   if (!slots.ok || !officer) {
     return { error: 'too_many_processes', message: 'Все сановники заняты.' };
@@ -160,9 +172,43 @@ async function applyProcess(domain, args, { config, runtime, world, officer, day
     summary,
     detail,
     goal: action.goal || '',
+    remainingWindowBand: conflux?.status === 'docked' ? remainingWindowBand(conflux, day) : '',
+    partnerName: partner?.name || '',
     log,
   });
   if (judged.note) action.durationNote = judged.note;
+  const previewPlot = args.plotId
+    ? (domain.plotlines || []).find((p) => String(p.id) === String(args.plotId))
+    : null;
+  const partnerHostedPlot = Boolean(
+    partner && previewPlot && plotHostId(previewPlot) === String(partner.id),
+  );
+  if (
+    conflux?.status === 'docked' &&
+    partner &&
+    isConflictOfInterestDeed({
+      judged,
+      process: action,
+      partnerName: partner.name,
+      partnerHostedPlot,
+    })
+  ) {
+    action.opposedStat = judged.opposedStat || null;
+    const applied = applyCrossIslandJudged(judged, {
+      process: action,
+      actor: domain,
+      target: partner,
+      conflux,
+      day,
+      config,
+    });
+    if (applied.error === 'window') {
+      domain.state.pendingActions = (domain.state.pendingActions || []).filter((p) => p.id !== action.id);
+      releaseOfficerProcess(domain, action);
+      return { error: 'window', message: applied.message };
+    }
+    Object.assign(judged, applied.judged);
+  }
   startDeed(action, { day, judged });
   scheduleDeedJob(world, domain, action);
   let plot = args.plotId ? linkProcessToPlotline(domain, action.id, String(args.plotId)) : null;
@@ -208,6 +254,8 @@ export async function runOfficerAct({
   reason = 'silence',
   proxyTrigger = null,
   proxyContext = '',
+  conflux = null,
+  partner = null,
 }) {
   const gate = reason === 'proxy' ? { ok: true, silent: 0 } : shouldRunSteward(domain, config);
   if (!gate.ok) return { silent: gate.silent, act: null };
@@ -258,6 +306,8 @@ export async function runOfficerAct({
             officer,
             day,
             log,
+            conflux,
+            partner,
           });
           if (applied.error) return toolFail(applied.error, applied.message);
           draft.data = {

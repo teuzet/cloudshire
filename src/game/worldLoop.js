@@ -56,6 +56,7 @@ import {
   threatTriggerLines,
   writeChronicle,
   deedActor,
+  deedActorGender,
   CHRONICLE_FINALE_MAX,
 } from './chronicler.js';
 import { reconcilePlot } from './reconciler.js';
@@ -298,19 +299,19 @@ export async function resolveDeedEvent({
     // Последнюю запись об истории пишет отдельный агент: у обычного хрониста
     // бриф на один ход, и развязка у него сжимается в строчку.
     const closesStory = Boolean(applied.closes) && Boolean(plot);
+    const longEntry = closesStory || Boolean(process.crossIsland);
     const written = await writeChronicle({
       runtime,
       domain,
       occasion: 'дело',
       agentId: closesStory ? 'chronicleFinale' : 'chronicler',
-      maxChars: closesStory ? CHRONICLE_FINALE_MAX : undefined,
+      maxChars: longEntry ? CHRONICLE_FINALE_MAX : undefined,
       prompt: closesStory
         ? formatFinalePrompt({
             plot,
             ending: plot.ending || null,
             triggerLines: deedTriggerLines({ domain, process, applied }),
             chronicleTail: plotChronicleTail(domain, plot.id),
-            dateLabel: gameDateFromDay(day).label,
           })
         : formatDeedPrompt({
             domain,
@@ -320,11 +321,13 @@ export async function resolveDeedEvent({
             threat: plot ? findThreat(plot, applied.threatId) : null,
             closed: false,
             chronicleTail: plotChronicleTail(domain, plot?.id),
-            dateLabel: gameDateFromDay(day).label,
           }),
       log,
     });
-    text = written?.text || fallbackDeedEntry(process, rolled.finish, { actor: deedActor(domain, process) });
+    text = written?.text || fallbackDeedEntry(process, rolled.finish, {
+      actor: deedActor(domain, process),
+      gender: deedActorGender(domain, process),
+    });
   }
 
   const fact = appendEventFact(domain, world, {
@@ -353,6 +356,7 @@ export async function resolveDeedEvent({
           day,
           log,
           storage,
+          config,
         });
 
   let secretVictim = null;
@@ -419,6 +423,7 @@ export async function resolveDeedEvent({
     rule,
     closed: Boolean(closed),
     actor: deedActor(domain, process),
+    actorGender: deedActorGender(domain, process),
     secretVictim,
     pairSpread,
   };
@@ -443,6 +448,7 @@ export async function fireThreatEvent({
   conflux = null,
   partner = null,
   storage = null,
+  config = null,
 } = {}) {
   const log = (parentLog || getLogger()).child({ scope: 'loop.threat', domainId: domain?.id, plotId });
   const plot = givenPlot || findPlotline(domain, plotId);
@@ -503,6 +509,7 @@ export async function fireThreatEvent({
     day,
     log,
     storage,
+    config,
   });
 
   let closed = null;

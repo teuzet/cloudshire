@@ -269,11 +269,14 @@ async function refreshConfluxUi() {
       const names = (c.domainNames || c.domainIds || []).join(' ↔ ');
       let detail = '';
       if (c.status === 'approaching') {
-        detail = `eta ${c.monthsUntilDock ?? '—'} мес.`;
+        const left = c.daysUntilDock;
+        detail =
+          left == null ? 'сближение' : left <= 0 ? 'сегодня' : `${left} дн.`;
       } else if (c.contact) {
         detail = `${c.contact.kind || '?'}${c.contact.description ? ` · ${String(c.contact.description).slice(0, 120)}` : ''}`;
       } else if (c.status === 'docked') {
-        detail = `в стыковке ${c.monthsDocked ?? 0}/${c.durationMonths ?? '?'}`;
+        const left = c.remainingDockDays;
+        detail = left != null ? `в сопряжении, ${left} дн.` : 'в сопряжении';
       } else {
         detail = c.status || '';
       }
@@ -650,8 +653,9 @@ function renderOverview() {
         ? keyVals([
             ['статус', cf.status],
             ['партнёры', (cf.domainNames || []).join(' ↔ ')],
-            ['до стыковки, мес.', cf.monthsUntilDock],
-            ['в стыковке', cf.monthsDocked != null ? `${cf.monthsDocked}/${cf.durationMonths || '?'}` : null],
+            ['до стыковки, дн.', cf.status === 'approaching' ? cf.daysUntilDock : null],
+            ['осталось в стыковке, дн.', cf.status === 'docked' ? cf.remainingDockDays : null],
+            ['длина стыковки, дн.', cf.dockSpanDays],
           ])
         : empty('сейчас остров идёт один'),
     ),
@@ -1050,9 +1054,10 @@ function renderConfluxTab() {
         ['id', cf.id],
         ['партнёры', (cf.domainNames || cf.domainIds || []).join(' ↔ ')],
         ['повторная', cf.rematch ? 'да' : 'нет'],
-        ['до стыковки, мес.', cf.monthsUntilDock],
-        ['стыковка на тике', cf.dockAtTick],
-        ['в стыковке', `${cf.monthsDocked ?? 0}/${cf.durationMonths ?? '?'}`],
+        ['до стыковки, дн.', cf.status === 'approaching' ? cf.daysUntilDock : null],
+        ['стыковка с дня', cf.dockStartDay],
+        ['осталось в стыковке, дн.', cf.status === 'docked' ? cf.remainingDockDays : null],
+        ['длина стыковки, дн.', cf.dockSpanDays],
         ['проход', contact.kind],
         ['описание прохода', contact.description],
         ['контроль', contact.control],

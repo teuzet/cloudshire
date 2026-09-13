@@ -88,14 +88,28 @@ function renderHistory(history, tutorial = null) {
   box.scrollTop = box.scrollHeight;
 }
 
+function daysWord(n) {
+  if (n == null || n === '') return '';
+  const d = Math.round(Number(n));
+  if (!Number.isFinite(d)) return '';
+  if (d <= 0) return 'сегодня';
+  return `${d} дн.`;
+}
+
 function confluxMark(island) {
   const c = island?.conflux;
   if (!c) return island?.draft ? 'черновик' : '';
-  if (c.status === 'docked') return c.partnerName ? `сопряжение · ${c.partnerName}` : 'сопряжение';
+  if (c.status === 'docked') {
+    const when = daysWord(c.remainingDockDays);
+    return c.partnerName
+      ? `сопряжение · ${c.partnerName}${when ? ` · ${when}` : ''}`
+      : `сопряжение${when ? ` · ${when}` : ''}`;
+  }
   if (c.status === 'approaching') {
-    const left = c.monthsUntilDock;
-    const when = left == null ? '' : left <= 0 ? 'скоро' : `${left} мес.`;
-    return c.partnerName ? `близко · ${c.partnerName}${when ? ` · ${when}` : ''}` : 'близко';
+    const when = daysWord(c.daysUntilDock);
+    return c.partnerName
+      ? `близко · ${c.partnerName}${when ? ` · ${when}` : ''}`
+      : `близко${when ? ` · ${when}` : ''}`;
   }
   return '';
 }
@@ -422,8 +436,9 @@ function renderCityTab(d) {
         ? keyVals([
             ['статус', c.status],
             ['партнёр', c.partnerName],
-            ['до сопряжения, мес.', c.monthsUntilDock],
-            ['в сопряжении, мес.', `${c.monthsDocked}/${c.durationMonths}`],
+            ['до сопряжения, дн.', c.status === 'approaching' ? c.daysUntilDock : null],
+            ['осталось в сопряжении, дн.', c.status === 'docked' ? c.remainingDockDays : null],
+            ['длина сопряжения, дн.', c.dockSpanDays],
             ['повторная', c.rematch ? 'да' : 'нет'],
             ['проход', c.contact ? `${c.contact.kind || '?'} — ${c.contact.description || ''}` : null],
             ['контроль прохода', c.contact?.control || null],
@@ -735,8 +750,9 @@ function renderConfluxTab(d) {
       keyVals([
         ['статус', c.status],
         ['партнёр', c.partnerName],
-        ['до сопряжения, мес.', c.monthsUntilDock],
-        ['в сопряжении, мес.', `${c.monthsDocked}/${c.durationMonths}`],
+        ['до сопряжения, дн.', c.status === 'approaching' ? c.daysUntilDock : null],
+        ['осталось в сопряжении, дн.', c.status === 'docked' ? c.remainingDockDays : null],
+        ['длина сопряжения, дн.', c.dockSpanDays],
         ['повторная', c.rematch ? 'да' : 'нет'],
         ['проход', c.contact ? `${c.contact.kind || '?'} — ${c.contact.description || ''}` : null],
         ['контроль прохода', c.contact?.control || null],

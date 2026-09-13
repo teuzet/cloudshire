@@ -67,13 +67,24 @@ export function enforceFinishPolarity(deltas, finish) {
   return next;
 }
 
+/** Удар по городу с чужого берега: успех нападавших — наши потери. */
+export function finishForFact(fact) {
+  const impact = fact?.pairImpact;
+  if (impact?.hostile) {
+    const f = String(impact.finish || '');
+    if (f === 'crit' || f === 'ok' || f === 'success') return 'fail';
+    if (f === 'fail') return 'ok';
+  }
+  return fact?.processFinish || null;
+}
+
 /** Тихий месяц и пропуски оценщика больше не двигают статы. */
 export function applyFallbackStatDrift() {
   return null;
 }
 
 function polarityOf(fact) {
-  const f = String(fact?.processFinish || '');
+  const f = String(finishForFact(fact) || '');
   if (f === 'crit') return 'nonneg';
   if (f === 'fail') return 'nonpos';
   return 'any';
@@ -83,6 +94,10 @@ function absBudgetForFact(domain, fact, config) {
   if (fact?.author === 'storyteller:quiet') return 0;
   // Правило города — не подвиг: постоянный порядок сам статов не даёт.
   if (fact?.author === 'engine:rule') return 0;
+  const impactDays = Number(fact?.pairImpact?.objectiveDays);
+  if (Number.isFinite(impactDays) && impactDays > 0) {
+    return deedStatBudget({ objectiveDays: impactDays }, config);
+  }
   if (fact?.processFinish) {
     const proc = (domain.state?.pendingActions || []).find((a) => a.id === fact.relatedPendingId);
     return deedStatBudget(proc, config);
@@ -200,10 +215,13 @@ export async function scoreChronicleStats({
   const listing = toScore
     .map((f, i) => {
       const kind = entryKind(f, domain);
-      const finish = f.processFinish ? ` исход: ${f.processFinish}` : '';
-      return `${i + 1}. id ${f.id} [${kind}]${finish}\n${f.text}`;
+      const finish = finishForFact(f);
+      const hit = f.pairImpact?.hostile ? ' удар с чужого берега' : '';
+      const finishNote = finish ? ` исход: ${finish}` : '';
+      return `${i + 1}. id ${f.id} [${kind}]${hit}${finishNote}\n${f.text}`;
     })
     .join('\n\n');
+  const hitUs = toScore.some((f) => f?.pairImpact?.hostile);
 
   await runtime.run({
     agentId: 'statJudge',
@@ -227,6 +245,9 @@ export async function scoreChronicleStats({
           'Если исход записи crit / [КРИТИЧЕСКИЙ УСПЕХ] — только плюсы, без down.',
           'Если fail / [ПРОВАЛ] — без плюсов, город теряет.',
           'Если ok / [УСПЕХ] — плюсы есть, небольшая негативная побочка обязательна.',
+          hitUs
+            ? 'Удар с чужого берега: этот город — пострадавший. Ставь потери (down), не добычу нападавших.'
+            : '',
           '',
           'Сейчас в городе:',
           statsBrief(domain, config),
@@ -235,7 +256,9 @@ export async function scoreChronicleStats({
           listing,
           '',
           'Вызови submit_stat_marks.',
-        ].join('\n'),
+        ]
+          .filter((line) => line != null)
+          .join('\n'),
       },
     ],
   });
@@ -268,7 +291,7 @@ export async function scoreChronicleStats({
         absBudget,
         polarity: polarityOf(fact),
       }),
-      fact.processFinish,
+      finishForFact(fact),
     );
     if (!deltas || !Object.keys(deltas).length) {
       if (note) {

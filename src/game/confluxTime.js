@@ -74,8 +74,20 @@ export function daysUntilUndock(conflux, day) {
 }
 
 export function remainingDockDays(conflux, day) {
-  if (conflux?.status !== 'docked') return daysUntilUndock(conflux, day);
   return daysUntilUndock(conflux, day);
+}
+
+/** Сколько дней до ближайшего события пары: стык или расхождение. */
+export function pairRemainingDays(conflux, day) {
+  if (!conflux) return null;
+  if (conflux.status === 'docked') return daysUntilUndock(conflux, day);
+  if (conflux.status === 'approaching') return daysUntilDock(conflux, day);
+  return null;
+}
+
+export function dockSpanDays(conflux) {
+  if (conflux?.dockStartDay == null || conflux?.dockEndDay == null) return null;
+  return Math.max(0, Math.round(Number(conflux.dockEndDay)) - Math.round(Number(conflux.dockStartDay)));
 }
 
 export function pairPrimaryId(conflux) {

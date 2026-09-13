@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sourceForFact, applyFallbackStatDrift, factsForStatJudge, enforceFinishPolarity } from '../src/game/statJudge.js';
+import { sourceForFact, applyFallbackStatDrift, factsForStatJudge, enforceFinishPolarity, finishForFact, deedStatBudget } from '../src/game/statJudge.js';
 
 const STAT_CONFIG = {
   stats: [
@@ -43,4 +43,18 @@ test('крит без минусов, провал без плюсов', () => {
   assert.deepEqual(enforceFinishPolarity({ prosperity: 3, knowledge: -2 }, 'crit'), { prosperity: 3 });
   assert.deepEqual(enforceFinishPolarity({ prosperity: 3, knowledge: -2 }, 'fail'), { knowledge: -2 });
   assert.deepEqual(enforceFinishPolarity({ prosperity: 3, knowledge: -2 }, 'ok'), { prosperity: 3, knowledge: -2 });
+});
+
+test('успешный удар по городу для жертвы — потери, не добыча', () => {
+  const hit = {
+    pairImpact: { hostile: true, finish: 'crit', objectiveDays: 27 },
+  };
+  assert.equal(finishForFact(hit), 'fail');
+  assert.deepEqual(enforceFinishPolarity({ prosperity: 2, security: -3 }, finishForFact(hit)), { security: -3 });
+  assert.ok(deedStatBudget({ objectiveDays: 27 }, { tick: { officerStatPerDay: 0.02, officerStatCap: 8 } }) >= 1);
+});
+
+test('провальный удар по городу для жертвы не режет в минус как crit нападавших', () => {
+  assert.equal(finishForFact({ pairImpact: { hostile: true, finish: 'fail' } }), 'ok');
+  assert.equal(finishForFact({ processFinish: 'crit' }), 'crit');
 });

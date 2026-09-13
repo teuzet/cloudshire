@@ -416,16 +416,16 @@ export async function returnBoardsOnUndock(conflux, domainsById, { decideContinu
 }
 
 export function approachingAnnounceText(domain, partner, remaining, rematch) {
-  const months = Number(remaining);
+  const days = Number(remaining);
   const when =
     remaining == null || remaining === ''
       ? ''
-      : Number.isFinite(months)
-        ? months <= 0
+      : Number.isFinite(days)
+        ? days <= 0
           ? 'Сопряжение уже в эту пору.'
-          : months === 1
-            ? 'До сопряжения около месяца.'
-            : `До сопряжения примерно ${Math.round(months)} мес.`
+          : days === 1
+            ? 'До сопряжения день.'
+            : `До сопряжения примерно ${Math.round(days)} дн.`
         : `До сопряжения ${remaining}.`;
   return [
     `На горизонте чужой летающий остров — город «${partner.name}».`,

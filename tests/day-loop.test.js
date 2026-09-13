@@ -1,13 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { triggerForEvent, deliverEvent, stepDomain, runDayLoop } from '../src/game/dayLoop.js';
-import { wakeDelayMs, MIN_WAKE_MS, MAX_WAKE_MS } from '../src/scheduler/days.js';
-import { scheduleJob, beginRulerTurn, holdClock, RULER_TURN_FAILSAFE_MS } from '../src/game/scheduler.js';
+import { wakeDelayMs, startDayScheduler, MIN_WAKE_MS, MAX_WAKE_MS } from '../src/scheduler/days.js';
+import { scheduleJob, beginRulerTurn, holdClock, skipStoredWorldDays, worldDay, RULER_TURN_FAILSAFE_MS } from '../src/game/scheduler.js';
 import { scheduleDeedJob } from '../src/game/worldLoop.js';
 import { startDeed } from '../src/game/deeds.js';
 import { notifySettings, markPushed } from '../src/game/notify.js';
-import { realMsPerGameDay } from '../src/game/gameClock.js';
+import { realMsPerGameDay, skipGameDays } from '../src/game/gameClock.js';
 import { addPriestOrder } from '../src/game/priestOrders.js';
+import { createConfluxRecord, schedulePairJobs } from '../src/game/conflux.js';
 
 const config = {
   stats: [{ id: 'prosperity' }, { id: 'security' }],
@@ -550,4 +552,101 @@ test('удержанные часы не будят мир к сроку дел'
   scheduleJob(world, { domainId: 'd1', kind: 'process_finish', dueDay: 0, payload: {} });
   holdClock(world, Date.now());
   assert.equal(wakeDelayMs(world, { now: Date.now() }), MAX_WAKE_MS);
+});
+
+test('проход мира не откатывает промотку, случившуюся посреди шага', async () => {
+  const world = makeWorld();
+  const storage = storageOf([makeDomain()], world);
+  let skipped = false;
+  storage.listDomains = async () => {
+    if (!skipped) {
+      skipped = true;
+      skipGameDays(world, 7, { now: 0 });
+    }
+    return [await storage.getDomain('d1')];
+  };
+  await runDayLoop({
+    config,
+    runtime: heraldRuntime(),
+    storage,
+    app: fakeApp(),
+    now: 0,
+    log: silentLog,
+  });
+  assert.equal(world.dayIndex, 7);
+});
+
+test('промотка за срок стыковки при удержанных часах стыкует пару', async () => {
+  const dayMs = realMsPerGameDay(null);
+  const now = 100 * dayMs;
+  const world = makeWorld();
+  holdClock(world, now);
+  const a = makeDomain({ id: 'd1' });
+  a.name = 'Астра';
+  const b = makeDomain({ id: 'd2' });
+  b.name = 'Берил';
+  const conflux = createConfluxRecord({
+    domainIds: ['d1', 'd2'],
+    world,
+    prepStartDay: 90,
+    dockStartDay: 110,
+    dockEndDay: 200,
+  });
+  schedulePairJobs(world, conflux);
+  const byCf = new Map([[conflux.id, conflux]]);
+  const storage = storageOf([a, b], world);
+  storage.listConfluxes = async () => [conflux];
+  storage.getConflux = async (id) => byCf.get(id) || null;
+  storage.saveConflux = async (c) => {
+    byCf.set(c.id, c);
+  };
+
+  await skipStoredWorldDays(storage, 15, { now });
+  assert.ok(worldDay(world, { now }) >= 110, 'промотка должна перейти срок стыковки');
+
+  const res = await runDayLoop({
+    config,
+    runtime: null,
+    storage,
+    app: fakeApp(),
+    now,
+    allowWhileHeld: true,
+    log: silentLog,
+  });
+  assert.equal(res.skipped, undefined);
+  assert.equal(conflux.status, 'docked');
+  assert.equal(world.jobs.find((j) => j.kind === 'conflux_dock')?.state, 'done');
+});
+
+test('принудительный проход не теряется, если дневной цикл уже идёт', async () => {
+  let releaseBoot;
+  const bootHold = new Promise((resolve) => {
+    releaseBoot = resolve;
+  });
+  const reasons = [];
+  const world = makeWorld();
+  const days = startDayScheduler({
+    config: { time: { enabled: true } },
+    storage: {
+      async getWorld() {
+        return world;
+      },
+    },
+    onDay: async ({ reason }) => {
+      reasons.push(reason);
+      if (reason === 'boot') await bootHold;
+      return { reason };
+    },
+  });
+  const forced = days.triggerNow('play-force');
+  releaseBoot();
+  await forced;
+  days.stop();
+  assert.deepEqual(reasons, ['boot', 'play-force']);
+});
+
+test('промотка в index не затеняет дневной планировщик именем days', () => {
+  const src = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  assert.match(src, /dayScheduler\.triggerNow/);
+  assert.doesNotMatch(src, /await days\.triggerNow/);
 });
