@@ -34,6 +34,17 @@ export function chronicleEntryLimit(raw) {
   return n > CHRONICLE_ENTRY_MAX ? n : CHRONICLE_ENTRY_MAX;
 }
 
+/**
+ * Рядовому дню хватает сухой строчки, и просить о ней надо прямо: иначе запись
+ * разрастается. Но то же слово «сухо» в расширенной записи съедает весь объём —
+ * модель отдаёт сводку в два предложения и на длинном пределе.
+ */
+export function entryRegister(limit) {
+  return chronicleEntryLimit(limit) > CHRONICLE_ENTRY_MAX
+    ? 'Предметно и подробно: город будет помнить это долго, коротить незачем.'
+    : 'Сухо и предметно.';
+}
+
 /** Исход одним токеном и толкованием. Словарь общий с броском, своего не заводим. */
 export function finishForPrompt(finish) {
   return FINISH_LABELS[finish] || FINISH_LABELS.ok;
@@ -253,6 +264,11 @@ function neighbourBlock({ partnerName = '', passage = '', pairArchive = '' } = {
   if (archive) {
     lines.push(`Что уже записано об этой встрече (не повторяй как новость и не противоречь):\n${archive}`);
   }
+  lines.push(
+    'Города сходятся редко, и такую работу помнят дольше прочих: пиши в полную силу,',
+    'не сводкой. Подробно — значит подойти ближе к тому, что случилось, а не добавить',
+    'ещё пунктов к перечню задетого.',
+  );
   lines.push('');
   return lines;
 }
@@ -302,7 +318,7 @@ export function formatDeedPrompt({
     ...(cross ? neighbourBlock({ partnerName, passage, pairArchive }) : []),
     'Календарную дату в текст не пиши: она стоит на записи отдельно.',
     cross
-      ? `Одна связная запись до ${CHRONICLE_FINALE_MAX} символов. Вызови submit_chronicle.`
+      ? `Одна связная запись, не короче четырёх предложений, до ${CHRONICLE_FINALE_MAX} символов. Вызови submit_chronicle.`
       : 'Напиши одну запись хроники о том, что случилось в городе. Вызови submit_chronicle.',
   ]
     .filter((l) => l != null)
@@ -455,8 +471,8 @@ export async function writeChronicle({
           entry: {
             type: 'string',
             description:
-              `Что случилось в городе, до ${limit} символов. Сухо и предметно, ` +
-              'в прошедшем времени. Без названий дел и историй, без кавычек с названиями.',
+              `Что случилось в городе, до ${limit} символов. ${entryRegister(limit)} ` +
+              'В прошедшем времени. Без названий дел и историй, без кавычек с названиями.',
           },
         },
       },

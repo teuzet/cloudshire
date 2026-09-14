@@ -16,6 +16,7 @@ import {
   judgeChronicleLeak,
 } from '../src/game/confluxCanon.js';
 import { createPlotline } from '../src/game/plotlines.js';
+import { loadConfig } from '../src/config.js';
 
 function city(id, name) {
   return { id, name, lore: [], plotlines: [] };
@@ -306,16 +307,41 @@ test('взгляд жертвы не переворачивает, кто нап
     viewerName: 'Аллерия',
     neighborName: 'Керсай',
     actorName: 'Керсай',
-    actorPerson: 'Маршал Орена (женщина)',
     hostile: true,
-    sourceText: 'Маршал Орена провела атаку через сопряжение с Аллерией. Керсай взял зерно.',
+    sourceText: 'Маршал Орена провела отряд на Аллерию. Керсай взял зерно.',
   });
   assert.match(text, /действовал город «Керсай»/);
-  assert.match(text, /Маршал Орена \(женщина\)/);
-  assert.match(text, /Согласуй род/);
   assert.match(text, /к нам пришли/);
   assert.match(text, /Не пиши, что мы ходили на «Керсай»/);
   assert.match(text, /Календарную дату в текст не пиши/);
+});
+
+test('канон мира: сопряжение — событие, а ходят по проходу', () => {
+  const cfg = loadConfig();
+  assert.match(cfg.world.cosmology, /событие и пора.*а не место/s);
+  assert.match(cfg.world.cosmology, /но не "через сопряжение"/);
+  assert.match(cfg.world.cosmology, /Ходят по проходу/);
+  const view = cfg.agents.subjectificator.instructions;
+  assert.match(view, /сопряжение — событие и пора, а не место/);
+  assert.match(view, /в запись не переноси ниоткуда/);
+  assert.match(view, /И источник, и архив пары писали у соседа/);
+  assert.match(view, /пиши развёрнуто, не сводкой/);
+});
+
+test('жертве не называют чужого сановника, даже если он стоит в источнике', () => {
+  const text = formatCityViewPrompt({
+    viewerName: 'Аллерия',
+    neighborName: 'Керсай',
+    actorName: 'Керсай',
+    hostile: true,
+    sourceText: 'Маршал Орена провела отряд на Аллерию. Керсай взял зерно.',
+  });
+  assert.match(text, /в запись не переноси ниоткуда/);
+  // Архив пары — дословная хроника нападавшего, поблажки по нему быть не может.
+  assert.doesNotMatch(text, /Назвать можно/);
+  assert.match(text, /Своих называй/);
+  // Запись берега — не сводка: жертве есть что описать и без чужих имён.
+  assert.match(text, /не короче четырёх предложений/);
 });
 
 test('удар с чужого берега помечает след для статов жертвы', () => {

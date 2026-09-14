@@ -12,6 +12,7 @@ import {
   formatThreatPrompt,
   threatTriggerLines,
   endingText,
+  entryRegister,
   finishForPrompt,
   plotChronicleTail,
   writeChronicle,
@@ -206,6 +207,28 @@ test('поручение подано как намерение и как мер
   assert.match(text, /это мерка, а не текст записи/);
   // Домашней работе соседа не показывают: выдумывать проход не с чего.
   assert.doesNotMatch(text, /ЗАДЕВАЛА ПРОХОД/);
+});
+
+test('расширенной записи не велят быть сухой — иначе объём не используется', () => {
+  assert.match(entryRegister(CHRONICLE_ENTRY_MAX), /Сухо/);
+  assert.doesNotMatch(entryRegister(CHRONICLE_FINALE_MAX), /Сухо/);
+  assert.match(entryRegister(CHRONICLE_FINALE_MAX), /подробно/);
+});
+
+test('кросс-островной записи прямо велят не сжиматься в сводку', () => {
+  const text = formatDeedPrompt({
+    domain: domain(),
+    process: { ...deed, crossIsland: true },
+    applied: { finish: 'ok' },
+    partnerName: 'Керсай',
+    passage: 'Края легли берег в берег.',
+  });
+  assert.match(text, /не короче четырёх предложений/);
+  assert.match(text, /пиши в полную силу/);
+  // Подробность и перечень — разные вещи, иначе правило против списков её съедает.
+  assert.match(text, /не добавить/);
+  const local = formatDeedPrompt({ domain: domain(), process: deed, applied: { finish: 'ok' } });
+  assert.doesNotMatch(local, /не короче четырёх предложений/);
 });
 
 test('исход приходит общим словарём броска, своего у хрониста нет', () => {

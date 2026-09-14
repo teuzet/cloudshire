@@ -15,8 +15,6 @@ import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { afterPairLoreWrite } from './confluxForecast.js';
 import { scoreChronicleStats } from './statJudge.js';
-import { findOfficer, officerGender } from './officers.js';
-
 export const PLACE_PAIR = 'pair';
 export const FROZEN_SYNOPSIS_PREFIX = 'Что случилось в этой истории на данный момент:';
 
@@ -319,13 +317,11 @@ export function formatCityViewPrompt({
   sourceText,
   archive = '',
   actorName = '',
-  actorPerson = '',
   hostile = false,
 } = {}) {
   const viewer = String(viewerName || '').trim() || 'этот город';
   const neighbor = String(neighborName || '').trim() || 'сосед';
   const actor = String(actorName || '').trim();
-  const person = String(actorPerson || '').trim();
   const hitUs = Boolean(hostile && actor && actor !== viewer);
   return [
     `Это летопись города «${viewer}». «Мы» и «наш берег» — только «${viewer}».`,
@@ -333,18 +329,18 @@ export function formatCityViewPrompt({
     actor
       ? `В источнике действовал город «${actor}». Стороны не меняй: кто напал или ходил, тот и ходил; кто принял удар, тот принял.`
       : '',
-    person
-      ? `Человек в источнике: ${person}. Согласуй род глаголов. Пол в скобках в текст не пиши.`
-      : '',
     hitUs
       ? `Это удар по «${viewer}». Пиши: к нам пришли, нас ударили, у нас взяли. Не пиши, что мы ходили на «${neighbor}».`
       : '',
     `Что произошло (взгляд другого берега — перескажи со своего, не копируй):\n${String(sourceText || '').trim()}`,
+    `Источник и архив писали у соседа, и там своих людей знают по именам. В «${viewer}» — нет.`,
+    `Имя, должность и звание человека из «${neighbor}» в запись не переноси ниоткуда:`,
+    'отсюда видно самих чужих людей, а не то, кто их вёл. Своих называй как обычно.',
     archive
       ? `Фон архива пары (для связности; не пересказывай как новость и даты из скобок не копируй):\n${archive}`
       : '',
     'Календарную дату в текст не пиши: она стоит на записи отдельно.',
-    'Напиши живую запись: место, люди, что видно с этого берега. Не сводку в два предложения.',
+    'Напиши живую запись своего берега, не короче четырёх предложений: сводка в два предложения здесь не годится.',
     'Вызови submit_chronicle.',
   ]
     .filter(Boolean)
@@ -378,7 +374,6 @@ export async function renderCityView({
   day,
   log,
   actorName = '',
-  actorPerson = '',
   hostile = false,
 }) {
   const knows = String(sourceText || '').trim();
@@ -427,7 +422,6 @@ export async function renderCityView({
               sourceText: knows,
               archive,
               actorName: actorName || '',
-              actorPerson,
               hostile,
             }),
           },
@@ -507,13 +501,9 @@ export async function spreadChronicleToPair({
     author: 'conflux-canon',
   });
 
+  // Сановника-исполнителя соседу не передаём: он человек чужого берега, и то,
+  // что его узнали, должно быть событием, а не побочным следствием пересказа.
   const archive = formatPairArchive(conflux, [domain, partner]);
-  const officer = process
-    ? findOfficer(domain, { officerId: process.officerId, office: process.office })
-    : null;
-  const actorPerson = officer?.name
-    ? `${officer.title} ${officer.name} (${officerGender(officer) === 'female' ? 'женщина' : 'мужчина'})`
-    : '';
   const cityFact = await renderCityView({
     runtime,
     world,
@@ -526,7 +516,6 @@ export async function spreadChronicleToPair({
     day,
     log,
     actorName: domain.name,
-    actorPerson,
     hostile,
   });
   if (cityFact) {

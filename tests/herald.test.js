@@ -15,6 +15,7 @@ import {
   formatHeraldPrompt,
 } from '../src/game/herald.js';
 import { createThreat, attachThreat } from '../src/game/threats.js';
+import { loadConfig } from '../src/config.js';
 
 function plot(extra = {}) {
   return {
@@ -181,7 +182,18 @@ test('промпт несёт повод, событие, нить и одну �
   assert.match(text, /ПРОСЬБА В КОНЦЕ: нет/);
   assert.match(text, /Кто довёл эту работу: Канцлер Жален/);
   assert.match(text, /Не говори, что он свободен/);
-  assert.match(text, /ЗАПИСЬ ЛЕТОПИСИ/, 'жрец пересказывает запись, а не отчитывается о деле');
+  assert.match(text, /ЗАПИСЬ ЛЕТОПИСИ/, 'жрец говорит о записи, а не отчитывается о деле');
+  assert.match(text, /слова здесь её, а не твои/, 'запись — тема вести, а не её текст');
+});
+
+test('жрец говорит своими словами и не остаётся безучастным', () => {
+  const text = loadConfig().agents.herald.instructions;
+  assert.match(text, /Её фразами не пересказывай/);
+  assert.match(text, /той же записью с переставленными словами/);
+  assert.match(text, /ТЫ НЕ БЕЗУЧАСТЕН/);
+  assert.match(text, /если оно сильное/);
+  // Живость — не повод голосить: сильное чувство и разыгранное чувство не одно и то же.
+  assert.match(text, /не разыгрывай горе/);
 });
 
 test('жрец согласует род сановницы', () => {
