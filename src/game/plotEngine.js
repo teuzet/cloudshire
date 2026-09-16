@@ -19,8 +19,10 @@ import {
   clipPlotText,
   PLOT_SUMMARY_MAX,
   isThreeActPlot,
+  isStoryPlot,
+  isErrandPlot,
+  isConfluxPlot,
   isStakedStory,
-  isFreeformPlot,
   plotHasActiveProcess,
   closePlotline,
 } from './plotlines.js';
@@ -151,8 +153,8 @@ export function rehomeUnrelatedProcess(domain, process, { tick = null, config = 
   if (engagementAttends(engagement)) {
     return { plot: attached[0] || findPlotline(domain, process.plotlineId) || null, rehomed: false, originPlot: null };
   }
-    const stories = attached.filter((p) => p.kind === 'story' && !isFreeformPlot(p));
-  const errands = attached.filter((p) => p.kind === 'errand');
+    const stories = attached.filter((p) => isStoryPlot(p));
+  const errands = attached.filter((p) => isErrandPlot(p));
   if (!stories.length) {
     return { plot: errands[0] || findPlotline(domain, process.plotlineId) || null, rehomed: false, originPlot: null };
   }
@@ -211,7 +213,7 @@ export function detachProcessFromPlots(domain, process, { tick = null } = {}) {
   process.plotlineId = null;
   const closedErrands = [];
   for (const plot of attached) {
-    if (plot.kind !== 'errand') continue;
+    if (!isErrandPlot(plot)) continue;
     if (plotHasActiveProcess(domain, plot)) continue;
     closePlotline(domain, plot.id, { tick, reason: 'поручение свёрнуто' });
     closedErrands.push(plot);
@@ -231,7 +233,7 @@ export function collectProcessAdvanceBatch(domain, alreadyAdvanced = new Set()) 
   );
   const due = [];
   for (const process of active) {
-    const stories = plotsForProcess(domain, process.id).filter((p) => p.kind === 'story' && !isFreeformPlot(p));
+    const stories = plotsForProcess(domain, process.id).filter((p) => isStoryPlot(p));
     if (!stories.length || !engagementAttends(engagementOf(process))) {
       due.push(process);
       continue;
@@ -352,7 +354,7 @@ export function planBeats({
     if (!outcome?.mustNarrate) continue;
     if (outcome.intel) continue;
     for (const plot of plotsForProcess(domain, outcome.processId)) {
-      if (isFreeformPlot(plot) && !isStakedStory(plot)) continue;
+      if (isConfluxPlot(plot)) continue;
       const relation = outcome.plotEngagement || engagementOf(findProcessById(domain, outcome.processId));
       if ((isThreeActPlot(plot) || isStakedStory(plot)) && relation && !engagementAttends(relation)) {
         continue;
@@ -377,7 +379,7 @@ export function planBeats({
         mandatory: true,
         reason: outcome.finished ? 'process_finished' : `process_${outcome.kind}`,
         tint: tintFromProcessOutcome(outcome),
-        finale: (outcome.finished && plot.kind === 'errand') || Boolean(actMove?.ending),
+        finale: (outcome.finished && isErrandPlot(plot)) || Boolean(actMove?.ending),
         outcome,
         actMove,
         skipTint: isThreeActPlot(plot),
@@ -388,8 +390,7 @@ export function planBeats({
 
   // 2. Сход забытой нити — служебное закрытие, слот не занимает. Трёхтактные так не гаснут.
   for (const plot of domain.plotlines) {
-    if (plot.kind === 'order') continue;
-    if (isThreeActPlot(plot) || isStakedStory(plot) || isFreeformPlot(plot)) continue;
+    if (isStoryPlot(plot) || isConfluxPlot(plot)) continue;
     if (!plotCanFade(domain, plot, cfg)) continue;
     addBeat(plot, { mandatory: true, reason: 'fade', fade: true, tint: 'dual' });
   }
@@ -399,7 +400,7 @@ export function planBeats({
 
   // Главная нить стыка: случайный тик пробивает потолок.
   for (const plot of domain.plotlines) {
-    if (plot.kind !== 'story') continue;
+    if (!isConfluxPlot(plot) && !isStoryPlot(plot)) continue;
     if (!pierce.has(plot.id) || taken.has(plot.id)) continue;
     const chance = beatChance(plot, cfg);
     if (rng() >= chance) continue;
@@ -409,8 +410,7 @@ export function planBeats({
   // 3. Случайные тики живых историй — только в остаток.
   // Трёхтактные: только если нет ни одного активного дела; без окраски.
   for (const plot of domain.plotlines) {
-    if (plot.kind !== 'story') continue;
-    if (isFreeformPlot(plot) && !isStakedStory(plot)) continue;
+    if (!isStoryPlot(plot)) continue;
     if (taken.has(plot.id)) continue;
     if (slotsUsed >= cap) break;
     if (isThreeActPlot(plot) && plotHasAttendingProcess(domain, plot)) continue;

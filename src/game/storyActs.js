@@ -14,15 +14,31 @@
  */
 
 import { isThreeActPlot } from './plotlines.js';
-import { pickFrontierReveal, remainingHiddenNodeIds } from './mysteryGraph.js';
-import {
-  autoTickPrefersDeepen,
-  pickFrontierAdvance,
-  applyLadderReveal,
-  ladderFullyRevealed,
-  formatLadderForPrompt,
-  hiddenIndexForRung,
-} from './suspenseGraph.js';
+
+function autoTickPrefersDeepen() {
+  return false;
+}
+function pickFrontierReveal() {
+  return null;
+}
+function remainingHiddenNodeIds() {
+  return [];
+}
+function pickFrontierAdvance() {
+  return null;
+}
+function applyLadderReveal() {
+  return false;
+}
+function ladderFullyRevealed() {
+  return true;
+}
+function formatLadderForPrompt() {
+  return '';
+}
+function hiddenIndexForRung() {
+  return null;
+}
 
 const ENDING_TAG = {
   fail: '[ПРОВАЛ]',

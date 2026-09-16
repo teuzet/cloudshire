@@ -101,7 +101,7 @@ test('нить без своих записей это и говорит', () =>
 
 test('у обычной нити один успешный исход остаётся успешным исходом', () => {
   const text = formatKeepPlotBlock(
-    { id: 'p2', kind: 'story', title: 'Гул', synopsis: 'гудит', closeWhen: 'Найдут источник.', mootWhen: 'Гул стих.' },
+    { id: 'p2', type: 'errand', title: 'Гул', synopsis: 'гудит', closeWhen: 'Найдут источник.', mootWhen: 'Гул стих.' },
     [],
   );
   assert.match(text, /Успешный исход: Найдут источник\./);
@@ -113,9 +113,7 @@ test('confluxStoryKeep обновляет общий синопсис shared-н�
   const plot = {
     id: 'p_shared',
     title: 'Проход',
-    kind: 'story',
-    shared: true,
-    isMainConflux: true,
+    type: 'conflux',
     synopsis: 'Острова сближаются.',
     closeWhen: 'Острова разошлись.',
   };

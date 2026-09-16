@@ -82,7 +82,7 @@ test('живые угрозы считаются по всем городски�
 });
 
 test('вольные истории в счёт угроз не идут', () => {
-  const d = domain({ plotlines: [{ id: 'f', kind: 'story', storyType: 'freeform', threats: [] }] });
+  const d = domain({ plotlines: [{ id: 'f', type: 'conflux', threats: [] }] });
   assert.equal(countLiveThreats(d), 0);
 });
 

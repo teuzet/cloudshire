@@ -108,8 +108,7 @@ test('главная нить стыка задевает оба города', 
     conflux: c,
     world: { tickIndex: 3 },
   });
-  assert.equal(main.isMainConflux, true);
-  assert.equal(main.storyType, 'freeform');
+  assert.equal(main.type, 'conflux');
   assert.equal(isSharedPlot(main), true);
   assert.deepEqual(main.concernsDomainIds.sort(), ['a', 'b']);
 });
@@ -185,10 +184,10 @@ test('городская история при регистрации ссылк
   assert.equal(a.plotlines[0], plot);
   assert.equal(c.plotRefs[0].plotId, plot.id);
   assert.equal(isThreeActPlot(plot), false);
-  assert.equal(plot.storyType, 'story');
+  assert.equal(plot.type, 'story');
   assert.equal(plot.hiddenPremises.length, 1);
   normalizePlotlines(a);
-  assert.equal(plot.storyType, 'story');
+  assert.equal(plot.type, 'story');
   assert.equal(plot.hiddenPremises[0], 'Седьмой удар открывает лишний сток.');
   assert.equal(plot.mootWhen.includes('обряд'), true);
 });

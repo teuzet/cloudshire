@@ -4,7 +4,7 @@
  * живёт в `domain.modifiers` и на доску не попадает.
  */
 
-import { createPlotline, refreshPlotAwareness } from './plotlines.js';
+import { createPlotline, refreshPlotAwareness, isConfluxPlot } from './plotlines.js';
 import { newId } from './ids.js';
 import { createLoreFact } from './models.js';
 import { attachThreat, createThreat } from './threats.js';
@@ -15,7 +15,7 @@ function asIdList(raw) {
 
 export function isSharedPlot(plot) {
   if (!plot) return false;
-  if (plot.isMainConflux) return true;
+  if (isConfluxPlot(plot)) return true;
   return asIdList(plot.concernsDomainIds).length >= 2 || Boolean(plot.shared);
 }
 
@@ -70,7 +70,7 @@ export function findPlotByChronicleId(conflux, chronicleId, domains = []) {
 export function chronicleReceiversForBeat(conflux, plot, beat, domains) {
   const list = domains || [];
   if (conflux?.status === 'docked') {
-    return list.filter((d) => plot?.isMainConflux || plotConcerns(plot, d.id));
+    return list.filter((d) => isConfluxPlot(plot) || plotConcerns(plot, d.id));
   }
 
   const processId = beat?.processOutcome?.processId;
@@ -92,7 +92,7 @@ export function sharePlotWithDomain(plot, domainId, { reason = 'process', day = 
   const id = String(domainId);
   plot.concernsDomainIds = asIdList(plot.concernsDomainIds);
   if (!plot.concernsDomainIds.includes(id)) plot.concernsDomainIds.push(id);
-  if (plot.concernsDomainIds.length >= 2 || plot.isMainConflux) {
+  if (plot.concernsDomainIds.length >= 2 || isConfluxPlot(plot)) {
     plot.shared = true;
     plot.sharedReason = reason;
   }
@@ -114,7 +114,6 @@ export function stampPlotOnConflux(plot, conflux, domainId) {
   plot.concernsDomainIds = asIdList(plot.concernsDomainIds);
   if (!plot.concernsDomainIds.length) plot.concernsDomainIds = [String(domainId)];
   plot.shared = isSharedPlot(plot);
-  plot.isMainConflux = Boolean(plot.isMainConflux);
   refreshPlotAwareness(plot);
   return plot;
 }
@@ -206,7 +205,7 @@ export function overlayConfluxView(domain, conflux, partner = null) {
     });
   }
   for (const p of conflux.plotlines || []) {
-    if (p?.isMainConflux) add(p);
+    if (isConfluxPlot(p)) add(p);
   }
   domain._confluxOverlayIds = extra.map((p) => p.id);
   domain.plotlines = [...(domain.plotlines || []), ...extra];
@@ -262,9 +261,7 @@ export function createEmptyContainer({ a, b, conflux, world, config }) {
       `Летающие острова городов «${a.name}» и «${b.name}» сошлись. ` +
       `Что из этого выйдет — решат дела людей на проходе.`,
     closeWhen: PAIR_CLOSE_WHEN,
-    kind: 'story',
-    storyType: 'freeform',
-    isMainConflux: true,
+    type: 'conflux',
     maxAgeMonths: 4,
     temperature: 70,
     tick: world?.tickIndex ?? null,
@@ -404,7 +401,7 @@ export async function returnBoardsOnUndock(conflux, domainsById, { decideContinu
     if (!domain) continue;
     const kept = [];
     for (const plot of domain.plotlines || []) {
-      if (plot?.isMainConflux || plot?.id === conflux.container?.id) continue;
+      if (isConfluxPlot(plot) || plot?.id === conflux.container?.id) continue;
       const concerns = asIdList(plot.concernsDomainIds);
       const shared = concerns.length >= 2 || plot.shared;
       if (plot.confluxId === conflux.id || shared) {

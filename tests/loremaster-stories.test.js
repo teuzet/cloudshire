@@ -11,35 +11,27 @@ import {
 import { overlayConfluxView } from '../src/game/confluxBoard.js';
 import { attachFactToPlotlines, closePlotline, createPlotline, normalizePlotlines } from '../src/game/plotlines.js';
 
-const mystery = {
+const story = {
   id: 'plot_cistern',
   title: 'Гул в цистерне',
-  kind: 'story',
-  storyType: 'mystery',
+  type: 'story',
   synopsis: 'Ночами в нижней цистерне гудит вода.',
   closeWhen: 'Найдут источник гула.',
-  truthGraph: {
-    nodes: [
-      { id: 'A', text: 'Цистерну перестали чистить.', knowledge: 'hidden' },
-      { id: 'X', text: 'Ночами вода гудит.', knowledge: 'observed' },
-    ],
-    edges: [{ from: 'A', to: 'X', reason: 'ил сжимает поток', knowledge: 'hidden' }],
-  },
+  hiddenAnswer: 'Цистерну перестали чистить, ил сжимает поток.',
 };
 
-test('без фокуса лормастер видит только краткие карточки, без канона тайны', () => {
-  const brief = formatOpenStoriesBrief([mystery]);
+test('без фокуса лормастер видит только краткие карточки, без разгадки', () => {
+  const brief = formatOpenStoriesBrief([story]);
   assert.match(brief, /plot_cistern/);
-  assert.match(brief, /тайна/);
+  assert.match(brief, /история/);
   assert.equal(brief.includes('Цистерну перестали чистить'), false);
-  assert.equal(formatStoriesForLoremaster([mystery]).includes('Цистерну перестали чистить'), false);
+  assert.equal(formatStoriesForLoremaster([story]).includes('Цистерну перестали чистить'), false);
 });
 
-test('фокус на идущей тайне даёт канон и запрет его раскрывать', () => {
-  const focused = formatFocusedStoryForLoremaster(mystery, { viewerId: 'city_a' });
-  assert.match(focused, /ТАЙНА/);
-  assert.match(focused, /Цистерну перестали чистить/);
-  assert.match(focused, /скрыто/i);
+test('фокус на идущей истории не выдаёт скрытую разгадку', () => {
+  const focused = formatFocusedStoryForLoremaster(story, { viewerId: 'city_a' });
+  assert.match(focused, /история/);
+  assert.doesNotMatch(focused, /Цистерну перестали чистить/);
   assert.match(focused, /не заводят новое направление/);
   assert.equal(focused.includes('«Гул в цистерне»'), false);
 });
@@ -48,8 +40,7 @@ test('скрытая разгадка не торчит в «успешном и
   const focused = formatFocusedStoryForLoremaster(
     {
       id: 'plot_sap',
-      kind: 'story',
-      storyType: 'story',
+      type: 'story',
       synopsis: 'Из коры течёт густая тёмная смола, у смолокуров немеют пальцы.',
       closeWhen: [
         'Развилки вскрывают и очищают от насекомых и поражённой коры.',
@@ -63,35 +54,17 @@ test('скрытая разгадка не торчит в «успешном и
   assert.match(focused, /густая тёмная смола/);
 });
 
-test('фокус на саспенсе показывает hiddenPremises целиком, только как скрытые', () => {
-  const text = formatFocusedStoryForLoremaster(
-    {
-      id: 'plot_shaft',
-      kind: 'story',
-      storyType: 'suspense',
-      synopsis: 'В шахте тянет холодом.',
-      hiddenPremises: ['Холод идёт через древнюю шахту к нижней стороне острова.'],
-      discoveryLadder: [{ id: 'r1', promise: 'Найти, откуда тянет', revealed: false }],
-    },
-    { viewerId: 'city_a' },
-  );
-  assert.match(text, /древнюю шахту/);
-  assert.match(text, /СКРЫТО/);
-  assert.match(text, /не в fact/);
-});
-
 test('resolve: открытая история с доски; контейнер пары лормастеру не виден', () => {
   const domain = {
     id: 'a',
-    plotlines: [{ id: 'loc', title: 'Гул', kind: 'story', synopsis: 'Гудит вода.' }],
-    closedPlotlines: [{ id: 'dead', kind: 'story', synopsis: 'Уже разгадали.', status: 'closed' }],
+    plotlines: [{ id: 'loc', title: 'Гул', type: 'story', synopsis: 'Гудит вода.' }],
+    closedPlotlines: [{ id: 'dead', type: 'story', synopsis: 'Уже разгадали.', status: 'closed' }],
   };
   const conflux = {
     container: {
       id: 'main',
       title: 'Сопряжение',
-      kind: 'story',
-      isMainConflux: true,
+      type: 'conflux',
       synopsis: 'Острова сближаются.',
     },
     plotlines: [],
@@ -108,7 +81,7 @@ test('resolve: открытая история с доски; контейнер
 
 test('факт копится на нити так же, как хроника', () => {
   const domain = { plotlines: [] };
-  const plot = createPlotline({ title: 'Гул', synopsis: 'Гудит вода.' });
+  const plot = createPlotline({ title: 'Гул', synopsis: 'Гудит вода.', type: 'story' });
   domain.plotlines.push(plot);
   normalizePlotlines(domain);
   attachFactToPlotlines(domain, 'lore_fact_1', [plot.id]);

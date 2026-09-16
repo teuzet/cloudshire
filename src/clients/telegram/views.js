@@ -1,5 +1,5 @@
 import { formatStatValue } from '../../game/stats.js';
-import { normalizePlotlines } from '../../game/plotlines.js';
+import { normalizePlotlines, isErrandPlot } from '../../game/plotlines.js';
 
 export function formatIslandStats(domain, config) {
   const name = domain?.name || 'Остров';
@@ -15,7 +15,7 @@ export function formatIslandPlotlines(domain) {
   const list = domain?.plotlines || [];
   if (!list.length) return `${domain?.name || 'Остров'}: открытых историй нет.`;
   const blocks = list.map((p) => {
-    const kind = p.kind === 'errand' ? 'поручение' : 'история';
+    const kind = isErrandPlot(p) ? 'поручение' : 'история';
     const age = `${p.ageMonths}/${p.maxAgeMonths} мес.`;
     const head =
       p.urgency != null || p.gravity != null

@@ -1,10 +1,8 @@
 import { newId } from './ids.js';
 import { parseSeedConfig } from './seedTemp.js';
 import { textsLookSame, processIsLive } from './processes.js';
-import { normalizeTruthGraph, judgeTruthGraph, parseMysteryShapes, normalizeFactList, RESOLUTION_FACT_MAX } from './mysteryGraph.js';
-import { normalizeDiscoveryLadder, normalizeHiddenPremises, judgeSuspenseCore } from './suspenseGraph.js';
 import { normalizeThreat } from './threats.js';
-import { normalizeRevealedPremises } from './premises.js';
+import { normalizeHiddenPremises, normalizeRevealedPremises } from './premises.js';
 
 /**
  * Сюжетные нити — ядро мира: событий вне нитей не бывает.
@@ -32,8 +30,8 @@ function clamp100(n, fallback = 0) {
 export const PLOT_ENDING_FLOOR_SHARE = 0.25;
 
 export function ensurePlotStatBudget(plot, config = null) {
-  if (!plot || plot.kind === 'errand') return plot;
-  if (plot.isMainConflux && plot.crystallized === false) {
+  if (!plot || isErrandPlot(plot)) return plot;
+  if (isConfluxPlot(plot) && plot.crystallized === false) {
     if (!plot.stats || typeof plot.stats !== 'object') plot.stats = {};
     plot.stats.budget = 0;
     plot.stats.remaining = 0;
@@ -63,7 +61,7 @@ function endingFloor(plot, config) {
  * провалом 15, с двумя 10, — и её не нужно нигде задавать числом.
  */
 export function plotStatForce(plot, { opening = false, ending = false, config = null } = {}) {
-  if (!plot || plot.kind === 'errand') return 0;
+  if (!plot || isErrandPlot(plot)) return 0;
   ensurePlotStatBudget(plot, config);
   const B = Number(plot.stats?.budget) || 0;
   if (opening) {
@@ -99,46 +97,69 @@ export const PLOT_ENDING_MAX = 600;
 export const PLOT_TITLE_MAX = 120;
 export { clipText as clipPlotText };
 
-export const PLOT_KINDS = ['story', 'errand'];
-export const STORY_TYPES = ['story', 'freeform', 'default'];
+export const PLOT_TYPES = ['story', 'errand', 'conflux'];
+/** @deprecated используй PLOT_TYPES */
+export const PLOT_KINDS = PLOT_TYPES;
+/** @deprecated используй PLOT_TYPES */
+export const STORY_TYPES = PLOT_TYPES;
 /** @deprecated трёхтакт удалён; оставлено, чтобы старые импорты не падали. */
 export const THREE_ACT_TYPES = [];
 
-export function isStoryPlot(plot) {
-  return plot?.kind === 'story';
+/**
+ * Одно поле на карточке.
+ * story — посев со ставками, глубиной и концовками.
+ * errand — одноразовое поручение.
+ * conflux — контейнер сопряжения.
+ *
+ * Старые сохранения: kind/storyType/isMainConflux читаются здесь и больше
+ * нигде не нужны.
+ */
+export function plotTypeOf(plot) {
+  if (!plot) return 'story';
+  if (PLOT_TYPES.includes(plot.type)) return plot.type;
+  if (plot.isMainConflux) return 'conflux';
+  if (plot.kind === 'errand') return 'errand';
+  return 'story';
 }
 
-/** Городская история — всегда story. Сопряжение ставит freeform само. */
+export function isStoryPlot(plot) {
+  return plotTypeOf(plot) === 'story';
+}
+
+export function isErrandPlot(plot) {
+  return plotTypeOf(plot) === 'errand';
+}
+
+export function isConfluxPlot(plot) {
+  return plotTypeOf(plot) === 'conflux';
+}
+
+/** @deprecated городская история — isStoryPlot */
+export function isStakedStory(plot) {
+  return isStoryPlot(plot);
+}
+
+/** @deprecated контейнер сопряжения — isConfluxPlot */
+export function isFreeformPlot(plot) {
+  return isConfluxPlot(plot);
+}
+
+/** Контейнер сопряжения: жрец, лормастер и сановник его не видят. */
+export function isPairThread(plot) {
+  return isConfluxPlot(plot);
+}
+
 export function pickStoryType() {
   return 'story';
 }
 
-/**
- * story — городская нить со ставками (бывший lab freeform).
- * freeform — главная нить сопряжения, без глубины и концовок.
- * default — поручение, указ, наследие без типа.
- * Старые mystery/suspense/lab-freeform при чтении становятся story.
- */
+/** @deprecated используй plotTypeOf */
 export function storyTypeOf(plot) {
-  if (!plot || plot.kind !== 'story') return 'default';
-  if (plot.isMainConflux) return 'freeform';
-  const raw = plot.storyType;
-  if (raw === 'story' || raw === 'freeform' || raw === 'mystery' || raw === 'suspense') return 'story';
-  return 'default';
+  return plotTypeOf(plot);
 }
 
 export function isThreeActPlot() {
   return false;
-}
-
-/** Главная нить сопряжения. */
-export function isFreeformPlot(plot) {
-  return plot?.kind === 'story' && storyTypeOf(plot) === 'freeform';
-}
-
-/** Городская история со ставками, концовками и глубиной. */
-export function isStakedStory(plot) {
-  return plot?.kind === 'story' && storyTypeOf(plot) === 'story';
 }
 
 /** closeWhen у story — список завершающих исходов. У остальных — одна фраза. */
@@ -186,8 +207,8 @@ export function gravityStatBudget(gravity) {
 
 /** Масштаб истории для доски и утечек: у story — от gravity, у сопряжения — якорь, иначе 0. */
 export function plotScale(plot) {
-  if (isStakedStory(plot)) return gravityStatBudget(plot.gravity) * 5;
-  if (isFreeformPlot(plot)) return 85;
+  if (isStoryPlot(plot)) return gravityStatBudget(plot.gravity) * 5;
+  if (isConfluxPlot(plot)) return 85;
   return 0;
 }
 
@@ -353,6 +374,9 @@ const STALE_PLOT_FIELDS = [
   'conflict',
   'dynamics',
   'consequences',
+  'kind',
+  'storyType',
+  'isMainConflux',
 ];
 
 function stripStalePlotFields(p) {
@@ -369,7 +393,7 @@ function parseStoryCountdown(raw) {
 }
 
 function storyActState(p = {}) {
-  const type = storyTypeOf(p);
+  const type = plotTypeOf(p);
   if (type === 'story') {
     const gravity = parseFreeformGravity(p.gravity);
     const maxDepth = clampFreeformDepth(p.maxDepth, defaultFreeformMaxDepth(gravity));
@@ -377,7 +401,7 @@ function storyActState(p = {}) {
     const depth = Math.max(0, Math.round((Number(p.depth) || 0) * 100) / 100);
     const failRaw = Math.round(Number(p.failCount));
     return {
-      storyType: 'story',
+      type: 'story',
       urgency: parseFreeformUrgency(p.urgency),
       gravity,
       countdown: parseStoryCountdown(p.countdown),
@@ -406,7 +430,7 @@ function storyActState(p = {}) {
       defenseCount: Math.max(0, Math.round(Number(p.defenseCount) || 0)),
     };
   }
-  return { storyType: type === 'freeform' ? 'freeform' : 'default' };
+  return { type };
 }
 
 /** Бинарная осведомлённость города о нити как о полной линии. */
@@ -427,7 +451,7 @@ function normalizePlotAwarenessMap(plot) {
   }
   const host = plot?.hostDomainId ? String(plot.hostDomainId) : null;
   if (host) next[host] = true;
-  if (plot?.isMainConflux) {
+  if (isConfluxPlot(plot)) {
     for (const id of Array.isArray(plot.concernsDomainIds) ? plot.concernsDomainIds : []) {
       if (id) next[String(id)] = true;
     }
@@ -575,7 +599,7 @@ export function plotConfig(config) {
         Math.round(Number(p.mystery?.graph?.maxNodes ?? 5)),
       ),
       sideRevealChance: Math.max(0, Math.min(1, Number(p.mystery?.graph?.sideRevealChance ?? 0.5))),
-      shapes: parseMysteryShapes(p.mystery?.graph?.shapes),
+      shapes: Array.isArray(p.mystery?.graph?.shapes) ? p.mystery.graph.shapes : [],
       judgeAttempts: Math.max(1, Math.min(8, Math.round(Number(p.mystery?.graph?.judgeAttempts ?? 3)))),
       generateTries: Math.max(1, Math.min(12, Math.round(Number(p.mystery?.graph?.generateTries ?? 6)))),
       presentationTries: Math.max(1, Math.min(6, Math.round(Number(p.mystery?.graph?.presentationTries ?? 3)))),
@@ -636,7 +660,7 @@ function applyPlotShape(p, config = null) {
   p.title = clipText(p.title || 'Сюжет', PLOT_TITLE_MAX);
   p.synopsis = clipText(p.synopsis ?? p.summary ?? '', PLOT_SUMMARY_MAX);
   p.mootWhen = clipText(p.mootWhen, PLOT_HOOK_MAX);
-  p.kind = PLOT_KINDS.includes(p.kind) ? p.kind : 'story';
+  p.type = plotTypeOf(p);
   p.tags = Array.isArray(p.tags) ? p.tags : [];
   p.relatedStats = normalizeStatIds(p.relatedStats, config);
   if (Array.isArray(p.relatedStats) && p.relatedStats.length > 1) {
@@ -658,7 +682,6 @@ function applyPlotShape(p, config = null) {
     ? [...new Set(p.concernsDomainIds.map(String))]
     : [];
   p.shared = Boolean(p.shared);
-  p.isMainConflux = Boolean(p.isMainConflux);
   p.sharedReason = p.sharedReason ? String(p.sharedReason) : null;
   p.leakedToConfluxAt =
     p.leakedToConfluxAt == null || p.leakedToConfluxAt === ''
@@ -671,9 +694,9 @@ function applyPlotShape(p, config = null) {
   p.beatCount = Math.max(0, Math.round(Number(p.beatCount) || 0));
   Object.assign(p, storyActState(p));
   stripStalePlotFields(p);
-  if (isStakedStory(p) && Array.isArray(p.endings) && p.endings.length) {
+  if (isStoryPlot(p) && Array.isArray(p.endings) && p.endings.length) {
     p.closeWhen = p.endings.map((e) => e.text);
-  } else if (isStakedStory(p) || Array.isArray(p.closeWhen)) {
+  } else if (isStoryPlot(p) || Array.isArray(p.closeWhen)) {
     p.closeWhen = normalizeCloseWhenList(p.closeWhen);
   } else {
     p.closeWhen = clipText(p.closeWhen, PLOT_HOOK_MAX);
@@ -708,7 +731,8 @@ export function createPlotline({
   summary = '', // legacy-алиас, уйдёт вместе со старым режиссёром
   closeWhen = '',
   mootWhen = '',
-  kind = 'story',
+  type = null,
+  kind = null,
   tags = [],
   relatedStats = [],
   maxAgeMonths = 6,
@@ -738,14 +762,8 @@ export function createPlotline({
   countdown = null,
   config = null,
 }) {
-  const resolvedKind = PLOT_KINDS.includes(kind) ? kind : 'story';
-  const staked =
-    resolvedKind === 'story' &&
-    !isMainConflux &&
-    (storyType === 'story' ||
-      storyType === 'freeform' ||
-      storyType === 'mystery' ||
-      storyType === 'suspense');
+  const resolvedType = plotTypeOf({ type, kind, storyType, isMainConflux });
+  const staked = resolvedType === 'story';
   const plot = {
     id: newId('plot'),
     title: clipText(title || 'Сюжет', PLOT_TITLE_MAX),
@@ -755,7 +773,7 @@ export function createPlotline({
         ? normalizeCloseWhenList(closeWhen)
         : clipText(closeWhen, PLOT_HOOK_MAX),
     mootWhen: clipText(mootWhen, PLOT_HOOK_MAX),
-    kind: resolvedKind,
+    type: resolvedType,
     tags: Array.isArray(tags) ? tags : [],
     relatedStats: normalizeStatIds(relatedStats, config),
     chronicleIds: [],
@@ -772,7 +790,6 @@ export function createPlotline({
       ? [...new Set(concernsDomainIds.map(String))]
       : [],
     shared: Boolean(shared),
-    isMainConflux: Boolean(isMainConflux),
     sharedReason: null,
     leakedToConfluxAt: null,
     plotAwareness: {},
@@ -782,7 +799,7 @@ export function createPlotline({
     lastBeatTick: null,
     beatCount: 0,
     ...storyActState({
-      storyType,
+      type: resolvedType,
       urgency,
       gravity,
       ending,
@@ -796,14 +813,12 @@ export function createPlotline({
       whyMoves,
       cause,
       countdown,
-      kind: resolvedKind,
-      isMainConflux,
       shared,
       confluxId,
     }),
   };
   stripStalePlotFields(plot);
-  if (plot.storyType === 'story' && Array.isArray(plot.endings) && plot.endings.length) {
+  if (plot.type === 'story' && Array.isArray(plot.endings) && plot.endings.length) {
     plot.closeWhen = plot.endings.map((e) => e.text);
   }
   return refreshPlotAwareness(plot);
@@ -816,7 +831,7 @@ export function createErrandPlotline(process, { tick = null, config = null } = {
     title: clipText(process?.summary || 'Городское дело', PLOT_TITLE_MAX),
     synopsis: clipText(process?.detail || process?.summary || '', PLOT_SUMMARY_MAX),
     closeWhen: 'Дело доведено до конца или свёрнуто.',
-    kind: 'errand',
+    type: 'errand',
     relatedStats: process?.linkedStats || [],
     maxAgeMonths: months + 2,
     temperature: 25,
@@ -839,7 +854,7 @@ export function isOverdue(plotline) {
  * упоминаний нет (температура остыла). Иначе срок просто ждёт.
  */
 export function plotCanFade(domain, plot, cfg) {
-  if (isStakedStory(plot) || isFreeformPlot(plot)) return false;
+  if (isStoryPlot(plot) || isConfluxPlot(plot)) return false;
   if (!isOverdue(plot)) return false;
   if (plotHasLiveProcess(domain, plot)) return false;
   const floor = Number(cfg?.temperature?.fadeBelow ?? 18);
@@ -848,8 +863,8 @@ export function plotCanFade(domain, plot, cfg) {
 
 export function countOpen(domain) {
   const list = domain?.plotlines || [];
-  const stories = list.filter((p) => p.kind === 'story').length;
-  const errands = list.filter((p) => p.kind === 'errand').length;
+  const stories = list.filter((p) => isStoryPlot(p)).length;
+  const errands = list.filter((p) => isErrandPlot(p)).length;
   return {
     // Доска историй: поручения слот не занимают.
     total: stories,
@@ -960,7 +975,7 @@ function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } =
     synopsis: plot.synopsis || '',
     closeWhen: Array.isArray(plot.closeWhen) ? [...plot.closeWhen] : plot.closeWhen || '',
     mootWhen: plot.mootWhen || '',
-    kind: plot.kind || 'story',
+    type: plotTypeOf(plot),
     tags: Array.isArray(plot.tags) ? plot.tags : [],
     relatedStats: Array.isArray(plot.relatedStats) ? [...plot.relatedStats] : [],
     chronicleIds: Array.isArray(plot.chronicleIds) ? [...plot.chronicleIds] : [],
@@ -976,7 +991,6 @@ function archiveClosedPlot(plot, { tick = null, reason = '', sequelHook = '' } =
     hostDomainId: plot.hostDomainId || null,
     concernsDomainIds: Array.isArray(plot.concernsDomainIds) ? [...plot.concernsDomainIds] : [],
     shared: Boolean(plot.shared),
-    isMainConflux: Boolean(plot.isMainConflux),
     sharedReason: plot.sharedReason || null,
     leakedToConfluxAt: plot.leakedToConfluxAt ?? null,
     plotAwareness: normalizePlotAwarenessMap(plot),
@@ -1011,7 +1025,7 @@ export function reopenClosedPlotline(domain, closedOrId) {
     ),
     closeWhen: clipText(closed.closeWhen, PLOT_HOOK_MAX),
     mootWhen: clipText(closed.mootWhen, PLOT_HOOK_MAX),
-    kind: PLOT_KINDS.includes(closed.kind) ? closed.kind : 'story',
+    type: plotTypeOf(closed),
     tags: Array.isArray(closed.tags) ? closed.tags : [],
     relatedStats: Array.isArray(closed.relatedStats) ? [...closed.relatedStats] : [],
     chronicleIds: Array.isArray(closed.chronicleIds) ? closed.chronicleIds.map(String) : [],
@@ -1033,7 +1047,6 @@ export function reopenClosedPlotline(domain, closedOrId) {
       ? closed.concernsDomainIds.map(String)
       : [],
     shared: Boolean(closed.shared),
-    isMainConflux: Boolean(closed.isMainConflux),
     sharedReason: closed.sharedReason || null,
     leakedToConfluxAt: closed.leakedToConfluxAt ?? null,
     plotAwareness: normalizePlotAwarenessMap(closed),
@@ -1721,12 +1734,8 @@ export function pickOpeningPlotTags(cfg, rng = Math.random) {
   return applyOpeningScale(cfg, pickPlotTags(cfg, rng), rng);
 }
 
-export function pickSeedTags(cfg, { storyType = 'suspense', opening = false, rng = Math.random } = {}) {
-  if (storyType === 'mystery') {
-    const tags = pickMysteryPlotTags(cfg, rng);
-    return opening ? applyOpeningScale(cfg, tags, rng) : tags;
-  }
-  return pickPlotTags(cfg, rng);
+export function pickSeedTags(cfg, { opening = false, rng = Math.random } = {}) {
+  return opening ? pickOpeningPlotTags(cfg, rng) : pickPlotTags(cfg, rng);
 }
 
 export function openingPlotCount(config, rng = Math.random) {
@@ -1742,23 +1751,13 @@ const SEED_HOOK_MIN = 220;
 /**
  * Отсев пустышки и близнеца. Форму «кто хочет / что мешает» не проверяем.
  */
-export function judgePlotSeed(domain, draft, { storyType, depth = 1 } = {}) {
+export function judgePlotSeed(domain, draft) {
   if (!draft) return 'empty';
   const title = String(draft.title || '').trim();
   const entry = String(draft.entry || '').trim();
   const synopsis = String(draft.synopsis || '').trim();
   if (!title || !entry || !synopsis) return 'empty';
-  if (storyType === 'mystery') {
-    const reason = judgeTruthGraph(draft.truthGraph || draft, {
-      minNodes: 3,
-      maxNodes: 8,
-    });
-    if (reason) return reason;
-  } else {
-    if (synopsis.length < SEED_HOOK_MIN) return 'thin_hook';
-    const reason = judgeSuspenseCore(draft, depth);
-    if (reason) return reason;
-  }
+  if (synopsis.length < SEED_HOOK_MIN) return 'thin_hook';
   const twin = (domain.plotlines || []).find((p) =>
     textsLookSame(`${p.title} ${p.synopsis}`, `${title} ${synopsis}`, { minShared: 7 }),
   );
@@ -1785,7 +1784,7 @@ export function stripPlotSecrets(plot) {
 /** Сумма масштаба живых историй. Дела не считаются. */
 export function liveStoryImportance(domain) {
   return (domain?.plotlines || [])
-    .filter((p) => p && p.kind === 'story')
+    .filter((p) => isStoryPlot(p))
     .reduce((sum, p) => sum + plotScale(p), 0);
 }
 
@@ -1806,7 +1805,7 @@ export function plotSeedChance(domain, cfg, tick = null) {
     const cooldown = cfg.board.seedCooldownMonths;
     if (cooldown > 0 && Number.isFinite(Number(tick))) {
       const youngest = (domain.plotlines || [])
-        .filter((p) => p.kind === 'story' && Number.isFinite(Number(p.createdTick)))
+        .filter((p) => isStoryPlot(p) && Number.isFinite(Number(p.createdTick)))
         .reduce((max, p) => Math.max(max, Number(p.createdTick)), -Infinity);
       if (Number.isFinite(youngest) && Number(tick) - youngest < cooldown) return 0;
     }
@@ -1835,10 +1834,7 @@ export function pickSequelSeed(domain, offers, cfg, rng = Math.random) {
 
 /** Тайна даёт сиквел только если её целиком разгадали и стартер пометил новую проблему. */
 export function allowSequelAfter(plot) {
-  if (!plot || plot.kind === 'errand') return false;
-  if (plot.storyType === 'mystery') {
-    return Boolean(plot.asksSequel) && (plot.ending === 'ok' || plot.ending === 'crit');
-  }
+  if (!plot || isErrandPlot(plot) || isConfluxPlot(plot)) return false;
   return true;
 }
 
@@ -1855,11 +1851,6 @@ export function formatPlotTagsForPrompt(tags, { soft = false } = {}) {
   return `всё мягко, ассоциации, не указания — ${body}`;
 }
 
-/** Нить сопряжения — состояние отношений: жрец, лормастер и сановник её не видят. */
-export function isPairThread(plot) {
-  return Boolean(plot?.isMainConflux);
-}
-
 export function plotsForPriest(plots = []) {
   return (plots || []).filter((p) => p && !isPairThread(p));
 }
@@ -1874,11 +1865,11 @@ export function formatBoardForPrompt(domain) {
       const stats = p.relatedStats.length ? ` | в игре: ${p.relatedStats.join('+')}` : '';
       const liveIds = liveRelatedProcessIds(domain, p);
       const proc = liveIds.length ? ` | дела: ${liveIds.join(', ')}` : '';
-      const kindLabel = p.kind === 'errand' ? '(дело)' : '';
+      const kindLabel = isErrandPlot(p) ? '(дело)' : '';
       const term = `возраст=${p.ageMonths}/${p.maxAgeMonths}`;
-      const meters = isStakedStory(p)
+      const meters = isStoryPlot(p)
         ? `urgency=${p.urgency} gravity=${p.gravity} depth=${p.depth ?? 0}/${p.maxDepth ?? '—'} тип=story`
-        : `T=${p.temperature} тип=${p.storyType || 'default'}`;
+        : `T=${p.temperature} тип=${plotTypeOf(p)}`;
       return (
         `- [${p.id}] «${p.title}» ${kindLabel} ${meters} ${term}` +
         stats +
@@ -1905,14 +1896,14 @@ export function formatBoardForSpeech(domain, { statsFeel = null, max = 8, viewer
       const viewerOwns =
         String(p.hostDomainId || '') === String(viewer) ||
         (p.concernsDomainIds || []).map(String).includes(String(viewer));
-      const kind = p.kind === 'errand'
+      const kind = isErrandPlot(p)
         ? 'поручение'
         : p.shared && viewerOwns
           ? 'общая история'
           : 'история';
       const duty = plotHasLiveProcess(domain, p)
         ? 'дело уже идёт'
-        : p.kind === 'errand'
+        : isErrandPlot(p)
             ? 'дела нет'
             : 'поручения ещё нет';
       const syn = clipText(p.synopsis || 'только началось', 180);

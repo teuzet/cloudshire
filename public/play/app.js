@@ -583,16 +583,16 @@ function plotCard(p, names = {}) {
     .map((id) => names[id] || id)
     .filter(Boolean);
   const host = p.hostDomainId ? names[p.hostDomainId] || p.hostDomainId : null;
-  const meta = [
-    p.kind,
-    p.storyType === 'story' ? 'история' : p.storyType === 'freeform' ? 'сопряжение' : null,
+    const meta = [
+    p.type,
+    p.type === 'story' ? 'история' : p.type === 'conflux' ? 'сопряжение' : p.type === 'errand' ? 'поручение' : null,
     p.urgency != null ? `срочность ${p.urgency}` : null,
     p.gravity != null ? `масштаб ${p.gravity}` : null,
     p.maxDepth != null
       ? `глубина ${Math.round((Number(p.depth) || 0) * 10) / 10}/${p.maxDepth}`
       : null,
     p.maxFails != null ? `провалов ${p.failCount ?? 0}/${p.maxFails}` : null,
-    p.isMainConflux ? 'главная нить сопряжения' : null,
+    p.type === 'conflux' ? 'главная нить сопряжения' : null,
     p.shared ? 'общая' : concerns.length ? 'локальная' : null,
     p.sharedReason ? `стала общей: ${p.sharedReason}` : null,
     host ? `хозяин: ${host}` : null,
@@ -658,7 +658,7 @@ function plotCard(p, names = {}) {
     `<p class="small muted">${esc(p.id)}</p>` +
     (canDev && p.canDrop
       ? `<div class="row-actions"><button type="button" class="drop-btn" data-drop="${esc(p.id)}">снять с хроникой</button></div>`
-      : canDev && p.kind === 'story' && !p.shared && !p.isMainConflux
+      : canDev && p.type === 'story' && !p.shared
         ? '<p class="small muted">снять нельзя: на истории ещё есть дело</p>'
         : '') +
     `</article>`

@@ -3,7 +3,7 @@
  * записи хроники и ставит, какие стороны города задеты. Величину считает движок.
  */
 
-import { defaultFreeformMaxDepth, findPlotline, GRAVITY_STAT_BUDGET, plotStatForce } from './plotlines.js';
+import { defaultFreeformMaxDepth, findPlotline, GRAVITY_STAT_BUDGET, plotStatForce, isErrandPlot } from './plotlines.js';
 import { depthGain } from './deedMath.js';
 import { worldDateLabel } from './gameClock.js';
 import { resolveStatDeltas } from './plotEngine.js';
@@ -154,7 +154,7 @@ export function absBudgetForFact(domain, fact, config) {
     return deedStatBudget(proc, config, { finish: fact.processFinish });
   }
   const plot = plotForFact(domain, fact) || closedPlotForFact(domain, fact);
-  if (!plot || plot.kind === 'errand') return 0;
+  if (!plot || isErrandPlot(plot)) return 0;
   const opening = /start|seed/i.test(String(fact.author || ''));
   return plotStatForce(plot, { opening, ending: Boolean(fact.plotClosed), config });
 }

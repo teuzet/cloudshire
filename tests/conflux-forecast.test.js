@@ -81,7 +81,7 @@ test('карточка нити пары показывает синопсис �
   conflux.synopsis.a = 'Нас заняли с прохода.';
   conflux.synopsis.b = 'Мы взяли соседний берег.';
   overlayConfluxView(a, conflux, b);
-  const card = a.plotlines.find((p) => p.isMainConflux);
+  const card = a.plotlines.find((p) => p.type === 'conflux');
   assert.equal(card.synopsis, 'Нас заняли с прохода.');
   assert.deepEqual(card.endings, []);
   assert.equal(conflux.container.synopsis, 'Нейтрально: город взят.');

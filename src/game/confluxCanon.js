@@ -10,6 +10,7 @@ import { appendChronicle } from './freeform.js';
 import { createLoreFact } from './models.js';
 import { newId } from './ids.js';
 import { plotHostId, plotConcerns } from './confluxBoard.js';
+import { isConfluxPlot } from './plotlines.js';
 import { gameDateFromDay } from './gameClock.js';
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
@@ -163,7 +164,7 @@ export function chronicleConcernFromData({
   const domainId = String(domain.id);
   if (process?.crossIsland) return 'both';
   if (process?.targetDomainId && String(process.targetDomainId) === partnerId) return 'both';
-  if (plot?.isMainConflux) return 'both';
+  if (isConfluxPlot(plot)) return 'both';
   const host = plotHostId(plot);
   if (host && host === partnerId) return 'both';
   if (plot && plotConcerns(plot, partnerId) && plotConcerns(plot, domainId)) return 'both';

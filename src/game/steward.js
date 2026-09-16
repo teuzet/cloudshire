@@ -18,7 +18,7 @@ import { plotHostId } from './confluxBoard.js';
 import { gameDateFromDay } from './gameClock.js';
 import { scheduleDeedJob } from './worldLoop.js';
 import { DURATION_SPEC } from './bands.js';
-import { formatBoardForPrompt, isStakedStory, plotHasLiveProcess } from './plotlines.js';
+import { formatBoardForPrompt, isStakedStory, isStoryPlot, plotHasLiveProcess } from './plotlines.js';
 import { ensureErrandForProcess, linkProcessToPlotline, rehomeUnrelatedProcess } from './plotEngine.js';
 import { judgeProcessAlignment, engagementOf } from './plotAlign.js';
 import { qualitativeStatsBrief, qualitativePopulation } from './stats.js';
@@ -332,7 +332,7 @@ export async function runOfficerAct({
     .map((p) => `- ${p.summary} (ждать ещё: ${DURATION_SPEC[deedRemainingBand(p, day)].label})`)
     .join('\n');
   const openStories = (domain.plotlines || []).filter(
-    (p) => p.kind === 'story' && !plotHasLiveProcess(domain, p),
+    (p) => isStoryPlot(p) && !plotHasLiveProcess(domain, p),
   );
 
   await runtime.run({

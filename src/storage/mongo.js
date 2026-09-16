@@ -3,7 +3,6 @@ import { createWorldFromConfig, normalizeDomain, normalizeWorld } from '../game/
 import { writeWorldArchive } from './worldArchive.js';
 import { createWipeGuard } from './wipeGuard.js';
 import { getLogger } from '../log.js';
-import { attachStoryPoolsFromCatalog } from '../game/annotationCatalog.js';
 import { stripOfficerPortraitPayload } from '../game/officers.js';
 import { nextRevision } from './revision.js';
 
@@ -33,7 +32,6 @@ export class MongoStorage {
     const world = await this.getWorld();
     if (!world) {
       const created = createWorldFromConfig(this.config);
-      await attachStoryPoolsFromCatalog(created, this);
       this.guard.setLiveWorld(created.id);
       await this.writeWorldUnlocked(created);
     } else {
@@ -50,7 +48,6 @@ export class MongoStorage {
     if (!doc) return null;
     const { _id, ...rest } = doc;
     const world = normalizeWorld(rest, this.config);
-    await attachStoryPoolsFromCatalog(world, this);
     return world;
   }
 
@@ -217,27 +214,6 @@ export class MongoStorage {
     return docs.map(({ _id, ...rest }) => rest);
   }
 
-  async getAnnotationCatalog(kind = 'mystery') {
-    const id = kind === 'suspense' ? 'suspense' : 'mystery';
-    const doc = await this.col('annotation_catalog').findOne({ _id: id });
-    return { kind: id, cards: Array.isArray(doc?.cards) ? doc.cards : [] };
-  }
-
-  async saveAnnotationCatalog(doc, kind = 'mystery') {
-    const id = doc?.kind === 'suspense' || kind === 'suspense' ? 'suspense' : 'mystery';
-    await this.col('annotation_catalog').replaceOne(
-      { _id: id },
-      {
-        _id: id,
-        kind: id,
-        cards: Array.isArray(doc?.cards) ? doc.cards : [],
-        updatedAt: new Date().toISOString(),
-      },
-      { upsert: true },
-    );
-    return doc;
-  }
-
   async sweepForeignUnlocked() {
     const live = this.guard.liveWorldId;
     if (!live) return;
@@ -319,7 +295,6 @@ export class MongoStorage {
       }
 
       const next = createWorldFromConfig(this.config);
-      await attachStoryPoolsFromCatalog(next, this);
       this.guard.setLiveWorld(next.id);
       await this.writeWorldUnlocked(next);
       await this.sweepForeignUnlocked();
@@ -364,10 +339,6 @@ export class MongoStorage {
         conflux.updatedAt = new Date().toISOString();
         const { id, ...rest } = conflux;
         await this.col('confluxes').replaceOne({ _id: id }, { _id: id, ...rest }, { upsert: true });
-      }
-      if (catalogs) {
-        await this.saveAnnotationCatalog(catalogs.mystery, 'mystery');
-        await this.saveAnnotationCatalog(catalogs.suspense, 'suspense');
       }
       return { ok: true, driver: 'mongo', worldId: world.id };
     });

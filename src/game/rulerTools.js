@@ -106,6 +106,9 @@ import {
   PLOT_TITLE_MAX,
   PLOT_SUMMARY_MAX,
   isStakedStory,
+  isErrandPlot,
+  isConfluxPlot,
+  plotTypeOf,
   plotHasLiveProcess,
 } from './plotlines.js';
 import {
@@ -204,7 +207,7 @@ function threatTimingHint(plot, action, day) {
 
 function syncErrandFromProcess(domain, action) {
   const plot = findPlotline(domain, action.plotlineId);
-  if (!plot || plot.kind !== 'errand') return;
+  if (!plot || !isErrandPlot(plot)) return;
   if (action.summary) plot.title = clipPlotText(action.summary, PLOT_TITLE_MAX);
   if (action.detail) plot.synopsis = clipPlotText(action.detail, PLOT_SUMMARY_MAX);
 }
@@ -513,7 +516,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
         plots: plotsForPriest(domain.plotlines).map((p) => ({
           id: p.id,
           title: p.title,
-          kind: p.kind === 'errand' ? 'errand' : 'story',
+          type: plotTypeOf(p),
           hasProcess: plotHasLiveProcess(domain, p),
           shared: Boolean(p.shared),
           // Нависшее, о чём город знает: формулировка и полоса остатка, без дней.
@@ -956,7 +959,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
         } else if (chronicleId && ctx.conflux) {
           targetPlot = findPlotByChronicleId(ctx.conflux, String(chronicleId), partners);
         }
-        if (targetPlot?.isMainConflux) {
+        if (isConfluxPlot(targetPlot)) {
           return toolFail(
             'pair_thread_no_deeds',
             'Нить сопряжения — состояние отношений, не история. Дело в неё ставить нельзя. ' +
@@ -973,7 +976,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
               'Для intel=true нужен plotId нити или chronicleId известной записи.',
             );
           }
-          if (plotHostId(targetPlot) === String(domain.id) || plotConcerns(targetPlot, domain.id) || targetPlot.isMainConflux) {
+          if (plotHostId(targetPlot) === String(domain.id) || plotConcerns(targetPlot, domain.id) || isConfluxPlot(targetPlot)) {
             return toolFail(
               'intel_already_known',
               'Эта история уже известна городу как линия. intel не нужен — заведи обычное дело, если вмешиваетесь.',
@@ -1099,7 +1102,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
         if (ctx.conflux && plot && !rehomed) {
           action.confluxId = ctx.conflux.id;
           action.ownerDomainId = domain.id;
-          if (!wantIntel && !plotConcerns(plot, domain.id) && !plot.isMainConflux) {
+          if (!wantIntel && !plotConcerns(plot, domain.id) && !isConfluxPlot(plot)) {
             sharePlotWithDomain(plot, domain.id, {
               reason: 'process',
               conflux: ctx.conflux,
@@ -1299,7 +1302,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
         if (plotId) {
           const current = findPlotline(domain, action.plotlineId);
           const target = findPlotline(domain, String(plotId));
-          if (current?.kind === 'errand' && target && isStakedStory(target)) {
+          if (isErrandPlot(current) && target && isStakedStory(target)) {
             return toolFail(
               'retarget_needs_new_process',
               'Это поручение снято с истории. Не перевешивай его. revoke_process это дело, затем declare_process с уточнённой целью и plotId той нити.',

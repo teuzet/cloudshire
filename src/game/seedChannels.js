@@ -4,7 +4,7 @@
  */
 
 import { chronicleEntries } from './models.js';
-import { countOpen, plotConfig } from './plotlines.js';
+import { countOpen, plotConfig, isStoryPlot } from './plotlines.js';
 import { cityGenesisSeedText } from './cityContext.js';
 import { pickGenesisSlice, formatGenesisSliceForPrompt } from './cityEntities.js';
 import { FINISH_SHORT } from './rolls.js';
@@ -90,7 +90,7 @@ export function pickErrandGravity(objectiveMonths, rng = Math.random) {
 export function yearChronicleGrain(domain, world, { yearTicks = YEAR_TICKS } = {}) {
   const now = Number(world?.tickIndex) || 0;
   const live = new Set(
-    (domain?.plotlines || []).filter((p) => p.kind === 'story').map((p) => String(p.id)),
+    (domain?.plotlines || []).filter((p) => isStoryPlot(p)).map((p) => String(p.id)),
   );
   return chronicleEntries(domain?.lore).filter((fact) => {
     if (Number.isFinite(Number(fact.tick)) && now - Number(fact.tick) >= yearTicks) return false;

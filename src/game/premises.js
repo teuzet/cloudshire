@@ -20,10 +20,31 @@
  * по индексам.
  */
 
-import { normalizeHiddenPremises } from './suspenseGraph.js';
+function normalizeSpace(s) {
+  return String(s || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 /** Доля maxDepth, после которой расследование способно сложить картину. */
 export const ANSWER_DEPTH_SHARE = 0.6;
+export const HIDDEN_PREMISE_MAX = 6;
+
+export function normalizeHiddenPremises(raw) {
+  const list = Array.isArray(raw) ? raw : [];
+  const out = [];
+  const seen = new Set();
+  for (const item of list) {
+    const text = normalizeSpace(typeof item === 'string' ? item : item?.text || item?.premise || '');
+    if (text.length < 8) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+    if (out.length >= HIDDEN_PREMISE_MAX) break;
+  }
+  return out;
+}
 
 export function normalizeRevealedPremises(raw) {
   return normalizeHiddenPremises(raw);

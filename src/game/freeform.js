@@ -8,6 +8,7 @@ import { newId } from './ids.js';
 import {
   createPlotline,
   isStakedStory,
+  isStoryPlot,
   normalizeCloseWhenList,
   formatCloseWhen,
   clipPlotText,
@@ -439,7 +440,7 @@ export function clampFreeformCountdown(n, fallback = null) {
 export function openStoryTitlesLine(domain, exceptId = null) {
   const skip = exceptId ? String(exceptId) : null;
   const titles = (domain?.plotlines || [])
-    .filter((p) => p.kind === 'story' && p.status !== 'closed' && (!skip || String(p.id) !== skip))
+    .filter((p) => isStoryPlot(p) && p.status !== 'closed' && (!skip || String(p.id) !== skip))
     .map((p) => String(p.title || '').trim())
     .filter(Boolean);
   if (!titles.length) return '';
@@ -523,8 +524,7 @@ export function createFreeformPlot({ domain, world, variant, config, seedChronic
     title: variant.title,
     synopsis: variant.synopsis || variant.chronicle,
     closeWhen: variant.closeWhen,
-    kind: 'story',
-    storyType: 'story',
+    type: 'story',
     hiddenPremises: variant.hiddenPremises,
     hiddenAnswer: variant.hiddenAnswer,
     urgency,
@@ -572,8 +572,8 @@ export function cityStateForPrompt(domain, world) {
     .map(([k, v]) => `${k} ${v}`)
     .join(', ');
   const open = (domain?.plotlines || [])
-    .filter((p) => p.kind === 'story')
-    .map((p) => `- ${p.title} [${p.storyType || 'default'}]: ${clipPlotText(p.synopsis, 180)}`)
+    .filter((p) => isStoryPlot(p))
+    .map((p) => `- ${p.title}: ${clipPlotText(p.synopsis, 180)}`)
     .join('\n');
   return [
     `Дата: ${worldDateLabel(world)} (тик ${world.tickIndex}).`,

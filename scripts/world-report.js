@@ -12,7 +12,7 @@
 
 import { loadConfig } from '../src/config.js';
 import { createStorage } from '../src/storage/index.js';
-import { plotConfig, plotlineAge, isOverdue } from '../src/game/plotlines.js';
+import { plotConfig, plotlineAge, isOverdue, isErrandPlot, plotTypeOf } from '../src/game/plotlines.js';
 import { activeProcesses } from '../src/game/processes.js';
 
 const GOOD = 'OK  ';
@@ -145,7 +145,7 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
   const hotPlots = plots.filter((p) => Number(p.temperature) >= 70);
   // Нить пережила отпущенный ей срок — движок обязан её закрыть битом-финалом.
   const stalePlots = plots.filter((p) => isOverdue(p));
-  const errands = plots.filter((p) => p.kind === 'errand');
+  const errands = plots.filter((p) => isErrandPlot(p));
   const boardOverflow = plots.length > (plotCfg.board?.maxOpen ?? 4);
 
   const myConfluxes = confluxes.filter((c) => (c.domainIds || []).includes(domain.id));
@@ -364,7 +364,7 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
       temperature: p.temperature,
       gravity: p.gravity,
       urgency: p.urgency,
-      kind: p.kind,
+      type: plotTypeOf(p),
       age: plotlineAge(p),
       maxAge: p.maxAgeMonths,
     })),
@@ -459,7 +459,7 @@ function printDomain(rep, { dialogTail = 0, dialog = [] } = {}) {
     console.log('плотлайны:');
     for (const p of rep.plotlines) {
       console.log(
-        `  • «${p.title}»${p.kind === 'errand' ? ' (дело)' : ''} T=${p.temperature} ` +
+        `  • «${p.title}»${p.type === 'errand' ? ' (дело)' : ''} T=${p.temperature} ` +
           (p.gravity != null ? `gravity=${p.gravity} urgency=${p.urgency} ` : '') +
           `возраст=${p.age ?? '?'}/${p.maxAge ?? '?'}`,
       );

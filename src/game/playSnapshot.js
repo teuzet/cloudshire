@@ -38,41 +38,9 @@ function clipLabel(raw) {
     .slice(0, LABEL_MAX);
 }
 
-function cloneCatalogCards(doc) {
-  const cards = Array.isArray(doc?.cards) ? doc.cards : [];
-  return structuredClone(cards);
-}
-
-function catalogsFromBundle(bundle) {
-  if (!bundle || !Object.prototype.hasOwnProperty.call(bundle, 'catalogs')) return null;
-  const catalogs = bundle.catalogs || {};
-  return {
-    mystery: { cards: cloneCatalogCards(catalogs.mystery) },
-    suspense: { cards: cloneCatalogCards(catalogs.suspense) },
-  };
-}
-
-async function captureCatalogs(storage) {
-  if (typeof storage.getAnnotationCatalog !== 'function') {
-    return { mystery: { cards: [] }, suspense: { cards: [] } };
-  }
-  const [mystery, suspense] = await Promise.all([
-    storage.getAnnotationCatalog('mystery'),
-    storage.getAnnotationCatalog('suspense'),
-  ]);
-  return {
-    mystery: { cards: cloneCatalogCards(mystery) },
-    suspense: { cards: cloneCatalogCards(suspense) },
-  };
-}
-
 export function snapshotMeta(bundle) {
   const world = bundle?.world || {};
   const day = Math.max(0, Math.round(Number(world.dayIndex) || 0));
-  const catalogs = catalogsFromBundle(bundle);
-  const catalogCards = catalogs
-    ? (catalogs.mystery.cards.length || 0) + (catalogs.suspense.cards.length || 0)
-    : 0;
   return {
     id: bundle.id,
     label: bundle.label || '',
@@ -82,18 +50,17 @@ export function snapshotMeta(bundle) {
     worldName: world.name || '',
     cityNames: (bundle.domains || []).map((d) => d.name).filter(Boolean),
     domainCount: (bundle.domains || []).length,
-    catalogCards,
+    catalogCards: 0,
   };
 }
 
 export async function captureLiveWorld(storage, { config = null, now = Date.now() } = {}) {
   const world = await storage.getWorld();
   if (!world) throw new Error('мира нет');
-  const [domains, users, confluxes, catalogs] = await Promise.all([
+  const [domains, users, confluxes] = await Promise.all([
     storage.listDomains(),
     storage.listUserBindings(),
     storage.listConfluxes(),
-    captureCatalogs(storage),
   ]);
   const cloned = structuredClone(world);
   const day = worldDay(cloned, { now, config });
@@ -107,7 +74,6 @@ export async function captureLiveWorld(storage, { config = null, now = Date.now(
     domains: structuredClone(domains || []),
     users: structuredClone(users || []),
     confluxes: structuredClone(confluxes || []),
-    catalogs,
   };
 }
 
@@ -202,7 +168,6 @@ export async function restoreLiveWorld(storage, bundle, { config = null, now = D
     domains: structuredClone(bundle.domains || []),
     users: structuredClone(bundle.users || []),
     confluxes: structuredClone(bundle.confluxes || []),
-    catalogs: catalogsFromBundle(bundle),
   });
   return { ok: true, worldId: world.id, clockHeld: clockIsHeld(world), ...snapshotMeta(bundle) };
 }

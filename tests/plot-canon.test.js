@@ -33,7 +33,7 @@ function plot(id, extra = {}) {
     title: 'Пустая келья',
     synopsis: 'Иару нашли живой в водосборных лестницах.',
     closeWhen: 'Найдут или похоронят.',
-    kind: 'story',
+    type: 'story',
     tags: [],
     relatedStats: ['security'],
     chronicleIds: ['lore_found'],
@@ -162,9 +162,9 @@ test('бит видит прошлую хронику нити и людей в 
 });
 
 test('просроченная нить гаснет только без дел и без внимания', () => {
-  const cold = plot('p_cold', { ageMonths: 6, maxAgeMonths: 5, temperature: 8, relatedProcessIds: [] });
-  const busy = plot('p_busy', { ageMonths: 6, maxAgeMonths: 5, temperature: 8, relatedProcessIds: ['act_1'] });
-  const hot = plot('p_hot', { ageMonths: 6, maxAgeMonths: 5, temperature: 40, relatedProcessIds: [] });
+  const cold = plot('p_cold', { type: 'errand', ageMonths: 6, maxAgeMonths: 5, temperature: 8, relatedProcessIds: [] });
+  const busy = plot('p_busy', { type: 'errand', ageMonths: 6, maxAgeMonths: 5, temperature: 8, relatedProcessIds: ['act_1'] });
+  const hot = plot('p_hot', { type: 'errand', ageMonths: 6, maxAgeMonths: 5, temperature: 40, relatedProcessIds: [] });
   assert.equal(plotCanFade({ plotlines: [cold], state: { pendingActions: [] } }, cold), true);
   assert.equal(
     plotCanFade(
@@ -176,8 +176,8 @@ test('просроченная нить гаснет только без дел 
   assert.equal(plotCanFade({ plotlines: [hot], state: { pendingActions: [] } }, hot), false);
   assert.equal(
     plotCanFade(
-      { plotlines: [plot('p_young', { ageMonths: 2, maxAgeMonths: 5, temperature: 0, relatedProcessIds: [] })] },
-      plot('p_young', { ageMonths: 2, maxAgeMonths: 5, temperature: 0, relatedProcessIds: [] }),
+      { plotlines: [plot('p_young', { type: 'errand', ageMonths: 2, maxAgeMonths: 5, temperature: 0, relatedProcessIds: [] })] },
+      plot('p_young', { type: 'errand', ageMonths: 2, maxAgeMonths: 5, temperature: 0, relatedProcessIds: [] }),
     ),
     false,
   );
@@ -185,12 +185,14 @@ test('просроченная нить гаснет только без дел 
 
 test('план битов: забытую нить гасит тихо, живую просроченную не финалит', () => {
   const forgotten = plot('p_fade', {
+    type: 'errand',
     ageMonths: 6,
     maxAgeMonths: 5,
     temperature: 5,
     relatedProcessIds: [],
   });
   const watched = plot('p_hot', {
+    type: 'errand',
     ageMonths: 6,
     maxAgeMonths: 5,
     temperature: 50,
@@ -228,7 +230,7 @@ test('тонкий архив без синопсиса всё равно под
 test('пустая доска всегда сеет историю, пауза не глушит', () => {
   const cfg = plotConfig({ tick: { plot: { board: { seedCooldownMonths: 2 } } } });
   assert.equal(plotSeedChance({ plotlines: [] }, cfg, 10), 1);
-  assert.equal(plotSeedChance({ plotlines: [{ kind: 'errand', createdTick: 10 }] }, cfg, 10), 1);
+  assert.equal(plotSeedChance({ plotlines: [{ type: 'errand', createdTick: 10 }] }, cfg, 10), 1);
 });
 
 const SEED_PAD = 'Дальше история должна жить своей жизнью и не обрываться на полуслове. '.repeat(4);
@@ -266,9 +268,9 @@ test('три мелкие истории не глушат посев, полн�
     tick: { plot: { board: { targetImportance: 100, seedCooldownMonths: 2, seedMaxChance: 0.5 } } },
   });
   const small = [
-    { kind: 'story', storyType: 'story', gravity: 'SITUATION', createdTick: 10 },
-    { kind: 'story', storyType: 'story', gravity: 'SITUATION', createdTick: 9 },
-    { kind: 'story', storyType: 'story', gravity: 'SITUATION', createdTick: 8 },
+    { type: 'story', gravity: 'SITUATION', createdTick: 10 },
+    { type: 'story', gravity: 'SITUATION', createdTick: 9 },
+    { type: 'story', gravity: 'SITUATION', createdTick: 8 },
   ];
   assert.equal(liveStoryImportance({ plotlines: small }), 75);
   assert.ok(plotSeedChance({ plotlines: small }, cfg, 10) > 0);
@@ -276,8 +278,8 @@ test('три мелкие истории не глушат посев, полн�
     plotSeedChance(
       {
         plotlines: [
-          { kind: 'story', storyType: 'story', gravity: 'CRISIS' },
-          { kind: 'story', storyType: 'story', gravity: 'EPISODE' },
+          { type: 'story', gravity: 'CRISIS' },
+          { type: 'story', gravity: 'EPISODE' },
         ],
       },
       cfg,
@@ -316,12 +318,9 @@ test('mystery/suspense-поля не оседают на карточке ист
   assert.equal(domain.plotlines[0].asksSequel, undefined);
   closePlotline(domain, seeded.id, { tick: 4, reason: 'Разгадали.', sequelHook: 'Яд шёл из соседней мастерской.' });
   assert.equal(findClosedPlotline(domain, seeded.id).asksSequel, undefined);
-  assert.equal(allowSequelAfter({ storyType: 'mystery', asksSequel: true, ending: 'ok', kind: 'story' }), true);
-  assert.equal(allowSequelAfter({ storyType: 'mystery', asksSequel: true, ending: 'crit', kind: 'story' }), true);
-  assert.equal(allowSequelAfter({ storyType: 'mystery', asksSequel: true, ending: 'fail', kind: 'story' }), false);
-  assert.equal(allowSequelAfter({ storyType: 'mystery', asksSequel: true, kind: 'story' }), false);
-  assert.equal(allowSequelAfter({ storyType: 'mystery', asksSequel: false, ending: 'ok', kind: 'story' }), false);
-  assert.equal(allowSequelAfter({ storyType: 'suspense', kind: 'story' }), true);
+  assert.equal(allowSequelAfter({ type: 'story' }), true);
+  assert.equal(allowSequelAfter({ type: 'errand' }), false);
+  assert.equal(allowSequelAfter({ type: 'conflux' }), false);
   assert.equal(allowSequelAfter({ kind: 'errand' }), false);
 });
 
@@ -485,12 +484,12 @@ test('продолжение сеется с крючком в освободи�
   assert.equal(pickSequelSeed({ plotlines: [] }, [offer], cfg, () => 0.9), null);
   assert.equal(pickSequelSeed({ plotlines: [] }, [{ id: 'plot_old', hook: '' }], cfg, () => 0), null);
   assert.equal(
-    pickSequelSeed({ plotlines: [{ kind: 'story' }] }, [offer], cfg, () => 0),
+    pickSequelSeed({ plotlines: [{ type: 'story' }] }, [offer], cfg, () => 0),
     offer,
   );
   assert.equal(
     pickSequelSeed(
-      { plotlines: [{ kind: 'story' }, { kind: 'story' }, { kind: 'story' }, { kind: 'story' }, { kind: 'story' }] },
+      { plotlines: [{ type: 'story' }, { type: 'story' }, { type: 'story' }, { type: 'story' }, { type: 'story' }] },
       [offer],
       cfg,
       () => 0,
@@ -501,15 +500,15 @@ test('продолжение сеется с крючком в освободи�
 
 test('нити указов не заполняют доску и не глушат посев', () => {
   const cfg = plotConfig({ tick: { plot: { board: { seedCooldownMonths: 2 } } } });
-  assert.equal(plotSeedChance({ plotlines: [{ kind: 'order', createdTick: 10 }] }, cfg, 10), 1);
-  assert.equal(liveStoryImportance({ plotlines: [{ kind: 'order' }] }), 0);
+  assert.equal(plotSeedChance({ plotlines: [{ type: 'errand', createdTick: 10 }] }, cfg, 10), 1);
+  assert.equal(liveStoryImportance({ plotlines: [{ type: 'errand' }] }), 0);
 });
 
 test('процессы занимают лимит тика, случайная история в остаток не проходит', () => {
   const domain = {
     plotlines: [
-      plot('p_proc', { kind: 'errand', relatedProcessIds: ['act_1'] }),
-      plot('p_story', { kind: 'story', relatedProcessIds: [], temperature: 90 }),
+      plot('p_proc', { type: 'errand', relatedProcessIds: ['act_1'] }),
+      plot('p_story', { type: 'story', relatedProcessIds: [], temperature: 90 }),
     ],
     state: { pendingActions: [{ id: 'act_1', status: 'active' }] },
   };
@@ -526,18 +525,20 @@ test('процессы занимают лимит тика, случайная 
 });
 
 test('масштаб story берётся из gravity, не из importance', () => {
-  assert.equal(plotScale({ kind: 'story', storyType: 'story', gravity: 'RUPTURE' }), 100);
-  assert.equal(plotScale({ kind: 'story', storyType: 'story', gravity: 'EPISODE' }), 50);
-  assert.equal(plotScale({ kind: 'story' }), 0);
+  assert.equal(plotScale({ type: 'story', gravity: 'RUPTURE' }), 100);
+  assert.equal(plotScale({ type: 'story', gravity: 'EPISODE' }), 50);
+  assert.equal(plotScale({ type: 'errand' }), 0);
+  assert.equal(plotScale({ type: 'conflux' }), 85);
   assert.equal(plotScale({ kind: 'story', isMainConflux: true, storyType: 'freeform' }), 85);
   assert.equal(
     liveStoryImportance({
       plotlines: [
-        { kind: 'story', storyType: 'story', gravity: 'CRISIS' },
-        { kind: 'story' },
-        { kind: 'errand' },
+        { type: 'story', gravity: 'CRISIS' },
+        { type: 'story' },
+        { type: 'errand' },
+        { type: 'conflux' },
       ],
     }),
-    75,
+    125,
   );
 });

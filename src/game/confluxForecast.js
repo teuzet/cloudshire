@@ -74,9 +74,7 @@ function pairCard(conflux, domain) {
     id: plot.id,
     title: plot.title,
     synopsis: conflux.synopsis[domain.id] || plot.synopsis || '',
-    kind: 'story',
-    storyType: 'freeform',
-    isMainConflux: true,
+    type: 'conflux',
   };
 }
 

@@ -487,9 +487,9 @@ function endingsBlock(p) {
 }
 
 function plotCard(p) {
-  const kindLabel = p.kind === 'errand' ? 'дело' : p.kind === 'story' ? 'история' : p.kind;
+  const typeLabel = p.type === 'errand' ? 'дело' : p.type === 'conflux' ? 'сопряжение' : p.type === 'story' ? 'история' : p.type;
   const meta = [
-    kindLabel,
+    typeLabel,
     p.urgency != null ? `срочность ${p.urgency}` : null,
     p.gravity != null ? `масштаб ${p.gravity}` : null,
     p.temperature != null ? `жар ${p.temperature}` : null,
@@ -816,11 +816,11 @@ function renderBrief() {
 function splitPlots(domain) {
   const open = domain?.plotlines || [];
   const closed = domain?.closedPlotlines || [];
-  const is = (p, kind) => String(p?.kind || 'story') === kind;
+  const is = (p, type) => String(p?.type || p?.kind || 'story') === type;
   return {
     stories: open.filter((p) => is(p, 'story')),
     errands: open.filter((p) => is(p, 'errand')),
-    closedStories: closed.filter((p) => is(p, 'story') || !p.kind),
+    closedStories: closed.filter((p) => is(p, 'story') || (!p.type && !p.kind)),
   };
 }
 

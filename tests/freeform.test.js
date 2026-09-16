@@ -48,7 +48,7 @@ import {
 } from '../src/game/freeformAssemble.js';
 import { plantStakedStory } from '../src/game/storyteller.js';
 import { startFreeformStory, normalizeSeedVariant } from '../src/game/freeformStarter.js';
-import { normalizeHiddenPremises } from '../src/game/suspenseGraph.js';
+import { normalizeHiddenPremises } from '../src/game/premises.js';
 import { tellFreeformBeat } from '../src/game/freeformTeller.js';
 import { loadConfig } from '../src/config.js';
 import { createWebServer } from '../src/clients/web/server.js';
@@ -145,7 +145,7 @@ test('freeform — отдельный тип, не трёхтакт', () => {
     urgency: 70,
     gravity: 'EPISODE',
   });
-  assert.equal(plot.storyType, 'story');
+  assert.equal(plot.type, 'story');
   assert.equal(isStakedStory(plot), true);
   assert.equal(isFreeformPlot(plot), false);
   assert.equal(isThreeActPlot(plot), false);
@@ -198,7 +198,7 @@ test('нормализация снимает трёхтактный блоб и
   };
   normalizePlotlines(domain);
   const live = domain.plotlines[0];
-  assert.equal(live.storyType, 'story');
+  assert.equal(live.type, 'story');
   assert.equal(live.gravity, 'EPISODE');
   assert.equal(live.act, undefined);
   assert.equal(live.truth, undefined);
@@ -2458,7 +2458,7 @@ test('конструктор собирает хронику, hidden и whyMoves
     config: loadConfig(),
     rng: () => 0,
   });
-  assert.equal(plot.storyType, 'story');
+  assert.equal(plot.type, 'story');
   assert.equal(plot.urgency, 'MEDIUM');
   assert.equal(plot.countdown, null);
   assert.equal(plot.whyMoves, out.whyMoves);

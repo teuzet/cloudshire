@@ -24,22 +24,8 @@ test('явный reasoningEffort агента перекрывает дефол�
   assert.equal(resolveReasoningEffort({ reasoningEffort: 'wat' }), undefined);
 });
 
-test('presentation, аннотации и литературные судьи без reasoningEffort', () => {
+test('литературные судьи без reasoningEffort', () => {
   const config = loadConfig();
-  assert.equal(config.agents.mysteryPresentation.reasoningEffort, undefined);
-  assert.equal(config.agents.mysteryPresentationJudge.reasoningEffort, undefined);
-  assert.equal(config.agents.suspenseJudge.reasoningEffort, undefined);
-  assert.equal(config.agents.mysteryPresentation.model, 'gpt-5.6-luna');
-  assert.equal(config.agents.mysteryAnnotation.reasoningEffort, undefined);
-  assert.equal(config.agents.mysteryAnnotation.model, 'claude-sonnet-4-6');
-  assert.equal(config.agents.mysteryAnnotation.provider, 'anthropic');
-  assert.equal(config.agents.mysteryAnnotationJudge.reasoningEffort, undefined);
-  assert.equal(config.agents.mysteryAnnotationJudge.model, 'gpt-5.6-luna');
-  assert.equal(config.agents.mysteryAnnotationJudge.provider, 'openai');
-  assert.equal(config.agents.suspenseAnnotation.reasoningEffort, undefined);
-  assert.equal(config.agents.suspenseAnnotation.model, 'claude-sonnet-4-6');
-  assert.equal(config.agents.suspenseAnnotation.provider, 'anthropic');
-  assert.equal(config.agents.suspenseAnnotationJudge.reasoningEffort, undefined);
-  assert.equal(config.agents.suspenseAnnotationJudge.model, 'gpt-5.6-luna');
-  assert.equal(config.agents.suspenseAnnotationJudge.provider, 'openai');
+  assert.equal(config.agents.freeformEndingsJudge.model, 'gpt-5.6-luna');
+  assert.equal(config.agents.freeformBeatJudge.model, 'gpt-5.6-luna');
 });

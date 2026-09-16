@@ -2,7 +2,7 @@ import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { clipPlotText, PLOT_SUMMARY_MAX } from './plotlines.js';
 import { captureAgentPrompt } from './agentPrompt.js';
-import { normalizeHiddenPremises } from './suspenseGraph.js';
+import { normalizeHiddenPremises } from './premises.js';
 import {
   freeformConfig,
   cityStateForPrompt,

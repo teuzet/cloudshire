@@ -3,11 +3,9 @@ import { createLoreFact, formatCastForPrompt, chronicleEntries, formatChronicleP
 import { formatFullChronicleForPrompt, formatFactsForPrompt } from './memory.js';
 import { findActiveConfluxForDomain } from './conflux.js';
 import { daysUntilDock } from './confluxTime.js';
-import { attachFactToPlotlines, isPairThread } from './plotlines.js';
+import { attachFactToPlotlines, isPairThread, isErrandPlot, isConfluxPlot } from './plotlines.js';
 import { cityRules } from './cityRules.js';
 import { overlayConfluxView, stampNewBoardItems, stripConfluxView } from './confluxBoard.js';
-import { formatTruthGraphForPrompt } from './mysteryGraph.js';
-import { formatLadderForPrompt } from './suspenseGraph.js';
 import { revealedPremises, revealedAnswer, hiddenAnswer } from './premises.js';
 import { formatCityForAgents, parseCityBrief, formatCanonicalUnknownsForPrompt } from './cityContext.js';
 import { getLogger, truncate } from '../log.js';
@@ -55,13 +53,11 @@ export function formatOpenStoriesBrief(plots = []) {
   if (!visible.length) return 'Открытых историй нет.';
   const lines = visible.map((p) => {
     const kind =
-      p.storyType === 'mystery'
-        ? 'тайна'
-        : p.kind === 'errand'
-          ? 'поручение'
-          : p.shared
-            ? 'общая история'
-            : 'история';
+      isErrandPlot(p)
+        ? 'поручение'
+        : p.shared
+          ? 'общая история'
+          : 'история';
     const syn = p.synopsis ? ` — ${p.synopsis}` : '';
     return `- ${p.id} (${kind})${syn}`;
   });
@@ -84,15 +80,13 @@ export function formatStoriesForLoremaster(plots = [], { viewerId = null, focusI
 export function formatFocusedStoryForLoremaster(p, { viewerId = null } = {}) {
   if (!p) return '';
   const host = p.hostDomainId || null;
-  const own = !viewerId || p.isMainConflux || !host || String(host) === String(viewerId);
+  const own = !viewerId || isConfluxPlot(p) || !host || String(host) === String(viewerId);
   const kind =
-    p.storyType === 'mystery'
-      ? 'ТАЙНА'
-      : p.kind === 'errand'
-        ? 'поручение'
-        : p.isMainConflux || p.shared
-          ? 'общая история сопряжения'
-          : 'история';
+    isErrandPlot(p)
+      ? 'поручение'
+      : isConfluxPlot(p) || p.shared
+        ? 'общая история сопряжения'
+        : 'история';
   const secret = hiddenAnswer(p);
   const lines = [
     `ФОКУС: нить ${p.id} (${kind}). Это идущая история — не закрытая.`,
@@ -119,46 +113,12 @@ export function formatFocusedStoryForLoremaster(p, { viewerId = null } = {}) {
     lines.push('ГОРОД ЭТО УЖЕ ВЫЯСНИЛ (можно отвечать прямо, это установлено):');
     if (solved) lines.push(`- разгадка: ${solved}`);
     for (const text of known) lines.push(`- ${text}`);
-  }
-  if (p.storyType === 'mystery' && (p.truthGraph || p.truth)) {
-    lines.push(
-      'КАНОН ТАЙНЫ (только чтобы не противоречить). Скрытое нельзя раскрывать, объяснять или писать в fact/ответы.',
-    );
-    if (p.truthGraph) {
-      lines.push(
-        formatTruthGraphForPrompt(p.truthGraph).replace(
-          'ПРИЧИННЫЙ ГРАФ (канон истины; узлы и рёбра не переписывай, меняй только статусы знания):',
-          'ПРИЧИННЫЙ ГРАФ (канон истины; только читать. Скрытое не раскрывай и не достраивай.):',
-        ),
-      );
-    } else if (p.truth) {
-      lines.push(`Канон (не раскрывай): ${p.truth}`);
-    }
-    lines.push(
-      'В ответы и add_fact — только уже «замеченное» или «понятое», плюс нейтральные детали фона, которые не намекают на скрытые узлы.',
-    );
-  } else if (p.storyType === 'suspense' && (p.hiddenPremises?.length || p.discoveryLadder?.length)) {
-    lines.push(
-      'СКРЫТАЯ ПРИРОДА НАСТОЯЩЕГО (только чтобы не противоречить). Не раскрывай, не пересказывай игроку/правителю и не пиши в fact.',
-    );
-    if (p.hiddenPremises?.length) {
-      lines.push('hiddenPremises:');
-      lines.push(formatHiddenPremisesForLoremaster(p.hiddenPremises));
-    }
-    if (p.discoveryLadder?.length) {
-      lines.push('Лестница открытия:');
-      lines.push(formatLadderForPrompt(p.discoveryLadder));
-    }
   } else {
     lines.push(
       'Не выдумывай исход, виновника, скрытый мотив или причину нерешённого в этой истории.',
     );
   }
   return lines.filter(Boolean).join('\n');
-}
-
-function formatHiddenPremisesForLoremaster(premises = []) {
-  return premises.map((text, i) => `- [${i}] СКРЫТО (не в ответы, не в fact): ${text}`).join('\n');
 }
 
 function loreLinkedToPlot(lore, plot) {

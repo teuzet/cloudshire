@@ -176,7 +176,7 @@ test('список, подпись и удаление снимков', async ()
   });
 });
 
-test('снимок берёт весь мир: оба острова, очередь и каталоги', async () => {
+test('снимок берёт весь мир: оба острова и очередь', async () => {
   await withStore(async (storage, config) => {
     const { world, domain } = await seedCity(storage);
     await storage.saveDomain({
@@ -190,10 +190,6 @@ test('снимок берёт весь мир: оба острова, очере
       worldId: world.id,
       domainId: 'domain_other',
     });
-    await storage.saveAnnotationCatalog(
-      { cards: [{ id: 'ann_keep', title: 'старая карта' }] },
-      'mystery',
-    );
     const live = await storage.getWorld();
     live.jobs = [{ id: 'job_world', kind: 'story_tick', dueDay: 9, state: 'pending' }];
     await storage.saveWorld(live);
@@ -203,7 +199,7 @@ test('снимок берёт весь мир: оба острова, очере
     assert.deepEqual(bundle.domains.map((d) => d.name).sort(), ['Веллея', 'Саркум']);
     assert.equal(bundle.users.length, 2);
     assert.equal(bundle.world.jobs[0].id, 'job_world');
-    assert.equal(bundle.catalogs.mystery.cards[0].id, 'ann_keep');
+    assert.equal(bundle.catalogs, undefined);
 
     const written = await writePlaySnapshot(config, bundle, { label: 'весь мир' });
     await storage.saveDomain({ ...domain, name: 'Переименовали' });
@@ -213,10 +209,6 @@ test('снимок берёт весь мир: оба острова, очере
       name: 'Лишний',
       status: 'playing',
     });
-    await storage.saveAnnotationCatalog(
-      { cards: [{ id: 'ann_new', title: 'после сейва' }] },
-      'mystery',
-    );
     const laterWorld = await storage.getWorld();
     laterWorld.jobs = [];
     await storage.saveWorld(laterWorld);
@@ -229,28 +221,5 @@ test('снимок берёт весь мир: оба острова, очере
     const names = (await storage.listDomains()).map((d) => d.name).sort();
     assert.deepEqual(names, ['Веллея', 'Саркум']);
     assert.equal((await storage.getWorld()).jobs[0].id, 'job_world');
-    const mystery = await storage.getAnnotationCatalog('mystery');
-    assert.equal(mystery.cards[0].id, 'ann_keep');
-    assert.equal(mystery.cards.length, 1);
-  });
-});
-
-test('старый снимок без каталогов не затирает каталог при загрузке', async () => {
-  await withStore(async (storage, config) => {
-    await seedCity(storage);
-    await storage.saveAnnotationCatalog(
-      { cards: [{ id: 'ann_live', title: 'живой каталог' }] },
-      'mystery',
-    );
-    const bundle = await captureLiveWorld(storage, { config });
-    delete bundle.catalogs;
-    bundle.version = 1;
-    const written = await writePlaySnapshot(config, bundle, { label: 'без каталога' });
-    const restored = await restoreLiveWorld(storage, await readPlaySnapshot(config, written.id), {
-      config,
-    });
-    assert.equal(restored.ok, true);
-    const mystery = await storage.getAnnotationCatalog('mystery');
-    assert.equal(mystery.cards[0].id, 'ann_live');
   });
 });

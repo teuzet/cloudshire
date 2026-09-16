@@ -6,6 +6,8 @@
 import { yearChronicleGrain, formatChronicleGrain, cityGenesisGrainText } from './seedChannels.js';
 import {
   findPlotline,
+  isStoryPlot,
+  isConfluxPlot,
   plotHasLiveProcess,
   parseFreeformGravity,
   FREEFORM_GRAVITY,
@@ -47,10 +49,10 @@ function factOwnedByPlot(fact, plot) {
 
 export function dropPlayStoryBlocker(domain, plot) {
   if (!plot) return { error: 'not_found', message: 'такой истории нет' };
-  if (plot.kind !== 'story') {
+  if (!isStoryPlot(plot)) {
     return { error: 'not_story', message: 'снять можно только городскую историю' };
   }
-  if (plot.shared || plot.isMainConflux || plot.confluxId) {
+  if (plot.shared || isConfluxPlot(plot) || plot.confluxId) {
     return { error: 'conflux', message: 'нить сопряжения отсюда не снимают' };
   }
   if (plotHasLiveProcess(domain, plot)) {

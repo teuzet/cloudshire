@@ -6,12 +6,6 @@ import { applyClockAlignedCalendar } from './tickClock.js';
 import { normalizeCityModifiers } from './cityContext.js';
 import { emptySeedTemp, normalizeSeedTemp } from './seedTemp.js';
 import { seedStartingMana } from './mana.js';
-import {
-  ensureDomainClimates,
-  loadStarterMysteryPool,
-  loadStarterSuspensePool,
-  mergeAnnotationCatalog,
-} from './annotationPool.js';
 
 export function emptyState() {
   return {
@@ -97,9 +91,6 @@ export function normalizeDomain(domain) {
   if (domain.imageUrl) domain.imageBase64 = null;
   if (typeof domain.cityBrief !== 'string') domain.cityBrief = domain.cityBrief || '';
   if (!Array.isArray(domain.seedClimate)) domain.seedClimate = [];
-  if (!Array.isArray(domain.mysteryClimate)) domain.mysteryClimate = [];
-  if (!Array.isArray(domain.suspenseClimate)) domain.suspenseClimate = [];
-  ensureDomainClimates(domain);
   domain.cityEntities = normalizeCityEntities(domain.cityEntities);
   if (domain.cityEntities.length) domain.cityEntitiesReady = true;
   else if (typeof domain.cityEntitiesReady !== 'boolean') domain.cityEntitiesReady = false;
@@ -151,8 +142,6 @@ export function createWorldFromConfig(config, { now = Date.now() } = {}) {
     },
     createdAt,
     updatedAt: createdAt,
-    mysteryAnnotationPool: loadStarterMysteryPool(),
-    suspenseAnnotationPool: loadStarterSuspensePool(),
   };
   applyClockAlignedCalendar(world, config, now);
   seedWorldNamePool(world, config);
@@ -187,14 +176,6 @@ export function normalizeWorld(world, config = null) {
   }
   seedWorldNamePool(world, config);
   normalizeNamePool(world);
-  world.mysteryAnnotationPool = mergeAnnotationCatalog(
-    loadStarterMysteryPool(),
-    world.mysteryAnnotationPool || [],
-  );
-  world.suspenseAnnotationPool = mergeAnnotationCatalog(
-    loadStarterSuspensePool(),
-    world.suspenseAnnotationPool || [],
-  );
   return world;
 }
 

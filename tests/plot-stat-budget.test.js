@@ -7,7 +7,7 @@ import { enforceFinishPolarity } from '../src/game/statJudge.js';
 const cfg = { tick: { plot: { stats: { openingShare: 0.25, beatShare: 0.25 } }, officerStatPerMonth: 1 } };
 
 test('RUPTURE → бюджет 20; старт силой 5 remaining не ест', () => {
-  const plot = createPlotline({ title: 'Гул', kind: 'story', storyType: 'story', gravity: 'RUPTURE' });
+  const plot = createPlotline({ title: 'Гул', type: 'story', gravity: 'RUPTURE' });
   ensurePlotStatBudget(plot, cfg);
   assert.equal(plot.stats.budget, 20);
   assert.equal(plot.stats.remaining, 20);
@@ -25,17 +25,17 @@ test('бюджет по enum: 5 / 10 / 15 / 20', () => {
     ['RUPTURE', 20],
   ];
   for (const [gravity, budget] of levels) {
-    const plot = createPlotline({ title: gravity, kind: 'story', storyType: 'story', gravity });
+    const plot = createPlotline({ title: gravity, type: 'story', gravity });
     ensurePlotStatBudget(plot, cfg);
     assert.equal(plot.stats.budget, budget, gravity);
   }
-  const garbage = createPlotline({ title: 'Мусор', kind: 'story', storyType: 'story', gravity: 80 });
+  const garbage = createPlotline({ title: 'Мусор', type: 'story', gravity: 80 });
   ensurePlotStatBudget(garbage, cfg);
   assert.equal(garbage.stats.budget, 10);
 });
 
 test('промежуточные события едят бюджет, но не весь: под концовку заперт порог', () => {
-  const plot = createPlotline({ title: 'Гул', kind: 'story', storyType: 'story', gravity: 'RUPTURE' });
+  const plot = createPlotline({ title: 'Гул', type: 'story', gravity: 'RUPTURE' });
   ensurePlotStatBudget(plot, cfg);
   for (let i = 0; i < 3; i += 1) {
     assert.equal(plotStatForce(plot, { config: cfg }), 5, `беда ${i + 1}`);
@@ -46,7 +46,7 @@ test('промежуточные события едят бюджет, но не
 
 test('кривая концовки выходит сама: чисто 20, один провал 15, два 10', () => {
   const payout = (fails) => {
-    const plot = createPlotline({ title: 'Гул', kind: 'story', storyType: 'story', gravity: 'RUPTURE' });
+    const plot = createPlotline({ title: 'Гул', type: 'story', gravity: 'RUPTURE' });
     ensurePlotStatBudget(plot, cfg);
     for (let i = 0; i < fails; i += 1) plotStatForce(plot, { config: cfg });
     return plotStatForce(plot, { ending: true, config: cfg });
@@ -76,8 +76,8 @@ test('финиш дела на 6 месяцев: сумма модулей = 6; 
 test('errand не занимает доску историй', () => {
   const domain = {
     plotlines: [
-      ...Array.from({ length: 5 }, (_, i) => createPlotline({ title: `Нить ${i}`, kind: 'story' })),
-      createPlotline({ title: 'Поручение', kind: 'errand' }),
+      ...Array.from({ length: 5 }, (_, i) => createPlotline({ title: `Нить ${i}`, type: 'story' })),
+      createPlotline({ title: 'Поручение', type: 'errand' }),
     ],
   };
   const counts = countOpen(domain);

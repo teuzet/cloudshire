@@ -1,7 +1,7 @@
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { clipPlotText } from './plotlines.js';
-import { runVerdictJudge, literaryJudgeAccepts } from './mysteryJudge.js';
+import { runVerdictJudge, literaryJudgeAccepts } from './verdictJudge.js';
 import { formatFreeformGravityForPrompt, formatFreeformSeedBlank } from './freeform.js';
 import { captureAgentPrompt } from './agentPrompt.js';
 

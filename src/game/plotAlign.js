@@ -149,7 +149,7 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
         {
           role: 'user',
           content: [
-            `История (${plot.storyType || plot.kind || ''}).`,
+            `История (${plot.type || ''}).`,
             plot.cause ? `Первопричина: ${plot.cause}` : '',
             plot.closeWhen ? `Закрывается, когда: ${plot.closeWhen}` : '',
             endingsBrief(plot) ? `Концовки карточки:\n${endingsBrief(plot)}` : '',

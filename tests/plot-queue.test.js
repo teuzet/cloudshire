@@ -60,8 +60,8 @@ test('UNRELATED снимается с истории на свою нить-по
   assert.equal(moved.originPlot.id, plot.id);
   assert.equal(plot.relatedProcessIds.includes('act_side'), false);
   assert.equal(action.plotlineId, moved.plot.id);
-  assert.equal(moved.plot.kind, 'errand');
-  assert.equal(domain.plotlines.some((p) => p.kind === 'errand' && p.relatedProcessIds.includes('act_side')), true);
+  assert.equal(moved.plot.type, 'errand');
+  assert.equal(domain.plotlines.some((p) => p.type === 'errand' && p.relatedProcessIds.includes('act_side')), true);
 });
 
 test('повторный rehome уже на поручении ничего не плодит', () => {
@@ -70,10 +70,10 @@ test('повторный rehome уже на поручении ничего не
   applyEngagement(action, 'UNRELATED');
   const domain = { plotlines: [plot], state: { pendingActions: [action] } };
   rehomeUnrelatedProcess(domain, action, { tick: 1 });
-  const errandsBefore = domain.plotlines.filter((p) => p.kind === 'errand').length;
+  const errandsBefore = domain.plotlines.filter((p) => p.type === 'errand').length;
   const again = rehomeUnrelatedProcess(domain, action, { tick: 2 });
   assert.equal(again.rehomed, false);
-  assert.equal(domain.plotlines.filter((p) => p.kind === 'errand').length, errandsBefore);
+  assert.equal(domain.plotlines.filter((p) => p.type === 'errand').length, errandsBefore);
 });
 
 test('два DIRECT на одной нити: второе дело видит состояние после первого', () => {
@@ -202,10 +202,10 @@ test('отмена поручения закрывает пустую errand-н�
   applyEngagement(action, 'UNRELATED');
   const domain = { plotlines: [plot], closedPlotlines: [], state: { pendingActions: [action] } };
   rehomeUnrelatedProcess(domain, action, { tick: 3 });
-  assert.equal(domain.plotlines.some((p) => p.kind === 'errand'), true);
+  assert.equal(domain.plotlines.some((p) => p.type === 'errand'), true);
   action.status = 'revoked';
   const dropped = detachProcessFromPlots(domain, action, { tick: 3 });
   assert.equal(dropped.closedErrands.length, 1);
-  assert.equal(domain.plotlines.some((p) => p.kind === 'errand'), false);
-  assert.equal(domain.closedPlotlines.some((p) => p.kind === 'errand'), true);
+  assert.equal(domain.plotlines.some((p) => p.type === 'errand'), false);
+  assert.equal(domain.closedPlotlines.some((p) => p.type === 'errand'), true);
 });

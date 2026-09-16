@@ -4,7 +4,6 @@ import yaml from 'js-yaml';
 import { createWorldFromConfig, normalizeDomain, normalizeWorld } from '../game/models.js';
 import { writeWorldArchive } from './worldArchive.js';
 import { createWipeGuard } from './wipeGuard.js';
-import { attachStoryPoolsFromCatalog } from '../game/annotationCatalog.js';
 import { ensureOfficersFromLore, stripOfficerPortraitPayload } from '../game/officers.js';
 import { nextRevision } from './revision.js';
 
@@ -56,7 +55,6 @@ export class YamlStorage {
     let world = await this.getWorld();
     if (!world) {
       world = createWorldFromConfig(this.config);
-      await attachStoryPoolsFromCatalog(world, this);
       this.guard.setLiveWorld(world.id);
       await this.writeWorldUnlocked(world);
     } else {
@@ -80,32 +78,10 @@ export class YamlStorage {
     return path.join(this.root, 'confluxes', `${confluxId}.yaml`);
   }
 
-  annotationCatalogPath(kind = 'mystery') {
-    const file = kind === 'suspense' ? 'suspense-annotation-catalog.yaml' : 'annotation-catalog.yaml';
-    return path.join(this.root, file);
-  }
-
-  async getAnnotationCatalog(kind = 'mystery') {
-    const k = kind === 'suspense' ? 'suspense' : 'mystery';
-    const data = await readYaml(this.annotationCatalogPath(k), { cards: [] });
-    return { kind: k, cards: Array.isArray(data?.cards) ? data.cards : [] };
-  }
-
-  async saveAnnotationCatalog(doc, kind = 'mystery') {
-    const k = doc?.kind === 'suspense' || kind === 'suspense' ? 'suspense' : 'mystery';
-    await writeYaml(this.annotationCatalogPath(k), {
-      kind: k,
-      cards: Array.isArray(doc?.cards) ? doc.cards : [],
-      updatedAt: new Date().toISOString(),
-    });
-    return doc;
-  }
-
   async getWorld() {
     const world = await readYaml(this.worldPath(), null);
     if (!world) return null;
     const normalized = normalizeWorld(world, this.config);
-    await attachStoryPoolsFromCatalog(normalized, this);
     return normalized;
   }
 
@@ -321,7 +297,6 @@ export class YamlStorage {
       await fs.unlink(this.worldPath()).catch(() => {});
 
       const next = createWorldFromConfig(this.config);
-      await attachStoryPoolsFromCatalog(next, this);
       this.guard.setLiveWorld(next.id);
       await this.writeWorldUnlocked(next);
       await this.sweepForeignUnlocked();
@@ -362,10 +337,6 @@ export class YamlStorage {
         if (!conflux?.id || !this.guard.acceptConflux(conflux)) continue;
         conflux.updatedAt = new Date().toISOString();
         await writeYaml(this.confluxPath(conflux.id), conflux);
-      }
-      if (catalogs) {
-        await this.saveAnnotationCatalog(catalogs.mystery, 'mystery');
-        await this.saveAnnotationCatalog(catalogs.suspense, 'suspense');
       }
       return { ok: true, driver: 'yaml', worldId: world.id };
     });

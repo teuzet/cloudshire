@@ -7,6 +7,7 @@ import { createLoreFact, formatCastForPrompt, chronicleEntries } from './models.
 import { findActiveConfluxForDomain } from './conflux.js';
 import { cityRules } from './cityRules.js';
 import { parseCityBrief, normalizeCanonicalUnknowns } from './cityContext.js';
+import { isErrandPlot, isConfluxPlot } from './plotlines.js';
 import { formatPairArchive } from './confluxCanon.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
@@ -22,7 +23,7 @@ export function visibleNeighborLore(lore) {
 }
 
 export function formatNeighborPlotList(plots = []) {
-  const list = (plots || []).filter((p) => p && p.kind !== 'errand' && !p.isMainConflux);
+  const list = (plots || []).filter((p) => p && !isErrandPlot(p) && !isConfluxPlot(p));
   if (!list.length) return 'Открытых бед и дел у того города нет.';
   return [
     'Текущие беды и дела того города — коротко, без скрытых подробностей:',
