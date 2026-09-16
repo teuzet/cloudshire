@@ -10,6 +10,12 @@ import {
   recordUsageEvent,
   getCurrentWorldId,
 } from '../llm/usage.js';
+import {
+  appendCityAgentTranscript,
+  recordCityLlmEvent,
+  recordCityToolEvent,
+  shouldLogLiveCityAgent,
+} from '../game/cityAgentLog.js';
 
 const deadlineStore = new AsyncLocalStorage();
 
@@ -231,8 +237,46 @@ export class AgentRuntime {
       footprint,
     });
 
+    const cityLog = {
+      on: shouldLogLiveCityAgent({
+        config: this.config,
+        domainId,
+        agentId,
+        scene,
+      }),
+      events: [],
+      startedAt: new Date(),
+    };
+    const noteCity = (event) => {
+      if (cityLog.on && event) cityLog.events.push(event);
+    };
+    const flushCityLog = async (extra = {}) => {
+      if (!cityLog.on) return;
+      try {
+        await appendCityAgentTranscript({
+          config: this.config,
+          domainId,
+          domainName: parentLog?.context?.domainName || log.context?.domainName || null,
+          worldId: getCurrentWorldId() || log.context?.worldId || null,
+          agentId,
+          scene,
+          model,
+          provider: agent.provider,
+          runId,
+          packed: assembled,
+          events: cityLog.events,
+          startedAt: cityLog.startedAt,
+          ms: Date.now() - runStarted,
+          toolsUsed: toolTrace.map((t) => t.name),
+          ...extra,
+        });
+      } catch (err) {
+        slog.warn('city_agent_log.failed', { error: err.message });
+      }
+    };
+
     try {
-      const finish = ({ truncated = false, turns, text = '', extra = {} } = {}) => {
+      const finish = async ({ truncated = false, turns, text = '', extra = {} } = {}) => {
         const record = this.#finishUsage({
           slog,
           agentId,
@@ -259,6 +303,12 @@ export class AgentRuntime {
         };
         if (truncated) slog.warn('agent.run.truncated', payload);
         else slog.info('agent.run.done', payload);
+        await flushCityLog({
+          truncated: Boolean(truncated),
+          turns,
+          text,
+          failed: false,
+        });
         return {
           text: text || '',
           messages,
@@ -320,6 +370,7 @@ export class AgentRuntime {
           contentPreview: truncate(message.content || '', 250),
           toolCallNames: (message.tool_calls || []).map((c) => c.function?.name),
         });
+        noteCity(recordCityLlmEvent({ turn: turn + 1, message }));
 
         messages.push(message);
 
@@ -332,12 +383,14 @@ export class AgentRuntime {
               expected: stillForcing ? forcedTool : 'deliverable',
               hasDraft: Boolean(String(message.content || '').trim()),
             });
+            const nudge = noToolNudge({
+              stillForcing,
+              draftedText: message.content,
+            });
+            noteCity({ type: 'nudge', turn: turn + 1, at: new Date(), content: nudge });
             messages.push({
               role: 'user',
-              content: noToolNudge({
-                stillForcing,
-                draftedText: message.content,
-              }),
+              content: nudge,
             });
             continue;
           }
@@ -366,6 +419,14 @@ export class AgentRuntime {
               agentMessage: `Невалидный JSON аргументов: ${parseErr.message}. Исправь arguments и вызови tool снова.`,
             };
             toolTrace.push({ name, args: {}, result });
+            noteCity(
+              recordCityToolEvent({
+                turn: turn + 1,
+                name,
+                args: call.function?.arguments || {},
+                result,
+              }),
+            );
             tlog.warn('agent.tool.parse_error', {
               tool: name,
               rawPreview: truncate(call.function?.arguments || '', 400),
@@ -401,6 +462,7 @@ export class AgentRuntime {
           }
 
           toolTrace.push({ name, args, result });
+          noteCity(recordCityToolEvent({ turn: turn + 1, name, args, result }));
           tlog.info('agent.tool', {
             tool: name,
             ok: result?.ok !== false,
@@ -459,7 +521,9 @@ export class AgentRuntime {
           failed: true,
         });
       }
+      noteCity({ type: 'error', at: new Date(), error: err.message });
       slog.error('agent.run.failed', { error: err.message });
+      await flushCityLog({ failed: true, error: err.message, turns: callUsages.length });
       throw err;
     }
   }

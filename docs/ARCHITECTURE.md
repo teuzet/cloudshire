@@ -42,7 +42,7 @@ src/index.js
 | Каталог | Зачем |
 |---------|--------|
 | `src/game/` | Правила мира |
-| `src/agents/runtime.js` | Вызов агента: tools, дедлайн, сборка system из canon/styles/instructions |
+| `src/agents/runtime.js` | Вызов агента: tools, дедлайн, сборка system из canon/styles/instructions; лог живого города |
 | `src/llm/` | OpenAI и Anthropic за одним интерфейсом; usage в Mongo/`logs` |
 | `src/storage/` | YAML или Mongo, один API |
 | `src/clients/` | Тонкие адаптеры |

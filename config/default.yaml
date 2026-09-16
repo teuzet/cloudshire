@@ -17,6 +17,8 @@ logging:
   dir: ./logs
   file: true
   seedDump: true
+  # Один файл на живой город: полный промпт, tools, результаты. После генезиса.
+  cityAgent: true
 
 telegram:
   # Авто: включится, если в .env есть TELEGRAM_BOT_TOKEN.

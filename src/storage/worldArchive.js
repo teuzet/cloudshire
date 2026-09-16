@@ -84,12 +84,19 @@ export async function writeWorldArchive({
   const copiedLogs = {
     usage: await copyFileIfExists(usageSrc, path.join(logsDest, 'usage.jsonl')),
     session: await copyFileIfExists(sessionSrc, path.join(logsDest, 'session.log')),
+    cities: false,
   };
 
   // Если usage ещё в live-папке мира — тоже
   const liveUsage = path.join(worldLogsDir(config, worldId), 'usage.jsonl');
   if (!copiedLogs.usage && liveUsage !== usageSrc) {
     copiedLogs.usage = await copyFileIfExists(liveUsage, path.join(logsDest, 'usage.jsonl'));
+  }
+
+  const citiesSrc = path.join(worldLogsDir(config, worldId), 'cities');
+  if (fs.existsSync(citiesSrc)) {
+    await fsp.cp(citiesSrc, path.join(logsDest, 'cities'), { recursive: true });
+    copiedLogs.cities = true;
   }
 
   const meta = {
