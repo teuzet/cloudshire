@@ -323,9 +323,37 @@ test('канон мира: сопряжение — событие, а ходя�
   assert.match(cfg.world.cosmology, /Ходят по проходу/);
   const view = cfg.agents.subjectificator.instructions;
   assert.match(view, /сопряжение — событие и пора, а не место/);
-  assert.match(view, /в запись не переноси ниоткуда/);
+  assert.match(view, /в запись не переноси\s+ниоткуда/);
   assert.match(view, /И источник, и архив пары писали у соседа/);
   assert.match(view, /пиши развёрнуто, не сводкой/);
+});
+
+test('жертве не видно ни чужого замысла, ни нужды соседа', () => {
+  const view = loadConfig().agents.subjectificator.instructions;
+  assert.match(view, /ЧУЖОЙ ЗАМЫСЕЛ ОТСЮДА ТОЖЕ НЕ ВИДЕН/);
+  assert.match(view, /чего ему не хватало/);
+  assert.match(view, /Пиши: взяли зерно/);
+
+  const text = formatCityViewPrompt({
+    viewerName: 'Аллерия',
+    neighborName: 'Керсай',
+    actorName: 'Керсай',
+    hostile: true,
+    sourceText: 'Маршал Орена вывела необходимые Керсаю припасы с чужого берега.',
+  });
+  assert.match(text, /Зачем это было «Керсай», отсюда тоже не видно/);
+  assert.match(text, /чужую нужду и чужой расчёт — нет/);
+});
+
+test('жертве не пересказывают проход заново: подробность в случившемся', () => {
+  const text = formatCityViewPrompt({
+    viewerName: 'Аллерия',
+    neighborName: 'Керсай',
+    sourceText: 'Ночью через проход пришёл отряд.',
+  });
+  assert.match(text, /Проход в летописи уже описан/);
+  assert.match(text, /не в описании прохода/);
+  assert.match(loadConfig().agents.subjectificator.instructions, /Заново его не описывай/);
 });
 
 test('жертве не называют чужого сановника, даже если он стоит в источнике', () => {

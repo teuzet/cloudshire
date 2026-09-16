@@ -22,7 +22,7 @@ import { FINISH_SHORT } from '../../game/rolls.js';
 import { resolveIslandImage } from '../../game/islandImage.js';
 import { resolveOfficerPortrait } from '../../game/officerImage.js';
 import { domainHasIslandImage, officerHasPortrait } from '../../storage/r2.js';
-import { overlayWithPartner } from '../../game/confluxBoard.js';
+import { overlayWithPartner, stripConfluxView } from '../../game/confluxBoard.js';
 import { deriveOnboardingPhase, normalizeOnboardingDraft } from '../../game/onboarding.js';
 import { genesisTutorialText } from '../../game/progressBar.js';
 import { miniCityPayload } from '../../game/miniCity.js';
@@ -159,10 +159,54 @@ function nameForDomain(id, domain, partner) {
   return sid || null;
 }
 
+/**
+ * Нити пары для инспектора. Контейнер живёт отдельно от plotlines и на оверлее
+ * правителя с него снимают концовки — здесь нужна живая карточка, иначе
+ * тестовый клиент показывает сопряжение без исхода.
+ */
+function inspectPairPlotlines(conflux, day, boardLore, viewer) {
+  const seen = new Set();
+  const out = [];
+  const add = (plot) => {
+    if (!plot?.id || seen.has(plot.id)) return;
+    seen.add(plot.id);
+    let card = plot;
+    if (conflux.container && plot.id === conflux.container.id) {
+      const syn = conflux.synopsis?.[viewer?.id];
+      if (syn) card = { ...plot, synopsis: syn };
+    }
+    out.push(inspectPlot(card, day, boardLore));
+  };
+  add(conflux.container);
+  for (const plot of conflux.plotlines || []) add(plot);
+  return out;
+}
+
+function inspectForecast(conflux, domain, partner) {
+  const src = conflux?.forecast;
+  if (!src || typeof src !== 'object') return null;
+  const names = {
+    ...(domain?.id ? { [String(domain.id)]: domain.name } : {}),
+    ...(partner?.id ? { [String(partner.id)]: partner.name } : {}),
+  };
+  const byCity = [];
+  let neutral = '';
+  for (const [id, value] of Object.entries(src)) {
+    const text = String(value || '').trim();
+    if (!text) continue;
+    if (id === 'neutral') {
+      neutral = text;
+      continue;
+    }
+    byCity.push({ id, name: names[String(id)] || id, text });
+  }
+  if (!byCity.length && !neutral) return null;
+  return { byCity, neutral: neutral || null };
+}
+
 /** Живая доска сопряжения для инспектора. */
 function inspectConfluxBoard(conflux, domain, partner, world, day) {
   if (!conflux) return null;
-  const viewerId = String(domain.id);
   const partnerId = partner ? String(partner.id) : null;
   const names = Object.fromEntries(
     (conflux.domainIds || []).map((id) => [String(id), nameForDomain(id, domain, partner) || String(id)]),
@@ -183,10 +227,11 @@ function inspectConfluxBoard(conflux, domain, partner, world, day) {
     partnerName: partner?.name || partnerId,
     mainPlotId: conflux.mainPlotId || null,
     knownAboutPartner: [...known].sort(byTick).map(slimLore),
-    plotlines: (conflux.plotlines || []).map((p) => inspectPlot(p, day, boardLore)),
+    plotlines: inspectPairPlotlines(conflux, day, boardLore, domain),
     closedPlotlines: (conflux.closedPlotlines || []).map((p) => inspectPlot(p, day, boardLore)),
     processes: (conflux.processes || []).map((p) => inspectProcess(p, day)),
     lore: [...(conflux.lore || [])].slice(-40).map(slimLore),
+    forecast: inspectForecast(conflux, domain, partner),
     domainNames: names,
   };
 }
@@ -684,7 +729,8 @@ export function createWebServer({ config, app, runtime, storage }) {
         const { partner: partnerDomain } = conflux
           ? await overlayWithPartner(storage, domain, conflux)
           : { partner: null };
-        const partner = partnerDomain?.id || null;
+        const overlay = new Set(domain._confluxOverlayIds || []);
+        const cityPlots = (domain.plotlines || []).filter((p) => !overlay.has(p.id));
 
         res.json({
           userId,
@@ -716,7 +762,7 @@ export function createWebServer({ config, app, runtime, storage }) {
             priestOrders: priestOrders(domain),
             notify: notifySettings(domain),
             monthLog: domain.state?.monthLog || [],
-            plotlines: (domain.plotlines || []).map((p) => ({
+            plotlines: cityPlots.map((p) => ({
               ...inspectPlot(p, day, lore),
               canDrop: canDropPlayStory(domain, p),
             })),
@@ -752,6 +798,7 @@ export function createWebServer({ config, app, runtime, storage }) {
             },
           },
         });
+        if (conflux) stripConfluxView(domain);
       } catch (err) {
         req.log?.error('http.error', { error: err.message });
         res.status(500).json({ error: err.message });

@@ -207,6 +207,31 @@ const DEFAULT_CONTINUATION_AUTHORS = [
   { id: 'wolfe', name: 'Джин Вулф' },
 ];
 
+/**
+ * Один автор на ход истории.
+ *
+ * У завязок этот жребий уже был: брейншторм бросает по автору на кандидата и
+ * просит развить сюжет его нарративной эстетикой. Развитию жребия не хватало,
+ * и биты сходились к ровному среднему — происшествие, работы, итог. Пул тот
+ * же: второй список означал бы две правды о том, чьей рукой пишется мир.
+ */
+export function pickContinuationAuthor(config, rng = Math.random) {
+  const pool = freeformConfig(config).continuationAuthors;
+  if (!pool.length) return null;
+  return pool[Math.min(pool.length - 1, Math.floor(rng() * pool.length))];
+}
+
+/** Согласование идёт со словом «автор»: в пуле есть и женские имена. */
+export function formatContinuationAuthorForPrompt(author) {
+  if (!author?.name) return '';
+  return [
+    `Развивай ход так, как это сделал бы автор: ${author.name}.`,
+    'Копируй не сюжеты и не слог, а нарративную эстетику: что этот автор счёл бы',
+    'достойным внимания и в каком порядке это показал бы.',
+    'Мир, имена, ремёсла и время остаются здешние, самого автора в тексте не поминай.',
+  ].join('\n');
+}
+
 function normalizeContinuationAuthors(raw) {
   const list = Array.isArray(raw) && raw.length ? raw : DEFAULT_CONTINUATION_AUTHORS;
   return list

@@ -25,7 +25,7 @@ import {
   createEmptyContainer,
   seedPartingClock,
   seedDockMeet,
-  PARTING_ENDING_ID,
+  findPartingThreat,
   approachingAnnounceText,
   returnBoardsOnUndock,
 } from './confluxBoard.js';
@@ -875,8 +875,8 @@ export async function undockConfluxNow({
 
   const plot = conflux.container;
   if (plot && !plot.ending) {
-    const clock = (plot.threats || []).find((t) => t.endingId === PARTING_ENDING_ID && t.status === 'live');
-    if (clock) fireThreat(plot, clock, { day, firedBy: 'undock' });
+    const clock = findPartingThreat(plot);
+    if (clock?.status === 'live') fireThreat(plot, clock, { day, firedBy: 'undock' });
   }
   if (world && plot) cancelJobsForPlot(world, plot.id);
 

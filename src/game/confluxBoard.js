@@ -173,6 +173,7 @@ export function normalizeConfluxBoard(conflux) {
   if (!conflux.quiet || typeof conflux.quiet !== 'object') {
     conflux.quiet = { nextAttemptDay: null, cooldownUntilDay: null };
   }
+  if (conflux.container) clearPairEndings(conflux.container);
   return conflux;
 }
 
@@ -260,7 +261,7 @@ export function createEmptyContainer({ a, b, conflux, world, config }) {
     synopsis:
       `Летающие острова городов «${a.name}» и «${b.name}» сошлись. ` +
       `Что из этого выйдет — решат дела людей на проходе.`,
-    closeWhen: 'Острова разошлись в небе, пути между ними больше нет.',
+    closeWhen: PAIR_CLOSE_WHEN,
     kind: 'story',
     storyType: 'freeform',
     isMainConflux: true,
@@ -286,24 +287,27 @@ export function createEmptyContainer({ a, b, conflux, world, config }) {
 }
 
 export const PARTING_ENDING_ID = 'end_parting';
-export const PARTING_ENDING_TEXT = 'Острова разошлись, всё вернулось как было.';
+export const PARTING_EVENT = 'parting';
+export const PAIR_CLOSE_WHEN = 'Острова разошлись в небе, пути между ними больше нет.';
 export const PARTING_THREAT_TEXT = 'Острова разойдутся, и всё вернётся как было.';
 export const DOCK_MEET_EVENT = 'dock_meet';
 export const DOCK_MEET_TEXT = 'Острова сошлись.';
 
-/** Нейтральная концовка разъезда и обязательство, которое её вызывает. */
+/**
+ * Часы расставания: обязательство мира со сроком на конец стыковки.
+ *
+ * Раньше к ним прилагалась ещё и «нейтральная концовка разъезда», а само
+ * обязательство искали по её id. Концовкой она не была: у сопряжения нет
+ * исходов на выбор, оно кончается по часам, а чем именно кончилось — это
+ * накопленное к тому дню, и его собирает финальная хроника из прогноза.
+ * Концовку сняли, часы остались, и ищутся они теперь по своему событию.
+ */
 export function seedPartingClock(plot, { day = 0, dockEndDay } = {}) {
   if (!plot) return null;
-  plot.endings = Array.isArray(plot.endings) ? plot.endings : [];
-  if (!plot.endings.some((e) => e.id === PARTING_ENDING_ID)) {
-    plot.endings.unshift({
-      id: PARTING_ENDING_ID,
-      kind: 'NEUTRAL_ENDING',
-      text: PARTING_ENDING_TEXT,
-    });
-  }
-  const existing = (plot.threats || []).find((t) => t.endingId === PARTING_ENDING_ID);
+  clearPairEndings(plot);
+  const existing = findPartingThreat(plot);
   if (existing) {
+    existing.eventKind = PARTING_EVENT;
     if (dockEndDay != null) existing.dueDay = Math.round(Number(dockEndDay));
     return existing;
   }
@@ -318,10 +322,29 @@ export function seedPartingClock(plot, { day = 0, dockEndDay } = {}) {
       known: true,
       day,
       dueDay: due,
-      endingId: PARTING_ENDING_ID,
+      eventKind: PARTING_EVENT,
       band: 'YEAR',
     }),
   );
+}
+
+/** Сейвы со старыми часами держат их на id снятой концовки. */
+export function findPartingThreat(plot) {
+  return (
+    (plot?.threats || []).find(
+      (t) => t?.eventKind === PARTING_EVENT || t?.endingId === PARTING_ENDING_ID,
+    ) || null
+  );
+}
+
+/**
+ * Сопряжение живёт без списка концовок. Старые сейвы держат их с тех пор,
+ * когда кристаллизация раздавала исходы по номеру в массиве, поэтому чистим
+ * при каждой нормализации доски, а не только при заводе часов.
+ */
+function clearPairEndings(plot) {
+  plot.endings = [];
+  plot.closeWhen = PAIR_CLOSE_WHEN;
 }
 
 /** Обязательство стыковки: по нему пишутся первая хроника и описание прохода. */

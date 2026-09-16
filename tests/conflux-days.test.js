@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createConfluxRecord, beginConfluxOwnership, dockConfluxNow, schedulePairJobs, monthsUntilDock, abortCrossIslandDeeds, undockConfluxNow, confluxSummary } from '../src/game/conflux.js';
 import { hoursToGameDays, pickPrepDelayHours, confluxConfig, remainingDockDays, rollConfluxSpan, stampGenesisConfluxBan, confluxDue } from '../src/game/confluxTime.js';
-import { seedDockMeet, DOCK_MEET_EVENT } from '../src/game/confluxBoard.js';
+import { seedDockMeet, seedPartingClock, findPartingThreat, DOCK_MEET_EVENT, PARTING_EVENT } from '../src/game/confluxBoard.js';
 import { fireThreat } from '../src/game/threats.js';
 import { hourInTimeZone, noteRulerActivity, emptyActivity } from '../src/game/activity.js';
 import { inQuietHours, setQuietHours, pushVerdict } from '../src/game/notify.js';
@@ -104,8 +104,9 @@ test('нити при сближении остаются на домене', ()
   assert.equal(c.plotRefs.some((r) => r.plotId === plot.id), true);
   assert.ok(c.container);
   assert.equal(c.container.crystallized, false);
-  assert.equal(c.container.endings.some((e) => e.id === 'end_parting'), true);
-  assert.equal((c.container.threats || []).some((t) => t.endingId === 'end_parting'), true);
+  // У сопряжения нет концовок: расставание — часы, а не исход на выбор.
+  assert.deepEqual(c.container.endings, []);
+  assert.equal((c.container.threats || []).some((t) => t.eventKind === PARTING_EVENT), true);
   assert.match(a.lore[0].text, /Берил/);
   assert.match(a.lore[0].text, /90 дн/);
   assert.doesNotMatch(a.lore[0].text, /~\d/);
@@ -146,7 +147,7 @@ test('стыковка вешает «острова сошлись» и не з
   assert.equal(meet.status, 'fired');
   assert.equal(meet.text, 'Острова сошлись.');
   assert.equal(c.container.ending, undefined);
-  assert.equal((c.container.threats || []).some((t) => t.endingId === 'end_parting' && t.status === 'live'), true);
+  assert.equal(findPartingThreat(c.container)?.status, 'live');
   assert.ok(out.contact?.description);
   assert.ok(c.passage?.text);
   assert.match(a.lore.map((f) => f.text).join('\n'), /Берил|проход|сошл/i);
@@ -506,7 +507,36 @@ test('после кристаллизации контейнер получае�
   });
   assert.equal(c.container.crystallized, true);
   assert.ok(c.container.stats.budget >= 15);
-  assert.ok(c.container.endings.length >= 2);
+  // Кристаллизация даёт помехи и бюджет, но концовок у пары нет вовсе.
+  assert.deepEqual(c.container.endings, []);
+  assert.ok((c.container.threats || []).length >= 2);
+});
+
+test('старый сейв с концовками пары теряет их, а часы остаются одни', () => {
+  const a = city('a', 'Астра');
+  const b = city('b', 'Берил');
+  const c = createConfluxRecord({
+    domainIds: ['a', 'b'],
+    world: world(),
+    prepStartDay: 0,
+    dockStartDay: 90,
+    dockEndDay: 180,
+  });
+  const plot = createEmptyContainer({ a, b, conflux: c, world: world(), config });
+  plot.endings = [
+    { id: 'end_parting', kind: 'NEUTRAL_ENDING', text: 'Острова разошлись, всё вернулось как было.' },
+    { id: 'end_0', kind: 'GOOD_ENDING', text: 'Города заключают временный договор о проходе.' },
+  ];
+  plot.threats = [
+    { id: 'thr_old', text: 'Острова разойдутся.', status: 'live', endingId: 'end_parting', dueDay: 180 },
+  ];
+
+  const clock = seedPartingClock(plot, { day: 90, dockEndDay: 180 });
+  assert.deepEqual(plot.endings, []);
+  assert.equal(plot.threats.length, 1, 'старые часы не продублировались');
+  assert.equal(clock.id, 'thr_old');
+  assert.equal(clock.eventKind, PARTING_EVENT, 'часы перевешены на своё событие');
+  assert.equal(findPartingThreat(plot), clock);
 });
 
 test('широкий проход нельзя запереть, зараза проходит при shut', () => {

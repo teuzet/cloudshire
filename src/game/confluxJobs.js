@@ -11,7 +11,7 @@ import { ensurePlotStatBudget } from './plotlines.js';
 import { createThreat, attachThreat } from './threats.js';
 import { resyncThreatJobs } from './worldLoop.js';
 import { pairPrimaryId } from './confluxTime.js';
-import { PARTING_ENDING_ID } from './confluxBoard.js';
+import { DOCK_MEET_EVENT, findPartingThreat } from './confluxBoard.js';
 import { maybeNudgeProxy } from './proxyJudge.js';
 import { getLogger } from '../log.js';
 
@@ -42,10 +42,15 @@ async function savePair(storage, conflux, domains) {
   await storage.saveConflux(conflux);
 }
 
+/**
+ * Кристаллизация даёт нити пары синопсис, тяжесть и помехи — и только их.
+ * Концовок у сопряжения нет: оно кончается по часам расставания, а чем
+ * кончилось — складывается из накопленного и пишется финальной хроникой.
+ */
 export async function crystallizeContainer({ runtime, conflux, domains, world, day, log }) {
   const plot = conflux?.container;
   if (!plot || plot.crystallized) return plot;
-  const draft = { gravity: 'CRISIS', synopsis: '', endings: [], threats: [] };
+  const draft = { gravity: 'CRISIS', synopsis: '', threats: [] };
   if (runtime) {
     try {
       await runtime.run({
@@ -57,7 +62,7 @@ export async function crystallizeContainer({ runtime, conflux, domains, world, d
         tools: [
           {
             name: 'submit_crystal',
-            description: 'Исходы, помехи и первое развитие общей нити сопряжения.',
+            description: 'Синопсис, тяжесть и помехи общей нити сопряжения.',
             parameters: {
               type: 'object',
               additionalProperties: false,
@@ -65,14 +70,12 @@ export async function crystallizeContainer({ runtime, conflux, domains, world, d
               properties: {
                 synopsis: { type: 'string' },
                 gravity: { type: 'string', enum: ['CRISIS', 'RUPTURE'] },
-                endings: { type: 'array', items: { type: 'string' } },
                 threats: { type: 'array', items: { type: 'string' } },
               },
             },
             handler: async (args) => {
               draft.synopsis = String(args?.synopsis || '').trim();
               draft.gravity = args?.gravity === 'RUPTURE' ? 'RUPTURE' : 'CRISIS';
-              draft.endings = Array.isArray(args?.endings) ? args.endings.map(String) : [];
               draft.threats = Array.isArray(args?.threats) ? args.threats.map(String) : [];
               return { ok: true };
             },
@@ -103,18 +106,8 @@ export async function crystallizeContainer({ runtime, conflux, domains, world, d
   plot.gravity = draft.gravity;
   plot.maxDepth = 2;
   if (draft.synopsis) plot.synopsis = draft.synopsis;
-  const keptEndings = (plot.endings || []).filter((e) => e.id === PARTING_ENDING_ID);
-  const extraTexts = (draft.endings.length ? draft.endings : ['ссора у прохода', 'общий убыток']).slice(0, 3);
-  plot.endings = [
-    ...keptEndings,
-    ...extraTexts.map((text, i) => ({
-      id: `end_${i}`,
-      kind: i === 0 ? 'GOOD_ENDING' : 'BAD_ENDING',
-      text,
-    })),
-  ];
   const keptThreats = (plot.threats || []).filter(
-    (t) => t.endingId === PARTING_ENDING_ID || t.eventKind === 'dock_meet',
+    (t) => t === findPartingThreat(plot) || t.eventKind === DOCK_MEET_EVENT,
   );
   plot.threats = keptThreats;
   const threatTexts = (draft.threats.length ? draft.threats : ['проход потребует крови или платы', 'на берегу назреет ссора']).slice(

@@ -231,6 +231,19 @@ test('кросс-островной записи прямо велят не сж
   assert.doesNotMatch(local, /не короче четырёх предложений/);
 });
 
+test('объём кросс-островной записи не уходит в описание прохода', () => {
+  const text = formatDeedPrompt({
+    domain: domain(),
+    process: { ...deed, crossIsland: true },
+    applied: { finish: 'ok' },
+    partnerName: 'Керсай',
+    passage: 'Края легли берег в берег, спуск по осыпи.',
+  });
+  assert.match(text, /Проход городу знаком и описан/);
+  assert.match(text, /обстановка работы, а не её событие/);
+  assert.match(text, /ближе к людям и к тому, чем работа обернулась/);
+});
+
 test('исход приходит общим словарём броска, своего у хрониста нет', () => {
   assert.equal(finishForPrompt('crit'), FINISH_LABELS.crit);
   assert.equal(finishForPrompt('fail'), FINISH_LABELS.fail);

@@ -179,15 +179,21 @@ function makeDomain() {
   };
 }
 
-function makeStorage(domain, world) {
+function makeStorage(domain, world, extra = {}) {
+  const confluxes = extra.confluxes || [];
+  const domains = [domain, ...(extra.domains || []).filter((d) => d.id !== domain.id)];
   return {
     getWorld: async () => world,
-    listDomains: async () => [domain],
-    getDomain: async (id) => (id === domain.id ? domain : null),
+    listDomains: async () => domains,
+    getDomain: async (id) => domains.find((d) => d.id === id) || null,
     getDomainForUser: async (userId) => (userId === 'local-user' ? domain : null),
     getUserBinding: async () => ({ userId: 'local-user', domainId: domain.id }),
     listUserBindings: async () => [{ userId: 'local-user', domainId: domain.id }],
-    listConfluxes: async () => [],
+    listConfluxes: async (opts = {}) => {
+      const wanted = opts.status ? [].concat(opts.status) : null;
+      return confluxes.filter((c) => !wanted || wanted.includes(c.status));
+    },
+    getConflux: async (id) => confluxes.find((c) => c.id === id) || null,
     saveDomain: async () => {},
     saveWorld: async () => {},
     updateWorld: async (mutate) => {
@@ -277,7 +283,7 @@ function makeApp(calls = [], hooks = {}) {
   };
 }
 
-async function withServer(run, { calls = [], hooks = {}, playDev, domain: givenDomain } = {}) {
+async function withServer(run, { calls = [], hooks = {}, playDev, domain: givenDomain, extraStorage } = {}) {
   const world = makeWorld();
   const domain = givenDomain || makeDomain();
   const cfg = playDev === false ? { ...config, web: { ...config.web, playDev: false } } : config;
@@ -285,7 +291,7 @@ async function withServer(run, { calls = [], hooks = {}, playDev, domain: givenD
     config: cfg,
     app: makeApp(calls, { ...hooks, domain, world }),
     runtime: {},
-    storage: makeStorage(domain, world),
+    storage: makeStorage(domain, world, extraStorage),
   });
   const http = await new Promise((resolve) => {
     const s = server.listen(0, '127.0.0.1', () => resolve(s));
@@ -399,6 +405,81 @@ test('концовки приходят разобранными, а не одн
   });
 });
 
+test('инспектор показывает концовку нити сопряжения, а не пустую карточку оверлея', async () => {
+  const partner = {
+    id: 'd2',
+    worldId: 'w1',
+    name: 'Керсай',
+    lore: [],
+    plotlines: [],
+  };
+  const container = {
+    id: 'plot_pair',
+    title: 'Сопряжение «Саркум» и «Керсай»',
+    synopsis: 'Острова сошлись.',
+    isMainConflux: true,
+    storyType: 'freeform',
+    kind: 'story',
+    closeWhen: 'Острова разошлись в небе, пути между ними больше нет.',
+    endings: [],
+    threats: [
+      {
+        id: 'thr_part',
+        text: 'Острова разойдутся, и всё вернётся как было.',
+        known: true,
+        status: 'live',
+        totalDays: 180,
+        dueDay: 305,
+        eventKind: 'parting',
+      },
+    ],
+  };
+  const conflux = {
+    id: 'cf1',
+    status: 'docked',
+    domainIds: ['d1', 'd2'],
+    container,
+    mainPlotId: container.id,
+    plotlines: [],
+    closedPlotlines: [],
+    processes: [],
+    lore: [],
+    forecast: {
+      d1: 'Саркум останется с пустыми складами.',
+      d2: 'Керсай уйдёт с зерном.',
+      neutral: 'Один берег взял у другого.',
+    },
+    synopsis: {
+      d1: 'Нас заняли с прохода.',
+    },
+  };
+  await withServer(
+    async ({ base, domain }) => {
+      const data = await get(base, '/api/play/inspect?userId=local-user');
+      const pair = data.domain.conflux;
+      assert.equal(pair.plotlines.length, 1);
+      assert.equal(pair.plotlines[0].id, 'plot_pair');
+      // Концовок у пары нет: чем кончится, показывает прогноз, а не список исходов.
+      assert.deepEqual(pair.plotlines[0].endings, []);
+      assert.equal(pair.plotlines[0].threats[0].text, 'Острова разойдутся, и всё вернётся как было.');
+      assert.equal(pair.forecast.neutral, 'Один берег взял у другого.');
+      assert.equal(pair.forecast.byCity[0].text, 'Саркум останется с пустыми складами.');
+      assert.equal(pair.plotlines[0].synopsis, 'Нас заняли с прохода.');
+      // Городская вкладка не дублирует ободранную карточку оверлея.
+      assert.equal(
+        data.domain.plotlines.some((p) => p.id === 'plot_pair'),
+        false,
+      );
+      assert.equal(
+        (domain.plotlines || []).some((p) => p.id === 'plot_pair'),
+        false,
+        'оверлей после инспектора снят',
+      );
+    },
+    { extraStorage: { confluxes: [conflux], domains: [partner] } },
+  );
+});
+
 test('клиент рисует концовки списком с пометкой рода', async () => {
   await withServer(async ({ base }) => {
     const res = await fetch(`${base}/play/app.js`);
@@ -427,6 +508,8 @@ test('клиент рисует концовки списком с пометк�
     assert.match(js, /\/api\/play\/clock/);
     assert.match(js, /\/api\/play\/snapshots/);
     assert.match(js, /skipDays/);
+    assert.match(js, /Если острова разойдутся сейчас/);
+    assert.match(js, /прогноза ещё нет/);
     assert.match(js, /function daysWord/);
     assert.match(js, /до сопряжения, дн\./);
     assert.match(js, /осталось в сопряжении, дн\./);

@@ -14,7 +14,7 @@ import {
   PLOT_ENDING_MAX,
   PLOT_HOOK_MAX,
 } from '../src/game/plotlines.js';
-import { appendChronicle, advanceWorldMonths, normalizeFinish, freeformConfig, openStoryTitlesLine, formatFreeformGravityForPrompt, formatFreeformChronicleSeed, formatBrainstormCandidateForPrompt, parseFreeformGravity, parseFreeformUrgency, FREEFORM_GRAVITY, clampFreeformCountdown, createFreeformPlot, sampleFreeformMaxDepth, advanceFreeformDepth, formatFreeformDepth, plotCardForPrompt, applyFreeformProgress, freeformTickDecision, autotickCloseKind, rollFreeformCountdown, maxFailsForGravity } from '../src/game/freeform.js';
+import { appendChronicle, advanceWorldMonths, normalizeFinish, freeformConfig, formatContinuationAuthorForPrompt, pickContinuationAuthor, openStoryTitlesLine, formatFreeformGravityForPrompt, formatFreeformChronicleSeed, formatBrainstormCandidateForPrompt, parseFreeformGravity, parseFreeformUrgency, FREEFORM_GRAVITY, clampFreeformCountdown, createFreeformPlot, sampleFreeformMaxDepth, advanceFreeformDepth, formatFreeformDepth, plotCardForPrompt, applyFreeformProgress, freeformTickDecision, autotickCloseKind, rollFreeformCountdown, maxFailsForGravity } from '../src/game/freeform.js';
 import { parseFreeformPick, formatFreeformVariants, formatFreeformCardJudgeCase, formatFreeformCardJudgeRepair, parseFreeformPackReview, FREEFORM_PACK_JUDGE_CODES } from '../src/game/freeformJudge.js';
 import { normalizeSeedBlank, pickFreeformSeedAxes, pickFreeformSeedAxisSets, formatFreeformAxisCatalogs, formatFreeformSeedAxisSetsForPrompt } from '../src/game/freeformArchitect.js';
 import { listLegalBeatDynamics, pickFreeformBeatDynamics, formatBeatDynamicsForPrompt } from '../src/game/freeformDynamics.js';
@@ -970,6 +970,25 @@ test('жребий динамики хода — полярность good/bad, 
   assert.match(formatted, /Способы сдвига/);
   assert.match(formatted, /Поворот/);
   assert.doesNotMatch(formatted, /SETTLEMENT|PLOT_TWIST|ДИНАМИКИ/);
+});
+
+test('ход тоже получает брошенного автора, и пул у него общий с завязками', () => {
+  const cfg = loadConfig();
+  const pool = freeformConfig(cfg).continuationAuthors;
+  const first = pickContinuationAuthor(cfg, () => 0);
+  const last = pickContinuationAuthor(cfg, () => 0.999999);
+  assert.equal(first.id, pool[0].id);
+  assert.equal(last.id, pool[pool.length - 1].id);
+
+  const text = formatContinuationAuthorForPrompt(first);
+  assert.match(text, new RegExp(first.name));
+  assert.match(text, /нарративную эстетику/);
+  // Бросок настраивает руку, а не тянет в текст чужой мир.
+  assert.match(text, /Мир, имена, ремёсла и время остаются здешние/);
+  assert.equal(formatContinuationAuthorForPrompt(null), '');
+
+  assert.match(cfg.agents.freeformArchitectTell.instructions, /брошен известный автор/);
+  assert.match(cfg.agents.freeformArchitectTell.instructions, /ничего в сюжете не решает/);
 });
 
 test('лабораторный undo снимает последний снимок', () => {

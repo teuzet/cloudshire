@@ -73,9 +73,10 @@ test('прогноз переписывается на каждой записи
   assert.match(conflux.forecast.neutral, /не удержался/);
 });
 
-test('карточка нити пары показывает синопсис своего города и прячет концовки', () => {
+test('карточка нити пары показывает синопсис своего города, а концовок у пары нет', () => {
   const { a, b, conflux } = pair();
-  conflux.container.endings = [{ id: 'end_x', text: 'Тайный исход' }];
+  // Сейв времён исходов «по номеру в массиве»: нормализация доски их снимает.
+  conflux.container.endings = [{ id: 'end_0', kind: 'GOOD_ENDING', text: 'Временный договор о проходе' }];
   conflux.container.synopsis = 'Нейтрально: город взят.';
   conflux.synopsis.a = 'Нас заняли с прохода.';
   conflux.synopsis.b = 'Мы взяли соседний берег.';
@@ -84,7 +85,7 @@ test('карточка нити пары показывает синопсис �
   assert.equal(card.synopsis, 'Нас заняли с прохода.');
   assert.deepEqual(card.endings, []);
   assert.equal(conflux.container.synopsis, 'Нейтрально: город взят.');
-  assert.equal(conflux.container.endings.length, 1);
+  assert.deepEqual(conflux.container.endings, []);
   stripConfluxView(a);
   assert.equal(a.plotlines.length, 0);
 });

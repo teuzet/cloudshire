@@ -761,6 +761,29 @@ function renderConfluxTab(d) {
     ),
   );
 
+  const forecastRows = [];
+  const src = c.forecast;
+  if (Array.isArray(src?.byCity)) {
+    for (const city of src.byCity) {
+      const name = city.name || names[city.id] || city.id;
+      if (city.text) forecastRows.push(`<p class="pre"><b>${esc(name)}:</b> ${esc(city.text)}</p>`);
+    }
+    if (src.neutral) forecastRows.push(`<p class="pre"><b>нейтрально:</b> ${esc(src.neutral)}</p>`);
+  } else if (src && typeof src === 'object') {
+    for (const [id, text] of Object.entries(src)) {
+      const body = String(text || '').trim();
+      if (!body) continue;
+      const label = id === 'neutral' ? 'нейтрально' : names[id] || id;
+      forecastRows.push(`<p class="pre"><b>${esc(label)}:</b> ${esc(body)}</p>`);
+    }
+  }
+  out.push(
+    block(
+      'Если острова разойдутся сейчас',
+      forecastRows.length ? forecastRows.join('') : '<p class="muted">прогноза ещё нет</p>',
+    ),
+  );
+
   out.push(
     block(
       `Нити сопряжения (${plots.length})`,

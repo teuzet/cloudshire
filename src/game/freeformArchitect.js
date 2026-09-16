@@ -3,10 +3,12 @@ import { toolFail } from '../agents/toolResult.js';
 import { clipPlotText, PLOT_TITLE_MAX, PLOT_SUMMARY_MAX } from './plotlines.js';
 import {
   freeformConfig,
+  formatContinuationAuthorForPrompt,
   formatFreeformGravityForPrompt,
   formatFreeformSeedBlank,
   formatStoryForBeatArchitect,
   finishLabel,
+  pickContinuationAuthor,
   FREEFORM_AXIS_IDS,
   FREEFORM_AXIS_TITLE,
 } from './freeform.js';
@@ -362,6 +364,8 @@ export async function inventBeatBlanks({
         index: i + 1,
       }));
   const auto = trigger === 'auto';
+  const author = pickContinuationAuthor(config, rng);
+  if (author) log.info('freeform.architect.beat_author', { author: author.id });
   return askBeatBlanks({
     runtime,
     cfg: { ...cfg, variantsMax: dynamics.length },
@@ -387,6 +391,7 @@ export async function inventBeatBlanks({
             .join('\n'),
       '',
       formatBeatDynamicsForPrompt(dynamics),
+      formatContinuationAuthorForPrompt(author),
     ]
       .filter(Boolean)
       .join('\n'),
