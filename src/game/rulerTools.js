@@ -102,6 +102,7 @@ import {
   warmPlotlines,
   plotConfig,
   findPlotline,
+  findVisiblePlot,
   clipPlotText,
   PLOT_TITLE_MAX,
   PLOT_SUMMARY_MAX,
@@ -513,11 +514,11 @@ export function buildRulerTools(domain, storage, character, ctx) {
         })),
         recentlyClosed: recentlyClosedProcesses(domain, world?.tickIndex, { day }),
         processSlots: canStartProcess(domain, ctx.config),
-        plots: plotsForPriest(domain.plotlines).map((p) => ({
+        plots: plotsForPriest(domain.plotlines, { partner: ctx.partner }).map((p) => ({
           id: p.id,
           title: p.title,
           type: plotTypeOf(p),
-          hasProcess: plotHasLiveProcess(domain, p),
+          hasProcess: plotHasLiveProcess(domain, p) || Boolean(ctx.partner && plotHasLiveProcess(ctx.partner, p)),
           shared: Boolean(p.shared),
           // Нависшее, о чём город знает: формулировка и полоса остатка, без дней.
           threats: knownThreatsForSpeech(p, day).map((t) => ({
@@ -527,7 +528,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
             ending: t.endingText || null,
           })),
           dread: dreadFlag(p, day),
-          foreign: Boolean(ctx.conflux && !plotConcerns(p, domain.id)),
+          foreign: Boolean(ctx.partner && String(p.hostDomainId || domain.id) === String(ctx.partner.id)),
         })),
         standingRules: cityRules(domain).map((m) => ({ id: m.id, text: m.text, since: m.sinceLabel })),
         proxyText: proxyText(domain) || null,
@@ -951,11 +952,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
         const partners = ctx.conflux && ctx.partner ? [domain, ctx.partner] : [domain];
         let targetPlot = null;
         if (plotId) {
-          targetPlot =
-            findPlotline(domain, String(plotId)) ||
-            (ctx.partner ? findPlotline(ctx.partner, String(plotId)) : null) ||
-            (ctx.conflux?.plotlines || []).find((p) => String(p.id) === String(plotId)) ||
-            null;
+          targetPlot = findVisiblePlot(domain, String(plotId), ctx.partner);
         } else if (chronicleId && ctx.conflux) {
           targetPlot = findPlotByChronicleId(ctx.conflux, String(chronicleId), partners);
         }
@@ -1265,9 +1262,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
             partnerName: ctx.partner?.name || '',
             log: ctx.log,
           });
-          const rewritePlot =
-            findPlotline(domain, action.plotlineId) ||
-            (ctx.partner ? findPlotline(ctx.partner, action.plotlineId) : null);
+          const rewritePlot = findVisiblePlot(domain, action.plotlineId, ctx.partner);
           const applied = applyDockedDeedClassification(judged, {
             action,
             domain,
@@ -1300,8 +1295,8 @@ export function buildRulerTools(domain, storage, character, ctx) {
         }
         syncErrandFromProcess(domain, action);
         if (plotId) {
-          const current = findPlotline(domain, action.plotlineId);
-          const target = findPlotline(domain, String(plotId));
+          const current = findVisiblePlot(domain, action.plotlineId, ctx.partner);
+          const target = findVisiblePlot(domain, String(plotId), ctx.partner);
           if (isErrandPlot(current) && target && isStakedStory(target)) {
             return toolFail(
               'retarget_needs_new_process',
@@ -1309,12 +1304,19 @@ export function buildRulerTools(domain, storage, character, ctx) {
             );
           }
           unlinkProcessFromAllPlots(domain, action.id);
-          const linked = linkProcessToPlotline(domain, action.id, String(plotId));
-          if (linked) {
-            action.plotlineId = linked.id;
+          if (ctx.partner) unlinkProcessFromAllPlots(ctx.partner, action.id);
+          if (target && isStakedStory(target)) {
+            target.relatedProcessIds = target.relatedProcessIds || [];
+            if (!target.relatedProcessIds.includes(action.id)) {
+              target.relatedProcessIds.push(action.id);
+            }
+            action.plotlineId = target.id;
+          } else {
+            const linked = linkProcessToPlotline(domain, action.id, String(plotId));
+            action.plotlineId = linked?.id || null;
           }
         }
-        let plot = findPlotline(domain, action.plotlineId);
+        let plot = findVisiblePlot(domain, action.plotlineId, ctx.partner);
         let rehomed = false;
         if (
           plot &&
@@ -1335,7 +1337,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
             });
             plot = moved.plot;
             rehomed = moved.rehomed;
-            action.plotlineId = plot?.id || action.plotlineId;
+            action.plotlineId = plot?.id || null;
           }
         }
         await save();

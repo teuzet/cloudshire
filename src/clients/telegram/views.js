@@ -1,5 +1,5 @@
 import { formatStatValue } from '../../game/stats.js';
-import { normalizePlotlines, isErrandPlot } from '../../game/plotlines.js';
+import { normalizePlotlines, isStoryPlot } from '../../game/plotlines.js';
 
 export function formatIslandStats(domain, config) {
   const name = domain?.name || 'Остров';
@@ -12,15 +12,14 @@ export function formatIslandStats(domain, config) {
 
 export function formatIslandPlotlines(domain) {
   normalizePlotlines(domain);
-  const list = domain?.plotlines || [];
+  const list = (domain?.plotlines || []).filter((p) => p && isStoryPlot(p));
   if (!list.length) return `${domain?.name || 'Остров'}: открытых историй нет.`;
   const blocks = list.map((p) => {
-    const kind = isErrandPlot(p) ? 'поручение' : 'история';
     const age = `${p.ageMonths}/${p.maxAgeMonths} мес.`;
     const head =
       p.urgency != null || p.gravity != null
-        ? `«${p.title}» (${kind}) · срочность ${p.urgency ?? '—'} · масштаб ${p.gravity ?? '—'} · ${age}`
-        : `«${p.title}» (${kind}) · ${age}`;
+        ? `«${p.title}» (история) · срочность ${p.urgency ?? '—'} · масштаб ${p.gravity ?? '—'} · ${age}`
+        : `«${p.title}» (история) · ${age}`;
     const parts = [head];
     if (p.synopsis) parts.push(p.synopsis);
     if (p.closeWhen) parts.push(`закроется, когда: ${p.closeWhen}`);

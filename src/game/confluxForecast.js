@@ -1,14 +1,14 @@
 /**
- * Прогноз пары, синопсис по городам и редкие угрозы тишины.
+ * Прогноз пары и синопсис по городам.
  *
- * Прогноз игроку не показывают: он кормит расставание и угрозы.
- * Синопсис на карточке — свой у каждого города, из его летописи о паре.
+ * Прогноз игроку не показывают: он кормит расставание.
+ * Синопсис — свой у каждого города, из его летописи о паре.
+ * Часы расставания живут на объекте пары, не угрозой-сюжетом.
  */
 
 import { keepStories } from './storyteller.js';
 import { confluxConfig, pairPrimaryId } from './confluxTime.js';
-import { attachThreat, createThreat, findThreat, liveThreats } from './threats.js';
-import { scheduleJob, cancelJobs, cancelJobsForThreat } from './scheduler.js';
+import { scheduleJob, cancelJobs } from './scheduler.js';
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 
@@ -67,14 +67,13 @@ export function cityPairChronicleAdds(domain, conflux) {
 }
 
 function pairCard(conflux, domain) {
-  const plot = conflux?.container;
-  if (!plot) return null;
+  if (!conflux || !domain) return null;
   ensurePairState(conflux);
   return {
-    id: plot.id,
-    title: plot.title,
-    synopsis: conflux.synopsis[domain.id] || plot.synopsis || '',
-    type: 'conflux',
+    id: `pair_syn_${conflux.id}_${domain.id}`,
+    title: 'Сопряжение',
+    synopsis: conflux.synopsis[domain.id] || '',
+    type: 'story',
   };
 }
 
@@ -90,7 +89,7 @@ export async function refreshCityPairSynopsis({
   chronicleAdds = [],
   log,
 } = {}) {
-  if (!runtime || !conflux?.container || !domain) return null;
+  if (!runtime || !conflux || !domain) return null;
   ensurePairState(conflux);
   const card = pairCard(conflux, domain);
   if (!card) return null;
@@ -212,17 +211,9 @@ export async function refreshPairForecast({
 }
 
 export function dropSilenceThreat(conflux, world) {
-  const plot = conflux?.container;
-  if (!plot) return null;
-  const threat = findThreat(plot, silenceThreatId(conflux.id));
-  if (!threat || threat.status !== 'live') return null;
-  threat.status = 'dropped';
-  if (world) cancelJobsForThreat(world, threat.id);
-  return threat;
-}
-
-function liveSilenceThreat(conflux) {
-  return liveThreats(conflux?.container).find((t) => t.id === silenceThreatId(conflux.id)) || null;
+  void conflux;
+  void world;
+  return null;
 }
 
 export function scheduleSilenceAttempt(world, conflux, dueDay) {
@@ -287,30 +278,11 @@ export function attemptPairSilence({
     return { skipped: 'roll', nextAttemptDay: retry };
   }
 
-  const existing = liveSilenceThreat(conflux);
-  if (existing) {
-    scheduleSilenceAttempt(world, conflux, today + cfg.quietCooldownDays);
-    return { skipped: 'already', threatId: existing.id, dueDay: existing.dueDay };
-  }
-
-  const plot = conflux.container;
-  if (!plot) return { skipped: 'no_container' };
-  const threat = createThreat({
-    plot,
-    text: SILENCE_THREAT_TEXT,
-    band: 'SEASON',
-    day: today,
-    outcome: 'harm',
-    known: true,
-    eventKind: SILENCE_EVENT,
-  });
-  threat.id = silenceThreatId(conflux.id);
-  attachThreat(plot, threat);
   const retry = today + cfg.quietCooldownDays;
   conflux.quiet.cooldownUntilDay = retry;
   scheduleSilenceAttempt(world, conflux, retry);
-  (log || getLogger()).info('conflux.silence_armed', { confluxId: conflux.id, threatId: threat.id, dueDay: threat.dueDay });
-  return { threat, nextAttemptDay: retry };
+  (log || getLogger()).info('conflux.silence_skip', { confluxId: conflux.id, reason: 'no_plot_threats' });
+  return { skipped: 'no_plot_threats', nextAttemptDay: retry };
 }
 
 /**

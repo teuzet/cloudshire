@@ -77,6 +77,13 @@ test('resolve: открытая история с доски; контейнер
   assert.equal(resolveLoremasterStory(domain, 'main', conflux), null);
   assert.equal(resolveLoremasterStory(domain, 'dead', conflux), null);
   assert.equal(resolveLoremasterStory(domain, 'nope', conflux), null);
+  const partner = {
+    id: 'b',
+    plotlines: [{ id: 'theirs', title: 'Чужой колодец', type: 'story', synopsis: 'Сосед ищет воду.' }],
+  };
+  const both = storiesForLoremaster(domain, conflux, partner);
+  assert.equal(both.some((p) => p.id === 'theirs'), true);
+  assert.equal(resolveLoremasterStory(domain, 'theirs', conflux, partner)?.id, 'theirs');
 });
 
 test('факт копится на нити так же, как хроника', () => {

@@ -3,10 +3,10 @@
  * записи хроники и ставит, какие стороны города задеты. Величину считает движок.
  */
 
-import { defaultFreeformMaxDepth, findPlotline, GRAVITY_STAT_BUDGET, plotStatForce, isErrandPlot } from './plotlines.js';
-import { depthGain } from './deedMath.js';
+import { findPlotline, plotStatForce, plotConfig, isStoryPlot } from './plotlines.js';
+import { deedValue, CRIT_DEPTH_MULTIPLIER } from './deedMath.js';
 import { worldDateLabel } from './gameClock.js';
-import { resolveStatDeltas } from './plotEngine.js';
+import { resolveStatDeltas, scaleTaggedAffects } from './plotEngine.js';
 import { applyStatDeltasToDomain, statEpithet } from './stats.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
@@ -37,51 +37,35 @@ function closedPlotForFact(domain, fact) {
 }
 
 /**
- * Встреча двух островов идёт по цене разрыва: единица её глубины стоит
- * столько же, сколько единица глубины RUPTURE-истории. Курс выводим из
- * тех же чисел, а не задаём отдельно, чтобы он поехал вслед за ними.
- */
-const CONFLUX_GRAVITY = 'RUPTURE';
-
-export function confluxStatRate() {
-  return GRAVITY_STAT_BUDGET[CONFLUX_GRAVITY] / defaultFreeformMaxDepth(CONFLUX_GRAVITY);
-}
-
-/**
- * Цена дела через проход: та же формула, что вклад дела в историю, переведённая
- * по курсу. Пула нет — дела не вычерпывают друг друга, пятый удар стоит как первый.
- *
- * Провал не пустой. Отбитый штурм — это и потеря нападавшего, и победа
- * защищавшегося, только дешевле удавшегося удара и без критовой надбавки.
- */
-function crossIslandStatBudget(process, config, finish) {
-  const rate = confluxStatRate();
-  const spent = finish === 'fail' ? 'ok' : finish;
-  // Разброс глушим: жребий уже брошен на исходе, второй раз кости не нужны.
-  const gain = depthGain({
-    durationBand: process.durationBand,
-    difficulty: process.difficulty,
-    gravity: CONFLUX_GRAVITY,
-    finish: spent,
-    spread: 0,
-  });
-  const share = finish === 'fail' ? Number(config?.tick?.crossIslandFailShare ?? 0.6) : 1;
-  return Math.max(1, Math.round(gain * rate * share));
-}
-
-/**
- * Бюджет errand-дела: пропорционален объёму работы, а не числу месяцев.
- * Полгода возни столпа не должны стоить столько же, сколько закрытая CRISIS.
+ * Статы дела: deedValue × statsPerDeedValue, crit дороже, провал пустой.
+ * CrossIsland — тот же счётчик × confluxStatGainModifier; провал через проход
+ * оставляет долю crossIslandFailShare.
  */
 export function deedStatBudget(process, config = null, { finish = null } = {}) {
-  if (!process) return 1;
-  if (process.crossIsland) {
-    return crossIslandStatBudget(process, config, finish || process.finishKind || 'ok');
+  if (!process) return 0;
+  const done = finish || process.finishKind || 'ok';
+  const value = deedValue({
+    durationBand: process.durationBand,
+    difficulty: process.difficulty,
+  });
+  if (value <= 0) return 0;
+  const cfg = plotConfig(config);
+  const per = Number(cfg.stats?.statsPerDeedValue ?? config?.tick?.statsPerDeedValue ?? 5);
+  const mod = Number(cfg.stats?.confluxStatGainModifier ?? config?.tick?.confluxStatGainModifier ?? 1.5);
+  const cross = Boolean(process.crossIsland);
+  if (done === 'fail') {
+    if (!cross) return 0;
+    const share = Number(config?.tick?.crossIslandFailShare ?? 0.6);
+    return Math.max(1, Math.round(value * per * mod * share));
   }
-  const perDay = Number(config?.tick?.officerStatPerDay ?? 0.02);
-  const days = Math.max(1, Number(process.objectiveDays) || 0);
-  const cap = Math.max(1, Number(config?.tick?.officerStatCap ?? 8));
-  return Math.max(1, Math.min(cap, Math.round(days * perDay)));
+  const crit = done === 'crit' ? CRIT_DEPTH_MULTIPLIER : 1;
+  return Math.max(1, Math.round(value * per * crit * (cross ? mod : 1)));
+}
+
+/** @deprecated курс больше не от gravity RUPTURE; оставлен для старых тестов. */
+export function confluxStatRate(config = null) {
+  const cfg = plotConfig(config);
+  return Number(cfg.stats?.statsPerDeedValue ?? 5) * Number(cfg.stats?.confluxStatGainModifier ?? 1.5);
 }
 
 export function factsForStatJudge(chronicleAdds = []) {
@@ -121,6 +105,14 @@ export function applyFallbackStatDrift() {
 }
 
 function polarityOf(fact) {
+  const pocket = String(fact?.statPocket || '');
+  const endingKind = String(fact?.endingKind || '');
+  if (pocket === 'threat' && !fact?.plotClosed) return 'nonpos';
+  if (pocket === 'ending' || fact?.plotClosed) {
+    if (endingKind === 'GOOD_ENDING') return 'nonneg';
+    if (endingKind === 'BAD_ENDING') return 'nonpos';
+    if (endingKind === 'NEUTRAL_ENDING') return 'mixed';
+  }
   const f = String(finishForFact(fact) || '');
   if (f === 'crit') return 'nonneg';
   if (f === 'fail') return 'nonpos';
@@ -128,12 +120,28 @@ function polarityOf(fact) {
 }
 
 export function absBudgetForFact(domain, fact, config) {
+  if (fact?.statsSettled) return 0;
   if (fact?.author === 'storyteller:quiet') return 0;
-  // Правило города — не подвиг: постоянный порядок сам статов не даёт.
   if (fact?.author === 'engine:rule') return 0;
+  const pocket = String(fact?.statPocket || '');
+  const plot = plotForFact(domain, fact) || closedPlotForFact(domain, fact);
+  if (pocket === 'seed') return plotStatForce(plot, { opening: true, config });
+  if (pocket === 'threat') return plotStatForce(plot, { threat: true, config });
+  if (pocket === 'ending') {
+    const ending = plotStatForce(plot, { ending: true, config });
+    if (fact?.processFinish) {
+      const proc = (domain.state?.pendingActions || []).find((a) => a.id === fact.relatedPendingId) || {
+        durationBand: fact.pairImpact?.durationBand,
+        difficulty: fact.pairImpact?.difficulty,
+        crossIsland: Boolean(fact.pairImpact?.crossIsland),
+        finishKind: fact.processFinish,
+      };
+      return ending + deedStatBudget(proc, config, { finish: fact.processFinish });
+    }
+    return ending;
+  }
   const impact = fact?.pairImpact;
   if (impact?.crossIsland) {
-    // Полосы приходят со следом: своего дела у задетого города нет.
     return deedStatBudget(
       {
         crossIsland: true,
@@ -145,18 +153,24 @@ export function absBudgetForFact(domain, fact, config) {
       { finish: impact.finish },
     );
   }
-  const impactDays = Number(impact?.objectiveDays);
-  if (Number.isFinite(impactDays) && impactDays > 0) {
-    return deedStatBudget({ objectiveDays: impactDays }, config);
-  }
   if (fact?.processFinish) {
     const proc = (domain.state?.pendingActions || []).find((a) => a.id === fact.relatedPendingId);
-    return deedStatBudget(proc, config, { finish: fact.processFinish });
+    let n = deedStatBudget(proc, config, { finish: fact.processFinish });
+    if (fact.plotClosed && plot && isStoryPlot(plot)) {
+      n += plotStatForce(plot, { ending: true, config });
+    }
+    return n;
   }
-  const plot = plotForFact(domain, fact) || closedPlotForFact(domain, fact);
-  if (!plot || isErrandPlot(plot)) return 0;
-  const opening = /start|seed/i.test(String(fact.author || ''));
-  return plotStatForce(plot, { opening, ending: Boolean(fact.plotClosed), config });
+  if (/start|seed/i.test(String(fact?.author || ''))) {
+    return plotStatForce(plot, { opening: true, config });
+  }
+  if (String(fact?.author || '').includes('threat')) {
+    return fact.plotClosed
+      ? plotStatForce(plot, { ending: true, config })
+      : plotStatForce(plot, { threat: true, config });
+  }
+  if (fact?.plotClosed) return plotStatForce(plot, { ending: true, config });
+  return 0;
 }
 
 function statsBrief(domain, config) {
@@ -388,4 +402,121 @@ export async function scoreChronicleStats({
   });
 
   return { scored, catastrophe };
+}
+
+/**
+ * Две субъектификации — один бюджет: пометки с обоих берегов делят deedStatBudget.
+ */
+export async function scorePairChronicleStats({
+  config,
+  runtime,
+  world,
+  process,
+  rows = [],
+  log: parentLog,
+} = {}) {
+  const list = (rows || []).filter((r) => r?.domain && r?.fact);
+  if (!list.length) return { scored: 0 };
+  const budget = deedStatBudget(process, config, { finish: process?.finishKind || process?.finish });
+  if (!budget) {
+    for (const row of list) row.fact.statsSettled = true;
+    return { scored: 0 };
+  }
+  const log = (parentLog || getLogger()).child({ scope: 'statJudge.pair' });
+  const marks = [];
+  for (const row of list) {
+    const collected = { affects: [] };
+    const domain = row.domain;
+    const fact = row.fact;
+    const statIds = (config.stats || []).map((s) => s.id).join(', ');
+    const draft = { entries: null };
+    try {
+      await runtime.run({
+        agentId: 'statJudge',
+        tools: [
+          {
+            name: 'submit_stat_marks',
+            description: 'След записи в жизни города.',
+            parameters: {
+              type: 'object',
+              required: ['entries'],
+              properties: {
+                entries: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    required: ['factId', 'affects'],
+                    properties: {
+                      factId: { type: 'string' },
+                      affects: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          required: ['stat', 'direction'],
+                          properties: {
+                            stat: { type: 'string' },
+                            direction: { type: 'string', enum: ['up', 'down'] },
+                            force: { type: 'string', enum: ['slight', 'notable', 'heavy'] },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            handler: async (args) => {
+              draft.entries = args.entries;
+              return { ok: true };
+            },
+          },
+        ],
+        maxTurns: 3,
+        toolChoice: { type: 'function', function: { name: 'submit_stat_marks' } },
+        log,
+        scene: 'stat_judge_pair',
+        domainId: domain.id,
+        extraSystem: `Город «${domain.name}».`,
+        userMessages: [
+          {
+            role: 'user',
+            content: [
+              `Сейчас ${world?.gameDate?.label || worldDateLabel(world)}.`,
+              `Город «${domain.name}». Проставь след записи. stat из: ${statIds}.`,
+              fact.text,
+              'Вызови submit_stat_marks.',
+            ].join('\n'),
+          },
+        ],
+      });
+    } catch (err) {
+      log.warn('statJudge.pair_failed', { error: err.message, domainId: domain.id });
+    }
+    for (const mark of draft.entries || []) {
+      for (const a of mark.affects || []) {
+        collected.affects.push(a);
+        marks.push({
+          domainId: domain.id,
+          stat: a.stat,
+          direction: a.direction,
+          force: a.force,
+        });
+      }
+    }
+    void collected;
+  }
+  const byDomain = scaleTaggedAffects(marks, budget, { polarity: 'any' });
+  let scored = 0;
+  for (const row of list) {
+    const raw = byDomain.get(row.domain.id) || {};
+    const deltas = enforceFinishPolarity(raw, finishForFact(row.fact));
+    row.fact.statsSettled = true;
+    if (!Object.keys(deltas).length) continue;
+    const changes = applyStatDeltasToDomain(row.domain, deltas);
+    if (Object.keys(changes).length) {
+      row.fact.statChanges = changes;
+      scored += 1;
+    }
+  }
+  return { scored };
 }

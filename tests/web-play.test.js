@@ -405,7 +405,7 @@ test('концовки приходят разобранными, а не одн
   });
 });
 
-test('инспектор показывает концовку нити сопряжения, а не пустую карточку оверлея', async () => {
+test('инспектор не показывает нить сопряжения: это объект пары, прогноз на месте', async () => {
   const partner = {
     id: 'd2',
     worldId: 'w1',
@@ -413,33 +413,12 @@ test('инспектор показывает концовку нити сопр
     lore: [],
     plotlines: [],
   };
-  const container = {
-    id: 'plot_pair',
-    title: 'Сопряжение «Саркум» и «Керсай»',
-    synopsis: 'Острова сошлись.',
-    isMainConflux: true,
-    storyType: 'freeform',
-    kind: 'story',
-    closeWhen: 'Острова разошлись в небе, пути между ними больше нет.',
-    endings: [],
-    threats: [
-      {
-        id: 'thr_part',
-        text: 'Острова разойдутся, и всё вернётся как было.',
-        known: true,
-        status: 'live',
-        totalDays: 180,
-        dueDay: 305,
-        eventKind: 'parting',
-      },
-    ],
-  };
   const conflux = {
     id: 'cf1',
     status: 'docked',
     domainIds: ['d1', 'd2'],
-    container,
-    mainPlotId: container.id,
+    container: null,
+    mainPlotId: null,
     plotlines: [],
     closedPlotlines: [],
     processes: [],
@@ -452,26 +431,21 @@ test('инспектор показывает концовку нити сопр
     synopsis: {
       d1: 'Нас заняли с прохода.',
     },
+    partingDueDay: 305,
   };
   await withServer(
     async ({ base, domain }) => {
       const data = await get(base, '/api/play/inspect?userId=local-user');
       const pair = data.domain.conflux;
-      assert.equal(pair.plotlines.length, 1);
-      assert.equal(pair.plotlines[0].id, 'plot_pair');
-      // Концовок у пары нет: чем кончится, показывает прогноз, а не список исходов.
-      assert.deepEqual(pair.plotlines[0].endings, []);
-      assert.equal(pair.plotlines[0].threats[0].text, 'Острова разойдутся, и всё вернётся как было.');
+      assert.equal(pair.plotlines.some((p) => p.id === 'plot_pair' || p.type === 'conflux'), false);
       assert.equal(pair.forecast.neutral, 'Один берег взял у другого.');
       assert.equal(pair.forecast.byCity[0].text, 'Саркум останется с пустыми складами.');
-      assert.equal(pair.plotlines[0].synopsis, 'Нас заняли с прохода.');
-      // Городская вкладка не дублирует ободранную карточку оверлея.
       assert.equal(
-        data.domain.plotlines.some((p) => p.id === 'plot_pair'),
+        data.domain.plotlines.some((p) => p.type === 'conflux'),
         false,
       );
       assert.equal(
-        (domain.plotlines || []).some((p) => p.id === 'plot_pair'),
+        (domain.plotlines || []).some((p) => p.type === 'conflux'),
         false,
         'оверлей после инспектора снят',
       );

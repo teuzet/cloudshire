@@ -9,6 +9,7 @@ import {
   isStoryPlot,
   isErrandPlot,
   isConfluxPlot,
+  normalizePlotlines,
 } from '../src/game/plotlines.js';
 import { engagementOf, applyEngagement } from '../src/game/plotAlign.js';
 
@@ -22,7 +23,7 @@ test('трёхтактных историй больше нет', () => {
   assert.equal(isThreeActPlot({ type: 'conflux' }), false);
 });
 
-test('plotline.type — story / errand / conflux', () => {
+test('plotline.type — живая нить только story; errand/conflux читаются, чтобы normalize снял', () => {
   const errand = createPlotline({ title: 'Дело', type: 'errand' });
   assert.equal(errand.type, 'errand');
   assert.equal(isErrandPlot(errand), true);
@@ -63,6 +64,19 @@ test('plotline.type — story / errand / conflux', () => {
   assert.equal(plotTypeOf({ kind: 'story' }), 'story');
   assert.equal(plotTypeOf({ kind: 'story', storyType: 'freeform' }), 'story');
   assert.equal(plotTypeOf({ kind: 'story', isMainConflux: true }), 'conflux');
+});
+
+test('normalize снимает errand и conflux с доски', () => {
+  const domain = {
+    plotlines: [
+      createPlotline({ title: 'Дело', type: 'errand' }),
+      createPlotline({ title: 'Стык', type: 'conflux' }),
+      createPlotline({ title: 'Гул', type: 'story' }),
+    ],
+  };
+  normalizePlotlines(domain);
+  assert.equal(domain.plotlines.length, 1);
+  assert.equal(domain.plotlines[0].type, 'story');
 });
 
 test('plotAlign: старый boolean и безопасный default', () => {

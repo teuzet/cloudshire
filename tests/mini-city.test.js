@@ -219,7 +219,7 @@ test('мини-аппка: свои истории и участие в сопр
   assert.equal(view.city.name, 'Саркум');
   assert.deepEqual(
     view.events.map((e) => e.title).sort(),
-    ['Гул колодца', 'Общая драка', 'Сопряжение'].sort(),
+    ['Гул колодца', 'Общая драка'].sort(),
   );
   assert.equal(view.events.some((e) => e.title === 'Чужой храм'), false);
   const fight = view.events.find((e) => e.title === 'Общая драка');

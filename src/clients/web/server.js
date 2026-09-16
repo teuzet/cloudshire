@@ -13,7 +13,6 @@ import {
   dockConfluxNow,
   undockConfluxNow,
 } from '../../game/conflux.js';
-import { crystallizeContainer } from '../../game/confluxJobs.js';
 import { getLogger, requestLogger, truncate } from '../../log.js';
 import { statEpithet } from '../../game/stats.js';
 import { chronicleEntries, castRecords } from '../../game/models.js';
@@ -164,21 +163,17 @@ function nameForDomain(id, domain, partner) {
  * правителя с него снимают концовки — здесь нужна живая карточка, иначе
  * тестовый клиент показывает сопряжение без исхода.
  */
-function inspectPairPlotlines(conflux, day, boardLore, viewer) {
+function inspectPairPlotlines(conflux, day, boardLore, viewer, partner) {
   const seen = new Set();
   const out = [];
   const add = (plot) => {
     if (!plot?.id || seen.has(plot.id)) return;
     seen.add(plot.id);
-    let card = plot;
-    if (conflux.container && plot.id === conflux.container.id) {
-      const syn = conflux.synopsis?.[viewer?.id];
-      if (syn) card = { ...plot, synopsis: syn };
-    }
-    out.push(inspectPlot(card, day, boardLore));
+    out.push(inspectPlot(plot, day, boardLore));
   };
-  add(conflux.container);
-  for (const plot of conflux.plotlines || []) add(plot);
+  for (const plot of viewer?.plotlines || []) add(plot);
+  for (const plot of partner?.plotlines || []) add(plot);
+  for (const plot of conflux?.plotlines || []) add(plot);
   return out;
 }
 
@@ -227,7 +222,7 @@ function inspectConfluxBoard(conflux, domain, partner, world, day) {
     partnerName: partner?.name || partnerId,
     mainPlotId: conflux.mainPlotId || null,
     knownAboutPartner: [...known].sort(byTick).map(slimLore),
-    plotlines: inspectPairPlotlines(conflux, day, boardLore, domain),
+    plotlines: inspectPairPlotlines(conflux, day, boardLore, domain, partner),
     closedPlotlines: (conflux.closedPlotlines || []).map((p) => inspectPlot(p, day, boardLore)),
     processes: (conflux.processes || []).map((p) => inspectProcess(p, day)),
     lore: [...(conflux.lore || [])].slice(-40).map(slimLore),
@@ -1408,20 +1403,7 @@ export function createWebServer({ config, app, runtime, storage }) {
     try {
       const loaded = await loadDevPair(req.params.id);
       if (!loaded) return res.status(404).json({ error: 'conflux not found' });
-      const { conflux, world, domains } = loaded;
-      if (!conflux.container) return res.status(400).json({ error: 'нет контейнера' });
-      await crystallizeContainer({
-        runtime,
-        conflux,
-        domains,
-        world,
-        day: world.dayIndex,
-      });
-      for (const d of domains) await storage.saveDomain(d);
-      await storage.saveConflux(conflux);
-      await storage.updateWorld((fresh) => commitWorldChanges(fresh, world));
-      const byId = Object.fromEntries(domains.map((d) => [d.id, d]));
-      res.json({ ok: true, conflux: confluxSummary(conflux, world, byId) });
+      return res.status(400).json({ error: 'сопряжение не нить' });
     } catch (err) {
       req.log?.error('http.error', { error: err.message });
       res.status(400).json({ error: err.message });

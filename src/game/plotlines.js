@@ -29,56 +29,48 @@ function clamp100(n, fallback = 0) {
  */
 export const PLOT_ENDING_FLOOR_SHARE = 0.25;
 
+export const DEFAULT_STORY_STAT_BUDGET = {
+  SITUATION: { seed: 1, threat: 2, ending: 4 },
+  EPISODE: { seed: 2, threat: 2, ending: 6 },
+  CRISIS: { seed: 3, threat: 3, ending: 8 },
+  RUPTURE: { seed: 4, threat: 4, ending: 10 },
+};
+
+export function storyStatPockets(plot, config = null) {
+  const g = parseFreeformGravity(plot?.gravity);
+  const table = plotConfig(config).stats?.storyStatBudget || DEFAULT_STORY_STAT_BUDGET;
+  const row = table[g] || DEFAULT_STORY_STAT_BUDGET[g] || DEFAULT_STORY_STAT_BUDGET.EPISODE;
+  return {
+    seed: Math.max(0, Math.round(Number(row.seed) || 0)),
+    threat: Math.max(0, Math.round(Number(row.threat) || 0)),
+    ending: Math.max(0, Math.round(Number(row.ending) || 0)),
+  };
+}
+
 export function ensurePlotStatBudget(plot, config = null) {
-  if (!plot || isErrandPlot(plot)) return plot;
-  if (isConfluxPlot(plot) && plot.crystallized === false) {
-    if (!plot.stats || typeof plot.stats !== 'object') plot.stats = {};
-    plot.stats.budget = 0;
-    plot.stats.remaining = 0;
-    plot.stats.interimSpent = Number.isFinite(Number(plot.stats.interimSpent)) ? plot.stats.interimSpent : 0;
-    return plot;
-  }
-  const budget = gravityStatBudget(plot.gravity);
+  if (!plot || !isStoryPlot(plot)) return plot;
+  const pockets = storyStatPockets(plot, config);
   if (!plot.stats || typeof plot.stats !== 'object') plot.stats = {};
-  if (!Number.isFinite(Number(plot.stats.budget))) plot.stats.budget = budget;
-  if (!Number.isFinite(Number(plot.stats.remaining))) plot.stats.remaining = plot.stats.budget;
+  plot.stats.seed = pockets.seed;
+  plot.stats.threat = pockets.threat;
+  plot.stats.ending = pockets.ending;
+  plot.stats.budget = pockets.seed + pockets.ending;
+  if (!Number.isFinite(Number(plot.stats.remaining))) plot.stats.remaining = plot.stats.ending;
   if (!Number.isFinite(Number(plot.stats.interimSpent))) plot.stats.interimSpent = 0;
   return plot;
 }
 
-function endingFloor(plot, config) {
-  const share = Number(config?.tick?.plot?.stats?.endingFloorShare ?? PLOT_ENDING_FLOOR_SHARE);
-  return Math.max(0, Math.round((Number(plot.stats?.budget) || 0) * share));
-}
-
 /**
- * Сила хроники истории.
- *
- * Стартовая запись бюджет не ест: завязка обязана двинуть статы, иначе новая
- * история незаметна. Дальше бюджет один на всю жизнь истории: каждое
- * промежуточное событие откусывает свою долю, а концовка получает остаток.
- * Отсюда кривая выходит сама — RUPTURE закрытый чисто стоит все 20, с одним
- * провалом 15, с двумя 10, — и её не нужно нигде задавать числом.
+ * Карман статов истории: затравка, одно срабатывание угрозы или концовка.
+ * Дела на нити этот карман не едят — у них своя ценность действия.
  */
-export function plotStatForce(plot, { opening = false, ending = false, config = null } = {}) {
-  if (!plot || isErrandPlot(plot)) return 0;
-  ensurePlotStatBudget(plot, config);
-  const B = Number(plot.stats?.budget) || 0;
-  if (opening) {
-    const openingShare = Number(config?.tick?.plot?.stats?.openingShare ?? 0.25);
-    return Math.max(0, Math.round(B * openingShare));
-  }
-  if (ending) {
-    const force = Math.max(0, Number(plot.stats.remaining) || 0);
-    plot.stats.remaining = 0;
-    return force;
-  }
-  const left = Math.max(0, (Number(plot.stats.remaining) || 0) - endingFloor(plot, config));
-  const share = Number(config?.tick?.plot?.stats?.beatShare ?? 0.25);
-  const force = Math.min(left, Math.max(0, Math.round(B * share)));
-  plot.stats.interimSpent = (Number(plot.stats.interimSpent) || 0) + force;
-  plot.stats.remaining = Math.max(0, (Number(plot.stats.remaining) || 0) - force);
-  return force;
+export function plotStatForce(plot, { opening = false, ending = false, threat = false, config = null } = {}) {
+  if (!plot || !isStoryPlot(plot)) return 0;
+  const pockets = storyStatPockets(plot, config);
+  if (opening) return pockets.seed;
+  if (ending) return pockets.ending;
+  if (threat) return pockets.threat;
+  return 0;
 }
 
 /** Обрезка по границе слова: обрубки в середине слова копятся из тика в тик. */
@@ -97,28 +89,23 @@ export const PLOT_ENDING_MAX = 600;
 export const PLOT_TITLE_MAX = 120;
 export { clipText as clipPlotText };
 
-export const PLOT_TYPES = ['story', 'errand', 'conflux'];
-/** @deprecated используй PLOT_TYPES */
+export const PLOT_TYPES = ['story'];
+/** @deprecated нить теперь только story */
 export const PLOT_KINDS = PLOT_TYPES;
-/** @deprecated используй PLOT_TYPES */
+/** @deprecated нить теперь только story */
 export const STORY_TYPES = PLOT_TYPES;
 /** @deprecated трёхтакт удалён; оставлено, чтобы старые импорты не падали. */
 export const THREE_ACT_TYPES = [];
 
 /**
- * Одно поле на карточке.
- * story — посев со ставками, глубиной и концовками.
- * errand — одноразовое поручение.
- * conflux — контейнер сопряжения.
- *
- * Старые сохранения: kind/storyType/isMainConflux читаются здесь и больше
- * нигде не нужны.
+ * Живая нить — только story. Поручение — процесс без plotlineId.
+ * Сопряжение — объект conflux, не карточка. Старые type=errand/conflux
+ * читаются здесь, чтобы normalize их снял.
  */
 export function plotTypeOf(plot) {
   if (!plot) return 'story';
-  if (PLOT_TYPES.includes(plot.type)) return plot.type;
-  if (plot.isMainConflux) return 'conflux';
-  if (plot.kind === 'errand') return 'errand';
+  if (plot.type === 'errand' || plot.kind === 'errand') return 'errand';
+  if (plot.type === 'conflux' || plot.isMainConflux) return 'conflux';
   return 'story';
 }
 
@@ -205,10 +192,9 @@ export function gravityStatBudget(gravity) {
   return GRAVITY_STAT_BUDGET[parseFreeformGravity(gravity)];
 }
 
-/** Масштаб истории для доски и утечек: у story — от gravity, у сопряжения — якорь, иначе 0. */
+/** Масштаб истории для доски: только story, от gravity. */
 export function plotScale(plot) {
   if (isStoryPlot(plot)) return gravityStatBudget(plot.gravity) * 5;
-  if (isConfluxPlot(plot)) return 85;
   return 0;
 }
 
@@ -467,6 +453,25 @@ function normalizePlotAwarenessMap(plot) {
   return next;
 }
 
+function pocketRow(raw, fallback) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  return {
+    seed: Math.max(0, Math.round(Number(src.seed ?? fallback.seed) || 0)),
+    threat: Math.max(0, Math.round(Number(src.threat ?? fallback.threat) || 0)),
+    ending: Math.max(0, Math.round(Number(src.ending ?? fallback.ending) || 0)),
+  };
+}
+
+function normalizeStoryStatBudget(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  return {
+    SITUATION: pocketRow(src.SITUATION, DEFAULT_STORY_STAT_BUDGET.SITUATION),
+    EPISODE: pocketRow(src.EPISODE, DEFAULT_STORY_STAT_BUDGET.EPISODE),
+    CRISIS: pocketRow(src.CRISIS, DEFAULT_STORY_STAT_BUDGET.CRISIS),
+    RUPTURE: pocketRow(src.RUPTURE, DEFAULT_STORY_STAT_BUDGET.RUPTURE),
+  };
+}
+
 export function plotConfig(config) {
   const p = config?.tick?.plot || {};
   const board = p.board || {};
@@ -518,6 +523,11 @@ export function plotConfig(config) {
       worldBudget: Math.max(1, Number(stats.worldBudget ?? 8)),
       finaleFactor: Number(stats.finaleFactor ?? 2),
       catastropheCooldown: Math.max(0, Number(stats.catastropheCooldown ?? 6)),
+      statsPerDeedValue: Math.max(0, Number(stats.statsPerDeedValue ?? config?.tick?.statsPerDeedValue ?? 5)),
+      confluxStatGainModifier: Math.max(0, Number(
+        stats.confluxStatGainModifier ?? config?.tick?.confluxStatGainModifier ?? 1.5,
+      )),
+      storyStatBudget: normalizeStoryStatBudget(stats.storyStatBudget),
     },
     log: {
       influenceChance: Number(log.influenceChance ?? 0.35),
@@ -710,17 +720,39 @@ export function normalizePlotlines(domain, config = null) {
   const closedIds = closedPlotIds(domain);
   const seen = new Set();
   const next = [];
+  const droppedIds = new Set();
   for (const p of domain.plotlines) {
     if (!p || typeof p !== 'object' || p.status === 'closed') continue;
     if (p.id && closedIds.has(p.id)) continue;
     if (p.id && seen.has(p.id)) continue;
+    const type = plotTypeOf(p);
+    if (type === 'errand' || type === 'conflux') {
+      if (p.id) droppedIds.add(String(p.id));
+      continue;
+    }
     applyPlotShape(p, config);
     if (p.id) seen.add(p.id);
     next.push(p);
   }
   domain.plotlines = next;
   if (Array.isArray(domain.closedPlotlines)) {
-    for (const closed of domain.closedPlotlines) stripStalePlotFields(closed);
+    domain.closedPlotlines = domain.closedPlotlines.filter((closed) => {
+      if (!closed || typeof closed !== 'object') return false;
+      const type = plotTypeOf(closed);
+      if (type === 'errand' || type === 'conflux') {
+        if (closed.id) droppedIds.add(String(closed.id));
+        return false;
+      }
+      stripStalePlotFields(closed);
+      return true;
+    });
+  }
+  if (droppedIds.size) {
+    for (const process of domain.state?.pendingActions || []) {
+      if (process?.plotlineId && droppedIds.has(String(process.plotlineId))) {
+        process.plotlineId = null;
+      }
+    }
   }
   return domain;
 }
@@ -824,21 +856,9 @@ export function createPlotline({
   return refreshPlotAwareness(plot);
 }
 
-/** Нить-заглушка для дела: у каждого процесса есть своя нить. */
-export function createErrandPlotline(process, { tick = null, config = null } = {}) {
-  const months = Math.max(1, Math.round(Number(process?.expectedMonths) || 1));
-  return createPlotline({
-    title: clipText(process?.summary || 'Городское дело', PLOT_TITLE_MAX),
-    synopsis: clipText(process?.detail || process?.summary || '', PLOT_SUMMARY_MAX),
-    closeWhen: 'Дело доведено до конца или свёрнуто.',
-    type: 'errand',
-    relatedStats: process?.linkedStats || [],
-    maxAgeMonths: months + 2,
-    temperature: 25,
-    tick,
-    relatedProcessIds: process?.id ? [process.id] : [],
-    config,
-  });
+/** Поручение больше не карточка: процесс без plotlineId. */
+export function createErrandPlotline() {
+  return null;
 }
 
 export function plotlineAge(plotline) {
@@ -853,23 +873,17 @@ export function isOverdue(plotline) {
  * Принудительно гаснет только забытая нить: срок вышел, связанных дел нет,
  * упоминаний нет (температура остыла). Иначе срок просто ждёт.
  */
-export function plotCanFade(domain, plot, cfg) {
-  if (isStoryPlot(plot) || isConfluxPlot(plot)) return false;
-  if (!isOverdue(plot)) return false;
-  if (plotHasLiveProcess(domain, plot)) return false;
-  const floor = Number(cfg?.temperature?.fadeBelow ?? 18);
-  return Number(plot.temperature || 0) <= floor;
+export function plotCanFade() {
+  return false;
 }
 
 export function countOpen(domain) {
   const list = domain?.plotlines || [];
   const stories = list.filter((p) => isStoryPlot(p)).length;
-  const errands = list.filter((p) => isErrandPlot(p)).length;
   return {
-    // Доска историй: поручения слот не занимают.
     total: stories,
     stories,
-    errands,
+    errands: 0,
     all: list.length,
   };
 }
@@ -1851,14 +1865,23 @@ export function formatPlotTagsForPrompt(tags, { soft = false } = {}) {
   return `всё мягко, ассоциации, не указания — ${body}`;
 }
 
-export function plotsForPriest(plots = []) {
-  return (plots || []).filter((p) => p && !isPairThread(p));
+export function plotsForPriest(plots = [], { partner = null } = {}) {
+  const own = (Array.isArray(plots) ? plots : []).filter((p) => p && isStoryPlot(p));
+  if (!partner) return own;
+  const seen = new Set(own.map((p) => p.id).filter(Boolean));
+  const extra = (partner.plotlines || []).filter((p) => p && isStoryPlot(p) && p.id && !seen.has(p.id));
+  return [...own, ...extra];
+}
+
+/** Нить, которую жрец видит: своя или чужая на стыке. */
+export function findVisiblePlot(domain, plotId, partner = null) {
+  return findPlotline(domain, plotId) || (partner ? findPlotline(partner, plotId) : null);
 }
 
 /** Служебный вид доски — для движка и логов, не для речи. */
-export function formatBoardForPrompt(domain) {
+export function formatBoardForPrompt(domain, { partner = null } = {}) {
   normalizePlotlines(domain);
-  const list = plotsForPriest(domain.plotlines);
+  const list = plotsForPriest(domain.plotlines, { partner });
   if (!list.length) return '(нитей нет)';
   return list
     .map((p) => {
@@ -1884,28 +1907,21 @@ export function formatBoardForPrompt(domain) {
  * Компактная доска для речи правителя: id для инструментов, без заголовка нити.
  * @param {(ids: string[]) => string} statsFeel — качественное описание статов
  */
-export function formatBoardForSpeech(domain, { statsFeel = null, max = 8, viewerId = null } = {}) {
+export function formatBoardForSpeech(domain, { statsFeel = null, max = 8, viewerId = null, partner = null } = {}) {
   normalizePlotlines(domain);
-  const list = plotsForPriest(domain.plotlines).slice(0, max);
+  const list = plotsForPriest(domain.plotlines, { partner }).slice(0, max);
   if (!list.length) return '';
   const viewer = viewerId || domain.id;
   return list
     .map((p) => {
       const feel =
         statsFeel && p.relatedStats.length ? ` Упирается в: ${statsFeel(p.relatedStats)}.` : '';
-      const viewerOwns =
-        String(p.hostDomainId || '') === String(viewer) ||
-        (p.concernsDomainIds || []).map(String).includes(String(viewer));
-      const kind = isErrandPlot(p)
-        ? 'поручение'
-        : p.shared && viewerOwns
-          ? 'общая история'
-          : 'история';
-      const duty = plotHasLiveProcess(domain, p)
+      const host = String(p.hostDomainId || '') || viewer;
+      const foreign = host && host !== String(viewer);
+      const kind = foreign ? 'чужая история' : 'история';
+      const duty = plotHasLiveProcess(domain, p) || (partner && plotHasLiveProcess(partner, p))
         ? 'дело уже идёт'
-        : isErrandPlot(p)
-            ? 'дела нет'
-            : 'поручения ещё нет';
+        : 'поручения ещё нет';
       const syn = clipText(p.synopsis || 'только началось', 180);
       return `[${p.id}] (${kind}, ${duty}): ${syn}${feel}`;
     })

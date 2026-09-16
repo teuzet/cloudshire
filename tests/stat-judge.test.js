@@ -60,7 +60,7 @@ test('успешный удар по городу для жертвы — пот
   };
   assert.equal(finishForFact(hit), 'fail');
   assert.deepEqual(enforceFinishPolarity({ prosperity: 2, security: -3 }, finishForFact(hit)), { security: -3 });
-  assert.ok(deedStatBudget({ objectiveDays: 27 }, { tick: { officerStatPerDay: 0.02, officerStatCap: 8 } }) >= 1);
+  assert.ok(deedStatBudget({ durationBand: 'WEEKS', difficulty: 'PLAIN' }, { tick: { statsPerDeedValue: 5 } }) >= 1);
 });
 
 test('провальный удар по городу для жертвы не режет в минус как crit нападавших', () => {
@@ -68,25 +68,24 @@ test('провальный удар по городу для жертвы не �
   assert.equal(finishForFact({ processFinish: 'crit' }), 'crit');
 });
 
-const TICK = { officerStatPerDay: 0.02, officerStatCap: 8, crossIslandFailShare: 0.6 };
+const TICK = { statsPerDeedValue: 5, confluxStatGainModifier: 1.5, crossIslandFailShare: 0.6 };
 const CFG = { tick: TICK };
 
-test('курс конфлюкса: единица его глубины стоит как единица глубины разрыва', () => {
-  assert.equal(confluxStatRate(), 5);
+test('курс конфлюкса: deedValue × statsPerDeedValue × 1.5', () => {
+  assert.equal(confluxStatRate(), 7.5);
 });
 
-test('дело через проход считается полосами, а поручение дома — днями', () => {
-  const raid = { crossIsland: true, durationBand: 'WEEKS', difficulty: 'SEVERE', objectiveDays: 27 };
-  assert.equal(deedStatBudget(raid, CFG, { finish: 'crit' }), 9);
-  assert.equal(deedStatBudget(raid, CFG, { finish: 'ok' }), 6);
-  assert.equal(deedStatBudget({ ...raid, difficulty: 'HARD' }, CFG, { finish: 'crit' }), 6);
-  assert.equal(deedStatBudget({ ...raid, durationBand: 'SEASON', difficulty: 'EXTREME' }, CFG, { finish: 'crit' }), 13);
-  // Тот же срок без прохода — прежние крохи: поручения статы не фармят.
-  assert.equal(deedStatBudget({ objectiveDays: 27 }, CFG), 1);
-  assert.equal(deedStatBudget({ objectiveDays: 400 }, CFG), 8);
+test('дело через проход считается deedValue × 5 × 1.5', () => {
+  const raid = { crossIsland: true, durationBand: 'WEEKS', difficulty: 'SEVERE' };
+  assert.equal(deedStatBudget(raid, CFG, { finish: 'crit' }), 19);
+  assert.equal(deedStatBudget(raid, CFG, { finish: 'ok' }), 13);
+  assert.equal(deedStatBudget({ ...raid, difficulty: 'HARD' }, CFG, { finish: 'crit' }), 14);
+  assert.equal(deedStatBudget({ ...raid, durationBand: 'SEASON', difficulty: 'EXTREME' }, CFG, { finish: 'crit' }), 27);
+  const home = { durationBand: 'WEEKS', difficulty: 'PLAIN' };
+  assert.equal(deedStatBudget(home, CFG, { finish: 'ok' }), 4);
 });
 
-test('мелкая вылазка через проход города не двигает', () => {
+test('мелкая вылазка через проход города почти не двигает', () => {
   const errand = { crossIsland: true, durationBand: 'INSTANT', difficulty: 'TRIVIAL' };
   assert.equal(deedStatBudget(errand, CFG, { finish: 'ok' }), 1);
 });
@@ -94,10 +93,9 @@ test('мелкая вылазка через проход города не дв
 test('отбитый штурм стоит дешевле удавшегося, но не ноль', () => {
   const raid = { crossIsland: true, durationBand: 'WEEKS', difficulty: 'SEVERE' };
   const repelled = deedStatBudget(raid, CFG, { finish: 'fail' });
-  assert.equal(repelled, 4);
+  assert.equal(repelled, 8);
   assert.ok(repelled < deedStatBudget(raid, CFG, { finish: 'ok' }), 'провал дешевле успеха');
-  // Крит нападавших провалу надбавки не даёт.
-  assert.equal(deedStatBudget(raid, { tick: { ...TICK, crossIslandFailShare: 1 } }, { finish: 'fail' }), 6);
+  assert.equal(deedStatBudget(raid, { tick: { ...TICK, crossIslandFailShare: 1 } }, { finish: 'fail' }), 13);
 });
 
 test('жертва считается по полосам следа, а не по своему делу', () => {
@@ -108,13 +106,11 @@ test('жертва считается по полосам следа, а не п
       finish: 'crit',
       durationBand: 'WEEKS',
       difficulty: 'SEVERE',
-      objectiveDays: 27,
     },
   };
-  assert.equal(absBudgetForFact({}, hit, CFG), 9);
-  // Отбились: тот же след, но дешевле, и знак у защищавшегося не минусовой.
+  assert.equal(absBudgetForFact({}, hit, CFG), 19);
   const held = { pairImpact: { ...hit.pairImpact, finish: 'fail' } };
-  assert.equal(absBudgetForFact({}, held, CFG), 4);
+  assert.equal(absBudgetForFact({}, held, CFG), 8);
   assert.equal(finishForFact(held), 'ok');
 });
 
@@ -122,12 +118,12 @@ test('нападавший берёт цену со своего дела, вк�
   const domain = {
     state: {
       pendingActions: [
-        { id: 'act_raid', crossIsland: true, durationBand: 'WEEKS', difficulty: 'SEVERE', objectiveDays: 27 },
+        { id: 'act_raid', crossIsland: true, durationBand: 'WEEKS', difficulty: 'SEVERE' },
       ],
     },
   };
-  assert.equal(absBudgetForFact(domain, { processFinish: 'crit', relatedPendingId: 'act_raid' }, CFG), 9);
+  assert.equal(absBudgetForFact(domain, { processFinish: 'crit', relatedPendingId: 'act_raid' }, CFG), 19);
   const lost = absBudgetForFact(domain, { processFinish: 'fail', relatedPendingId: 'act_raid' }, CFG);
-  assert.equal(lost, 4);
+  assert.equal(lost, 8);
   assert.deepEqual(enforceFinishPolarity({ security: 2, prosperity: -2 }, 'fail'), { prosperity: -2 });
 });

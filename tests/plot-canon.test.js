@@ -23,6 +23,8 @@ import {
   reopenClosedPlotline,
   plotScale,
   storyTypeOf,
+  plotsForPriest,
+  findVisiblePlot,
 } from '../src/game/plotlines.js';
 import { ensureErrandForProcess, planBeats } from '../src/game/plotEngine.js';
 import { peopleUnderWatch, priorPlotChronicle, mintSeedCast, offerMysterySeedNames } from '../src/game/storyteller.js';
@@ -98,7 +100,7 @@ test('законченное дело не открывает закрытую �
   assert.equal((domain.closedPlotlines || []).length, 1);
 });
 
-test('живое поручение возвращает закрытую нить, а не заводит пустую карточку', () => {
+test('дело на закрытую историю не открывает её заново и не плодит карточку', () => {
   const domain = {
     plotlines: [plot('plot_iara')],
     closedPlotlines: [],
@@ -114,12 +116,10 @@ test('живое поручение возвращает закрытую нит
   };
   const result = ensureErrandForProcess(domain, process, { tick: 7 });
   assert.equal(result.created, false);
-  assert.equal(result.reopened, true);
-  assert.equal(result.plot.id, 'plot_iara');
-  assert.match(result.plot.synopsis, /нашли/);
-  assert.ok(result.plot.relatedProcessIds.includes('act_search'));
-  assert.equal(domain.plotlines.length, 1);
-  assert.equal((domain.closedPlotlines || []).length, 0);
+  assert.equal(result.plot, null);
+  assert.equal(process.plotlineId, null);
+  assert.equal(domain.plotlines.length, 0);
+  assert.equal((domain.closedPlotlines || []).length, 1);
 });
 
 test('бит видит прошлую хронику нити и людей в розыске', () => {
@@ -161,53 +161,24 @@ test('бит видит прошлую хронику нити и людей в 
   assert.equal(watched[0].name, 'Левра');
 });
 
-test('просроченная нить гаснет только без дел и без внимания', () => {
-  const cold = plot('p_cold', { type: 'errand', ageMonths: 6, maxAgeMonths: 5, temperature: 8, relatedProcessIds: [] });
-  const busy = plot('p_busy', { type: 'errand', ageMonths: 6, maxAgeMonths: 5, temperature: 8, relatedProcessIds: ['act_1'] });
-  const hot = plot('p_hot', { type: 'errand', ageMonths: 6, maxAgeMonths: 5, temperature: 40, relatedProcessIds: [] });
-  assert.equal(plotCanFade({ plotlines: [cold], state: { pendingActions: [] } }, cold), true);
-  assert.equal(
-    plotCanFade(
-      { plotlines: [busy], state: { pendingActions: [{ id: 'act_1', status: 'active' }] } },
-      busy,
-    ),
-    false,
-  );
-  assert.equal(plotCanFade({ plotlines: [hot], state: { pendingActions: [] } }, hot), false);
-  assert.equal(
-    plotCanFade(
-      { plotlines: [plot('p_young', { type: 'errand', ageMonths: 2, maxAgeMonths: 5, temperature: 0, relatedProcessIds: [] })] },
-      plot('p_young', { type: 'errand', ageMonths: 2, maxAgeMonths: 5, temperature: 0, relatedProcessIds: [] }),
-    ),
-    false,
-  );
+test('просроченная нить сама не гаснет: сход отключён', () => {
+  const cold = plot('p_cold', { type: 'story', ageMonths: 6, maxAgeMonths: 5, temperature: 8, relatedProcessIds: [] });
+  assert.equal(plotCanFade({ plotlines: [cold], state: { pendingActions: [] } }, cold), false);
 });
 
-test('план битов: забытую нить гасит тихо, живую просроченную не финалит', () => {
+test('план битов: случайных тиков и схода нет', () => {
   const forgotten = plot('p_fade', {
-    type: 'errand',
+    type: 'story',
     ageMonths: 6,
     maxAgeMonths: 5,
     temperature: 5,
     relatedProcessIds: [],
   });
-  const watched = plot('p_hot', {
-    type: 'errand',
-    ageMonths: 6,
-    maxAgeMonths: 5,
-    temperature: 50,
-    relatedProcessIds: [],
-  });
   const { beats } = planBeats({
-    domain: { plotlines: [forgotten, watched], state: { pendingActions: [] } },
-    rng: () => 1,
+    domain: { plotlines: [forgotten], state: { pendingActions: [] } },
+    rng: () => 0,
   });
-  const fade = beats.find((b) => b.plotId === 'p_fade');
-  const hot = beats.find((b) => b.plotId === 'p_hot');
-  assert.equal(fade?.fade, true);
-  assert.equal(fade?.finale, false);
-  assert.equal(fade?.reason, 'fade');
-  assert.equal(hot, undefined);
+  assert.equal(beats.length, 0);
 });
 
 test('тонкий архив без синопсиса всё равно поднимает развязку в карточку', () => {
@@ -504,10 +475,10 @@ test('нити указов не заполняют доску и не глуш�
   assert.equal(liveStoryImportance({ plotlines: [{ type: 'errand' }] }), 0);
 });
 
-test('процессы занимают лимит тика, случайная история в остаток не проходит', () => {
+test('процессы занимают слот, случайной истории нет', () => {
   const domain = {
     plotlines: [
-      plot('p_proc', { type: 'errand', relatedProcessIds: ['act_1'] }),
+      plot('p_proc', { type: 'story', relatedProcessIds: ['act_1'] }),
       plot('p_story', { type: 'story', relatedProcessIds: [], temperature: 90 }),
     ],
     state: { pendingActions: [{ id: 'act_1', status: 'active' }] },
@@ -521,15 +492,15 @@ test('процессы занимают лимит тика, случайная 
   assert.equal(cap, 1);
   assert.equal(slotsUsed, 1);
   assert.ok(beats.some((b) => b.plotId === 'p_proc' && b.mandatory));
-  assert.equal(beats.some((b) => b.plotId === 'p_story' && !b.fade), false);
+  assert.equal(beats.some((b) => b.plotId === 'p_story'), false);
 });
 
 test('масштаб story берётся из gravity, не из importance', () => {
   assert.equal(plotScale({ type: 'story', gravity: 'RUPTURE' }), 100);
   assert.equal(plotScale({ type: 'story', gravity: 'EPISODE' }), 50);
   assert.equal(plotScale({ type: 'errand' }), 0);
-  assert.equal(plotScale({ type: 'conflux' }), 85);
-  assert.equal(plotScale({ kind: 'story', isMainConflux: true, storyType: 'freeform' }), 85);
+  assert.equal(plotScale({ type: 'conflux' }), 0);
+  assert.equal(plotScale({ kind: 'story', isMainConflux: true, storyType: 'freeform' }), 0);
   assert.equal(
     liveStoryImportance({
       plotlines: [
@@ -541,4 +512,15 @@ test('масштаб story берётся из gravity, не из importance', (
     }),
     125,
   );
+});
+
+test('на стыке жрец видит чужие истории, не копируя их на свою доску', () => {
+  const ours = plot('p_ours', { type: 'story', hostDomainId: 'a' });
+  const theirs = plot('p_theirs', { type: 'story', hostDomainId: 'b', synopsis: 'Чужой колодец.' });
+  const domain = { id: 'a', plotlines: [ours] };
+  const partner = { id: 'b', plotlines: [theirs] };
+  const list = plotsForPriest(domain.plotlines, { partner });
+  assert.deepEqual(list.map((p) => p.id), ['p_ours', 'p_theirs']);
+  assert.equal(findVisiblePlot(domain, 'p_theirs', partner)?.id, 'p_theirs');
+  assert.equal(domain.plotlines.length, 1);
 });

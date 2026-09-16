@@ -101,7 +101,15 @@ const noRuntime = null;
 function chronicleRuntime(text, calls = [], agentIds = []) {
   return {
     run: async (opts) => {
-      if (opts.agentId !== 'chronicler' && opts.agentId !== 'chronicleFinale') return {};
+      if (
+        opts.agentId !== 'chronicler' &&
+        opts.agentId !== 'chronicleFinale' &&
+        opts.agentId !== 'chronicleDeed' &&
+        opts.agentId !== 'chronicleThreat' &&
+        opts.agentId !== 'errandChronicler'
+      ) {
+        return {};
+      }
       agentIds.push(opts.agentId);
       calls.push(opts.userMessages[0].content);
       await opts.tools[0].handler({ entry: text });
@@ -818,13 +826,13 @@ test('слив не зацикливается на задании, которо
 
 test('заводка ставит попытку посева и обязательства живым историям', async () => {
   const plot = makePlot();
-  const errand = makePlot({ id: 'p2', kind: 'errand', storyType: 'freeform' });
+  const errand = { id: 'p2', type: 'errand', title: 'Поручение' };
   const domain = makeDomain({ plots: [plot, errand] });
   const world = makeWorld();
   await armDomainSchedule({ runtime: noRuntime, domain, world, day: 120, rng: () => 0.5, log: silentLog });
   assert.equal(jobList(world).filter((j) => j.kind === 'seed_attempt').length, 1);
   assert.equal(liveThreats(plot).length, 2);
-  assert.equal(liveThreats(errand).length, 0, 'поручение не заводит обязательств мира');
+  assert.equal(domain.plotlines.some((p) => p.id === 'p2'), false, 'поручение не карточка');
 });
 
 test('повторная заводка не плодит вторую попытку посева', async () => {

@@ -5,7 +5,7 @@
  * Фон архива субъектификатору даётся отдельно от того, что городу можно знать.
  */
 
-import { writeChronicle, CHRONICLE_FINALE_MAX } from './chronicler.js';
+import { writeChronicle, CHRONICLE_FINALE_MAX, nativePlotChronicleTail, finishForPrompt } from './chronicler.js';
 import { appendChronicle } from './freeform.js';
 import { createLoreFact } from './models.js';
 import { newId } from './ids.js';
@@ -15,7 +15,7 @@ import { gameDateFromDay } from './gameClock.js';
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { afterPairLoreWrite } from './confluxForecast.js';
-import { scoreChronicleStats } from './statJudge.js';
+import { scoreChronicleStats, scorePairChronicleStats } from './statJudge.js';
 export const PLACE_PAIR = 'pair';
 export const FROZEN_SYNOPSIS_PREFIX = 'Что случилось в этой истории на данный момент:';
 
@@ -579,7 +579,7 @@ export async function publishPairCanon({
   const pairFact = appendPairEntry(conflux, world, {
     text: body,
     place,
-    plotId: plot?.id || conflux.container?.id || null,
+    plotId: plot?.id || null,
     day,
     author: 'conflux-canon',
   });
@@ -611,4 +611,113 @@ export async function publishPairCanon({
     log,
   });
   return { pairFact, cityFacts };
+}
+
+/**
+ * Исход дела на сопряжении: нейтральная запись пары, сразу две субъектификации.
+ * Если дело на истории — в промпт идёт её синопсис и родная (не субъектифицированная) хроника.
+ */
+export async function narratePairDeed({
+  runtime,
+  world,
+  conflux,
+  actor,
+  partner,
+  process,
+  plot = null,
+  host = null,
+  applied = {},
+  day = null,
+  log = null,
+  config = null,
+} = {}) {
+  if (!conflux || !actor || !partner || !process) return null;
+  const nativeTail = plot && host ? nativePlotChronicleTail(host, plot.id) : [];
+  const archive = formatPairArchive(conflux, [actor, partner]);
+  const prompt = [
+    `Нейтральная летопись сопряжения «${actor.name}» и «${partner.name}».`,
+    process.detail || process.summary || '—',
+    process.goal ? `Чего добивались: ${process.goal}` : '',
+    `ИСХОД: ${finishForPrompt(applied.finish || process.finishKind)}`,
+    plot ? `Синопсис истории: ${plot.synopsis || '—'}` : '',
+    nativeTail.length ? `Родная хроника этой истории (не пересказы соседа):\n${nativeTail.map((t) => `- ${t}`).join('\n')}` : '',
+    archive ? `Архив пары:\n${archive}` : '',
+    'Одна связная запись. Вызови submit_chronicle.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const written = runtime
+    ? await writeChronicle({
+        runtime,
+        domain: actor,
+        occasion: 'дело',
+        agentId: 'confluxDeedChronicler',
+        maxChars: CHRONICLE_FINALE_MAX,
+        prompt,
+        log,
+      })
+    : null;
+  const text = String(written?.text || process.detail || process.summary || '').trim();
+  if (!text) return null;
+  const pairFact = appendPairEntry(conflux, world, {
+    text,
+    place: PLACE_PAIR,
+    plotId: plot?.id || null,
+    day,
+    author: 'confluxDeedChronicler',
+  });
+  const cityFacts = [];
+  for (const domain of [actor, partner]) {
+    const other = domain.id === actor.id ? partner : actor;
+    const cityFact = await renderCityView({
+      runtime,
+      world,
+      conflux,
+      domain,
+      partner: other,
+      plot,
+      sourceText: text,
+      archive,
+      day,
+      log,
+      actorName: actor.name,
+      hostile: Boolean(process.crossIsland) && domain.id !== actor.id,
+    });
+    if (!cityFact) continue;
+    cityFact.statPocket = 'deed';
+    cityFact.processFinish = applied.finish || process.finishKind || null;
+    cityFact.relatedPendingId = process.id;
+    stampPairImpact(cityFact, {
+      process,
+      actorId: actor.id,
+      hostile: Boolean(process.crossIsland) && domain.id !== actor.id,
+    });
+    cityFacts.push({ domain, fact: cityFact, domainId: domain.id });
+  }
+  if (runtime && config) {
+    await scorePairChronicleStats({
+      config,
+      runtime,
+      world,
+      process: { ...process, finishKind: applied.finish || process.finishKind, crossIsland: true },
+      rows: cityFacts,
+      log,
+    });
+  }
+  await afterPairLoreWrite({
+    runtime,
+    conflux,
+    domains: [actor, partner],
+    world,
+    day,
+    cityFacts,
+    log,
+    config,
+  });
+  const actorRow = cityFacts.find((r) => r.domain.id === actor.id);
+  return {
+    pairFact,
+    fact: actorRow?.fact || null,
+    cityFacts,
+  };
 }

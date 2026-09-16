@@ -49,7 +49,7 @@ function process(id, extra = {}) {
   };
 }
 
-test('UNRELATED снимается с истории на свою нить-поручение', () => {
+test('UNRELATED снимается с истории: дело остаётся поручением без нити', () => {
   const plot = mystery({ relatedProcessIds: ['act_side'] });
   const action = process('act_side');
   applyEngagement(action, 'UNRELATED');
@@ -59,21 +59,21 @@ test('UNRELATED снимается с истории на свою нить-по
   assert.equal(moved.rehomed, true);
   assert.equal(moved.originPlot.id, plot.id);
   assert.equal(plot.relatedProcessIds.includes('act_side'), false);
-  assert.equal(action.plotlineId, moved.plot.id);
-  assert.equal(moved.plot.type, 'errand');
-  assert.equal(domain.plotlines.some((p) => p.type === 'errand' && p.relatedProcessIds.includes('act_side')), true);
+  assert.equal(action.plotlineId, null);
+  assert.equal(moved.plot, null);
+  assert.equal(domain.plotlines.some((p) => p.type === 'errand'), false);
 });
 
-test('повторный rehome уже на поручении ничего не плодит', () => {
+test('повторный rehome уже без нити ничего не плодит', () => {
   const plot = mystery({ relatedProcessIds: ['act_side'] });
   const action = process('act_side');
   applyEngagement(action, 'UNRELATED');
   const domain = { plotlines: [plot], state: { pendingActions: [action] } };
   rehomeUnrelatedProcess(domain, action, { tick: 1 });
-  const errandsBefore = domain.plotlines.filter((p) => p.type === 'errand').length;
   const again = rehomeUnrelatedProcess(domain, action, { tick: 2 });
   assert.equal(again.rehomed, false);
-  assert.equal(domain.plotlines.filter((p) => p.type === 'errand').length, errandsBefore);
+  assert.equal(action.plotlineId, null);
+  assert.equal(domain.plotlines.filter((p) => p.type === 'errand').length, 0);
 });
 
 test('два DIRECT на одной нити: второе дело видит состояние после первого', () => {
@@ -196,16 +196,17 @@ test('UNRELATED на доске снимается пачкой и не держ
   assert.ok(due.some((p) => p.id === 'act_main'));
 });
 
-test('отмена поручения закрывает пустую errand-нить', () => {
+test('отмена поручения не плодит и не закрывает карточку-нить', () => {
   const plot = mystery({ relatedProcessIds: ['act_side'] });
   const action = process('act_side');
   applyEngagement(action, 'UNRELATED');
   const domain = { plotlines: [plot], closedPlotlines: [], state: { pendingActions: [action] } };
   rehomeUnrelatedProcess(domain, action, { tick: 3 });
-  assert.equal(domain.plotlines.some((p) => p.type === 'errand'), true);
+  assert.equal(action.plotlineId, null);
+  assert.equal(domain.plotlines.some((p) => p.type === 'errand'), false);
   action.status = 'revoked';
   const dropped = detachProcessFromPlots(domain, action, { tick: 3 });
-  assert.equal(dropped.closedErrands.length, 1);
-  assert.equal(domain.plotlines.some((p) => p.type === 'errand'), false);
-  assert.equal(domain.closedPlotlines.some((p) => p.type === 'errand'), true);
+  assert.equal(dropped.closedErrands.length, 0);
+  assert.equal(domain.plotlines.length, 1);
+  assert.equal(domain.closedPlotlines.length, 0);
 });

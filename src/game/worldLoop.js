@@ -32,7 +32,9 @@ import {
   plotsForProcess,
   plotConfig,
   countOpen,
+  normalizePlotlines,
 } from './plotlines.js';
+import { plotHostId } from './confluxBoard.js';
 import { normalizeDomainProcesses } from './processes.js';
 import { releaseOfficerProcess } from './officers.js';
 import { normalizeDeed, rollDeedFinish, finishDeed, deedOutcome } from './deeds.js';
@@ -77,7 +79,7 @@ import { plantStakedStory } from './storyteller.js';
 import { accrueMana } from './mana.js';
 import { countEvent, markReported, pickReportSubject } from './priestOrders.js';
 import { decideAsk } from './herald.js';
-import { writePairChronicle, confluxEvent, spreadChronicleToPair, formatPairArchive } from './confluxCanon.js';
+import { writePairChronicle, confluxEvent, spreadChronicleToPair, formatPairArchive, narratePairDeed } from './confluxCanon.js';
 import { formatPassageForPrompt } from './passage.js';
 import { secretRevealTexts } from './deedConflux.js';
 import { releasePassageHold } from './passage.js';
@@ -98,6 +100,7 @@ export function appendEventFact(
     finish = null,
     secret = false,
     secretForDomainId = null,
+    extra = {},
   },
 ) {
   const fact = createLoreFact({
@@ -116,6 +119,9 @@ export function appendEventFact(
     secret: Boolean(secret),
     secretForDomainId: secretForDomainId || null,
   });
+  if (extra.statPocket) fact.statPocket = extra.statPocket;
+  if (extra.endingKind) fact.endingKind = extra.endingKind;
+  if (extra.plotClosed) fact.plotClosed = true;
   domain.lore = Array.isArray(domain.lore) ? domain.lore : [];
   domain.lore.push(fact);
   if (plotId) attachChronicleToPlotlines(domain, fact.id, [plotId]);
@@ -176,7 +182,6 @@ export function sweepOrphanJobs(world, domain, { conflux = null, log = null } = 
   const plots = new Set((domain.plotlines || []).map((p) => p.id));
   if (conflux) {
     for (const plot of conflux.plotlines || []) plots.add(plot.id);
-    if (conflux.container?.id) plots.add(conflux.container.id);
   }
   const deeds = new Set((domain.state?.pendingActions || []).map((a) => a.id));
   const dropped = cancelJobs(world, (job) => {
@@ -236,6 +241,34 @@ function findProcess(domain, processId) {
   return (domain?.state?.pendingActions || []).find((a) => String(a.id) === String(processId)) || null;
 }
 
+function storyForProcess(domain, process, partner = null) {
+  const local =
+    plotsForProcess(domain, process?.id).find((p) => isStakedStory(p)) ||
+    (process?.plotlineId ? findPlotline(domain, process.plotlineId) : null);
+  if (local && isStakedStory(local)) return { plot: local, host: domain };
+  if (partner) {
+    const theirs =
+      plotsForProcess(partner, process?.id).find((p) => isStakedStory(p)) ||
+      (process?.plotlineId ? findPlotline(partner, process.plotlineId) : null);
+    if (theirs && isStakedStory(theirs)) return { plot: theirs, host: partner };
+  }
+  return { plot: null, host: domain };
+}
+
+function isPairCrossingDeed(process, plot, partner) {
+  if (!partner || !process) return false;
+  if (process.crossIsland) return true;
+  if (process.targetDomainId && String(process.targetDomainId) === String(partner.id)) return true;
+  if (plot && String(plotHostId(plot) || '') === String(partner.id)) return true;
+  return false;
+}
+
+function deedChronicleAgent({ closesStory, plot }) {
+  if (closesStory) return 'chronicleFinale';
+  if (plot) return 'chronicleDeed';
+  return 'errandChronicler';
+}
+
 /**
  * Дело дошло до срока: бросок, последствия на нити, разбор остального.
  * Возвращает описание для рассказчика или `null`, если рассказывать нечего.
@@ -283,7 +316,7 @@ export async function resolveDeedEvent({
   releaseOfficerProcess(domain, process);
   const outcome = deedOutcome(process, { finish: rolled.finish, day, roll: rolled.roll });
 
-  const plot = plotsForProcess(domain, process.id).find((p) => isStakedStory(p)) || null;
+  const { plot, host: plotHost } = storyForProcess(domain, process, partner);
   const applied = plot
     ? applyDeedToPlot({ plot, process, finish: rolled.finish, day, rng })
     : { alignment: alignmentOf(process) || 'UNRELATED', closes: false, depthGain: 0 };
@@ -296,23 +329,39 @@ export async function resolveDeedEvent({
   // и был тем метагеймом, который жрец потом честно пересказывал.
   // Порядок города говорит сам за себя — там текст уже предметный.
   let text = rule?.text || null;
+  let pairNarration = null;
+  const closesStory = Boolean(applied.closes) && Boolean(plot);
+  const pairDeed = !rule && conflux?.status === 'docked' && isPairCrossingDeed(process, plot, partner);
+  if (!text && pairDeed) {
+    pairNarration = await narratePairDeed({
+      runtime,
+      world,
+      conflux,
+      actor: domain,
+      partner,
+      process,
+      plot,
+      host: plotHost,
+      applied,
+      day,
+      log,
+      config,
+    });
+    text = pairNarration?.fact?.text || null;
+  }
   if (!text) {
-    // Последнюю запись об истории пишет отдельный агент: у обычного хрониста
-    // бриф на один ход, и развязка у него сжимается в строчку.
-    const closesStory = Boolean(applied.closes) && Boolean(plot);
-    const longEntry = closesStory || Boolean(process.crossIsland);
     const written = await writeChronicle({
       runtime,
       domain,
       occasion: 'дело',
-      agentId: closesStory ? 'chronicleFinale' : 'chronicler',
-      maxChars: longEntry ? CHRONICLE_FINALE_MAX : undefined,
+      agentId: deedChronicleAgent({ closesStory, plot }),
+      maxChars: closesStory || Boolean(process.crossIsland) ? CHRONICLE_FINALE_MAX : undefined,
       prompt: closesStory
         ? formatFinalePrompt({
             plot,
             ending: plot.ending || null,
             triggerLines: deedTriggerLines({ domain, process, applied }),
-            chronicleTail: plotChronicleTail(domain, plot.id),
+            chronicleTail: plotChronicleTail(plotHost || domain, plot.id),
           })
         : formatDeedPrompt({
             domain,
@@ -321,7 +370,7 @@ export async function resolveDeedEvent({
             applied,
             threat: plot ? findThreat(plot, applied.threatId) : null,
             closed: false,
-            chronicleTail: plotChronicleTail(domain, plot?.id),
+            chronicleTail: plotChronicleTail(plotHost || domain, plot?.id),
             partnerName: process.crossIsland ? partner?.name || '' : '',
             passage: process.crossIsland && conflux ? formatPassageForPrompt(conflux) : '',
             pairArchive:
@@ -337,20 +386,31 @@ export async function resolveDeedEvent({
     });
   }
 
-  const fact = appendEventFact(domain, world, {
-    text,
-    plotId: plot?.id || null,
-    processId: process.id,
-    day,
-    author: rule ? 'engine:rule' : 'engine:deed',
-    finish: rolled.finish,
-    secret: Boolean(process.secret),
-    secretForDomainId: process.secret ? domain.id : null,
-  });
+  const fact = pairNarration?.fact
+    ? pairNarration.fact
+    : appendEventFact(domain, world, {
+        text,
+        plotId: plot?.id || null,
+        processId: process.id,
+        day,
+        author: rule ? 'engine:rule' : 'engine:deed',
+        finish: rolled.finish,
+        secret: Boolean(process.secret),
+        secretForDomainId: process.secret ? domain.id : null,
+        extra: {
+          statPocket: closesStory ? 'ending' : 'deed',
+          endingKind: plot?.ending?.kind || applied.endingKind || null,
+          plotClosed: closesStory,
+        },
+      });
+  if (!pairNarration?.fact && fact) {
+    fact.statPocket = closesStory ? 'ending' : 'deed';
+    if (closesStory) fact.endingKind = plot?.ending?.kind || applied.endingKind || null;
+  }
 
   const pairSpread =
-    process.secret
-      ? null
+    process.secret || pairNarration
+      ? pairNarration || null
       : await spreadChronicleToPair({
           runtime,
           world,
@@ -398,17 +458,20 @@ export async function resolveDeedEvent({
   }
 
   let closed = null;
+  const host = plotHost && plotHost.id !== domain.id ? plotHost : domain;
   if (plot && applied.closes) {
-    closed = closePlotWithJobs(domain, world, plot, {
+    closed = closePlotWithJobs(host, world, plot, {
       day,
       reason: applied.endingKind === 'GOOD_ENDING' ? 'depth' : 'lives',
       fact,
     });
+    if (storage && host !== domain) await storage.saveDomain(host);
   } else if (plot) {
-    resyncThreatJobs(world, domain, plot);
-    await reconcilePlot({ runtime, domain, plot, resolved: outcome, day, log });
-    resyncThreatJobs(world, domain, plot);
-    await ensurePlotObligations({ runtime, domain, world, plot, day, rng, log });
+    resyncThreatJobs(world, host, plot);
+    await reconcilePlot({ runtime, domain: host, plot, resolved: outcome, day, log });
+    resyncThreatJobs(world, host, plot);
+    await ensurePlotObligations({ runtime, domain: host, world, plot, day, rng, log });
+    if (storage && host !== domain) await storage.saveDomain(host);
   }
 
   log.info('loop.deed_resolved', {
@@ -475,7 +538,7 @@ export async function fireThreatEvent({
     runtime,
     domain,
     occasion,
-    agentId: closesStory ? 'chronicleFinale' : 'chronicler',
+    agentId: closesStory ? 'chronicleFinale' : 'chronicleThreat',
     maxChars: closesStory ? CHRONICLE_FINALE_MAX : undefined,
     prompt: closesStory
       ? formatFinalePrompt({
@@ -503,6 +566,11 @@ export async function fireThreatEvent({
     day,
     author: res.kind === 'resolution' ? 'engine:resolution' : 'engine:threat',
     importance: 'major',
+    extra: {
+      statPocket: closesStory ? 'ending' : 'threat',
+      endingKind: plot.ending?.kind || (closesStory ? 'BAD_ENDING' : null),
+      plotClosed: closesStory,
+    },
   });
 
   const pairSpread = await spreadChronicleToPair({
@@ -781,6 +849,7 @@ export function askForEvent(domain, event, config = null) {
 /** Первичная заводка домена на непрерывное время: попытка посева и обязательства. */
 export async function armDomainSchedule({ runtime, domain, world, day = 0, rng = Math.random, log } = {}) {
   if (!world || !domain) return;
+  normalizePlotlines(domain);
   const hasAttempt = (world.jobs || []).some(
     (j) => j.state === 'pending' && j.kind === 'seed_attempt' && j.domainId === domain.id,
   );

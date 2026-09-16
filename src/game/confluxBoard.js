@@ -4,10 +4,9 @@
  * живёт в `domain.modifiers` и на доску не попадает.
  */
 
-import { createPlotline, refreshPlotAwareness, isConfluxPlot } from './plotlines.js';
+import { refreshPlotAwareness, isConfluxPlot } from './plotlines.js';
 import { newId } from './ids.js';
 import { createLoreFact } from './models.js';
-import { attachThreat, createThreat } from './threats.js';
 
 function asIdList(raw) {
   return [...new Set((Array.isArray(raw) ? raw : []).map(String).filter(Boolean))];
@@ -172,7 +171,14 @@ export function normalizeConfluxBoard(conflux) {
   if (!conflux.quiet || typeof conflux.quiet !== 'object') {
     conflux.quiet = { nextAttemptDay: null, cooldownUntilDay: null };
   }
-  if (conflux.container) clearPairEndings(conflux.container);
+  if (conflux.container) {
+    if (conflux.partingDueDay == null && conflux.dockEndDay != null) {
+      conflux.partingDueDay = Math.round(Number(conflux.dockEndDay));
+    }
+    conflux.container = null;
+    conflux.containerPlotId = null;
+    conflux.mainPlotId = null;
+  }
   return conflux;
 }
 
@@ -186,29 +192,9 @@ export function sharedPlots(conflux) {
  */
 export function overlayConfluxView(domain, conflux, partner = null) {
   if (!domain || !conflux) return domain;
-  void partner;
   normalizeConfluxBoard(conflux);
-  const extra = [];
-  const seen = new Set((domain.plotlines || []).map((p) => p?.id).filter(Boolean));
-  const add = (plot) => {
-    if (!plot?.id || seen.has(plot.id)) return;
-    extra.push(plot);
-    seen.add(plot.id);
-  };
-  if (conflux.container) {
-    const syn = conflux.synopsis?.[domain.id];
-    add({
-      ...conflux.container,
-      synopsis: syn || conflux.container.synopsis,
-      endings: [],
-      threats: [],
-    });
-  }
-  for (const p of conflux.plotlines || []) {
-    if (isConfluxPlot(p)) add(p);
-  }
-  domain._confluxOverlayIds = extra.map((p) => p.id);
-  domain.plotlines = [...(domain.plotlines || []), ...extra];
+  void partner;
+  domain._confluxOverlayIds = [];
   return domain;
 }
 
@@ -254,33 +240,8 @@ export function takeDomainBoardIntoConflux(domain, conflux) {
   stampNewBoardItems(domain, conflux);
 }
 
-export function createEmptyContainer({ a, b, conflux, world, config }) {
-  const plot = createPlotline({
-    title: `Сопряжение «${a.name}» и «${b.name}»`,
-    synopsis:
-      `Летающие острова городов «${a.name}» и «${b.name}» сошлись. ` +
-      `Что из этого выйдет — решат дела людей на проходе.`,
-    closeWhen: PAIR_CLOSE_WHEN,
-    type: 'conflux',
-    maxAgeMonths: 4,
-    temperature: 70,
-    tick: world?.tickIndex ?? null,
-    confluxId: conflux.id,
-    config,
-  });
-  plot.shared = true;
-  plot.hostDomainId = null;
-  plot.concernsDomainIds = [a.id, b.id];
-  plot.crystallized = false;
-  plot.endings = [];
-  plot.threats = [];
-  plot.maxDepth = 0;
-  plot.gravity = null;
-  if (!plot.stats || typeof plot.stats !== 'object') plot.stats = {};
-  plot.stats.budget = 0;
-  plot.stats.remaining = 0;
-  refreshPlotAwareness(plot);
-  return plot;
+export function createEmptyContainer() {
+  return null;
 }
 
 export const PARTING_ENDING_ID = 'end_parting';
@@ -290,79 +251,27 @@ export const PARTING_THREAT_TEXT = 'Острова разойдутся, и вс
 export const DOCK_MEET_EVENT = 'dock_meet';
 export const DOCK_MEET_TEXT = 'Острова сошлись.';
 
-/**
- * Часы расставания: обязательство мира со сроком на конец стыковки.
- *
- * Раньше к ним прилагалась ещё и «нейтральная концовка разъезда», а само
- * обязательство искали по её id. Концовкой она не была: у сопряжения нет
- * исходов на выбор, оно кончается по часам, а чем именно кончилось — это
- * накопленное к тому дню, и его собирает финальная хроника из прогноза.
- * Концовку сняли, часы остались, и ищутся они теперь по своему событию.
- */
-export function seedPartingClock(plot, { day = 0, dockEndDay } = {}) {
-  if (!plot) return null;
-  clearPairEndings(plot);
-  const existing = findPartingThreat(plot);
-  if (existing) {
-    existing.eventKind = PARTING_EVENT;
-    if (dockEndDay != null) existing.dueDay = Math.round(Number(dockEndDay));
-    return existing;
-  }
-  const due = dockEndDay != null ? Math.round(Number(dockEndDay)) : Math.round(Number(day) || 0) + 1;
-  return attachThreat(
-    plot,
-    createThreat({
-      plot,
-      text: PARTING_THREAT_TEXT,
-      outcome: 'neutral',
-      valence: 'neutral',
-      known: true,
-      day,
-      dueDay: due,
-      eventKind: PARTING_EVENT,
-      band: 'YEAR',
-    }),
-  );
+/** Часы расставания — поле объекта пары, не угроза-сюжет. */
+export function seedPartingClock(conflux, { dockEndDay } = {}) {
+  if (!conflux) return null;
+  const due =
+    dockEndDay != null
+      ? Math.round(Number(dockEndDay))
+      : conflux.dockEndDay != null
+        ? Math.round(Number(conflux.dockEndDay))
+        : null;
+  conflux.partingDueDay = due;
+  return due;
 }
 
-/** Сейвы со старыми часами держат их на id снятой концовки. */
-export function findPartingThreat(plot) {
-  return (
-    (plot?.threats || []).find(
-      (t) => t?.eventKind === PARTING_EVENT || t?.endingId === PARTING_ENDING_ID,
-    ) || null
-  );
+export function findPartingThreat(conflux) {
+  const due = Number(conflux?.partingDueDay ?? conflux?.dockEndDay);
+  if (!Number.isFinite(due)) return null;
+  return { id: `parting_${conflux.id || 'pair'}`, eventKind: PARTING_EVENT, dueDay: due, status: 'clock' };
 }
 
-/**
- * Сопряжение живёт без списка концовок. Старые сейвы держат их с тех пор,
- * когда кристаллизация раздавала исходы по номеру в массиве, поэтому чистим
- * при каждой нормализации доски, а не только при заводе часов.
- */
-function clearPairEndings(plot) {
-  plot.endings = [];
-  plot.closeWhen = PAIR_CLOSE_WHEN;
-}
-
-/** Обязательство стыковки: по нему пишутся первая хроника и описание прохода. */
-export function seedDockMeet(plot, { day = 0 } = {}) {
-  if (!plot) return null;
-  const existing = (plot.threats || []).find((t) => t.eventKind === DOCK_MEET_EVENT);
-  if (existing) return existing;
-  return attachThreat(
-    plot,
-    createThreat({
-      plot,
-      text: DOCK_MEET_TEXT,
-      outcome: 'neutral',
-      valence: 'neutral',
-      known: true,
-      day,
-      dueDay: Math.round(Number(day) || 0),
-      band: 'DAYS',
-      eventKind: DOCK_MEET_EVENT,
-    }),
-  );
+export function seedDockMeet() {
+  return null;
 }
 
 export function pushInternalChronicle(conflux, { text, world, plotIds = [], tags = [], author = 'conflux' }) {
@@ -401,7 +310,7 @@ export async function returnBoardsOnUndock(conflux, domainsById, { decideContinu
     if (!domain) continue;
     const kept = [];
     for (const plot of domain.plotlines || []) {
-      if (isConfluxPlot(plot) || plot?.id === conflux.container?.id) continue;
+      if (isConfluxPlot(plot)) continue;
       const concerns = asIdList(plot.concernsDomainIds);
       const shared = concerns.length >= 2 || plot.shared;
       if (plot.confluxId === conflux.id || shared) {
@@ -424,12 +333,9 @@ export async function returnBoardsOnUndock(conflux, domainsById, { decideContinu
     }
   }
 
-  if (conflux.container) {
-    conflux.container.crystallized = conflux.container.crystallized || false;
-    conflux.closedPlotlines = conflux.closedPlotlines || [];
-    conflux.closedPlotlines.push(conflux.container);
-    conflux.container = null;
-  }
+  conflux.container = null;
+  conflux.containerPlotId = null;
+  conflux.mainPlotId = null;
   conflux.plotlines = [];
   conflux.processes = [];
   conflux.plotRefs = [];

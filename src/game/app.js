@@ -948,6 +948,7 @@ export class GameApp {
     const plotBrief = formatBoardForSpeech(domain, {
       statsFeel: (ids) => statEpithetsShort(domain.stats || {}, this.config, ids),
       viewerId: domain.id,
+      partner,
     });
 
     const askNow = shouldRulerAskPatron(domain, world);
@@ -1619,11 +1620,11 @@ export class GameApp {
     const pid = String(plotId || '').trim();
     const tid = String(threatId || '').trim();
     if (!pid || !tid) return { ok: false, error: 'not_found', message: 'не указаны нить или угроза' };
-    return this.runPlayForce(userId, async ({ world, domain, conflux, day, log }) => {
+    return this.runPlayForce(userId, async ({ world, domain, conflux, partner, day, log }) => {
       const plot =
         findPlotline(domain, pid) ||
+        (partner ? findPlotline(partner, pid) : null) ||
         (conflux?.plotlines || []).find((p) => String(p.id) === pid) ||
-        (conflux?.container && String(conflux.container.id) === pid ? conflux.container : null) ||
         null;
       if (!plot) return { ok: false, error: 'not_found', message: 'такой нити нет' };
       const threat = findThreat(plot, tid);

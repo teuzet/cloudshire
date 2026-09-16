@@ -12,7 +12,7 @@
 
 import { loadConfig } from '../src/config.js';
 import { createStorage } from '../src/storage/index.js';
-import { plotConfig, plotlineAge, isOverdue, isErrandPlot, plotTypeOf } from '../src/game/plotlines.js';
+import { plotConfig, plotlineAge, isOverdue, plotTypeOf } from '../src/game/plotlines.js';
 import { activeProcesses } from '../src/game/processes.js';
 
 const GOOD = 'OK  ';
@@ -145,7 +145,7 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
   const hotPlots = plots.filter((p) => Number(p.temperature) >= 70);
   // Нить пережила отпущенный ей срок — движок обязан её закрыть битом-финалом.
   const stalePlots = plots.filter((p) => isOverdue(p));
-  const errands = plots.filter((p) => isErrandPlot(p));
+  const errands = processes.filter((p) => !p.plotlineId);
   const boardOverflow = plots.length > (plotCfg.board?.maxOpen ?? 4);
 
   const myConfluxes = confluxes.filter((c) => (c.domainIds || []).includes(domain.id));
@@ -267,7 +267,7 @@ function analyzeDomain({ domain, config, world, confluxes, usageByDomain }) {
     flags.push([BAD, `нитей ${plots.length} > доски ${plotCfg.board?.maxOpen}`]);
   }
   if (errands.length > 6) {
-    flags.push([WARN, `проходных нитей ${errands.length} — много отдельных поручений`]);
+    flags.push([WARN, `поручений без истории ${errands.length} — много отдельных дел`]);
   }
   if (stalePlots.length) {
     flags.push([
@@ -426,7 +426,7 @@ function printDomain(rep, { dialogTail = 0, dialog = [] } = {}) {
       .map(([k, v]) => `${k} ${v}`)
       .join(', ');
     console.log(
-      `сюжет: нитей ${rep.story.plots} (проходных ${rep.story.errands}) · битов всего ${rep.story.beatsTotal} · ` +
+      `сюжет: нитей ${rep.story.plots} (поручений ${rep.story.errands}) · битов всего ${rep.story.beatsTotal} · ` +
         `закрыто ${rep.story.closed} · каст ${rep.story.castSize}` +
         (authors ? ` · записи: ${authors}` : ''),
     );

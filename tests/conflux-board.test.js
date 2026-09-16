@@ -11,6 +11,7 @@ import {
   approachingAnnounceText,
   isSharedPlot,
   chronicleReceiversForBeat,
+  seedPartingClock,
 } from '../src/game/confluxBoard.js';
 import { createPlotline, isThreeActPlot, normalizePlotlines, closePlotline, formatBoardForSpeech, releaseInactiveProcessesFromOpenPlots } from '../src/game/plotlines.js';
 
@@ -100,17 +101,13 @@ test('гидратация правителя не показывает чужу
   assert.equal(a.plotlines.some((p) => p.id === plot.id), false);
 });
 
-test('главная нить стыка задевает оба города', () => {
-  const c = conflux();
-  const main = createEmptyContainer({
-    a: domain('a'),
-    b: domain('b'),
-    conflux: c,
-    world: { tickIndex: 3 },
-  });
-  assert.equal(main.type, 'conflux');
-  assert.equal(isSharedPlot(main), true);
-  assert.deepEqual(main.concernsDomainIds.sort(), ['a', 'b']);
+test('сопряжение не карточка: контейнер пустой, часы — поле пары', () => {
+  const c = conflux({ dockEndDay: 180 });
+  assert.equal(createEmptyContainer(), null);
+  const due = seedPartingClock(c, { dockEndDay: 180 });
+  assert.equal(due, 180);
+  assert.equal(c.partingDueDay, 180);
+  assert.equal(c.container, undefined);
 });
 
 test('расстыковка: общая нить остаётся у хозяина, второй город уходит из concerns', async () => {
@@ -250,7 +247,7 @@ test('речь правителя не видит концовки', () => {
 });
 
 test('регистрация не забирает resolved дело с домена', () => {
-  const closed = createPlotline({ title: 'Мост', kind: 'errand' });
+  const closed = createPlotline({ title: 'Мост', kind: 'story' });
   closed.status = 'closed';
   closed.relatedProcessIds = ['act_done'];
   const proc = { id: 'act_done', summary: 'Мост', status: 'resolved', plotlineId: closed.id };
@@ -264,7 +261,7 @@ test('регистрация не забирает resolved дело с доме
 });
 
 test('снятие вида не переносит сироту на конфлюкс — дело остаётся на домене', () => {
-  const closed = createPlotline({ title: 'Мост', kind: 'errand' });
+  const closed = createPlotline({ title: 'Мост', kind: 'story' });
   closed.status = 'closed';
   closed.relatedProcessIds = ['act_done'];
   const c = conflux();

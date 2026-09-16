@@ -3,16 +3,11 @@ import assert from 'node:assert/strict';
 import {
   lastPairChronicleDay,
   attemptPairSilence,
-  silenceThreatId,
-  SILENCE_THREAT_TEXT,
   ensurePairState,
   refreshPairForecast,
 } from '../src/game/confluxForecast.js';
 import { appendPairEntry, PLACE_PAIR } from '../src/game/confluxCanon.js';
-import { overlayConfluxView, stripConfluxView, createEmptyContainer } from '../src/game/confluxBoard.js';
-import { createPlotline } from '../src/game/plotlines.js';
-import { liveThreats, findThreat } from '../src/game/threats.js';
-import { resyncThreatJobs } from '../src/game/worldLoop.js';
+import { overlayConfluxView, stripConfluxView } from '../src/game/confluxBoard.js';
 
 function city(id, name) {
   return { id, name, lore: [], plotlines: [] };
@@ -29,7 +24,6 @@ function pair(extra = {}) {
     lore: [],
     ...extra,
   };
-  conflux.container = createEmptyContainer({ a, b, conflux, world: { tickIndex: 0 }, config: {} });
   ensurePairState(conflux);
   return { a, b, conflux };
 }
@@ -73,24 +67,16 @@ test('прогноз переписывается на каждой записи
   assert.match(conflux.forecast.neutral, /не удержался/);
 });
 
-test('карточка нити пары показывает синопсис своего города, а концовок у пары нет', () => {
+test('оверлей не кладёт карточку пары на доску города', () => {
   const { a, b, conflux } = pair();
-  // Сейв времён исходов «по номеру в массиве»: нормализация доски их снимает.
-  conflux.container.endings = [{ id: 'end_0', kind: 'GOOD_ENDING', text: 'Временный договор о проходе' }];
-  conflux.container.synopsis = 'Нейтрально: город взят.';
   conflux.synopsis.a = 'Нас заняли с прохода.';
-  conflux.synopsis.b = 'Мы взяли соседний берег.';
   overlayConfluxView(a, conflux, b);
-  const card = a.plotlines.find((p) => p.type === 'conflux');
-  assert.equal(card.synopsis, 'Нас заняли с прохода.');
-  assert.deepEqual(card.endings, []);
-  assert.equal(conflux.container.synopsis, 'Нейтрально: город взят.');
-  assert.deepEqual(conflux.container.endings, []);
+  assert.equal(a.plotlines.filter((p) => p.type === 'conflux').length, 0);
   stripConfluxView(a);
   assert.equal(a.plotlines.length, 0);
 });
 
-test('тишина: пара без пересечений получает попытку, живой поток — нет', () => {
+test('тишина без нити не вешает угрозу', () => {
   const { conflux } = pair();
   const world = { jobs: [] };
   const cfg = { tick: { conflux: { quietSilenceDays: 21, quietChance: 1, quietCooldownDays: 10 } } };
@@ -101,10 +87,8 @@ test('тишина: пара без пересечений получает по
     config: cfg,
     rng: () => 0,
   });
-  assert.ok(silent.threat);
-  assert.equal(silent.threat.id, silenceThreatId(conflux.id));
-  assert.equal(silent.threat.text, SILENCE_THREAT_TEXT);
-  assert.equal(liveThreats(conflux.container).length, 1);
+  assert.equal(silent.skipped, 'no_plot_threats');
+  assert.equal(silent.threat, undefined);
 
   appendPairEntry(conflux, { gameDate: { label: 'x' } }, { text: 'На проходе снова люди.', place: PLACE_PAIR, day: 131 });
   const busy = attemptPairSilence({
@@ -115,25 +99,6 @@ test('тишина: пара без пересечений получает по
     rng: () => 0,
   });
   assert.equal(busy.skipped, 'active');
-  assert.equal(findThreat(conflux.container, silenceThreatId(conflux.id)).status, 'dropped');
-});
-
-test('часы существующей угрозы тишины не переназначаются', () => {
-  const { a, conflux } = pair();
-  const world = { jobs: [] };
-  const cfg = { tick: { conflux: { quietSilenceDays: 5, quietChance: 1, quietCooldownDays: 10 } } };
-  const first = attemptPairSilence({ conflux, world, day: 120, config: cfg, rng: () => 0 });
-  const due = first.threat.dueDay;
-  resyncThreatJobs(world, a, conflux.container);
-  const jobs1 = (world.jobs || []).filter((j) => j.kind === 'threat_fire' && j.state === 'pending');
-  assert.equal(jobs1.length, 1);
-  const again = attemptPairSilence({ conflux, world, day: 140, config: cfg, rng: () => 0 });
-  assert.equal(again.skipped, 'already');
-  assert.equal(findThreat(conflux.container, silenceThreatId(conflux.id)).dueDay, due);
-  resyncThreatJobs(world, a, conflux.container);
-  const jobs2 = (world.jobs || []).filter((j) => j.kind === 'threat_fire' && j.state === 'pending');
-  assert.equal(jobs2.length, 1);
-  assert.equal(jobs2[0].dueDay, due);
 });
 
 test('lastPairChronicleDay не считает замороженный синопсис', () => {
@@ -147,5 +112,3 @@ test('lastPairChronicleDay не считает замороженный сино
   appendPairEntry(conflux, { gameDate: { label: 'b' } }, { text: 'Твари перешли проход.', place: PLACE_PAIR, day: 80 });
   assert.equal(lastPairChronicleDay(conflux), 80);
 });
-
-void createPlotline;

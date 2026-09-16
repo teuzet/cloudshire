@@ -1,5 +1,5 @@
 /**
- * Задания пары: стыковка, расстыковка, касание, ход контейнера.
+ * Задания пары: стыковка, расстыковка, касание.
  * Берутся из общей очереди мира; handler грузит оба домена.
  */
 
@@ -7,11 +7,6 @@ import { dueJobs, claimJob, completeJob, failJob, LockSet } from './scheduler.js
 import { findActiveConfluxForDomain, dockConfluxNow, undockConfluxNow } from './conflux.js';
 import { normalizeDomain } from './models.js';
 import { attemptPairSilence } from './confluxForecast.js';
-import { ensurePlotStatBudget } from './plotlines.js';
-import { createThreat, attachThreat } from './threats.js';
-import { resyncThreatJobs } from './worldLoop.js';
-import { pairPrimaryId } from './confluxTime.js';
-import { DOCK_MEET_EVENT, findPartingThreat } from './confluxBoard.js';
 import { maybeNudgeProxy } from './proxyJudge.js';
 import { getLogger } from '../log.js';
 
@@ -42,103 +37,9 @@ async function savePair(storage, conflux, domains) {
   await storage.saveConflux(conflux);
 }
 
-/**
- * Кристаллизация даёт нити пары синопсис, тяжесть и помехи — и только их.
- * Концовок у сопряжения нет: оно кончается по часам расставания, а чем
- * кончилось — складывается из накопленного и пишется финальной хроникой.
- */
-export async function crystallizeContainer({ runtime, conflux, domains, world, day, log }) {
-  const plot = conflux?.container;
-  if (!plot || plot.crystallized) return plot;
-  const draft = { gravity: 'CRISIS', synopsis: '', threats: [] };
-  if (runtime) {
-    try {
-      await runtime.run({
-        agentId: 'confluxCrystal',
-        scene: 'conflux_crystal',
-        log,
-        maxTurns: 2,
-        toolChoice: { type: 'function', function: { name: 'submit_crystal' } },
-        tools: [
-          {
-            name: 'submit_crystal',
-            description: 'Синопсис, тяжесть и помехи общей нити сопряжения.',
-            parameters: {
-              type: 'object',
-              additionalProperties: false,
-              required: ['synopsis', 'gravity'],
-              properties: {
-                synopsis: { type: 'string' },
-                gravity: { type: 'string', enum: ['CRISIS', 'RUPTURE'] },
-                threats: { type: 'array', items: { type: 'string' } },
-              },
-            },
-            handler: async (args) => {
-              draft.synopsis = String(args?.synopsis || '').trim();
-              draft.gravity = args?.gravity === 'RUPTURE' ? 'RUPTURE' : 'CRISIS';
-              draft.threats = Array.isArray(args?.threats) ? args.threats.map(String) : [];
-              return { ok: true };
-            },
-          },
-        ],
-        extraSystem:
-          'Есть два города на летающих островах. Края сошлись, проход есть, общей истории ещё нет. ' +
-          'По тому, что уже случилось у прохода, сложи краткую историю, которая теперь висит над обоими. ' +
-          'Верни submit_crystal.',
-        userMessages: [
-          {
-            role: 'user',
-            content: [
-              `Города: ${domains.map((d) => d.name).join(' и ')}`,
-              conflux.passage?.text ? `Проход: ${conflux.passage.text}` : '',
-              'Контейнер пары ещё пуст: напиши первое развитие отношений, если игроки молчат.',
-            ]
-              .filter(Boolean)
-              .join('\n'),
-          },
-        ],
-      });
-    } catch (err) {
-      log?.warn?.('conflux.crystal_failed', { error: err.message });
-    }
-  }
-  plot.crystallized = true;
-  plot.gravity = draft.gravity;
-  plot.maxDepth = 2;
-  if (draft.synopsis) plot.synopsis = draft.synopsis;
-  const keptThreats = (plot.threats || []).filter(
-    (t) => t === findPartingThreat(plot) || t.eventKind === DOCK_MEET_EVENT,
-  );
-  plot.threats = keptThreats;
-  const threatTexts = (draft.threats.length ? draft.threats : ['проход потребует крови или платы', 'на берегу назреет ссора']).slice(
-    0,
-    3,
-  );
-  while (threatTexts.length < 2) threatTexts.push('на проходе случится столкновение');
-  for (const text of threatTexts) {
-    attachThreat(
-      plot,
-      createThreat({
-        plot,
-        text,
-        outcome: 'harm',
-        valence: 'bad',
-        known: true,
-        day,
-        band: 'SEASON',
-      }),
-    );
-  }
-  if (plot.stats && typeof plot.stats === 'object') {
-    delete plot.stats.budget;
-    delete plot.stats.remaining;
-  }
-  ensurePlotStatBudget(plot);
-  if (world && domains?.length) {
-    const primary = domains.find((d) => d.id === pairPrimaryId(conflux)) || domains[0];
-    resyncThreatJobs(world, primary, plot);
-  }
-  return plot;
+/** Сопряжение не нить: кристаллизации контейнера больше нет. */
+export async function crystallizeContainer() {
+  return null;
 }
 
 const HANDLERS = {
@@ -209,13 +110,9 @@ const HANDLERS = {
       rng: ctx.rng,
       log: ctx.log,
     });
-    if (out.threat && ctx.world && domains.length) {
-      const primary = domains.find((d) => d.id === pairPrimaryId(conflux)) || domains[0];
-      resyncThreatJobs(ctx.world, primary, conflux.container);
-    }
     await savePair(ctx.storage, conflux, domains);
     if (out.skipped) return { skipped: out.skipped, nextAttemptDay: out.nextAttemptDay || null };
-    return { occasion: 'сопряжение', confluxId: conflux.id, domains, threatId: out.threat?.id || null };
+    return { occasion: 'сопряжение', confluxId: conflux.id, domains };
   },
   async conflux_beat() {
     return { skipped: 'retired' };

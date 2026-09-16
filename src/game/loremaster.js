@@ -3,7 +3,7 @@ import { createLoreFact, formatCastForPrompt, chronicleEntries, formatChronicleP
 import { formatFullChronicleForPrompt, formatFactsForPrompt } from './memory.js';
 import { findActiveConfluxForDomain } from './conflux.js';
 import { daysUntilDock } from './confluxTime.js';
-import { attachFactToPlotlines, isPairThread, isErrandPlot, isConfluxPlot } from './plotlines.js';
+import { attachFactToPlotlines, plotsForPriest, isStoryPlot } from './plotlines.js';
 import { cityRules } from './cityRules.js';
 import { overlayConfluxView, stampNewBoardItems, stripConfluxView } from './confluxBoard.js';
 import { revealedPremises, revealedAnswer, hiddenAnswer } from './premises.js';
@@ -32,32 +32,23 @@ function approachingSoonText(conflux, world) {
   return 'до сопряжения ещё недели и месяцы';
 }
 
-export function storiesForLoremaster(domain, conflux = null) {
+export function storiesForLoremaster(domain, conflux = null, partner = null) {
   void conflux;
-  const byId = new Map();
-  for (const p of domain?.plotlines || []) {
-    if (p && !isPairThread(p)) byId.set(p.id, p);
-  }
-  return [...byId.values()];
+  return plotsForPriest(domain?.plotlines, { partner });
 }
 
-/** Идущая история с доски или конфлюкса; закрытая и указ — null. */
-export function resolveLoremasterStory(domain, plotId, conflux = null) {
+/** Идущая история с доски или соседа на стыке; закрытая — null. */
+export function resolveLoremasterStory(domain, plotId, conflux = null, partner = null) {
   const id = String(plotId || '').trim();
   if (!id) return null;
-  return storiesForLoremaster(domain, conflux).find((p) => String(p.id) === id) || null;
+  return storiesForLoremaster(domain, conflux, partner).find((p) => String(p.id) === id) || null;
 }
 
 export function formatOpenStoriesBrief(plots = []) {
-  const visible = (plots || []).filter((p) => p && !isPairThread(p));
+  const visible = (plots || []).filter((p) => p && isStoryPlot(p));
   if (!visible.length) return 'Открытых историй нет.';
   const lines = visible.map((p) => {
-    const kind =
-      isErrandPlot(p)
-        ? 'поручение'
-        : p.shared
-          ? 'общая история'
-          : 'история';
+    const kind = p.shared ? 'общая история' : 'история';
     const syn = p.synopsis ? ` — ${p.synopsis}` : '';
     return `- ${p.id} (${kind})${syn}`;
   });
@@ -80,13 +71,8 @@ export function formatStoriesForLoremaster(plots = [], { viewerId = null, focusI
 export function formatFocusedStoryForLoremaster(p, { viewerId = null } = {}) {
   if (!p) return '';
   const host = p.hostDomainId || null;
-  const own = !viewerId || isConfluxPlot(p) || !host || String(host) === String(viewerId);
-  const kind =
-    isErrandPlot(p)
-      ? 'поручение'
-      : isConfluxPlot(p) || p.shared
-        ? 'общая история сопряжения'
-        : 'история';
+  const own = !viewerId || !host || String(host) === String(viewerId);
+  const kind = p.shared ? 'общая история' : 'история';
   const secret = hiddenAnswer(p);
   const lines = [
     `ФОКУС: нить ${p.id} (${kind}). Это идущая история — не закрытая.`,
@@ -167,8 +153,8 @@ export async function askLoremaster({
     const otherId = (conflux.domainIds || []).find((id) => id !== working.id);
     if (otherId) partner = await storage.getDomain(otherId);
   }
-  const openStories = storiesForLoremaster(working, conflux);
-  const focusPlot = resolveLoremasterStory(working, plotId, conflux);
+  const openStories = storiesForLoremaster(working, conflux, partner);
+  const focusPlot = resolveLoremasterStory(working, plotId, conflux, partner);
 
   const description = cityTextForLoremaster(working);
   const canonicalUnknowns = parseCityBrief(working.cityBrief).unknowns;

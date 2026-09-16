@@ -3,7 +3,7 @@ import { createLoreFact, normalizeDomain } from './models.js';
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { gameDateFromDay, worldDateLabel } from './gameClock.js';
-import { scheduleJob, cancelJobs, cancelJobsForPlot, commitWorldChanges } from './scheduler.js';
+import { scheduleJob, cancelJobs, commitWorldChanges } from './scheduler.js';
 import {
   confluxConfig,
   hoursToGameDays,
@@ -22,15 +22,10 @@ import { notifySettings } from './notify.js';
 import {
   normalizeConfluxBoard,
   takeDomainBoardIntoConflux,
-  createEmptyContainer,
   seedPartingClock,
-  seedDockMeet,
-  findPartingThreat,
   approachingAnnounceText,
   returnBoardsOnUndock,
 } from './confluxBoard.js';
-import { fireThreat } from './threats.js';
-import { resyncThreatJobs } from './worldLoop.js';
 import { maybeNudgeProxy } from './proxyJudge.js';
 import { decideUndockContinuation } from './undockContinuation.js';
 import { publishPairCanon, PLACE_PAIR } from './confluxCanon.js';
@@ -337,26 +332,15 @@ export function schedulePairJobs(world, conflux, { contactAtFraction = 0.05, qui
   return jobs;
 }
 
-/** Нити остаются у хозяина. Контейнер и часы разъезда — уже при сближении. */
-export function beginConfluxOwnership({ a, b, conflux, world, config }) {
+/** Нити остаются у хозяина. Часы разъезда — уже при сближении. */
+export function beginConfluxOwnership({ a, b, conflux, world }) {
   normalizeConfluxBoard(conflux);
   takeDomainBoardIntoConflux(a, conflux);
   takeDomainBoardIntoConflux(b, conflux);
-
-  if (!conflux.container) {
-    const container = createEmptyContainer({ a, b, conflux, world, config });
-    seedPartingClock(container, {
-      day: world?.dayIndex ?? conflux.prepStartDay,
-      dockEndDay: conflux.dockEndDay,
-    });
-    conflux.container = container;
-    conflux.containerPlotId = container.id;
-    conflux.mainPlotId = container.id;
-  }
-  if (world) {
-    const primary = a.id === pairPrimaryId(conflux) ? a : b;
-    resyncThreatJobs(world, primary, conflux.container);
-  }
+  seedPartingClock(conflux, { dockEndDay: conflux.dockEndDay });
+  conflux.container = null;
+  conflux.containerPlotId = null;
+  conflux.mainPlotId = null;
 
   const left = daysUntilDock(conflux, world?.dayIndex ?? 0);
   const textA = approachingAnnounceText(a, b, left, conflux.rematch);
@@ -364,7 +348,7 @@ export function beginConfluxOwnership({ a, b, conflux, world, config }) {
   const tags = conflux.rematch ? ['approaching', 'seed', 'rematch'] : ['approaching', 'seed'];
   pushPublicChronicle(a, world, textA, conflux, tags);
   pushPublicChronicle(b, world, textB, conflux, tags);
-  return { main: conflux.container, textA, textB };
+  return { main: null, textA, textB };
 }
 
 function pushPublicChronicle(domain, world, text, conflux, extraTags = []) {
@@ -701,18 +685,37 @@ export function confluxSummary(c, world, domainsById = {}, day = null) {
   };
 }
 
+function abortLiveDeed(domain, process, { day, reason }) {
+  if (!process) return null;
+  if (process.status && process.status !== 'active' && process.status !== 'paused') return null;
+  process.status = 'resolved';
+  process.finishKind = 'abort';
+  process.abortReason = reason;
+  process.resolvedDay = Math.round(Number(day) || 0);
+  if (!process.abortOutcome) process.abortOutcome = 'вернуться домой с тем, что успели';
+  releaseOfficerProcess(domain, process);
+  return process;
+}
+
 export function abortCrossIslandDeeds(domain, { day, reason = 'undock' } = {}) {
   const aborted = [];
   for (const p of domain.state?.pendingActions || []) {
     if (!p.crossIsland && !p.targetDomainId && !p.needsPassage) continue;
-    if (p.status && p.status !== 'active' && p.status !== 'paused') continue;
-    p.status = 'resolved';
-    p.finishKind = 'abort';
-    p.abortReason = reason;
-    p.resolvedDay = Math.round(Number(day) || 0);
-    if (!p.abortOutcome) p.abortOutcome = 'вернуться домой с тем, что успели';
-    releaseOfficerProcess(domain, p);
-    aborted.push(p);
+    const done = abortLiveDeed(domain, p, { day, reason });
+    if (done) aborted.push(done);
+  }
+  return aborted;
+}
+
+/** Дело на чужой истории: после расставания нить уходит с соседом. */
+export function abortForeignPlotDeeds(domain, partner, { day, reason = 'undock' } = {}) {
+  if (!partner) return [];
+  const theirs = new Set((partner.plotlines || []).map((p) => String(p.id)));
+  const aborted = [];
+  for (const p of domain.state?.pendingActions || []) {
+    if (!p.plotlineId || !theirs.has(String(p.plotlineId))) continue;
+    const done = abortLiveDeed(domain, p, { day, reason });
+    if (done) aborted.push(done);
   }
   return aborted;
 }
@@ -816,14 +819,10 @@ export async function dockConfluxNow({
   conflux.status = 'docked';
   conflux.dockedDay = Math.round(Number(day) || 0);
   conflux.dockedTick = world.tickIndex;
-  if (!conflux.container) {
-    conflux.container = createEmptyContainer({ a: pair[0], b: pair[1], conflux, world, config });
-  }
-  const meet = seedDockMeet(conflux.container, { day });
-  if (meet?.status === 'live') fireThreat(conflux.container, meet, { day, firedBy: 'dock' });
-  seedPartingClock(conflux.container, { day, dockEndDay: conflux.dockEndDay });
-  conflux.containerPlotId = conflux.container.id;
-  conflux.mainPlotId = conflux.container.id;
+  conflux.container = null;
+  conflux.containerPlotId = null;
+  conflux.mainPlotId = null;
+  seedPartingClock(conflux, { dockEndDay: conflux.dockEndDay });
 
   const contact = await generateContact({ config, runtime, conflux, domains: pair, world, log });
   conflux.contact = contact;
@@ -835,10 +834,6 @@ export async function dockConfluxNow({
     heldByProcessId: null,
   };
   ensurePassage(conflux);
-  if (world) {
-    const primary = pair.find((d) => d.id === pairPrimaryId(conflux)) || pair[0];
-    resyncThreatJobs(world, primary, conflux.container);
-  }
   recordPartnerDock(pair[0], pair[1]);
 
   await publishPairCanon({
@@ -848,11 +843,11 @@ export async function dockConfluxNow({
     domains: pair,
     text: contact.description || `Летающие острова городов «${pair[0].name}» и «${pair[1].name}» сошлись.`,
     place: PLACE_PAIR,
-    plot: conflux.container,
+    plot: null,
     day,
     log,
   });
-  return { conflux, contact, container: conflux.container };
+  return { conflux, contact, container: null };
 }
 
 /** Расстыковка: большая хроника, обрыв дел через проход, посев последствий. */
@@ -873,18 +868,17 @@ export async function undockConfluxNow({
   conflux.endedDay = Math.round(Number(day) || 0);
   conflux.endedTick = world?.tickIndex;
 
-  const plot = conflux.container;
-  if (plot && !plot.ending) {
-    const clock = findPartingThreat(plot);
-    if (clock?.status === 'live') fireThreat(plot, clock, { day, firedBy: 'undock' });
-  }
-  if (world && plot) cancelJobsForPlot(world, plot.id);
-
   const abortedByCity = [];
   for (const d of pair) {
     const partner = pair.find((x) => x.id !== d.id) || null;
     await flagPassageDeeds({ runtime, domain: d, partner, log });
-    abortedByCity.push({ domain: d, aborted: abortCrossIslandDeeds(d, { day, reason: 'undock' }) });
+    abortedByCity.push({
+      domain: d,
+      aborted: [
+        ...abortCrossIslandDeeds(d, { day, reason: 'undock' }),
+        ...abortForeignPlotDeeds(d, partner, { day, reason: 'undock' }),
+      ],
+    });
   }
 
   const abortedLines = abortedByCity
@@ -908,7 +902,7 @@ export async function undockConfluxNow({
       domains: pair,
       text,
       place: PLACE_PAIR,
-      plot,
+      plot: null,
       day,
       log,
     });

@@ -2,13 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createConfluxRecord, beginConfluxOwnership, dockConfluxNow, schedulePairJobs, monthsUntilDock, abortCrossIslandDeeds, undockConfluxNow, confluxSummary } from '../src/game/conflux.js';
 import { hoursToGameDays, pickPrepDelayHours, confluxConfig, remainingDockDays, rollConfluxSpan, stampGenesisConfluxBan, confluxDue } from '../src/game/confluxTime.js';
-import { seedDockMeet, seedPartingClock, findPartingThreat, DOCK_MEET_EVENT, PARTING_EVENT } from '../src/game/confluxBoard.js';
-import { fireThreat } from '../src/game/threats.js';
+import { seedPartingClock, findPartingThreat, PARTING_EVENT } from '../src/game/confluxBoard.js';
 import { hourInTimeZone, noteRulerActivity, emptyActivity } from '../src/game/activity.js';
 import { inQuietHours, setQuietHours, pushVerdict } from '../src/game/notify.js';
 import { applyCrossIslandJudged, secretRevealTexts, isCrossIslandDeed, deedMentionsPartner, isConflictOfInterestDeed } from '../src/game/deedConflux.js';
-import { takeDomainBoardIntoConflux, createEmptyContainer, overlayConfluxView, stripConfluxView } from '../src/game/confluxBoard.js';
-import { createPlotline, ensurePlotStatBudget } from '../src/game/plotlines.js';
+import { takeDomainBoardIntoConflux, overlayConfluxView, stripConfluxView } from '../src/game/confluxBoard.js';
+import { createPlotline } from '../src/game/plotlines.js';
 import { confluxEvent, writePairChronicle } from '../src/game/confluxCanon.js';
 import { crystallizeContainer } from '../src/game/confluxJobs.js';
 import { clampPassageState, passageCanShut } from '../src/game/passage.js';
@@ -102,11 +101,9 @@ test('нити при сближении остаются на домене', ()
   assert.equal(a.plotlines[0], plot);
   assert.equal(b.plotlines.length, 0);
   assert.equal(c.plotRefs.some((r) => r.plotId === plot.id), true);
-  assert.ok(c.container);
-  assert.equal(c.container.crystallized, false);
-  // У сопряжения нет концовок: расставание — часы, а не исход на выбор.
-  assert.deepEqual(c.container.endings, []);
-  assert.equal((c.container.threats || []).some((t) => t.eventKind === PARTING_EVENT), true);
+  assert.equal(c.container, null);
+  assert.equal(c.partingDueDay, 180);
+  assert.equal(findPartingThreat(c)?.dueDay, 180);
   assert.match(a.lore[0].text, /Берил/);
   assert.match(a.lore[0].text, /90 дн/);
   assert.doesNotMatch(a.lore[0].text, /~\d/);
@@ -122,7 +119,7 @@ test('свежий город не идёт в матчмейк четыре ч�
   assert.equal(confluxDue(d, now + 4 * 3600 * 1000), true);
 });
 
-test('стыковка вешает «острова сошлись» и не закрывает контейнер', async () => {
+test('стыковка не вешает нить: часы расставания на объекте пары', async () => {
   const w = world(100);
   const a = city('a', 'Астра');
   const b = city('b', 'Берил');
@@ -142,37 +139,12 @@ test('стыковка вешает «острова сошлись» и не з
     world: w,
     day: 100,
   });
-  const meet = (c.container.threats || []).find((t) => t.eventKind === DOCK_MEET_EVENT);
-  assert.ok(meet);
-  assert.equal(meet.status, 'fired');
-  assert.equal(meet.text, 'Острова сошлись.');
-  assert.equal(c.container.ending, undefined);
-  assert.equal(findPartingThreat(c.container)?.status, 'live');
+  assert.equal(c.container, null);
+  assert.equal(c.partingDueDay, 190);
+  assert.equal(findPartingThreat(c)?.dueDay, 190);
   assert.ok(out.contact?.description);
   assert.ok(c.passage?.text);
   assert.match(a.lore.map((f) => f.text).join('\n'), /Берил|проход|сошл/i);
-});
-
-test('срабатывание «острова сошлись» не ранит и не закрывает нить', () => {
-  const plot = { id: 'p1', failCount: 0, endings: [], threats: [] };
-  const meet = seedDockMeet(plot, { day: 10 });
-  const res = fireThreat(plot, meet, { day: 10 });
-  assert.equal(res.ok, true);
-  assert.equal(res.closes, false);
-  assert.equal(res.kind, 'event');
-  assert.equal(plot.failCount, 0);
-  assert.equal(plot.ending, undefined);
-});
-
-test('пустой контейнер не кристаллизован и не двигает статы', () => {
-  const c = createConfluxRecord({ domainIds: ['a', 'b'], world: world(), prepStartDay: 0, dockStartDay: 90, dockEndDay: 180 });
-  const plot = createEmptyContainer({ a: city('a', 'Астра'), b: city('b', 'Берил'), conflux: c, world: world(), config });
-  assert.equal(plot.crystallized, false);
-  assert.equal(plot.endings.length, 0);
-  assert.equal((plot.threats || []).length, 0);
-  assert.equal(plot.maxDepth, 0);
-  assert.equal(plot.gravity, null);
-  assert.equal(plot.stats?.budget ?? 0, 0);
 });
 
 test('тихие часы считаются в зоне игрока, не сервера', () => {
@@ -337,13 +309,13 @@ test('событие, не коснувшееся города, не пишет 
   assert.equal(b.lore.length, 0);
 });
 
-test('оверлей не крадёт нить: после снятия доска хозяина та же', () => {
+test('оверлей больше не кладёт карточку пары на доску города', () => {
   const a = city('a', 'Астра');
   const plot = createPlotline({ title: 'Своё', kind: 'story' });
   a.plotlines = [plot];
-  const c = { id: 'cf', domainIds: ['a', 'b'], container: createEmptyContainer({ a, b: city('b', 'Берил'), conflux: { id: 'cf' }, world: world(), config }), plotlines: [] };
+  const c = { id: 'cf', domainIds: ['a', 'b'], container: null, plotlines: [] };
   overlayConfluxView(a, c);
-  assert.equal(a.plotlines.length, 2);
+  assert.equal(a.plotlines.length, 1);
   stripConfluxView(a);
   assert.equal(a.plotlines.length, 1);
   assert.equal(a.plotlines[0], plot);
@@ -446,7 +418,8 @@ test('расставание: судьба оборванного дела по�
     dockEndDay: 100,
   });
   c.status = 'docked';
-  c.container = createEmptyContainer({ a, b, conflux: c, world: w, config });
+  c.container = null;
+  seedPartingClock(c, { dockEndDay: 100 });
   c.forecast = { a: 'Астра в руинах.', b: 'Берил уходит с добычей.', neutral: 'Один берег занял другой.' };
   const officer = a.officers[0];
   const process = {
@@ -479,12 +452,11 @@ test('расставание: судьба оборванного дела по�
   assert.equal(c.status, 'ended');
   assert.ok((c.lore || []).some((f) => /разошлись/.test(f.text)));
   assert.equal(c.container, null);
-  assert.ok((c.closedPlotlines || []).length >= 1);
   assert.equal(process.finishKind, 'abort');
   assert.ok((w.jobs || []).some((j) => j.kind === 'seed_appear'));
 });
 
-test('после кристаллизации контейнер получает бюджет RUPTURE/CRISIS', async () => {
+test('кристаллизации контейнера больше нет', async () => {
   const c = createConfluxRecord({
     domainIds: ['a', 'b'],
     world: world(),
@@ -492,29 +464,20 @@ test('после кристаллизации контейнер получае�
     dockStartDay: 90,
     dockEndDay: 180,
   });
-  const a = city('a', 'Астра');
-  const b = city('b', 'Берил');
-  c.container = createEmptyContainer({ a, b, conflux: c, world: world(), config });
+  c.container = null;
   c.status = 'docked';
-  ensurePlotStatBudget(c.container);
-  assert.equal(c.container.stats.budget, 0);
-  await crystallizeContainer({
+  const out = await crystallizeContainer({
     runtime: null,
     conflux: c,
-    domains: [a, b],
+    domains: [city('a', 'Астра'), city('b', 'Берил')],
     world: world(),
     day: 90,
   });
-  assert.equal(c.container.crystallized, true);
-  assert.ok(c.container.stats.budget >= 15);
-  // Кристаллизация даёт помехи и бюджет, но концовок у пары нет вовсе.
-  assert.deepEqual(c.container.endings, []);
-  assert.ok((c.container.threats || []).length >= 2);
+  assert.equal(out, null);
+  assert.equal(c.container, null);
 });
 
-test('старый сейв с концовками пары теряет их, а часы остаются одни', () => {
-  const a = city('a', 'Астра');
-  const b = city('b', 'Берил');
+test('часы расставания — поле пары, не угроза-сюжет', () => {
   const c = createConfluxRecord({
     domainIds: ['a', 'b'],
     world: world(),
@@ -522,21 +485,12 @@ test('старый сейв с концовками пары теряет их, 
     dockStartDay: 90,
     dockEndDay: 180,
   });
-  const plot = createEmptyContainer({ a, b, conflux: c, world: world(), config });
-  plot.endings = [
-    { id: 'end_parting', kind: 'NEUTRAL_ENDING', text: 'Острова разошлись, всё вернулось как было.' },
-    { id: 'end_0', kind: 'GOOD_ENDING', text: 'Города заключают временный договор о проходе.' },
-  ];
-  plot.threats = [
-    { id: 'thr_old', text: 'Острова разойдутся.', status: 'live', endingId: 'end_parting', dueDay: 180 },
-  ];
-
-  const clock = seedPartingClock(plot, { day: 90, dockEndDay: 180 });
-  assert.deepEqual(plot.endings, []);
-  assert.equal(plot.threats.length, 1, 'старые часы не продублировались');
-  assert.equal(clock.id, 'thr_old');
-  assert.equal(clock.eventKind, PARTING_EVENT, 'часы перевешены на своё событие');
-  assert.equal(findPartingThreat(plot), clock);
+  c.container = { id: 'old', endings: [{ id: 'end_0', kind: 'GOOD_ENDING', text: 'договор' }] };
+  const clock = seedPartingClock(c, { dockEndDay: 180 });
+  assert.equal(clock, 180);
+  assert.equal(c.partingDueDay, 180);
+  assert.equal(findPartingThreat(c).eventKind, PARTING_EVENT);
+  assert.equal(findPartingThreat(c).dueDay, 180);
 });
 
 test('широкий проход нельзя запереть, зараза проходит при shut', () => {

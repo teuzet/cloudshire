@@ -143,6 +143,14 @@ export function workUnits(durationBand, difficultyBand) {
 }
 
 /**
+ * Ценность самого действия: только срок × сложность.
+ * Глубина истории и статы считаются отсюда, а не друг из друга.
+ */
+export function deedValue({ durationBand, difficulty } = {}) {
+  return workUnits(durationBand, difficulty);
+}
+
+/**
  * Вклад дела в глубину истории.
  *
  * Считается по **исходной** полосе срока: спешка меняет шансы, а не объём работы,
@@ -158,7 +166,7 @@ export function depthGain({
   spread = DEPTH_SPREAD,
 } = {}) {
   if (finish === 'fail') return 0;
-  const base = workUnits(durationBand, difficulty);
+  const base = deedValue({ durationBand, difficulty });
   if (base <= 0) return 0;
   const mult = GRAVITY_DEPTH_MULTIPLIER[normalizeGravity(gravity)];
   const crit = finish === 'crit' ? CRIT_DEPTH_MULTIPLIER : 1;

@@ -72,6 +72,24 @@ export function plotChronicleTail(domain, plotId, limit = CHRONICLE_TAIL) {
     .filter(Boolean);
 }
 
+/** Родная хроника нити: без субъектификаций сопряжения. */
+export function nativePlotChronicleTail(domain, plotId, limit = CHRONICLE_TAIL) {
+  if (!plotId) return [];
+  const id = String(plotId);
+  return chronicleEntries(domain?.lore)
+    .filter((f) => {
+      const tags = f?.tags || [];
+      if (tags.includes('subjective')) return false;
+      return (
+        String(f?.sourcePlotId || '') === id ||
+        (f?.relatedPlotlineIds || []).some((x) => String(x) === id)
+      );
+    })
+    .slice(-limit)
+    .map((f) => String(f.text || '').trim())
+    .filter(Boolean);
+}
+
 /** Запасная запись, если модель не ответила. Без названий дел и историй. */
 export function fallbackDeedEntry(process, finish, { actor, gender } = {}) {
   const what = String(process?.goal || process?.detail || '').trim();

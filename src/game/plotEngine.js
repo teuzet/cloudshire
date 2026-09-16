@@ -8,26 +8,14 @@ import {
   normalizePlotlines,
   advancePlotClocks,
   findPlotline,
-  findClosedPlotline,
-  reopenClosedPlotline,
-  plotCanFade,
-  plotHasAttendingProcess,
   plotsForProcess,
-  createErrandPlotline,
-  boardHasRoom,
   plotConfig,
-  clipPlotText,
-  PLOT_SUMMARY_MAX,
   isThreeActPlot,
   isStoryPlot,
-  isErrandPlot,
   isConfluxPlot,
   isStakedStory,
-  plotHasActiveProcess,
-  closePlotline,
 } from './plotlines.js';
 import {
-  beatChance,
   pickRollStat,
   rollTint,
   tintFromProcessOutcome,
@@ -56,51 +44,26 @@ function attachProcess(plot, processId) {
 }
 
 /**
- * У каждого дела своя нить: открытая, недавно закрытая (её надо вернуть),
- * либо новая проходная. Нельзя заводить пустую карточку поверх уже случившейся развязки.
+ * Поручение больше не карточка: процесс без plotlineId.
+ * Если дело уже на истории — вернуть её. Иначе ничего не создавать.
  */
 export function ensureErrandForProcess(domain, process, { tick = null, config = null } = {}) {
+  void tick;
   normalizePlotlines(domain, config);
   const processId = String(process?.id || '');
-  const existing = (domain.plotlines || []).find((p) =>
-    (p.relatedProcessIds || []).includes(processId),
-  );
-  if (!processIsLive(process)) {
-    return {
-      plot: existing || findPlotline(domain, process?.plotlineId) || null,
-      created: false,
-    };
+  const existing = plotsForProcess(domain, processId).find((p) => isStoryPlot(p));
+  if (existing) {
+    if (process) process.plotlineId = existing.id;
+    return { plot: existing, created: false };
   }
-  if (existing) return { plot: existing, created: false };
-
   if (process?.plotlineId) {
     const named = findPlotline(domain, process.plotlineId);
-    if (named) return { plot: attachProcess(named, processId), created: false };
+    if (named && isStoryPlot(named)) {
+      return { plot: attachProcess(named, processId), created: false };
+    }
   }
-
-  const closed =
-    (process?.plotlineId && findClosedPlotline(domain, process.plotlineId)) ||
-    (domain.closedPlotlines || []).find((p) => (p.relatedProcessIds || []).includes(processId));
-  if (closed) {
-    const plot = reopenClosedPlotline(domain, closed);
-    if (plot) return { plot: attachProcess(plot, processId), created: false, reopened: true };
-  }
-
-  const cfg = plotConfig(config || {});
-  const room = boardHasRoom(domain, cfg);
-  if (!room.errand) return { plot: null, created: false, reason: 'board_full' };
-
-  const plot = createErrandPlotline(process, { tick, config });
-  const parent = process?.plotlineId ? findClosedPlotline(domain, process.plotlineId) : null;
-  if (parent?.reason || parent?.synopsis) {
-    const known = parent.synopsis || `Уже установлено: ${parent.reason}`;
-    plot.synopsis = clipPlotText(
-      `${known} Поручение ещё шло: ${process.detail || process.summary || ''}`.trim(),
-      PLOT_SUMMARY_MAX,
-    );
-  }
-  domain.plotlines.push(plot);
-  return { plot, created: true };
+  if (process) process.plotlineId = null;
+  return { plot: null, created: false };
 }
 
 /** Привязать дело к существующей нити (когда игрок продолжает начатую историю). */
@@ -140,10 +103,11 @@ export function attendingQueueForPlot(domain, plot) {
 }
 
 /**
- * UNRELATED на трёхтактной нити — ошибка привязки: своя проходная карточка.
- * Автотик и такты истории это дело больше не трогает.
+ * UNRELATED снимается с истории: дело остаётся поручением без нити.
  */
 export function rehomeUnrelatedProcess(domain, process, { tick = null, config = null } = {}) {
+  void tick;
+  void config;
   if (!process || process.intel) return { plot: null, rehomed: false, originPlot: null };
   const attached = plotsForProcess(domain, process.id);
   const engagement = engagementOf(process);
@@ -153,24 +117,16 @@ export function rehomeUnrelatedProcess(domain, process, { tick = null, config = 
   if (engagementAttends(engagement)) {
     return { plot: attached[0] || findPlotline(domain, process.plotlineId) || null, rehomed: false, originPlot: null };
   }
-    const stories = attached.filter((p) => isStoryPlot(p));
-  const errands = attached.filter((p) => isErrandPlot(p));
+  const stories = attached.filter((p) => isStoryPlot(p));
   if (!stories.length) {
-    return { plot: errands[0] || findPlotline(domain, process.plotlineId) || null, rehomed: false, originPlot: null };
+    process.plotlineId = null;
+    return { plot: null, rehomed: false, originPlot: null };
   }
   const originPlot = stories[0];
   for (const plot of stories) unlinkProcessFromPlot(plot, process.id);
   applyEngagement(process, 'UNRELATED');
-  if (errands.length) {
-    process.plotlineId = errands[0].id;
-    return { plot: errands[0], rehomed: true, originPlot };
-  }
   process.plotlineId = null;
-  const created = createErrandPlotline(process, { tick, config });
-  domain.plotlines = domain.plotlines || [];
-  domain.plotlines.push(created);
-  process.plotlineId = created.id;
-  return { plot: created, rehomed: true, originPlot };
+  return { plot: null, rehomed: true, originPlot };
 }
 
 /** Снять с трёхтактных нитей все дела, которые судья счёл UNRELATED. */
@@ -206,19 +162,12 @@ export function mootSiblingProcesses(domain, plot, exceptProcessId) {
 /**
  * Снять дело со всех нитей. Пустую карточку-поручение закрыть без новой истории.
  */
-export function detachProcessFromPlots(domain, process, { tick = null } = {}) {
+export function detachProcessFromPlots(domain, process) {
   if (!process) return { closedErrands: [] };
   const attached = plotsForProcess(domain, process.id);
   for (const plot of attached) unlinkProcessFromPlot(plot, process.id);
   process.plotlineId = null;
-  const closedErrands = [];
-  for (const plot of attached) {
-    if (!isErrandPlot(plot)) continue;
-    if (plotHasActiveProcess(domain, plot)) continue;
-    closePlotline(domain, plot.id, { tick, reason: 'поручение свёрнуто' });
-    closedErrands.push(plot);
-  }
-  return { closedErrands };
+  return { closedErrands: [] };
 }
 
 /**
@@ -285,10 +234,8 @@ function statValue(domain, statId) {
 }
 
 /**
- * План битов месяца.
- * Процессы всегда занимают слоты (и могут забить весь потолок).
- * Случайные тики живых историй — только в остаток. Сход слот не занимает.
- * Нити указов сюда не входят.
+ * План битов: только исходы дел. Случайных тиков историй нет —
+ * город пишет хронику, когда что-то кончилось или сработала угроза.
  */
 export function planBeats({
   domain,
@@ -299,7 +246,7 @@ export function planBeats({
 } = {}) {
   const cfg = plotConfig(config || {});
   normalizePlotlines(domain, config);
-  const pierce = new Set((piercePlotIds || []).map(String));
+  void piercePlotIds;
 
   const beats = [];
   const taken = new Set();
@@ -379,7 +326,7 @@ export function planBeats({
         mandatory: true,
         reason: outcome.finished ? 'process_finished' : `process_${outcome.kind}`,
         tint: tintFromProcessOutcome(outcome),
-        finale: (outcome.finished && isErrandPlot(plot)) || Boolean(actMove?.ending),
+        finale: Boolean(actMove?.ending),
         outcome,
         actMove,
         skipTint: isThreeActPlot(plot),
@@ -388,51 +335,8 @@ export function planBeats({
     }
   }
 
-  // 2. Сход забытой нити — служебное закрытие, слот не занимает. Трёхтактные так не гаснут.
-  for (const plot of domain.plotlines) {
-    if (isStoryPlot(plot) || isConfluxPlot(plot)) continue;
-    if (!plotCanFade(domain, plot, cfg)) continue;
-    addBeat(plot, { mandatory: true, reason: 'fade', fade: true, tint: 'dual' });
-  }
-
   const cap = cfg.beats.maxPerTick;
-  let slotsUsed = beats.filter((b) => !b.fade).length;
-
-  // Главная нить стыка: случайный тик пробивает потолок.
-  for (const plot of domain.plotlines) {
-    if (!isConfluxPlot(plot) && !isStoryPlot(plot)) continue;
-    if (!pierce.has(plot.id) || taken.has(plot.id)) continue;
-    const chance = beatChance(plot, cfg);
-    if (rng() >= chance) continue;
-    if (addBeat(plot, { mandatory: false, reason: 'pierce' })) slotsUsed += 1;
-  }
-
-  // 3. Случайные тики живых историй — только в остаток.
-  // Трёхтактные: только если нет ни одного активного дела; без окраски.
-  for (const plot of domain.plotlines) {
-    if (!isStoryPlot(plot)) continue;
-    if (taken.has(plot.id)) continue;
-    if (slotsUsed >= cap) break;
-    if (isThreeActPlot(plot) && plotHasAttendingProcess(domain, plot)) continue;
-    const chance = beatChance(plot, cfg);
-    if (rng() >= chance) continue;
-    let actMove = null;
-    if (isThreeActPlot(plot)) {
-      actMove = applyStoryActMove(plot, { trigger: 'auto', rng, config: cfg });
-    }
-    if (
-      addBeat(plot, {
-        mandatory: false,
-        reason: isThreeActPlot(plot) ? 'auto' : 'roll',
-        actMove,
-        skipTint: isThreeActPlot(plot),
-        finale: Boolean(actMove?.ending),
-      })
-    ) {
-      slotsUsed += 1;
-    }
-  }
-
+  const slotsUsed = beats.filter((b) => !b.fade).length;
   return { beats, slotsUsed, cap };
 }
 
@@ -483,6 +387,29 @@ export function scaleAffectsToBudget(affects, budget, { polarity = 'any', allowe
     .filter((a) => a.stat && (!allowed || allowed.has(a.stat)));
   if (polarity === 'nonneg') rows = rows.filter((r) => r.dir > 0);
   if (polarity === 'nonpos') rows = rows.filter((r) => r.dir < 0);
+  if (polarity === 'mixed') {
+    const up = rows.filter((r) => r.dir > 0);
+    const down = rows.filter((r) => r.dir < 0);
+    if (up.length && down.length) {
+      const upB = Math.max(1, Math.round(B / 2));
+      const downB = Math.max(1, B - upB);
+      return {
+        ...scaleAffectsToBudget(up.map((r) => ({ stat: r.stat, direction: 'up', force: 'notable' })), upB, {
+          polarity: 'nonneg',
+          allowed,
+        }),
+        ...Object.fromEntries(
+          Object.entries(
+            scaleAffectsToBudget(
+              down.map((r) => ({ stat: r.stat, direction: 'down', force: 'notable' })),
+              downB,
+              { polarity: 'nonpos', allowed },
+            ),
+          ),
+        ),
+      };
+    }
+  }
   if (!rows.length) return {};
   const sumW = rows.reduce((s, r) => s + r.weight, 0) || 1;
   const mags = rows.map((r) => Math.max(0, Math.round((r.weight / sumW) * B)));
@@ -539,6 +466,51 @@ export function resolveStatDeltas(
     deltas[stat] = (deltas[stat] || 0) + dir * size;
   }
   return deltas;
+}
+
+/**
+ * Один бюджет на пометки двух берегов.
+ * marks: [{ domainId, stat, direction, force }] → Map domainId -> { stat: delta }
+ */
+export function scaleTaggedAffects(marks, budget, { polarity = 'any' } = {}) {
+  const B = Math.max(0, Math.round(Number(budget) || 0));
+  const empty = new Map();
+  if (!B) return empty;
+  let rows = (marks || [])
+    .map((a) => ({
+      domainId: String(a?.domainId || ''),
+      stat: String(a?.stat || ''),
+      dir: a?.direction === 'down' ? -1 : 1,
+      weight: Math.max(1, FORCE_BASE[a?.force] ?? 2),
+    }))
+    .filter((a) => a.domainId && a.stat);
+  if (polarity === 'nonneg') rows = rows.filter((r) => r.dir > 0);
+  if (polarity === 'nonpos') rows = rows.filter((r) => r.dir < 0);
+  if (!rows.length) return empty;
+  const sumW = rows.reduce((s, r) => s + r.weight, 0) || 1;
+  const mags = rows.map((r) => Math.max(0, Math.round((r.weight / sumW) * B)));
+  let cur = mags.reduce((a, b) => a + b, 0);
+  let i = 0;
+  while (cur !== B && i < 400) {
+    const idx = i % mags.length;
+    if (cur < B) {
+      mags[idx] += 1;
+      cur += 1;
+    } else if (mags[idx] > 0) {
+      mags[idx] -= 1;
+      cur -= 1;
+    }
+    i += 1;
+  }
+  const byDomain = new Map();
+  rows.forEach((r, idx) => {
+    const v = r.dir * mags[idx];
+    if (!v) return;
+    const curD = byDomain.get(r.domainId) || {};
+    curD[r.stat] = (curD[r.stat] || 0) + v;
+    byDomain.set(r.domainId, curD);
+  });
+  return byDomain;
 }
 
 function pickWeighted(items, weights, rng) {

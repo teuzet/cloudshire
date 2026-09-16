@@ -1,6 +1,6 @@
 import { statEpithet } from './stats.js';
 import { plotConcerns } from './confluxBoard.js';
-import { isStoryPlot, isErrandPlot, isConfluxPlot } from './plotlines.js';
+import { isStoryPlot } from './plotlines.js';
 import { activeProcesses, pausedProcesses, processOwnedBy, processStatAverage, processPaceRatio } from './processes.js';
 import { finishChancePercents } from './rolls.js';
 import { blessManaCost, currentMana } from './mana.js';
@@ -185,8 +185,7 @@ function difficultyWord(band) {
 }
 
 function cityParticipates(plot, domainId) {
-  if (!plot || isErrandPlot(plot)) return false;
-  if (isConfluxPlot(plot)) return true;
+  if (!isStoryPlot(plot)) return false;
   return plotConcerns(plot, domainId);
 }
 
@@ -281,7 +280,7 @@ function collectEvents(domain, conflux, config, mana = 0, day = 0) {
     if (isStoryPlot(p) && p.id) byId.set(p.id, p);
   }
   for (const p of conflux?.plotlines || []) {
-    if (!p?.id || isErrandPlot(p)) continue;
+    if (!p?.id || !isStoryPlot(p)) continue;
     if (!cityParticipates(p, id)) continue;
     byId.set(p.id, p);
   }
