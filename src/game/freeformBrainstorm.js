@@ -129,36 +129,39 @@ export const VOID_JUDGE_EXTRA = [
 ].join('\n');
 
 export const GENESIS_ARCHITECT_EXTRA = [
-  '==== ЗАТРАВКА — ОПИСАНИЕ ГОРОДА ====',
-  'Дан не случай месяца и не полный бриф, а срез: несколько сущностей одного вида или один аспект.',
+  '==== ЗАТРАВКА — БРИФ ГОРОДА ====',
+  'Дан стандартный бриф города — тот же, что получают агенты. Не полное описание и не каталог сущностей.',
   'Это переопределяет правило «данная затравка — причина конфликта»: конфликт не обязан следовать из одной фразы.',
-  'Город — фон. Возьми из среза зацепку, если она есть, и напиши новую историю. Не тащи в завязку громкие места и риски острова, которых нет в этом срезе.',
-  'Не пересказывай срез. Три кандидата — три разных завязки, не три вариации одного крючка.',
+  'Город — фон и материал. Не пересказывай бриф. Три кандидата — три разных завязки, не три вариации одного крючка.',
 ].join('\n');
 
 export const GENESIS_JUDGE_EXTRA = [
-  '==== ЗАТРАВКА — ОПИСАНИЕ ГОРОДА ====',
-  'Критерий CHRONICLE не требуй как вытекание из одной строки описания.',
-  'FAIL, если история противоречит данному срезу, происходит на чужом острове, или это пересказ среза без новой завязки.',
-  'Не ставь FAIL только за то, что конфликт не вырос из конкретного места или риска города: срез — фон и материал, не обязательный крючок.',
+  '==== ЗАТРАВКА — БРИФ ГОРОДА ====',
+  'Критерий CHRONICLE не требуй как вытекание из одной строки брифа.',
+  'FAIL, если история противоречит брифу, происходит на чужом острове, или это пересказ брифа без новой завязки.',
+  'Не ставь FAIL только за то, что конфликт не вырос из конкретной фразы брифа: бриф — фон и материал, не обязательный крючок.',
 ].join('\n');
 
 function extraWithNote(base, note) {
   return [base, String(note || '').trim()].filter(Boolean).join('\n\n');
 }
 
-function architectExtraSystem({ requireMystery = false, fromVoid = false, fromGenesis = false } = {}) {
+function architectExtraSystem({
+  requireMystery = false,
+  fromVoid = false,
+  fromGenesis = false,
+} = {}) {
   const grain = fromVoid ? VOID_ARCHITECT_EXTRA : fromGenesis ? GENESIS_ARCHITECT_EXTRA : '';
-  return [grain, requireMystery ? MYSTERY_ARCHITECT_EXTRA : '']
-    .filter(Boolean)
-    .join('\n\n');
+  return [grain, requireMystery ? MYSTERY_ARCHITECT_EXTRA : ''].filter(Boolean).join('\n\n');
 }
 
-function judgeExtraSystem({ requireMystery = false, fromVoid = false, fromGenesis = false } = {}) {
+function judgeExtraSystem({
+  requireMystery = false,
+  fromVoid = false,
+  fromGenesis = false,
+} = {}) {
   const grain = fromVoid ? VOID_JUDGE_EXTRA : fromGenesis ? GENESIS_JUDGE_EXTRA : '';
-  return [grain, requireMystery ? MYSTERY_JUDGE_EXTRA : '']
-    .filter(Boolean)
-    .join('\n\n');
+  return [grain, requireMystery ? MYSTERY_JUDGE_EXTRA : ''].filter(Boolean).join('\n\n');
 }
 
 function formatSeedUserBlock(seedText, fromVoid, fromGenesis = false) {
@@ -170,7 +173,7 @@ function formatSeedUserBlock(seedText, fromVoid, fromGenesis = false) {
   }
   if (fromGenesis) {
     return [
-      'ОПИСАНИЕ ГОРОДА (срез, не полный бриф и не хроника месяца)',
+      'БРИФ ГОРОДА (стандартный бриф для агентов, не полное описание)',
       String(seedText || '').trim() || '(пусто)',
     ].join('\n');
   }
@@ -430,7 +433,9 @@ export async function brainstormFreeformSeeds({
           '',
           'НАБОРЫ',
           formatFreeformBrainstormRollsForPrompt(rolls),
-        ].join('\n'),
+        ]
+          .filter((line) => line != null)
+          .join('\n'),
       },
     ],
   };
@@ -547,7 +552,9 @@ export async function reviewBrainstormPack({
           formatSeedUserBlock(seedText, fromVoid, fromGenesis),
           '',
           formatPackForJudge(candidates),
-        ].join('\n'),
+        ]
+          .filter((line) => line != null)
+          .join('\n'),
       },
     ],
   };
@@ -646,7 +653,7 @@ export async function repairBrainstormPack({
           'Сейчас ты не придумываешь новую пачку. Ты правишь уже написанные три хроники по замечаниям судьи.',
           'Оси и автора не меняй. Центральный механизм не подменяй, кроме случая, когда судья требует убрать новый закон мира — тогда тот же двигатель внутри уже данного порядка.',
           'Не подменяй двигатель инженерией: желоб, водосток, водоотвод, скрытая галерея, дорога, подъёмник, настил или склад как новая причинная система.',
-          'Если просят поднять Gravity — укрупни уже данный конфликт (обряд, существо, ветер, спор), не сажай второй сюжет про трубы и влагу. Места из среза города — декорации, не новый механизм.',
+          'Если просят поднять Gravity — укрупни уже данный конфликт (обряд, существо, ветер, спор), не сажай второй сюжет про трубы и влагу. Места из брифа города — декорации, не новый механизм.',
           'Не поднимай и не опускай Gravity риторикой. Правь угрозу или возможность в хронике и динамику, которая её зарабатывает.',
           'Если просят обострить — конкретный конфликт и явную динамику в том же тексте, не новая посадка. Если просят ужать — вырежи орнамент, механизм оставь.',
           'Кандидат без замечания верни без изменений. Не делай кандидатов близнецами.',

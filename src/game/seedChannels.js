@@ -5,8 +5,7 @@
 
 import { chronicleEntries } from './models.js';
 import { countOpen, plotConfig, isStoryPlot } from './plotlines.js';
-import { cityGenesisSeedText } from './cityContext.js';
-import { pickGenesisSlice, formatGenesisSliceForPrompt } from './cityEntities.js';
+import { formatCityBrief, parseCityBrief } from './cityContext.js';
 import { FINISH_SHORT } from './rolls.js';
 import {
   SEED_SOURCES,
@@ -136,28 +135,27 @@ export function formatErrandGrain(outcome, chronicleAdds = []) {
     .join('\n');
 }
 
-/** Зерно генезиса: срез каталога или аспекта, иначе сжатый бриф. */
-export function cityGenesisGrainText(domain, { rng = Math.random } = {}) {
-  const slice = pickGenesisSlice(domain, rng);
-  const fromSlice = slice ? formatGenesisSliceForPrompt(slice, domain) : '';
-  return fromSlice || cityGenesisSeedText(domain);
+/** Зерно генезиса: стандартный бриф города, тот же, что получают агенты. */
+export function cityGenesisGrainText(domain) {
+  const raw = String(domain?.cityBrief || '').trim();
+  return raw ? formatCityBrief(parseCityBrief(raw)) : '';
 }
 
 export function voidGrainPack(domain, { config, rng = Math.random } = {}) {
   const grain = pickVoidGrain(config, rng);
   if (grain === 'genesis') {
-    const seedText = cityGenesisGrainText(domain, { rng });
+    const seedText = cityGenesisGrainText(domain);
     if (seedText) return { grain: 'genesis', fromVoid: false, fromGenesis: true, seedText };
   }
   return { grain: 'void', fromVoid: true, fromGenesis: false, seedText: '' };
 }
 
 /**
- * Зерно стартовой нити из генезиса: срез города и заранее назначенная gravity.
- * `null`, если среза и описания нет.
+ * Стартовая нить из брифа города и заранее назначенная gravity.
+ * `null`, если брифа нет.
  */
-export function openingGrain(domain, { gravity = null, rng = Math.random } = {}) {
-  const seedText = cityGenesisGrainText(domain, { rng });
+export function openingGrain(domain, { gravity = null } = {}) {
+  const seedText = cityGenesisGrainText(domain);
   if (!seedText) return null;
   return {
     source: 'void',

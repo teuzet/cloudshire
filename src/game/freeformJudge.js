@@ -388,7 +388,6 @@ export async function reviewFreeformPack({
 export const FREEFORM_CARD_JUDGE_CODES = [
   'HINGE',
   'PLAUSIBLE_ENOUGH',
-  'WHY_MOVES',
   'CLOSE_WHEN',
   'PREMISE_DRIFT',
   'GRAVITY_FIDELITY',
@@ -424,7 +423,6 @@ export function formatFreeformCardJudgeCase({
     `title: ${card?.title || '—'}`,
     `synopsis: ${card?.synopsis || '—'}`,
     card?.entry ? `entry: ${card.entry}` : null,
-    `whyMoves: ${card?.whyMoves || '—'}`,
     close.length ? `closeWhen:\n${close.map((x) => `- ${x}`).join('\n')}` : 'closeWhen: (нет)',
     card?.hiddenAnswer ? `hiddenAnswer: ${card.hiddenAnswer}` : 'hiddenAnswer: (нет)',
     hidden.length
@@ -468,7 +466,7 @@ export async function judgeFreeformCard({
     caseText: formatFreeformCardJudgeCase({ seedText, blank, card, gravity, config }),
     extraSystem,
     extraUser:
-      'Проверка собранной карточки, не выбор из пачки. PASS если шарнир на месте, whyMoves — намёток последствий если не займутся, closeWhen различны и хотя бы один держит масштаб последствий, карточка — тот же сюжет, gravity совпадает с посадкой (синопсис может быть меньше), космология цела, hiddenPremises не выдуманы, хроника без прогноза. Иначе FAIL одним из HINGE / PLAUSIBLE_ENOUGH / WHY_MOVES / CLOSE_WHEN / PREMISE_DRIFT / GRAVITY_FIDELITY / WORLD_FIDELITY / HIDDEN_INVENTED. UNCERTAIN пайплайн принимает. Историю не чини.',
+      'Проверка собранной карточки, не выбор из пачки. PASS если шарнир на месте, closeWhen различны и хотя бы один держит масштаб последствий, карточка — тот же сюжет, gravity совпадает с посадкой (синопсис может быть меньше), космология цела, hiddenPremises не выдуманы, хроника без прогноза. Иначе FAIL одним из HINGE / PLAUSIBLE_ENOUGH / CLOSE_WHEN / PREMISE_DRIFT / GRAVITY_FIDELITY / WORLD_FIDELITY / HIDDEN_INVENTED. UNCERTAIN пайплайн принимает. Историю не чини.',
     log,
     domainId,
     codes: FREEFORM_CARD_JUDGE_CODES,
@@ -476,7 +474,7 @@ export async function judgeFreeformCard({
     scope: 'freeform.card_judge',
     toolName: 'submit_freeform_card_verdict',
     toolDescription: 'Вердикт по собранной карточке. Историю не чини и не переписывай.',
-    locationDescription: 'Поле карточки: synopsis, whyMoves, closeWhen, hiddenPremises, шарнир.',
+    locationDescription: 'Поле карточки: synopsis, closeWhen, hiddenPremises, шарнир.',
   });
   const accepted = literaryJudgeAccepts(verdict.verdict);
   log.info('freeform.card_judge', {

@@ -86,7 +86,6 @@ function makeDomain() {
         title: 'Гул колодца',
         synopsis: 'Вода поёт.',
         cause: 'под срубом чужая кладка, и колодец держится на ней',
-        whyMoves: 'кладка осыпается, и гул усиливается сам',
         gravity: 'CRISIS',
         depth: 1,
         maxDepth: 3,
@@ -401,7 +400,7 @@ test('концовки приходят разобранными, а не одн
       ],
     );
     assert.equal(plot.cause, 'под срубом чужая кладка, и колодец держится на ней');
-    assert.equal(plot.whyMoves, 'кладка осыпается, и гул усиливается сам');
+    assert.equal(plot.whyMoves, undefined);
   });
 });
 
@@ -464,7 +463,7 @@ test('клиент рисует концовки списком с пометк�
     assert.match(js, /вопрос снят:/);
     assert.match(js, /теперь иначе:/);
     assert.match(js, /первопричина:/);
-    assert.match(js, /если не займутся:/);
+    assert.doesNotMatch(js, /если не займутся:/);
     assert.match(js, /data-seed-form/);
     assert.match(js, /посеять с тайной/);
     assert.match(js, /name="mystery"/);

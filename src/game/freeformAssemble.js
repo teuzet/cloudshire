@@ -46,13 +46,6 @@ export function keepSeedAnswer(raw) {
   return text && !isHollowHiddenPremise(text) ? text : '';
 }
 
-function lastSentence(text) {
-  const t = String(text || '').trim();
-  if (!t) return '';
-  const parts = t.split(/(?<=[.!?…])\s+/).map((s) => s.trim()).filter(Boolean);
-  return parts[parts.length - 1] || t;
-}
-
 export function splitChronicleHiddenLayer(text) {
   const raw = String(text || '').trim();
   if (!raw) return { chronicle: '', hiddenPremises: [] };
@@ -121,7 +114,6 @@ export function fallbackAssembledStory(candidate) {
     title,
     chronicle,
     synopsis: chronicle,
-    whyMoves: lastSentence(chronicle),
     cause: '',
     hiddenAnswer: keepSeedAnswer(layer[0]),
     hiddenPremises: layer.slice(1),
@@ -133,7 +125,6 @@ export function normalizeAssembledStory(raw, candidate, maxChars = PLOT_SUMMARY_
   const split = splitChronicleHiddenLayer(raw?.chronicle || raw?.entry || '');
   const chronicle = clipPlotText(split.chronicle || fallback.chronicle, maxChars);
   if (!chronicle) return null;
-  const whyMoves = clipPlotText(raw?.whyMoves, PLOT_SUMMARY_MAX) || fallback.whyMoves;
   const cause = clipPlotText(raw?.cause, PLOT_SUMMARY_MAX) || fallback.cause;
   const answer = keepSeedAnswer(raw?.hiddenAnswer);
   const hidden = uniqueHiddenLines([
@@ -144,7 +135,6 @@ export function normalizeAssembledStory(raw, candidate, maxChars = PLOT_SUMMARY_
     title: keepStoryTitle(raw?.title, chronicle) || fallback.title || 'История',
     chronicle,
     synopsis: chronicle,
-    whyMoves,
     cause,
     hiddenAnswer: answer,
     hiddenPremises: hidden,
@@ -359,11 +349,11 @@ export async function constructFreeformStory({
     tools: [
       {
         name: 'submit_freeform_story',
-        description: 'Карточка истории: стартовая хроника в этом городе, скрытый слой и следующий ход ситуации.',
+        description: 'Карточка истории: стартовая хроника в этом городе и скрытый слой.',
         parameters: {
           type: 'object',
           additionalProperties: false,
-          required: ['chronicle', 'cause', 'whyMoves'],
+          required: ['chronicle', 'cause'],
           properties: {
             chronicle: {
               type: 'string',
@@ -378,12 +368,6 @@ export async function constructFreeformStory({
                 'Пример: «гон костоломов — сезонный цикл карьерных птиц, из-за которого нельзя работать в выработке».',
               ].join(' '),
             },
-            whyMoves: {
-              type: 'string',
-              description:
-                'Одно-два предложения: что ситуация сделает следующим, если город ею не займётся. ' +
-                'Конкретный процесс из этой истории, не «напряжение растёт» и не финал.',
-            },
             hiddenPremises: {
               type: 'array',
               items: { type: 'string' },
@@ -393,10 +377,7 @@ export async function constructFreeformStory({
         },
         handler: async (args) => {
           const card = normalizeAssembledStory(args, candidate, maxChars);
-          if (!card) return toolFail('thin', 'Нужны chronicle и whyMoves.');
-          if (!card.whyMoves) {
-            return toolFail('thin', 'Нужен whyMoves: следующий ход ситуации, если ею не занимаются.');
-          }
+          if (!card) return toolFail('thin', 'Нужна chronicle.');
           if (!card.cause) {
             return toolFail(
               'no_cause',
@@ -434,7 +415,6 @@ export async function constructFreeformStory({
             'Проверь себя: если все спорщики разойдутся по домам, cause останется на месте.',
             'Разойдётся вместе с ними — значит это не первопричина, а спор.',
           ].join(' '),
-          'whyMoves — что ситуация сделает следующим, если город ею не займётся.',
           requireMystery
             ? 'Разгадка обязательна: перенеси блок «На самом деле:» в hiddenPremises, отговорки не клади.'
             : 'Если есть блок «На самом деле:» — перенеси его в hiddenPremises, в хронику не пиши.',

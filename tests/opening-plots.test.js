@@ -55,7 +55,6 @@ function openingRuntime(calls) {
         await tool.handler({
           title: `История ${n}`,
           chronicle: `На мостках Варшелы случилось ${n}.`,
-          whyMoves: `Если не вмешаться, ${n} спустится к корням.`,
           hiddenPremises: [],
         });
         return;
@@ -148,9 +147,10 @@ test('появление стартовой нити рассказываетс�
   assert.equal(seedQueue(domain).length, 1, 'вторая заявка ещё ждёт своего дня');
 
   assert.equal(calls.length, 1);
-  assert.match(calls[0].extra, /ОПИСАНИЕ ГОРОДА/);
+  assert.match(calls[0].extra, /БРИФ ГОРОДА/);
   assert.match(calls[0].user, /Вертикальный город вокруг Праотца/);
   assert.doesNotMatch(calls[0].extra, /НЕТ ЗАТРАВКИ/);
+  assert.doesNotMatch(calls[0].user, /cityBrief|Срез каталога/i);
 });
 
 test('появление стартовой нити из пустоты не берёт бриф', async () => {
@@ -175,7 +175,7 @@ test('появление стартовой нити из пустоты не б
   assert.equal(res.plot.gravity, 'EPISODE');
   assert.equal(calls.length, 1);
   assert.match(calls[0].extra, /НЕТ ЗАТРАВКИ/);
-  assert.doesNotMatch(calls[0].extra, /ОПИСАНИЕ ГОРОДА/);
+  assert.doesNotMatch(calls[0].extra, /БРИФ ГОРОДА/);
   assert.doesNotMatch(calls[0].user, /Праотца/);
 });
 
@@ -189,18 +189,18 @@ test('зерно стартовой нити — описание города �
   assert.equal(openingGrain({}, { gravity: 'EPISODE' }), null, 'без описания зерна нет');
 });
 
-test('посев из генезиса отдаёт срез каталога, а не весь бриф', () => {
+test('посев из описания города отдаёт стандартный бриф, не каталог сущностей', () => {
   const domain = {
     name: 'Варшела',
     cityBrief: 'Вертикальный город вокруг Праотца, джунгли давят на край освоенного ядра.',
+    description: 'Длинный генезис, который агентам тика не нужен.',
     cityEntities: [
       { kind: 'custom', name: 'Обмен хлебом', about: 'На равноденствие дворы меняются караваями.' },
     ],
   };
-  const grain = openingGrain(domain, { gravity: 'SITUATION', rng: () => 0 });
-  assert.match(grain.seedText, /Обмен хлебом/);
-  assert.match(grain.seedText, /Срез каталога/);
-  assert.doesNotMatch(grain.seedText, /Праотца/);
+  const grain = openingGrain(domain, { gravity: 'SITUATION' });
+  assert.match(grain.seedText, /Праотца/);
+  assert.doesNotMatch(grain.seedText, /Обмен хлебом|Срез каталога|Длинный генезис/);
 });
 
 test('пустой посев: 50% генезис города, иначе настоящая пустота', () => {

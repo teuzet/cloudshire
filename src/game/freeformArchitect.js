@@ -375,12 +375,7 @@ export async function inventBeatBlanks({
       formatStoryForBeatArchitect(domain, plot),
       '',
       auto
-        ? [
-            'Городом эту историю не занимались. Ситуация сама сдвинулась.',
-            plot?.whyMoves ? `Она клонилась к тому, что: ${plot.whyMoves}` : '',
-          ]
-            .filter(Boolean)
-            .join('\n')
+        ? 'Городом эту историю не занимались. Ситуация сама сдвинулась.'
         : [
             `Поступок: ${deed?.summary || ''}`,
             deed?.detail ? `Подробности: ${deed.detail}` : '',

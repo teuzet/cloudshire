@@ -259,13 +259,12 @@ test('freeform глубина — с нуля и без потолка теку�
     gravity: 'EPISODE',
     depth: 0,
     maxDepth: 3,
-    whyMoves: 'Хозяин уйдёт искать сапог по дворам.',
   });
   assert.equal(plot.depth, 0);
   assert.equal(plot.maxDepth, 3);
   assert.equal(formatFreeformDepth(plot), 'глубина 0/3');
   assert.match(plotCardForPrompt(plot), /глубина 0\/3/);
-  assert.match(plotCardForPrompt(plot), /если не займутся: Хозяин уйдёт/);
+  assert.doesNotMatch(plotCardForPrompt(plot), /если не займутся|whyMoves/);
   advanceFreeformDepth(plot);
   assert.equal(plot.depth, 1);
   assert.equal(plot.maxDepth, 3);
@@ -359,7 +358,10 @@ test('конфиг freeform читается из YAML', () => {
   assert.doesNotMatch(agents.freeformBrainstorm.instructions, /только к полю «последствия»/);
   assert.doesNotMatch(agents.freeformBrainstorm.instructions, /агент брейншторма/);
   assert.match(agents.freeformBrainstorm.instructions, /Анти-аттракт: бюрократия/);
-  assert.match(agents.freeformBrainstorm.instructions, /не в протоколах/);
+  assert.match(agents.freeformBrainstorm.instructions, /спор о договорах/);
+  assert.match(agents.freeformBrainstorm.instructions, /эпитетов и орнамента/);
+  assert.match(agents.freeformBrainstorm.instructions, /объясняет сюжет структурно/);
+  assert.match(agents.freeformBrainstorm.instructions, /Все двигатели должны быть заданы явно/);
   assert.match(agents.freeformBrainstorm.instructions, /бога-покровителя и верховного жреца/);
   assert.match(agents.freeformBrainstorm.instructions, /наблюдаемый слой/);
   assert.match(agents.freeformBrainstorm.instructions, /клиффхэнгер/);
@@ -400,13 +402,15 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformBrainstormJudge.instructions, /submit_freeform_pack_review/);
   assert.match(agents.freeformBrainstormJudge.instructions, /GRAVITY/);
   assert.match(agents.freeformBrainstormJudge.instructions, /COSMOLOGY/);
-  assert.match(agents.freeformBrainstormJudge.instructions, /Небо открыто/);
-  assert.match(agents.freeformBrainstormJudge.instructions, /воздушные слои/);
-  assert.match(agents.freeformBrainstormJudge.instructions, /не требуй заменить небесную причину/i);
+  assert.match(agents.freeformBrainstormJudge.instructions, /FORECAST/);
+  assert.match(agents.freeformBrainstormJudge.instructions, /BUREAUCRACY_PORN/);
+  assert.match(agents.freeformBrainstormJudge.instructions, /WATER_SYSTEMS_PORN/);
   assert.match(agents.freeformBrainstormJudge.instructions, /не подменяй его водостоком/);
   assert.match(agents.freeformBrainstormJudge.instructions, /TEMPO/);
   assert.match(agents.freeformBrainstormJudge.instructions, /ECONOMY/);
   assert.match(agents.freeformBrainstormJudge.instructions, /недели и месяцы/);
+  assert.match(agents.freeformBrainstormJudge.instructions, /Нет эпитетов и орнамента/);
+  assert.match(agents.freeformBrainstormJudge.instructions, /Сюжет задан структурно/);
   assert.match(agents.freeformBrainstormJudge.instructions, /5–8 кратких предложений/);
   assert.match(agents.freeformBrainstormJudge.instructions, /PATRON/);
   assert.match(agents.freeformBrainstormJudge.instructions, /CONFLUX/);
@@ -419,7 +423,7 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformBrainstormJudge.instructions, /На самом деле/);
   assert.match(agents.freeformBrainstormJudge.instructions, /Неизвестно/);
   assert.match(agents.freeformBrainstormJudge.instructions, /клиффхэнгер/);
-  assert.match(agents.freeformBrainstormJudge.instructions, /классное объяснение/);
+  assert.match(agents.freeformBrainstormJudge.instructions, /интересное и логичное объяснение/);
   assert.match(agents.freeformBrainstormJudge.instructions, /тайну не требуй/);
   assert.match(agents.freeformBrainstormJudge.instructions, /верховный жрец/);
   assert.match(agents.freeformBrainstormJudge.instructions, /СОВЕТЫ/);
@@ -477,8 +481,8 @@ test('конфиг freeform читается из YAML', () => {
   assert.deepEqual(agents.freeformAssemble.canon, ['world']);
   assert.deepEqual(agents.freeformAssemble.styles, []);
   assert.match(agents.freeformAssemble.instructions, /submit_freeform_story/);
-  assert.match(agents.freeformAssemble.instructions, /whyMoves/);
-  assert.match(agents.freeformAssemble.instructions, /что ситуация сделает следующим/);
+  assert.doesNotMatch(agents.freeformAssemble.instructions, /whyMoves/);
+  assert.doesNotMatch(agents.freeformAssemble.instructions, /что ситуация сделает следующим/);
   assert.match(agents.freeformAssemble.instructions, /неделями и месяцами/);
   assert.doesNotMatch(agents.freeformAssemble.instructions, /САНОВНИКИ НЕ ГЕРОИ|столпов не используй/i);
   assert.match(agents.freeformBrainstormJudge.instructions, /FORECAST/);
@@ -568,7 +572,7 @@ test('затравка брейншторма — одна запись или �
   );
 });
 
-test('пакет судьи карточки — абзац, whyMoves, gravity, без угрозы', () => {
+test('пакет судьи карточки — абзац, gravity, без угрозы', () => {
   const text = formatFreeformCardJudgeCase({
     seedText: 'На площади нашли сапог.',
     blank: {
@@ -582,7 +586,6 @@ test('пакет судьи карточки — абзац, whyMoves, gravity, 
     card: {
       title: 'Сапог',
       synopsis: 'Гость оставил сапог.',
-      whyMoves: 'Хозяин ищет сапог.',
       closeWhen: ['Найти', 'Бросить'],
       hiddenPremises: [],
       urgency: 40,
@@ -591,7 +594,7 @@ test('пакет судьи карточки — абзац, whyMoves, gravity, 
   });
   assert.match(text, /Сапог зовёт к створу/);
   assert.match(text, /последствия: Площадь неделю спорит/);
-  assert.match(text, /whyMoves: Хозяин ищет сапог/);
+  assert.doesNotMatch(text, /whyMoves/);
   assert.match(text, /GRAVITY: RUPTURE/);
   assert.match(text, /HUMAN/);
   assert.match(text, /hiddenPremises: \[\]/);
@@ -703,7 +706,6 @@ test('архитектор не видит бриф города, констру
           synopsis: 'Гость оставил сапог и ушёл к створу.',
           entry: '',
           closeWhen: ['Найти хозяина 2', 'Бросить сапог'],
-          whyMoves: 'Пока сапог лежит на площади, хозяин ищет его, а двор держит чужака.',
           cause: 'Гость ушёл к створу и не вернулся за своим сапогом.',
           hiddenPremises: [],
         });
@@ -732,7 +734,7 @@ test('архитектор не видит бриф города, констру
   assert.equal(started.ok, true);
   assert.equal(started.winner.title, 'Сапог на площади');
   assert.equal(started.winner.gravity, 'RUPTURE');
-  assert.match(started.winner.whyMoves, /сапог/);
+  assert.equal(started.winner.whyMoves, undefined);
   assert.equal(started.rejected.length, 2);
   assert.match(started.rejected[0].hook, /Сапог зовёт в путь 1/);
   assert.match(started.rejected[0].text, /конфликт: Конфликт сапога 1/);
@@ -770,8 +772,9 @@ test('архитектор не видит бриф города, констру
   assert.doesNotMatch(architect.user, /EPISODE/);
   assert.doesNotMatch(architect.user, /изгородь|венок|помолвк/);
   assert.match(judge.user, /GRAVITY: RUPTURE/);
-  assert.match(ctor.user, /whyMoves/);
+  assert.doesNotMatch(ctor.user, /whyMoves/);
   assert.ok(!ctor.required.includes('urgency'));
+  assert.ok(!ctor.required.includes('whyMoves'));
   assert.match(ctor.user, /Urgency не ставь/);
   assert.equal(started.winner.urgency, undefined);
   assert.match(judge.user, /чужой остров/);
@@ -805,7 +808,6 @@ test('FAIL судьи карточки — одна доработка конс�
               ? 'Горький корень гуще, значит есть неучтённые жильцы.'
               : 'Горький корень гуще у стены, потому что там течёт скрытый сток, и по густоте судят о числе жильцов.',
           closeWhen: ['Признать жильцов', 'Срезать корень'],
-          whyMoves: 'Корень растёт и закрывает сток.',
           cause: 'Под стеной течёт неучтённый сток, и корень кормится им.',
           hiddenPremises: [],
         });
@@ -851,7 +853,6 @@ test('UNCERTAIN судьи карточки не гоняет конструкт
           title: 'Сапог',
           synopsis: 'Гость оставил сапог.',
           closeWhen: ['Найти', 'Бросить'],
-          whyMoves: 'Хозяин ищет сапог.',
           cause: 'Гость ушёл к створу и не вернулся за сапогом.',
           hiddenPremises: [],
         });
@@ -1047,7 +1048,6 @@ test('автотик: архитектор без дела, с динамика�
     closeWhen: ['Найти хозяина'],
     synopsis: 'На площади нашли сапог.',
   });
-  plot.whyMoves = 'Пока сапог лежит, хозяин ищет его дворами.';
   const told = await tellFreeformBeat({
     config: loadConfig(),
     runtime,
@@ -1061,9 +1061,7 @@ test('автотик: архитектор без дела, с динамика�
   assert.equal(told.pickedIndex, 2);
   const architect = calls.find((c) => c.agentId === 'freeformArchitectTell');
   assert.match(architect.user, /не занимались/);
-  assert.match(architect.user, /клонилась к тому/);
-  assert.match(architect.user, /Пока сапог лежит, хозяин ищет его дворами/);
-  assert.doesNotMatch(architect.user, /whyMoves|Дело:|Поступок:/);
+  assert.doesNotMatch(architect.user, /клонилась к тому|whyMoves|Дело:|Поступок:/);
   assert.match(architect.user, /Способы сдвига/);
 });
 
@@ -1995,7 +1993,7 @@ test('посев из генезиса: архитектор видит опис
   const packed = await brainstormFreeformPack({
     config: loadConfig(),
     runtime,
-    seedText: 'Вертикальный город вокруг Праотца, джунгли давят на край.',
+    seedText: 'Вертикальный город вокруг Праотца, джунгли давят на край освоенного ядра.',
     gravity: 'SITUATION',
     fromGenesis: true,
     rng: () => 0,
@@ -2003,14 +2001,60 @@ test('посев из генезиса: архитектор видит опис
   assert.equal(packed.ok, true);
   const architect = extras.find((e) => e.agentId === 'freeformBrainstorm');
   const judge = extras.find((e) => e.agentId === 'freeformBrainstormJudge');
-  assert.match(architect.extraSystem, /ОПИСАНИЕ ГОРОДА/);
+  assert.match(architect.extraSystem, /БРИФ ГОРОДА/);
+  assert.match(architect.extraSystem, /стандартный бриф/);
+  assert.match(architect.extraSystem, /Не полное описание и не каталог сущностей/);
+  assert.match(architect.user, /БРИФ ГОРОДА/);
   assert.match(architect.user, /Вертикальный город вокруг Праотца/);
+  assert.doesNotMatch(architect.user, /cityBrief/i);
+  assert.doesNotMatch(architect.user, /Срез каталога|Обмен хлебом/);
+  assert.doesNotMatch(architect.extraSystem, /cityBrief|полное описание города|==== ГОРОД ====/);
   assert.doesNotMatch(architect.extraSystem, /НЕТ ЗАТРАВКИ/);
-  assert.match(judge.extraSystem, /ОПИСАНИЕ ГОРОДА/);
+  assert.match(judge.extraSystem, /БРИФ ГОРОДА/);
+  assert.match(judge.user, /Вертикальный город вокруг Праотца/);
   assert.doesNotMatch(judge.extraSystem, /CHRONICLE не применяй/);
-  assert.match(GENESIS_ARCHITECT_EXTRA, /срез/);
+  assert.match(GENESIS_ARCHITECT_EXTRA, /стандартный бриф/);
   assert.match(GENESIS_JUDGE_EXTRA, /не обязательный крючок/);
   assert.doesNotMatch(GENESIS_JUDGE_EXTRA, /не вырастает из этого города/);
+});
+
+test('посев из хроники не подмешивает бриф города', async () => {
+  const real = new AgentRuntime(loadConfig());
+  const extras = [];
+  const runtime = {
+    assembleChat: (opts) => real.assembleChat(opts),
+    async run(opts) {
+      extras.push({
+        agentId: opts.agentId,
+        extraSystem: String(opts.extraSystem || ''),
+        user: String(opts.userMessages?.[0]?.content || ''),
+      });
+      const tool = opts.tools?.[0];
+      if (!tool) return;
+      if (opts.agentId === 'freeformBrainstorm') {
+        await tool.handler({
+          candidates: [1, 2, 3].map((i) => ({ chronicle: `Хроника сапога ${i}` })),
+        });
+      } else if (opts.agentId === 'freeformBrainstormJudge') {
+        await tool.handler({
+          reviews: [1, 2, 3].map((i) => ({ index: i, verdict: 'PASS', summary: 'держит' })),
+        });
+      }
+    },
+  };
+  await brainstormFreeformPack({
+    config: loadConfig(),
+    runtime,
+    seedText: 'На площади нашли чужой сапог и двор его держит.',
+    gravity: 'EPISODE',
+    rng: () => 0,
+  });
+  const writer = extras.find((e) => e.agentId === 'freeformBrainstorm');
+  const judge = extras.find((e) => e.agentId === 'freeformBrainstormJudge');
+  assert.match(writer.user, /На площади нашли чужой сапог/);
+  assert.doesNotMatch(writer.extraSystem, /БРИФ ГОРОДА|стандартный бриф/);
+  assert.doesNotMatch(writer.user, /БРИФ ГОРОДА/);
+  assert.doesNotMatch(judge.extraSystem, /БРИФ ГОРОДА/);
 });
 
 test('правка пропускается, если судья ничего не просит', async () => {
@@ -2296,7 +2340,6 @@ test('живой посев без флага и без выпавшего ша�
         await tool.handler({
           title: 'Мосток у межи',
           chronicle: 'Двор чинит мосток у межи. Доски скрипят под возом.',
-          whyMoves: 'Мосток осядет, если его не перебрать.',
           cause: 'Опоры мостка сгнили от воды, стоящей у межи.',
           hiddenPremises: [],
         });
@@ -2354,7 +2397,6 @@ test('живой посев с выпавшей тайной просит раз
         await tool.handler({
           title: 'Мосток у межи',
           chronicle: 'Двор чинит мосток у межи. Доски скрипят под возом.',
-          whyMoves: 'Мосток осядет, если его не перебрать.',
           cause: 'Опоры мостка сгнили от воды, стоящей у межи.',
           hiddenPremises: ['сосед подпилил балку, чтобы воз соседа застрял'],
         });
@@ -2391,7 +2433,7 @@ test('скрытый слой отрезается от наблюдаемой �
     chronicle: 'Сапог лежит на площади и зовёт хозяина дворами.\nНа самом деле: это не сапог, а край.',
   });
   assert.doesNotMatch(fallback.chronicle, /На самом деле/i);
-  assert.match(fallback.whyMoves, /зовёт/);
+  assert.equal(fallback.whyMoves, undefined);
   assert.match(fallback.hiddenAnswer, /не сапог/);
   assert.deepEqual(
     heuristicHiddenSplit(['соль сыплется из разлома края.', 'двор видел расходную книгу деда']),
@@ -2431,7 +2473,7 @@ test('имя-агент не принимает пересказ хроники'
   assert.equal(named.title, 'Смола восточного дерева');
 });
 
-test('конструктор собирает хронику, hidden и whyMoves — без countdown-агента', async () => {
+test('конструктор собирает хронику и hidden — без countdown-агента', async () => {
   const real = new AgentRuntime(loadConfig());
   const calls = [];
   const domain = {
@@ -2457,9 +2499,10 @@ test('конструктор собирает хронику, hidden и whyMoves
           ['submit_freeform_story'],
         );
         assert.doesNotMatch(opts.extraSystem || '', /САНОВНИКИ НЕ ГЕРОИ/);
+        assert.deepEqual(opts.tools[0].parameters.required, ['chronicle', 'cause']);
+        assert.equal(opts.tools[0].parameters.properties.whyMoves, undefined);
         await tool.handler({
           chronicle: 'На площади Грастока двор держит сапог без пары.',
-          whyMoves: 'Пока сапог лежит, хозяин ищет его дворами.',
           cause: 'Соль сыплется из разлома края, и двор не знает, чей это сапог.',
           hiddenPremises: ['Соль сыплется из разлома края, не из склада.', 'Старший видел расходную книгу деда.'],
         });
@@ -2497,13 +2540,13 @@ test('конструктор собирает хронику, hidden и whyMoves
   assert.equal(out.title, 'Сапог на площади');
   assert.match(out.chronicle, /площади/);
   assert.doesNotMatch(out.chronicle, /На самом деле/i);
-  assert.match(out.whyMoves, /хозяин/);
+  assert.equal(out.whyMoves, undefined);
   assert.match(out.cause, /разлома края/);
   assert.match(out.hiddenAnswer, /Соль/);
   assert.match(out.hiddenPremises[0], /расходную книгу/);
   assert.equal(out.countdown, undefined);
   assert.match(out.assemblePrompt, /submit_freeform_story/);
-  assert.match(out.assemblePrompt, /что ситуация сделает следующим/);
+  assert.doesNotMatch(out.assemblePrompt, /whyMoves|что ситуация сделает следующим/);
   assert.match(out.assemblePrompt, /Первопричина/);
   assert.doesNotMatch(out.assemblePrompt, /claim_character/);
   assert.doesNotMatch(out.assemblePrompt, /Не схлопывай цепочку/);
@@ -2525,7 +2568,7 @@ test('конструктор собирает хронику, hidden и whyMoves
   assert.equal(plot.type, 'story');
   assert.equal(plot.urgency, 'MEDIUM');
   assert.equal(plot.countdown, null);
-  assert.equal(plot.whyMoves, out.whyMoves);
+  assert.equal(plot.whyMoves, undefined);
   assert.equal(plot.cause, out.cause, 'первопричина живёт на нити, а не только в сборке');
   assert.equal(plot.arena, undefined);
   assert.equal(plot.hook, undefined);
@@ -2565,7 +2608,6 @@ test('завязка возвращает полный промпт архите
           title: 'Сапог',
           synopsis: 'Гость оставил сапог.',
           closeWhen: ['Найти', 'Бросить'],
-          whyMoves: 'Хозяин ищет сапог.',
           cause: 'Гость ушёл к створу и не вернулся за сапогом.',
           hiddenPremises: [],
         });

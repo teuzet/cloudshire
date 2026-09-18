@@ -647,7 +647,6 @@ function plotCard(p, names = {}) {
     `<div class="muted small">${esc(meta)}</div>` +
     (p.synopsis ? `<p class="pre">${esc(p.synopsis)}</p>` : '') +
     (p.cause ? `<p class="small muted">первопричина: ${esc(p.cause)}</p>` : '') +
-    (p.whyMoves ? `<p class="small muted">если не займутся: ${esc(p.whyMoves)}</p>` : '') +
     facts.known +
     facts.hidden +
     truth +

@@ -563,7 +563,6 @@ export function createFreeformPlot({ domain, world, variant, config, seedChronic
     failCount: Math.round(Number(variant.failCount) || 0),
     maxFails: maxFailsForGravity(gravity),
     endings: variant.endings,
-    whyMoves: variant.whyMoves,
     cause: variant.cause,
     countdown,
     tick: world.tickIndex,
@@ -584,7 +583,6 @@ export function applyFreeformState(plot, patch = {}) {
     plot.endings = normalizeFreeformEndings(patch.endings);
     plot.closeWhen = plot.endings.map((e) => e.text);
   }
-  if (patch.whyMoves) plot.whyMoves = clipPlotText(patch.whyMoves, PLOT_SUMMARY_MAX);
   if (patch.urgency) plot.urgency = parseFreeformUrgency(patch.urgency);
   if (Number.isFinite(Number(patch.failCount))) plot.failCount = Math.round(Number(patch.failCount));
   if (Number.isFinite(Number(patch.countdown))) {
@@ -630,9 +628,6 @@ export function plotCardForPrompt(plot, { revealHidden = true } = {}) {
     `Синопсис: ${plot.synopsis || '—'}`,
     plot.cause ? `Первопричина: ${plot.cause}` : '',
     `Исходы:\n${formatFreeformEndings(plot) || formatCloseWhen(plot)}`,
-    plot.whyMoves
-      ? `если не займутся: ${plot.whyMoves}`
-      : '',
     // Раскрытое городом — уже не тайна, а установленный факт: об этом можно
     // говорить и писать в отличие от скрытого слоя ниже.
     solved ? `Город разгадал: ${solved}` : '',

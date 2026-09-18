@@ -360,6 +360,7 @@ const STALE_PLOT_FIELDS = [
   'conflict',
   'dynamics',
   'consequences',
+  'whyMoves',
   'kind',
   'storyType',
   'isMainConflux',
@@ -391,7 +392,6 @@ function storyActState(p = {}) {
       urgency: parseFreeformUrgency(p.urgency),
       gravity,
       countdown: parseStoryCountdown(p.countdown),
-      whyMoves: clipText(p.whyMoves, PLOT_SUMMARY_MAX),
       // Первопричина живёт столько же, сколько нить: концовки обязаны снять
       // именно её, а не спор сторон вокруг неё.
       cause: clipText(p.cause, PLOT_SUMMARY_MAX),
@@ -781,7 +781,6 @@ export function createPlotline({
   maxDepth = null,
   hiddenPremises = [],
   hiddenAnswer = '',
-  whyMoves = '',
   cause = '',
   countdown = null,
   config = null,
@@ -834,7 +833,6 @@ export function createPlotline({
       endings,
       hiddenPremises,
       hiddenAnswer,
-      whyMoves,
       cause,
       countdown,
       shared,

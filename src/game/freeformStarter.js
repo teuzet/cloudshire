@@ -20,7 +20,6 @@ export function normalizeSeedVariant(raw, cfg) {
   // У посева игрока тайна если и есть, то одна и это сразу разгадка:
   // подступы к ней городу ещё не попадались.
   const hiddenAnswer = clipPlotText(raw?.hiddenAnswer, PLOT_SUMMARY_MAX);
-  const whyMoves = clipPlotText(raw?.whyMoves || raw?.motion, PLOT_SUMMARY_MAX);
   const cause = clipPlotText(raw?.cause, PLOT_SUMMARY_MAX);
   if (!title || !synopsis || closeWhen.length < 1) return null;
   return {
@@ -28,7 +27,6 @@ export function normalizeSeedVariant(raw, cfg) {
     synopsis,
     entry: entry || '',
     closeWhen,
-    whyMoves,
     cause,
     hiddenAnswer,
     hiddenPremises: [],
@@ -44,7 +42,6 @@ export function seedCardFromBlank(blank, cfg) {
       synopsis,
       entry: '',
       closeWhen: blank.closeWhen?.length ? blank.closeWhen : ['Ситуация исчерпала себя', 'Принять произошедшее как новый порядок'],
-      whyMoves: blank.whyMoves || blank.dynamics || '',
       cause: blank.cause || '',
       hiddenAnswer: blank.hiddenAnswer || '',
     },
@@ -63,7 +60,7 @@ async function constructSeed({ runtime, domain, world, seedText, blank, repair =
         parameters: {
           type: 'object',
           additionalProperties: false,
-          required: ['title', 'synopsis', 'closeWhen', 'whyMoves', 'cause'],
+          required: ['title', 'synopsis', 'closeWhen', 'cause'],
           properties: {
             title: { type: 'string' },
             synopsis: { type: 'string' },
@@ -83,11 +80,6 @@ async function constructSeed({ runtime, domain, world, seedText, blank, repair =
               items: { type: 'string' },
               description: '2–4 разных исхода. Хотя бы один закрывает историю на масштабе последствий.',
             },
-            whyMoves: {
-              type: 'string',
-              description:
-                'Одно предложение: почему история сама развивается, если ей никто не занимается. Реальный процесс, не «напряжение растёт».',
-            },
             hiddenAnswer: {
               type: 'string',
               description:
@@ -99,10 +91,7 @@ async function constructSeed({ runtime, domain, world, seedText, blank, repair =
         handler: async (args) => {
           const card = normalizeSeedVariant(args, cfg);
           if (!card) {
-            return toolFail('thin', 'Нужны title, synopsis, closeWhen и whyMoves.');
-          }
-          if (!card.whyMoves) {
-            return toolFail('thin', 'Нужен whyMoves: почему история движется, если ей не занимаются.');
+            return toolFail('thin', 'Нужны title, synopsis и closeWhen.');
           }
           if (!card.cause) {
             return toolFail(
@@ -137,7 +126,6 @@ async function constructSeed({ runtime, domain, world, seedText, blank, repair =
           '',
           'Посади ЭТОТ сюжет в город через submit_freeform_seed.',
           'synopsis — затравка и конфликт в этом городе; он может остаться в масштабе затравки.',
-          'whyMoves — из динамики: путь к посадке. Не «напряжение растёт».',
           'cause — первопричина: если все спорщики разойдутся по домам, она останется на месте. Разойдётся с ними — значит это спор, а не первопричина.',
           'Хотя бы один closeWhen — исход на масштабе последствий. Не ужимай посадку до двора затравки.',
           'Gravity относится к последствиям. Синопсис не обязан уже показывать разрыв.',
