@@ -1,6 +1,5 @@
 /**
- * Генератор трёх следующих хроник: код бросает четыре оси мира, модель пишет один текст на набор.
- * Двигатель и профиль во времени модель выбирает сама из меню и возвращает вместе с текстом.
+ * Генератор трёх следующих хроник: код бросает шесть осей мира, модель пишет один текст на набор.
  * Лаборатория: пачка → судья. PASS сразу в пул и не чинится.
  * Не-PASS всегда идут на починку, даже если PASS уже ≥2.
  * Второй судья видит только чиненные слоты.
@@ -32,45 +31,6 @@ import {
   isPackPass,
   freeformPackJudgeCodes,
 } from './freeformJudge.js';
-
-/**
- * Двигатель истории — меню, а не жребий: агент берёт одно значение сам и возвращает эхом.
- * Внешнее, отложенное и аномальное сюда не входят — это уже worldRelation и arena.
- */
-export const STORY_ENGINES = [
-  {
-    id: 'REFUSAL',
-    hint: 'кто-то перестал делать то, на что город рассчитывал: отказ, уход, неявка, молчание. Не саботаж и не злодейство',
-  },
-  {
-    id: 'DISCOVERY',
-    hint: 'город нашёл или узнал то, чего у него не было: место, существо, способ, правду. Двигает не находка, а спор о том, что с ней делать',
-  },
-  {
-    id: 'OPEN_FEUD',
-    hint: 'два лагеря уже открыто бьются за одно и то же, и у обоих есть силы победить',
-  },
-  {
-    id: 'INTERNAL_BETRAYAL',
-    hint: 'кто-то внутри круга доверия ломает договор, молчание или долг',
-  },
-  {
-    id: 'SYSTEMIC_CRISIS',
-    hint: 'ломается уклад, на котором держится жизнь города: договор, обычай, распределение, привычный порядок труда. Чинят делом и отношением, не канцелярией и не потерянной бумагой',
-  },
-  {
-    id: 'MORAL_DILEMMA',
-    hint: 'два законных требования, нельзя удовлетворить оба. Нет злодея',
-  },
-  {
-    id: 'PRICE_OF_SUCCESS',
-    hint: 'что-то вышло слишком хорошо, и город не выдерживает своей удачи: избыток, слава, приток, урожай не по силам',
-  },
-  {
-    id: 'RIVAL_IDEOLOGY',
-    hint: 'столкновение двух правд о том, как жить вместе. Не ссора характеров',
-  },
-];
 
 export function parseRequireMystery(raw) {
   if (raw === true || raw === 1) return true;
@@ -180,51 +140,6 @@ function formatSeedUserBlock(seedText, fromVoid, fromGenesis = false) {
   return ['ЗАТРАВКА', seedText].join('\n');
 }
 
-/** Профиль во времени — тоже меню на выбор агента. */
-export const STORY_TIMINGS = [
-  {
-    id: 'FRESH_INCIDENT',
-    hint: 'только что случилось; ещё нет привычки',
-  },
-  {
-    id: 'LONG_SIMMERING',
-    hint: 'тлело давно; сейчас нельзя больше делать вид, что этого нет',
-  },
-  {
-    id: 'CYCLICAL_PATTERN',
-    hint: 'это уже повторялось, и каждый круг хуже или дороже',
-  },
-  {
-    id: 'DELAYED_BOMB',
-    hint: 'решение или повреждение уже есть; разрыв ещё впереди',
-  },
-  {
-    id: 'BLOW',
-    hint: 'удар уже случился и часть города потеряна; история про то, чем жить дальше',
-  },
-  {
-    id: 'DID_NOT_HAPPEN',
-    hint: 'то, что случалось всегда, в этот раз не случилось',
-  },
-];
-
-function menuIds(menu) {
-  return menu.map((item) => item.id);
-}
-
-function formatMenu(title, menu) {
-  return [title, ...menu.map((item) => `${item.id} — ${item.hint}`)].join('\n');
-}
-
-/** Двигатель и время агент выбирает сам: в промпт уходит меню, не назначение. */
-export function formatFreeformBrainstormMenusForPrompt() {
-  return [
-    formatMenu('engine — природа двигателя. Выбери сам, по одному значению на кандидата:', STORY_ENGINES),
-    '',
-    formatMenu('timing — как конфликт выглядит по времени. Тоже выбери сам:', STORY_TIMINGS),
-  ].join('\n');
-}
-
 function pickWithoutReplacement(items, n, rng) {
   const pool = [...items];
   const out = [];
@@ -253,8 +168,6 @@ export function pickFreeformBrainstormRolls(config, count, rng = Math.random) {
   return sets.map((axes, i) => ({
     axes,
     author: authors[i] || authors[0],
-    engine: null,
-    timing: null,
   }));
 }
 
@@ -263,11 +176,7 @@ export function formatFreeformBrainstormRollsForPrompt(rolls) {
   return rolls
     .map((roll, i) => {
       const author = roll.author?.name || roll.authorName || '?';
-      const chosen = [
-        roll.engine?.id ? `engine ${roll.engine.id}` : null,
-        roll.timing?.id ? `timing ${roll.timing.id}` : null,
-      ].filter(Boolean);
-      return [`${i + 1}. ${formatAxisSetLine(roll.axes)}`, ...chosen, `автор ${author}`].join(' · ');
+      return `${i + 1}. ${formatAxisSetLine(roll.axes)} · автор ${author}`;
     })
     .join('\n');
 }
@@ -288,14 +197,14 @@ export function normalizeBrainstormCandidate(raw, roll, index = 1, maxChars = PL
     worldRelation: axisTagName(roll?.axes, 'worldRelation'),
     target: axisTagName(roll?.axes, 'target'),
     knowledge: axisTagName(roll?.axes, 'knowledge'),
-    engine: roll?.engine?.id || axisEcho(raw, 'engine'),
-    timing: roll?.timing?.id || axisEcho(raw, 'timing'),
+    engine: axisTagName(roll?.axes, 'engine'),
+    timing: axisTagName(roll?.axes, 'timing'),
     authorId: roll.author?.id || '',
     authorName: roll.author?.name || '',
   };
 }
 
-/** Эхо сверяем только по брошенным осям: двигатель и время агент выбирает сам. */
+/** Эхо сверяем по брошенным осям: агент их не выбирает. */
 function logAxisEchoMismatch(log, index, raw, roll) {
   const expected = Object.fromEntries(
     FREEFORM_AXIS_IDS.map((id) => [id, axisTagName(roll.axes, id)]),
@@ -312,8 +221,6 @@ export function rollFromBrainstormCandidate(candidate) {
       const name = String(candidate?.[groupId] || '').trim();
       return { groupId, tagId: name.toLowerCase(), tagName: name };
     }).filter((tag) => tag.tagName),
-    engine: candidate?.engine ? { id: candidate.engine } : null,
-    timing: candidate?.timing ? { id: candidate.timing } : null,
     author: {
       id: candidate?.authorId || '',
       name: candidate?.authorName || '',
@@ -324,7 +231,7 @@ export function rollFromBrainstormCandidate(candidate) {
 function emitCandidatesTool({ n, rolls, draft, log, indices = null, maxChars = PLOT_SUMMARY_MAX }) {
   return {
     name: 'emit_freeform_candidates',
-    description: `Ровно ${n} кандидатов: одна следующая хроника на каждый набор осей, в том же порядке. Брошенные оси в ответе — эхо входа; engine и timing выбираешь сам.`,
+    description: `Ровно ${n} кандидатов: одна следующая хроника на каждый набор осей, в том же порядке. Брошенные оси в ответе — эхо входа.`,
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -336,7 +243,7 @@ function emitCandidatesTool({ n, rolls, draft, log, indices = null, maxChars = P
           maxItems: n,
           items: {
             type: 'object',
-            required: ['chronicle', 'engine', 'timing'],
+            required: ['chronicle'],
             properties: {
               chronicle: {
                 type: 'string',
@@ -347,16 +254,8 @@ function emitCandidatesTool({ n, rolls, draft, log, indices = null, maxChars = P
               worldRelation: { type: 'string', description: 'Эхо оси worldRelation этого набора.' },
               target: { type: 'string', description: 'Эхо оси target этого набора.' },
               knowledge: { type: 'string', description: 'Эхо оси knowledge этого набора.' },
-              engine: {
-                type: 'string',
-                enum: menuIds(STORY_ENGINES),
-                description: 'Двигатель, который ты выбрал для этого кандидата.',
-              },
-              timing: {
-                type: 'string',
-                enum: menuIds(STORY_TIMINGS),
-                description: 'Профиль во времени, который ты выбрал для этого кандидата.',
-              },
+              engine: { type: 'string', description: 'Эхо оси engine этого набора.' },
+              timing: { type: 'string', description: 'Эхо оси timing этого набора.' },
             },
           },
         },
@@ -428,8 +327,6 @@ export async function brainstormFreeformSeeds({
           '',
           'ОСИ',
           formatFreeformAxisCatalogs(config),
-          '',
-          formatFreeformBrainstormMenusForPrompt(),
           '',
           'НАБОРЫ',
           formatFreeformBrainstormRollsForPrompt(rolls),

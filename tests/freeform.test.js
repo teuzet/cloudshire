@@ -22,7 +22,6 @@ import { sessionPayload, snapshotForUndo, pushUndo, popUndo } from '../src/clien
 import {
   pickFreeformBrainstormRolls,
   formatFreeformBrainstormRollsForPrompt,
-  formatFreeformBrainstormMenusForPrompt,
   rollFromBrainstormCandidate,
   brainstormFreeformSeeds,
   brainstormFreeformPack,
@@ -313,10 +312,17 @@ test('конфиг freeform читается из YAML', () => {
   const cfg = freeformConfig(loadConfig());
   assert.equal(cfg.variantsMin, 3);
   assert.equal(cfg.variantsMax, 3);
-  assert.deepEqual(cfg.chronicleMaxChars, { seed: 1200, beat: 1200, ending: 1200 });
+  assert.deepEqual(cfg.chronicleMaxChars, { seed: 1800, beat: 1200, ending: 1800 });
   assert.equal(cfg.seedMysteryChance, 0.25);
   assert.equal(cfg.lunaRepairRounds, 2);
-  assert.deepEqual(Object.keys(cfg.axes), ['arena', 'worldRelation', 'target', 'knowledge']);
+  assert.deepEqual(Object.keys(cfg.axes), [
+    'arena',
+    'worldRelation',
+    'target',
+    'knowledge',
+    'engine',
+    'timing',
+  ]);
   assert.deepEqual(
     cfg.axes.arena.map((v) => v.id),
     ['human', 'custom', 'creature', 'ecology', 'matter', 'sky', 'phenomenon'],
@@ -333,6 +339,27 @@ test('конфиг freeform читается из YAML', () => {
   assert.equal(cfg.axes.arena[0].name, 'HUMAN');
   assert.equal(cfg.axes.arena.find((v) => v.id === 'matter').weight, 5);
   assert.equal(cfg.axes.worldRelation.find((v) => v.id === 'native').weight, 35);
+  assert.deepEqual(
+    cfg.axes.engine.map((v) => v.id),
+    [
+      'refusal',
+      'open_feud',
+      'discovery',
+      'internal_betrayal',
+      'moral_dilemma',
+      'systemic_crisis',
+      'price_of_success',
+      'rival_ideology',
+    ],
+  );
+  assert.deepEqual(
+    cfg.axes.timing.map((v) => v.id),
+    ['fresh_incident', 'long_simmering', 'cyclical_pattern', 'delayed_bomb', 'blow', 'did_not_happen'],
+  );
+  assert.equal(cfg.axes.engine.find((v) => v.id === 'refusal').weight, 5);
+  assert.equal(cfg.axes.timing.find((v) => v.id === 'did_not_happen').weight, 4);
+  assert.ok(new Set(cfg.axes.engine.map((v) => v.weight)).size > 1);
+  assert.ok(new Set(cfg.axes.timing.map((v) => v.weight)).size > 1);
   assert.ok(Object.values(cfg.axes).every((list) => list.every((v) => v.about && v.weight > 0)));
   const agents = loadConfig().agents;
   for (const id of LEGACY_FREEFORM_AGENTS) {
@@ -348,7 +375,7 @@ test('конфиг freeform читается из YAML', () => {
   assert.deepEqual(agents.freeformBrainstorm.canon, ['world']);
   assert.match(agents.freeformBrainstorm.instructions, /затравк/);
   assert.match(agents.freeformBrainstorm.instructions, /нарративн/);
-  assert.match(agents.freeformBrainstorm.instructions, /5–8 предложен/);
+  assert.match(agents.freeformBrainstorm.instructions, /5–7 предложен/);
   assert.match(agents.freeformBrainstorm.instructions, /НЕ БОЛЬШЕ/);
   assert.doesNotMatch(agents.freeformBrainstorm.instructions, /Можно больше/);
   assert.match(agents.freeformBrainstorm.instructions, /неделями и месяцами/);
@@ -369,9 +396,9 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformBrainstorm.instructions, /записей хроники/);
   assert.match(agents.freeformBrainstorm.instructions, /не обязательно из последней строки/);
   assert.match(agents.freeformBrainstorm.instructions, /будущие и текущие сопряжения/);
-  assert.match(agents.freeformBrainstorm.instructions, /arena, worldRelation, target, knowledge/);
+  assert.match(agents.freeformBrainstorm.instructions, /arena, worldRelation, target, knowledge, engine, timing/);
   assert.match(agents.freeformBrainstorm.instructions, /причина живёт на arena, ломается target/);
-  assert.match(agents.freeformBrainstorm.instructions, /engine.*timing.*выбираешь сам/s);
+  assert.doesNotMatch(agents.freeformBrainstorm.instructions, /выбираешь сам/);
   assert.match(agents.freeformBrainstorm.instructions, /emit_freeform_candidates/);
   // Каталоги значений живут только в tick.plot.freeform.axes и приходят в запросе.
   assert.doesNotMatch(agents.freeformBrainstorm.instructions, /^HUMAN —|^NATIVE —|^FOOD —/m);
@@ -402,10 +429,9 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformBrainstormJudge.instructions, /submit_freeform_pack_review/);
   assert.match(agents.freeformBrainstormJudge.instructions, /GRAVITY/);
   assert.match(agents.freeformBrainstormJudge.instructions, /COSMOLOGY/);
-  assert.match(agents.freeformBrainstormJudge.instructions, /FORECAST/);
+  assert.match(agents.freeformBrainstormJudge.instructions, /MYSTERY_CANDIDATE/);
   assert.match(agents.freeformBrainstormJudge.instructions, /BUREAUCRACY_PORN/);
   assert.match(agents.freeformBrainstormJudge.instructions, /WATER_SYSTEMS_PORN/);
-  assert.match(agents.freeformBrainstormJudge.instructions, /не подменяй его водостоком/);
   assert.match(agents.freeformBrainstormJudge.instructions, /TEMPO/);
   assert.match(agents.freeformBrainstormJudge.instructions, /ECONOMY/);
   assert.match(agents.freeformBrainstormJudge.instructions, /недели и месяцы/);
@@ -426,8 +452,6 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformBrainstormJudge.instructions, /интересное и логичное объяснение/);
   assert.match(agents.freeformBrainstormJudge.instructions, /тайну не требуй/);
   assert.match(agents.freeformBrainstormJudge.instructions, /верховный жрец/);
-  assert.match(agents.freeformBrainstormJudge.instructions, /СОВЕТЫ/);
-  assert.match(agents.freeformBrainstormJudge.instructions, /не повод для FAIL/);
   assert.match(agents.freeformBrainstormJudge.instructions, /не обязательно из последней строки/);
   assert.match(agents.freeformBrainstormJudge.instructions, /repair всё равно напиши/);
   assert.doesNotMatch(agents.freeformBrainstormJudge.instructions, /вход для дела/);
@@ -478,18 +502,17 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformArchitectTell.instructions, /НА САМОМ ДЕЛЕ/);
   assert.match(agents.freeformEndings.instructions, /хотя бы по одной/);
   assert.equal(agents.freeformAssemble.model, 'gpt-5.6-luna');
-  assert.deepEqual(agents.freeformAssemble.canon, ['world']);
+  assert.deepEqual(agents.freeformAssemble.canon, ['chronicle', 'world']);
   assert.deepEqual(agents.freeformAssemble.styles, []);
   assert.match(agents.freeformAssemble.instructions, /submit_freeform_story/);
   assert.doesNotMatch(agents.freeformAssemble.instructions, /whyMoves/);
   assert.doesNotMatch(agents.freeformAssemble.instructions, /что ситуация сделает следующим/);
-  assert.match(agents.freeformAssemble.instructions, /неделями и месяцами/);
   assert.doesNotMatch(agents.freeformAssemble.instructions, /САНОВНИКИ НЕ ГЕРОИ|столпов не используй/i);
-  assert.match(agents.freeformBrainstormJudge.instructions, /FORECAST/);
+  assert.match(agents.freeformBrainstormJudge.instructions, /MYSTERY_CANDIDATE/);
   assert.match(agents.freeformAssemble.instructions, /На самом деле/);
   assert.match(agents.freeformAssemble.instructions, /неизвестно/);
   assert.match(agents.freeformAssemble.instructions, /наблюдаемый слой/);
-  assert.match(agents.freeformAssemble.instructions, /Имя истории ставится отдельно по готовой хронике/);
+  assert.match(agents.freeformAssemble.instructions, /не изменяй основы истории/);
   assert.doesNotMatch(agents.freeformAssemble.instructions, /claim_character/);
   assert.doesNotMatch(agents.freeformAssemble.instructions, /Не схлопывай цепочку/);
   assert.doesNotMatch(agents.freeformAssemble.instructions, /первая запись этой истории/);
@@ -502,11 +525,10 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformHiddenSplit.instructions, /Не дописывай подступы/);
   assert.equal(agents.freeformTitle.model, 'gpt-5.6-luna');
   assert.equal(agents.freeformTitle.maxTokens, 400);
-  assert.equal(agents.freeformTitle.reasoningEffort, 'low');
+  assert.equal(agents.freeformTitle.reasoningEffort, undefined);
   assert.deepEqual(agents.freeformTitle.canon, []);
-  assert.match(agents.freeformTitle.instructions, /наблюдаемый слой/);
-  assert.match(agents.freeformTitle.instructions, /не домысливай/);
-  assert.match(agents.freeformTitle.instructions, /не сжатая хроника/);
+  assert.match(agents.freeformTitle.instructions, /завязк/);
+  assert.match(agents.freeformTitle.instructions, /2-4 слова/);
   assert.match(agents.freeformTitle.instructions, /submit_freeform_title/);
   assert.equal(agents.freeformUrgency.model, 'gpt-5.6-luna');
   assert.equal(agents.freeformUrgency.maxTokens, 400);
@@ -1204,58 +1226,65 @@ test('RELATED на maxDepth не закрывает, провал DIRECT даё�
   );
 });
 
-test('жребий завязки — четыре оси мира из каталога конфига', () => {
+test('жребий завязки — шесть осей мира из каталога конфига', () => {
   const cfg = loadConfig();
   const tags = pickFreeformSeedAxes(cfg, () => 0);
   assert.deepEqual(
     tags.map((t) => t.groupId),
-    ['arena', 'worldRelation', 'target', 'knowledge'],
+    ['arena', 'worldRelation', 'target', 'knowledge', 'engine', 'timing'],
   );
   assert.deepEqual(
     tags.map((t) => t.tagId),
-    ['human', 'native', 'food', 'open'],
+    ['human', 'native', 'food', 'open', 'refusal', 'fresh_incident'],
   );
   assert.match(tags[0].about, /поступке|решении/);
 
   const setsText = formatFreeformSeedAxisSetsForPrompt([tags], cfg);
-  assert.match(setsText, /1\. arena HUMAN · worldRelation NATIVE · target FOOD · knowledge OPEN/);
+  assert.match(
+    setsText,
+    /1\. arena HUMAN · worldRelation NATIVE · target FOOD · knowledge OPEN · engine REFUSAL · timing FRESH_INCIDENT/,
+  );
   assert.match(setsText, /четыре поля/);
   assert.match(setsText, /ассоциативн/);
 
   const catalogs = formatFreeformAxisCatalogs(cfg);
-  for (const axis of ['arena', 'worldRelation', 'target', 'knowledge']) {
+  for (const axis of ['arena', 'worldRelation', 'target', 'knowledge', 'engine', 'timing']) {
     assert.match(catalogs, new RegExp(`^${axis} — `, 'm'));
   }
   assert.match(catalogs, /^PHENOMENON — /m);
   assert.match(catalogs, /^SURFACED — /m);
   assert.match(catalogs, /^RITE — /m);
   assert.match(catalogs, /^FALSE_BELIEF — /m);
+  assert.match(catalogs, /^CYCLICAL_PATTERN — /m);
+  assert.match(catalogs, /^PRICE_OF_SUCCESS — /m);
+  assert.match(catalogs, /^DID_NOT_HAPPEN — /m);
   assert.doesNotMatch(catalogs, /FREE|вайлдкард|CONTACT|^BUILT|^EARTH/im);
+  assert.doesNotMatch(catalogs, /EXTERNAL_THREAT|DELAYED_CONSEQUENCE|SUPERNATURAL_ANOMALY/);
 
   const sets = pickFreeformSeedAxisSets(cfg, 4, () => 0);
   assert.equal(sets.length, 4);
-  for (const axis of ['arena', 'worldRelation', 'target', 'knowledge']) {
+  for (const axis of ['arena', 'worldRelation', 'target', 'knowledge', 'engine', 'timing']) {
     const drawn = sets.map((s) => s.find((t) => t.groupId === axis).tagId);
     assert.equal(new Set(drawn).size, 4, `${axis} повторился в пачке`);
   }
 });
 
-test('жребий брейншторма — четыре оси без повторов, двигатель и время остаются за агентом', () => {
+test('жребий брейншторма — шесть осей без повторов, двигатель и время из броска', () => {
   const cfg = loadConfig();
   const zero = pickFreeformBrainstormRolls(cfg, 3, () => 0);
   assert.equal(zero.length, 3);
-  assert.equal(zero[0].engine, null);
-  assert.equal(zero[0].timing, null);
+  assert.equal(zero[0].engine, undefined);
+  assert.equal(zero[0].timing, undefined);
   assert.deepEqual(
     zero[0].axes.map((t) => t.tagId),
-    ['human', 'native', 'food', 'open'],
+    ['human', 'native', 'food', 'open', 'refusal', 'fresh_incident'],
   );
   assert.equal(new Set(zero.map((r) => r.author.id)).size, 3);
   assert.equal(zero[0].author.name, 'Эдгар Аллан По');
   for (let i = 0; i < 20; i += 1) {
     const rolls = pickFreeformBrainstormRolls(cfg, 3);
     assert.equal(new Set(rolls.map((r) => r.author.id)).size, 3);
-    for (const axis of ['arena', 'worldRelation', 'target', 'knowledge']) {
+    for (const axis of ['arena', 'worldRelation', 'target', 'knowledge', 'engine', 'timing']) {
       const drawn = rolls.map((r) => r.axes.find((t) => t.groupId === axis).tagId);
       assert.equal(new Set(drawn).size, 3, `${axis} повторился в пачке`);
     }
@@ -1264,18 +1293,10 @@ test('жребий брейншторма — четыре оси без пов�
   const text = formatFreeformBrainstormRollsForPrompt(zero);
   assert.match(
     text,
-    /1\. arena HUMAN · worldRelation NATIVE · target FOOD · knowledge OPEN · автор Эдгар Аллан По/,
+    /1\. arena HUMAN · worldRelation NATIVE · target FOOD · knowledge OPEN · engine REFUSAL · timing FRESH_INCIDENT · автор Эдгар Аллан По/,
   );
-  assert.doesNotMatch(text, /engine |timing |conflictSource|temporalShape/);
+  assert.doesNotMatch(text, /conflictSource|temporalShape/);
   assert.doesNotMatch(text, /не канцелярия|ассоциативн|кликбейт|ориентир|четыре поля/);
-
-  const menus = formatFreeformBrainstormMenusForPrompt();
-  assert.match(menus, /^engine — /m);
-  assert.match(menus, /^timing — /m);
-  assert.match(menus, /^DISCOVERY — /m);
-  assert.match(menus, /^PRICE_OF_SUCCESS — /m);
-  assert.match(menus, /^DID_NOT_HAPPEN — /m);
-  assert.doesNotMatch(menus, /EXTERNAL_THREAT|DELAYED_CONSEQUENCE|SUPERNATURAL_ANOMALY/);
 
   const blank = normalizeBrainstormCandidate(
     {
@@ -1295,8 +1316,8 @@ test('жребий брейншторма — четыре оси без пов�
   assert.equal(blank.worldRelation, 'NATIVE');
   assert.equal(blank.target, 'FOOD');
   assert.equal(blank.knowledge, 'OPEN');
-  assert.equal(blank.engine, 'MORAL_DILEMMA');
-  assert.equal(blank.timing, 'BLOW');
+  assert.equal(blank.engine, 'REFUSAL');
+  assert.equal(blank.timing, 'FRESH_INCIDENT');
   assert.equal(blank.authorName, 'Эдгар Аллан По');
   assert.equal(blank.index, 1);
   assert.equal(normalizeBrainstormCandidate({ hook: 'Сапог на площади.' }, zero[0], 2).chronicle, 'Сапог на площади.');
@@ -1305,19 +1326,19 @@ test('жребий брейншторма — четыре оси без пов�
   assert.ok(normalizeBrainstormCandidate({ hook: longHook }, zero[0], 3, 20).chronicle.length <= 21);
 
   const shown = formatBrainstormCandidateForPrompt(blank, 1);
-  assert.match(shown, /оси: HUMAN · NATIVE · FOOD · OPEN · MORAL_DILEMMA · BLOW/);
+  assert.match(shown, /оси: HUMAN · NATIVE · FOOD · OPEN · REFUSAL · FRESH_INCIDENT/);
   assert.match(shown, /хроника: На площади нашли сапог/);
   assert.doesNotMatch(shown, /конфликт:|динамика:|последствия:|автор:/);
   assert.match(formatBrainstormCandidateForPrompt(blank, 1, { includeAuthor: true }), /автор: Эдгар Аллан По/);
 
   // Починка не даёт агенту переголосовать двигатель и время.
   const again = normalizeBrainstormCandidate(
-    { chronicle: 'Тот же двор, тот же сапог.', engine: 'REFUSAL', timing: 'FRESH_INCIDENT' },
+    { chronicle: 'Тот же двор, тот же сапог.', engine: 'MORAL_DILEMMA', timing: 'BLOW' },
     rollFromBrainstormCandidate(blank),
     1,
   );
-  assert.equal(again.engine, 'MORAL_DILEMMA');
-  assert.equal(again.timing, 'BLOW');
+  assert.equal(again.engine, 'REFUSAL');
+  assert.equal(again.timing, 'FRESH_INCIDENT');
   assert.equal(again.target, 'FOOD');
 });
 
@@ -1333,8 +1354,6 @@ test('брейншторм не видит город, не зовёт судь�
       await tool.handler({
         candidates: [1, 2, 3].map((i) => ({
           chronicle: `Хроника сапога ${i}`,
-          engine: 'MORAL_DILEMMA',
-          timing: 'BLOW',
         })),
       });
     },
@@ -1355,8 +1374,8 @@ test('брейншторм не видит город, не зовёт судь�
     assert.equal(c.worldRelation, axes.find((t) => t.groupId === 'worldRelation').tagName);
     assert.equal(c.target, axes.find((t) => t.groupId === 'target').tagName);
     assert.equal(c.knowledge, axes.find((t) => t.groupId === 'knowledge').tagName);
-    assert.equal(c.engine, 'MORAL_DILEMMA');
-    assert.equal(c.timing, 'BLOW');
+    assert.equal(c.engine, axes.find((t) => t.groupId === 'engine').tagName);
+    assert.equal(c.timing, axes.find((t) => t.groupId === 'timing').tagName);
     assert.equal(c.authorName, drafted.rolls[i].author.name);
     assert.equal(c.chronicle, `Хроника сапога ${i + 1}`);
     assert.equal(c.hook, c.chronicle);
@@ -1383,7 +1402,7 @@ test('брейншторм не видит город, не зовёт судь�
   assert.match(user, /^engine — /m);
   assert.match(user, /^timing — /m);
   assert.match(user, /^НАБОРЫ$/m);
-  assert.match(user, /^1\. arena \w+ · worldRelation \w+ · target \w+ · knowledge \w+ · автор /m);
+  assert.match(user, /^1\. arena \w+ · worldRelation \w+ · target \w+ · knowledge \w+ · engine \w+ · timing \w+ · автор /m);
   assert.match(user, /На площади нашли чужой сапог/);
   assert.doesNotMatch(user, /не канцелярия|ассоциативн|кликбейт|Верни ровно|emit_freeform_candidates/);
   assert.doesNotMatch(user, /Судьбоносность/);

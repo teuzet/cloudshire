@@ -254,13 +254,15 @@ function normalizeContinuationAuthors(raw) {
 }
 
 /** Оси завязки, которые бросает код. Порядок — порядок вывода в промпте. */
-export const FREEFORM_AXIS_IDS = ['arena', 'worldRelation', 'target', 'knowledge'];
+export const FREEFORM_AXIS_IDS = ['arena', 'worldRelation', 'target', 'knowledge', 'engine', 'timing'];
 
 export const FREEFORM_AXIS_TITLE = {
   arena: 'arena — где живёт причина: причинный субстрат, не место действия и не происхождение',
   worldRelation: 'worldRelation — как история относится к тому, что в городе уже есть',
   target: 'target — какая несущая опора города под ударом',
   knowledge: 'knowledge — кто понимает, что происходит',
+  engine: 'engine — природа двигателя: почему сюжет идёт вперёд',
+  timing: 'timing — как конфликт выглядит по времени',
 };
 
 const FALLBACK_AXIS_VALUES = {
@@ -268,6 +270,17 @@ const FALLBACK_AXIS_VALUES = {
   worldRelation: ['native', 'arrived', 'born', 'surfaced', 'legacy'],
   target: ['food', 'body', 'work', 'rite', 'power', 'shelter', 'kin', 'word', 'night'],
   knowledge: ['open', 'unknown', 'few_know', 'false_belief', 'too_late'],
+  engine: [
+    'refusal',
+    'open_feud',
+    'discovery',
+    'internal_betrayal',
+    'moral_dilemma',
+    'systemic_crisis',
+    'price_of_success',
+    'rival_ideology',
+  ],
+  timing: ['fresh_incident', 'long_simmering', 'cyclical_pattern', 'delayed_bomb', 'blow', 'did_not_happen'],
 };
 
 function normalizeAxisValues(raw, fallbackIds) {
