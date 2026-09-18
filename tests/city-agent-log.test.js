@@ -39,6 +39,42 @@ test('живой город логируется, онбординг и гене
     true,
   );
   assert.equal(
+    shouldLogLiveCityAgent({
+      config,
+      domainId: 'domain_1',
+      agentId: 'freeformBrainstorm',
+      scene: 'freeform_brainstorm_seed',
+    }),
+    true,
+  );
+  assert.equal(
+    shouldLogLiveCityAgent({
+      config,
+      domainId: 'domain_1',
+      agentId: 'freeformBrainstormJudge',
+      scene: 'freeform_brainstorm_judge',
+    }),
+    true,
+  );
+  assert.equal(
+    shouldLogLiveCityAgent({
+      config,
+      domainId: 'domain_1',
+      agentId: 'freeformEndings',
+      scene: 'freeform_endings',
+    }),
+    true,
+  );
+  assert.equal(
+    shouldLogLiveCityAgent({
+      config,
+      domainId: 'domain_1',
+      agentId: 'freeformUrgency',
+      scene: 'freeform_urgency',
+    }),
+    true,
+  );
+  assert.equal(
     shouldLogLiveCityAgent({ config, domainId: null, agentId: 'chronicler', scene: 'chronicle_deed' }),
     false,
   );

@@ -7,7 +7,6 @@ import { worldDateLabel } from './gameClock.js';
 import { chronicleEntries, castRecords, formatChroniclePriestMark } from './models.js';
 import {
   findPlotline,
-  plotConfig,
   clipPlotText,
   isStakedStory,
   formatCloseWhen,
@@ -17,88 +16,17 @@ import {
   PLOT_SUMMARY_MAX,
 } from './plotlines.js';
 import { sharedPlots } from './confluxBoard.js';
-import { takeNameAtRandom, seedWorldNamePool } from './names.js';
 import { brainstormFreeformPack, shouldRequireSeedMystery } from './freeformBrainstorm.js';
 import { assembleFreeformLabStory } from './freeformAssemble.js';
 import { writePlotSeedDump } from './seedDump.js';
-import { createFreeformPlot, appendChronicle, openStoryTitlesLine } from './freeform.js';
+import { createFreeformPlot, appendChronicle, openStoryTitlesLine, chronicleBudget } from './freeform.js';
 import { refreshFreeformEndings } from './freeformEndings.js';
 import { setFreeformUrgency } from './freeformUrgency.js';
 import { voidGrainPack } from './seedChannels.js';
 import { getLogger } from '../log.js';
 
-function rulerName(domain) {
-  return String(domain?.characters?.[0]?.name || '').trim();
-}
-
-const FALLBACK_SEED_ROLES = [
-  { role: 'писец управы', about: 'ведёт списки дворов и пайков' },
-  { role: 'дозор у края', about: 'стоит смену на западной тропе' },
-  { role: 'смотритель цистерн', about: 'обходит водосборы на рассвете' },
-  { role: 'гончар', about: 'обжигает кувшины для цистерн' },
-];
-
 const PRIOR_CHRONICLE_LIMIT = 30;
 const WATCH_RE = /розыск|задерж|пойм|арест|угроз|подозрева|разыск/i;
-
-/**
- * 1–2 имени из пула, без роли и возраста. Из пула ещё не вынимаем:
- * заберёт bindCharacterNames, когда агент заведёт человека.
- */
-export function offerMysterySeedNames({ world, domain, config, rng = Math.random } = {}) {
-  seedWorldNamePool(world, config, rng);
-  const n = rng() < 0.5 ? 1 : 2;
-  const ruler = rulerName(domain).toLowerCase();
-  const names = [];
-  const taken = new Set();
-  for (let i = 0; i < n; i += 1) {
-    const gender = rng() < 0.5 ? 'female' : 'male';
-    const key = gender === 'female' ? 'female' : 'male';
-    const pool = (world.namePool?.[key] || []).filter((name) => {
-      const k = String(name || '').toLowerCase();
-      return k && k !== ruler && !taken.has(k);
-    });
-    if (!pool.length) continue;
-    const name = pool[Math.floor(rng() * pool.length)];
-    taken.add(String(name).toLowerCase());
-    names.push({ name, gender });
-  }
-  return names;
-}
-
-/** 1–2 готовых человека: имя из пула, роль из каталога, возраст ставит движок. */
-export function mintSeedCast({ world, domain, config, rng = Math.random, count = null } = {}) {
-  seedWorldNamePool(world, config, rng);
-  const roles = plotConfig(config).seedRoles;
-  const catalog = roles.length ? roles : FALLBACK_SEED_ROLES;
-  const n = count === 1 || count === 2 ? count : rng() < 0.5 ? 1 : 2;
-  const used = new Set();
-  const ruler = rulerName(domain).toLowerCase();
-  const people = [];
-  for (let i = 0; i < n; i += 1) {
-    const gender = rng() < 0.5 ? 'female' : 'male';
-    let name = takeNameAtRandom(world, gender, config, rng);
-    if (ruler && name.toLowerCase() === ruler) {
-      name = takeNameAtRandom(world, gender, config, rng);
-    }
-    const available = catalog
-      .map((_, i) => i)
-      .filter((i) => !used.has(i));
-    const pool = available.length ? available : catalog.map((_, i) => i);
-    const idx = pool[Math.floor(rng() * pool.length)];
-    used.add(idx);
-    const spec = catalog[idx] || catalog[0];
-    people.push({
-      name,
-      gender,
-      role: spec.role,
-      about: spec.about,
-      ageYears: 18 + Math.floor(rng() * 43),
-      status: 'alive',
-    });
-  }
-  return people;
-}
 
 export function voidSeedPackArgs(domain, { config, rng = Math.random } = {}) {
   return voidGrainPack(domain, { config, rng });
@@ -142,6 +70,7 @@ export async function plantStakedStory({
       requireMystery: wantMystery,
       note: openStoryTitlesLine(domain),
       log,
+      domainId: domain?.id,
     });
     if (!drafted?.winner) {
       log.warn('storyteller.opening_failed', { gravity, error: 'no_winner', fromVoid, fromGenesis });
@@ -171,6 +100,7 @@ export async function plantStakedStory({
           plotId: plot.id,
           author: 'freeform:seed',
           day,
+          maxChars: chronicleBudget(config, 'seed'),
         })
       : null;
     await refreshFreeformEndings({ runtime, domain, plot, log });

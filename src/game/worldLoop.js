@@ -553,7 +553,8 @@ export async function fireThreatEvent({
           threat,
           kind: res.kind,
           closed: false,
-          severity: res.severity,
+          stage: res.stage,
+          remainingPct: res.remainingPct,
           chronicleTail: tail,
           dateLabel: gameDateFromDay(day).label,
         }),
@@ -604,7 +605,8 @@ export async function fireThreatEvent({
   log.info('loop.threat_fired', {
     title: plot.title,
     kind: res.kind,
-    severity: res.severity,
+    stage: res.stage,
+    remainingPct: res.remainingPct,
     closed: Boolean(closed),
     livesLeft: res.livesLeft ?? null,
   });
@@ -615,7 +617,8 @@ export async function fireThreatEvent({
     plotId: plot.id,
     occasion,
     closed: Boolean(closed),
-    severity: res.severity,
+    stage: res.stage || null,
+    remainingPct: res.remainingPct ?? null,
     pairSpread,
   };
 }

@@ -14,24 +14,22 @@ import {
   rollThreatDays,
   shiftThreatBand,
   pickThreatBands,
-  THREAT_KNOWN_CHANCE,
   THREAT_SPEC,
   remainingBand,
 } from './bands.js';
 import { maxFailsForGravity, parseFreeformGravity } from './plotlines.js';
+import { hiddenAnswer, hiddenPremises, revealedAnswer, revealedPremises } from './premises.js';
 
 export const THREAT_OUTCOMES = ['harm', 'neutral'];
 
-/** Полосы тяжести. Порядок важен: индекс = насколько близко к катастрофе. */
-export const SEVERITY_BANDS = ['ТРЕВОГА', 'УЩЕРБ', 'УТРАТА', 'КАТАСТРОФА'];
+/** Промежуточный удар или исход истории. Старые четыре слова больше не живой словарь. */
+export const THREAT_STAGES = ['interim', 'finale'];
 
-export const SEVERITY_GUIDANCE = {
-  ТРЕВОГА:
-    'Никто ничего не потерял. Растёт цена, растёт страх, сужается выбор. Ущерб обратим одним делом.',
-  УЩЕРБ: 'Потеряно реальное, но восстановимое: имущество, урожай, репутация, время.',
-  УТРАТА:
-    'Потеряно необратимое — но не ядро истории. Смерть, разрушение, раскол, который уже не склеить.',
-  КАТАСТРОФА: 'Это и есть плохая концовка истории. Пиши её, а не подступ к ней.',
+const LEGACY_SEVERITY_STAGE = {
+  ТРЕВОГА: 'interim',
+  УЩЕРБ: 'interim',
+  УТРАТА: 'interim',
+  КАТАСТРОФА: 'finale',
 };
 
 /** Сколько угроз история держит одновременно. */
@@ -83,25 +81,67 @@ export function liveFinaleThreats(plot) {
   });
 }
 
-/**
- * Полоса тяжести по остатку жизней. Автор угрозы получает её вместе с текстом
- * плохой концовки как анти-таргет: вот пол, до которого нельзя доходить.
- */
-export function severityForLives(lives) {
-  const n = Math.round(Number(lives) || 0);
-  if (n <= 0) return 'КАТАСТРОФА';
-  if (n === 1) return 'УТРАТА';
-  if (n === 2) return 'УЩЕРБ';
-  return 'ТРЕВОГА';
+function maxFailsOf(plot) {
+  if (plot?.maxFails == null || plot?.maxFails === '') return maxFailsForGravity(plot?.gravity);
+  return Math.max(0, Math.round(Number(plot.maxFails) || 0));
 }
 
-export function severityForPlot(plot) {
-  return severityForLives(livesLeft(plot));
+/** Доля пути, которая ещё осталась до плохой карточки. 0 — это уже исход. */
+export function remainingToBadEndingPct(plot) {
+  const maxFails = maxFailsOf(plot);
+  const left = livesLeft(plot);
+  if (maxFails <= 0 || left <= 0) return 0;
+  return Math.max(1, Math.round((100 * left) / maxFails));
 }
 
-export function severityIndex(band) {
-  const i = SEVERITY_BANDS.indexOf(String(band || '').trim().toUpperCase());
-  return i < 0 ? 0 : i;
+export function threatStageForPlot(plot) {
+  return livesLeft(plot) <= 0 ? 'finale' : 'interim';
+}
+
+export function formatKnownUnknown(plot) {
+  const known = [
+    plot?.synopsis ? `Наблюдаемый слой: ${plot.synopsis}` : '',
+    revealedAnswer(plot) ? `Город уже знает разгадку: ${revealedAnswer(plot)}` : '',
+    ...(revealedPremises(plot) || []).map((item) => `Город выяснил: ${item}`),
+  ].filter(Boolean);
+  const hidden = [
+    hiddenAnswer(plot) ? `Разгадка (город не знает): ${hiddenAnswer(plot)}` : '',
+    ...(hiddenPremises(plot) || []).map((item) => `Скрытый подступ: ${item}`),
+  ].filter(Boolean);
+  return [
+    'ИЗВЕСТНОЕ И НЕИЗВЕСТНОЕ',
+    known.length ? known.join('\n') : 'Город видит только то, что уже записано в хронике.',
+    hidden.length
+      ? `СКРЫТО:\n${hidden.join('\n')}`
+      : 'Скрытого слоя нет: город понимает, откуда идёт причина.',
+    'known=true — эту беду город уже может назвать своими словами, без разгадки.',
+    'known=false — беда следует из скрытого или город ещё не видит, откуда удар.',
+    'В формулировке известной беды скрытый слой не сливай.',
+  ].join('\n');
+}
+
+export function formatWoundGuidance(plot) {
+  const gravity = parseFreeformGravity(plot?.gravity);
+  const stage = threatStageForPlot(plot);
+  if (stage === 'finale') {
+    return {
+      stage,
+      remainingPct: 0,
+      guidance:
+        `Это исход истории, не промежуточный удар. Масштаб — ${gravity}: ` +
+        'пиши событие, которым город необратимо лишается того, из-за чего вопрос стоял. ' +
+        'Не «стало хуже» — предмета спора после этого нет.',
+    };
+  }
+  const pct = remainingToBadEndingPct(plot);
+  return {
+    stage,
+    remainingPct: pct,
+    guidance:
+      `Промежуточный удар. До плохой концовки ещё ${pct}%. ` +
+      `Тяжесть — относительно ${gravity}, не абсолютный конец города. ` +
+      'Анти-таргет ниже — до него доходить нельзя.',
+  };
 }
 
 export function threatSlots(plot) {
@@ -111,8 +151,7 @@ export function threatSlots(plot) {
 
 /**
  * Сколько угроз должно висеть сейчас.
- * Хотя бы одна всегда: у ситуации с нулём жизней первая же угроза катастрофична,
- * и это правильно — мелкая беда решается или случается.
+ * Хотя бы одна всегда: у ситуации с нулём жизней первая же угроза — исход.
  */
 export function targetThreatCount(plot) {
   const lives = livesLeft(plot);
@@ -161,7 +200,8 @@ function nextThreatId(plotId) {
 }
 
 /**
- * Завести угрозу. Полосу и текст даёт автор, конкретный срок и видимость — код.
+ * Завести угрозу. Полосу и текст даёт автор; срок бросает код.
+ * Видимость решает автор беды (`known`); без ответа считаем беду видимой.
  */
 export const THREAT_VALENCES = ['good', 'neutral', 'bad'];
 
@@ -184,6 +224,8 @@ export function createThreat({
   endingId = null,
   valence = null,
   eventKind = null,
+  stage = null,
+  remainingPct = null,
 } = {}) {
   const effectiveBand = shiftThreatBand(normalizeThreatBand(band), Math.max(0, Math.round(slowdown)));
   const rolledDays = Math.max(1, rollThreatDays(effectiveBand, rng));
@@ -192,7 +234,13 @@ export function createThreat({
   const totalDays = Math.max(1, dueDay != null ? resolvedDue - created : rolledDays);
   const isNeutral = outcome === 'neutral' || valence === 'neutral';
   const resolvedValence = normalizeValence(valence, { outcome: isNeutral ? 'neutral' : outcome });
-  const visible = isNeutral ? true : known == null ? rng() < (THREAT_KNOWN_CHANCE[effectiveBand] ?? 0.6) : !!known;
+  const wound = isNeutral ? { stage: null, remainingPct: null } : formatWoundGuidance(plot);
+  const resolvedStage = isNeutral
+    ? null
+    : THREAT_STAGES.includes(stage)
+      ? stage
+      : wound.stage;
+  const visible = isNeutral ? true : known == null ? true : !!known;
   return {
     id: nextThreatId(plot?.id),
     plotId: plot?.id || null,
@@ -201,7 +249,12 @@ export function createThreat({
     totalDays,
     dueDay: resolvedDue,
     createdDay: created,
-    severity: isNeutral ? null : severityForPlot(plot),
+    stage: resolvedStage,
+    remainingPct: isNeutral
+      ? null
+      : remainingPct == null
+        ? wound.remainingPct
+        : Math.max(0, Math.round(Number(remainingPct) || 0)),
     known: visible,
     outcome: isNeutral ? 'neutral' : 'harm',
     valence: resolvedValence,
@@ -241,29 +294,6 @@ export function revealThreat(threat, day) {
   threat.known = true;
   threat.surfacedDay = Math.round(Number(day) || 0);
   return true;
-}
-
-export const DREAD_LEVELS = ['спокойно', 'тревожно', 'очень тревожно', 'на пороге'];
-
-/**
- * Флаг тревоги по неизвестным угрозам: сколько пути они уже прошли.
- * Уходит и рассказчику, и жрецу — саму угрозу они не видят.
- */
-export function dreadFlag(plot, day) {
-  const hidden = liveThreats(plot).filter((t) => !t.known);
-  if (!hidden.length) return null;
-  let share = 1;
-  for (const t of hidden) {
-    share = Math.min(share, remainingDays(t, day) / Math.max(1, t.totalDays));
-  }
-  let level;
-  if (share > 0.6) level = 0;
-  else if (share > 0.3) level = 1;
-  else if (share > 0.1) level = 2;
-  else level = 3;
-  const severity = severityForPlot(plot);
-  if (severity === 'УТРАТА' || severity === 'КАТАСТРОФА') level = Math.min(3, level + 1);
-  return DREAD_LEVELS[level];
 }
 
 /** Что жрец может сказать вслух про известные угрозы: формулировка и полоса остатка. */
@@ -347,7 +377,8 @@ export function fireThreat(plot, threat, { day = 0, firedBy = null } = {}) {
       ok: true,
       kind: 'event',
       closes: false,
-      severity: null,
+      stage: null,
+      remainingPct: null,
       endingKind: null,
       deferred: [],
     };
@@ -364,7 +395,8 @@ export function fireThreat(plot, threat, { day = 0, firedBy = null } = {}) {
     return {
       ok: true,
       kind: linked.kind === 'BAD_ENDING' ? 'threat' : 'resolution',
-      severity: null,
+      stage: null,
+      remainingPct: null,
       closes: true,
       endingKind: plot.ending.kind,
       deferred: [],
@@ -377,7 +409,8 @@ export function fireThreat(plot, threat, { day = 0, firedBy = null } = {}) {
   return {
     ok: true,
     kind: 'threat',
-    severity: threat.severity || severityForLives(lives + 1),
+    stage: threat.stage || 'interim',
+    remainingPct: threat.remainingPct ?? remainingToBadEndingPct(plot),
     closes: false,
     endingKind: null,
     livesLeft: lives,
@@ -477,10 +510,16 @@ export function nextObligationRequest(plot, { day = 0, rng = Math.random } = {})
   if (liveResolutions(plot).length) return null;
 
   const used = live.map((t) => t.band);
-  const [band] = pickThreatBands(1, rng);
-  const existing = live.map((t) => ({ text: t.text, remainingBand: remainingBand(remainingDays(t, day)) }));
+  const gravity = parseFreeformGravity(plot?.gravity);
+  const [band] = pickThreatBands(1, rng, { gravity });
+  const existing = live.map((t) => ({
+    text: t.text,
+    remainingBand: remainingBand(remainingDays(t, day)),
+    known: Boolean(t.known),
+  }));
   const depth = Math.max(0, Number(plot?.depth) || 0);
   const maxDepth = Math.max(0.01, Number(plot?.maxDepth) || 1);
+  const knownUnknown = formatKnownUnknown(plot);
 
   if (woundsExhausted(plot)) {
     if (liveFinaleThreats(plot).length) return null;
@@ -492,17 +531,20 @@ export function nextObligationRequest(plot, { day = 0, rng = Math.random } = {})
         endingId: null,
         band: shiftThreatBand(band, 1),
         slowdown: 0,
-        severity: null,
-        severityGuidance: null,
+        stage: null,
+        remainingPct: null,
+        woundGuidance: null,
         antiTarget: null,
         endingText: null,
         known: true,
         livesLeft: livesLeft(plot),
         existingThreats: existing,
         usedBands: used,
+        knownUnknown,
       };
     }
     const ending = pickBadEnding(plot, rng);
+    const wound = formatWoundGuidance(plot);
     return {
       plotId: plot?.id || null,
       outcome: 'harm',
@@ -513,13 +555,15 @@ export function nextObligationRequest(plot, { day = 0, rng = Math.random } = {})
       endingNowDifferent: ending?.nowDifferent || null,
       band,
       slowdown: 0,
-      severity: 'КАТАСТРОФА',
-      severityGuidance: SEVERITY_GUIDANCE.КАТАСТРОФА,
+      stage: wound.stage,
+      remainingPct: wound.remainingPct,
+      woundGuidance: wound.guidance,
       antiTarget: ending?.text || null,
-      known: true,
+      known: null,
       livesLeft: livesLeft(plot),
       existingThreats: existing,
       usedBands: used,
+      knownUnknown,
     };
   }
 
@@ -528,7 +572,7 @@ export function nextObligationRequest(plot, { day = 0, rng = Math.random } = {})
 
   const wantsResolution = rng() < resolutionChance(plot);
   const slowdown = defenseSlowdown(plot);
-  const severity = severityForPlot(plot);
+  const wound = wantsResolution ? null : formatWoundGuidance(plot);
   const badEnding = plotBadEndings(plot)[0];
 
   return {
@@ -538,14 +582,16 @@ export function nextObligationRequest(plot, { day = 0, rng = Math.random } = {})
     endingId: null,
     band: wantsResolution ? shiftThreatBand(band, 1) : band,
     slowdown: wantsResolution ? 0 : slowdown,
-    severity: wantsResolution ? null : severity,
-    severityGuidance: wantsResolution ? null : SEVERITY_GUIDANCE[severity],
+    stage: wantsResolution ? null : wound.stage,
+    remainingPct: wantsResolution ? null : wound.remainingPct,
+    woundGuidance: wantsResolution ? null : wound.guidance,
     antiTarget: wantsResolution ? null : badEnding?.text || null,
     endingText: null,
     known: wantsResolution ? true : null,
     livesLeft: livesLeft(plot),
     existingThreats: existing,
     usedBands: used,
+    knownUnknown,
   };
 }
 
@@ -568,9 +614,11 @@ export function replenishThreats(plot, { day = 0, rng = Math.random, author = nu
       band: drafted?.band || req.band,
       outcome: req.outcome,
       slowdown: req.slowdown,
-      known: req.known === true || req.outcome === 'neutral' ? true : drafted?.known ?? null,
+      known: req.outcome === 'neutral' ? true : drafted?.known ?? req.known,
       endingId: req.endingId || null,
       valence: req.finale ? 'bad' : req.outcome === 'neutral' ? 'neutral' : 'bad',
+      stage: req.stage,
+      remainingPct: req.remainingPct,
       day,
       rng,
     });
@@ -588,6 +636,17 @@ export function normalizeThreat(raw, plotId = null) {
   const totalDays = Math.max(1, Math.round(Number(raw.totalDays) || THREAT_SPEC[band].min));
   const status = ['live', 'fired', 'averted', 'cancelled'].includes(raw.status) ? raw.status : 'live';
   const outcome = raw.outcome === 'neutral' ? 'neutral' : 'harm';
+  const stage = THREAT_STAGES.includes(raw.stage)
+    ? raw.stage
+    : LEGACY_SEVERITY_STAGE[String(raw.severity || '').trim().toUpperCase()] || (outcome === 'neutral' ? null : 'interim');
+  const remainingPct =
+    outcome === 'neutral' || stage === 'finale'
+      ? stage === 'finale'
+        ? 0
+        : null
+      : raw.remainingPct == null
+        ? null
+        : Math.max(0, Math.round(Number(raw.remainingPct) || 0));
   return {
     id: String(raw.id || nextThreatId(plotId)),
     plotId: raw.plotId || plotId || null,
@@ -596,7 +655,8 @@ export function normalizeThreat(raw, plotId = null) {
     totalDays,
     dueDay: Math.round(Number(raw.dueDay) || 0),
     createdDay: Math.round(Number(raw.createdDay) || 0),
-    severity: SEVERITY_BANDS.includes(raw.severity) ? raw.severity : outcome === 'neutral' ? null : 'ТРЕВОГА',
+    stage: outcome === 'neutral' ? null : stage,
+    remainingPct,
     known: outcome === 'neutral' ? true : !!raw.known,
     outcome,
     valence: normalizeValence(raw.valence, { outcome }),

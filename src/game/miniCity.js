@@ -15,7 +15,6 @@ import {
 } from './bands.js';
 import { deedDurationBand, deedRemainingBand, deedRemainingDays } from './deeds.js';
 import { paceLabel } from './deedMath.js';
-import { dreadFlag } from './threats.js';
 import { chronicleEntries } from './models.js';
 import { parseCityBrief } from './cityContext.js';
 import { domainHasIslandImage, officerHasPortrait } from '../storage/r2.js';
@@ -291,9 +290,6 @@ function collectEvents(domain, conflux, config, mana = 0, day = 0) {
     return {
       title: clip(plot.title || 'История', 80),
       synopsis: clip(plot.synopsis || '', 600),
-      // Конкретные угрозы со сроком в справочник не кладём: таймер — у дел.
-      // Скрытое и нависшее город чувствует только чутьём жреца.
-      dread: dreadFlag(plot, day),
       processes: procs
         .filter((pr) => related.has(String(pr.id)))
         .map((pr) => slimProcess(pr, config, { mana, domain, day })),

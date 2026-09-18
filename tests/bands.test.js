@@ -18,7 +18,7 @@ import {
   pickThreatBands,
   remainingBand,
   deedBeatsThreat,
-  THREAT_KNOWN_CHANCE,
+  GRAVITY_THREAT_SHIFT,
 } from '../src/game/bands.js';
 
 function seq(values) {
@@ -105,9 +105,24 @@ test('полосы счётчика угрозы', () => {
   }
 });
 
-test('быстрые угрозы почти всегда видимы, медленные — редко', () => {
-  assert.ok(THREAT_KNOWN_CHANCE.DAYS > THREAT_KNOWN_CHANCE.SEASON);
-  assert.ok(THREAT_KNOWN_CHANCE.SEASON > THREAT_KNOWN_CHANCE.YEAR);
+test('gravity только сдвигает веса: любой срок всё ещё возможен', () => {
+  assert.ok(GRAVITY_THREAT_SHIFT.SITUATION.DAYS > GRAVITY_THREAT_SHIFT.RUPTURE.DAYS);
+  assert.ok(GRAVITY_THREAT_SHIFT.RUPTURE.YEAR > GRAVITY_THREAT_SHIFT.SITUATION.YEAR);
+  const situation = { DAYS: 0, WEEKS: 0, SEASON: 0, YEAR: 0 };
+  const rupture = { DAYS: 0, WEEKS: 0, SEASON: 0, YEAR: 0 };
+  const sitRng = lcg(7);
+  const rupRng = lcg(7);
+  const n = 2500;
+  for (let i = 0; i < n; i += 1) {
+    situation[pickThreatBands(1, sitRng, { gravity: 'SITUATION' })[0]] += 1;
+    rupture[pickThreatBands(1, rupRng, { gravity: 'RUPTURE' })[0]] += 1;
+  }
+  for (const band of THREAT_BANDS) {
+    assert.ok(situation[band] > 0, `ситуация не выкинула ${band}`);
+    assert.ok(rupture[band] > 0, `разрыв не выкинул ${band}`);
+  }
+  assert.ok(situation.DAYS > rupture.DAYS, 'мелкая история чаще быстрая');
+  assert.ok(rupture.YEAR > situation.YEAR, 'крупная история чаще медленная');
 });
 
 test('слоты угроз обычно разнородны, но совпасть могут', () => {

@@ -12,7 +12,7 @@
 import { getLogger } from '../log.js';
 import { captureAgentPrompt } from './agentPrompt.js';
 import { chronicleEntries } from './models.js';
-import { dreadFlag, knownThreatsForSpeech, livesLeft } from './threats.js';
+import { knownThreatsForSpeech, livesLeft } from './threats.js';
 import { revealedPremises, revealedAnswer } from './premises.js';
 import { remainingWork } from './deedMath.js';
 
@@ -95,7 +95,6 @@ export function threadCard(plot, day, { closed = false } = {}) {
       livesLeft: null,
       workLeft: null,
       knownThreats: [],
-      dread: null,
     };
   }
   return {
@@ -112,7 +111,6 @@ export function threadCard(plot, day, { closed = false } = {}) {
       revealedAnswer(plot) ? `разгадка: ${revealedAnswer(plot)}` : '',
       ...revealedPremises(plot),
     ].filter(Boolean),
-    dread: dreadFlag(plot, day),
   };
 }
 
@@ -203,7 +201,6 @@ export function formatHeraldPrompt(ctx) {
       lines.push('Город это уже выяснил, и об этом ты говоришь как об установленном:');
       for (const text of ctx.thread.established) lines.push(`- ${text}`);
     }
-    if (ctx.thread.dread) lines.push(`Смутное чувство: ${ctx.thread.dread}. Что именно — ты не знаешь.`);
   }
   if (ctx.closing) {
     lines.push(

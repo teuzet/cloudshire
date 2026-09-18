@@ -47,14 +47,17 @@ const domain = { id: 'd1', state: { pendingActions: [] } };
 
 // ───────────────────────────── автор беды ─────────────────────────────
 
-test('заявка на беду несёт тяжесть и анти-таргет, но не срок', () => {
+test('заявка на беду несёт долю пути и анти-таргет, но не срок', () => {
   const p = plot({ failCount: 1 });
   const text = formatThreatRequest(nextObligationRequest(p, { rng: () => 0.5 }), p);
-  assert.match(text, /ПОЛОСА ТЯЖЕСТИ: УТРАТА/);
+  assert.match(text, /УДАР: промежуточный/);
+  assert.match(text, /50%/);
   assert.match(text, /АНТИ-ТАРГЕТ/);
   assert.match(text, /Северное крыло рушится вместе с людьми/);
   assert.match(text, /Срок не называй/);
+  assert.match(text, /ИЗВЕСТНОЕ И НЕИЗВЕСТНОЕ/);
   assert.ok(!/дней/.test(text));
+  assert.doesNotMatch(text, /ПОЛОСА ТЯЖЕСТИ|ТРЕВОГА|УЩЕРБ|УТРАТА|КАТАСТРОФА|dread/i);
 });
 
 test('на исчерпанных ранах автор пишет событие утраты, а не ещё одно ухудшение', () => {
@@ -90,7 +93,7 @@ test('заявка на разрешение просит нейтральный
   const text = formatThreatRequest(req, p);
   assert.equal(req.outcome, 'neutral');
   assert.match(text, /НУЖНО РАЗРЕШЕНИЕ/);
-  assert.ok(!/ПОЛОСА ТЯЖЕСТИ/.test(text));
+  assert.doesNotMatch(text, /УДАР:|ПОЛОСА ТЯЖЕСТИ/);
 });
 
 test('автор беды получает правило независимых параллельных часов', () => {
@@ -98,6 +101,10 @@ test('автор беды получает правило независимых
   assert.match(ins, /независим/);
   assert.match(ins, /параллельные часы/);
   assert.match(ins, /даже если остальные/);
+  assert.match(ins, /ещё 50%/);
+  assert.match(ins, /known=true/);
+  assert.match(ins, /known=false/);
+  assert.doesNotMatch(ins, /ТРЕВОГА|УЩЕРБ|КАТАСТРОФА|dread/i);
 });
 
 test('автор видит уже висящие беды, чтобы не повторяться', () => {
@@ -120,6 +127,17 @@ test('текст беды приходит от агента и обрезает
   });
   assert.equal(res.text, 'Осевшая опора уронит лестницу северного крыла');
   assert.equal(runtime.calls[0].agentId, 'threatSmith');
+});
+
+test('автор решает, видит ли город беду', async () => {
+  const p = plot({ gravity: 'EPISODE' });
+  const runtime = fakeRuntime({
+    submit_threat: { text: 'Пыль забьёт водосборный сток', known: false },
+  });
+  const created = await replenishPlotThreats({ runtime, domain, plot: p, day: 10, rng: () => 0.5 });
+  assert.equal(created.length, 1);
+  assert.equal(created[0].known, false);
+  assert.equal(created[0].text, 'Пыль забьёт водосборный сток');
 });
 
 test('дозаполнение с агентом ставит обязательства с его текстом', async () => {

@@ -356,11 +356,22 @@ export function formatDeedPrompt({
 export function formatThreatPrompt({
   plot,
   threat,
-  severity = null,
+  stage = null,
+  remainingPct = null,
   chronicleTail = [],
   dateLabel = '',
 }) {
   void dateLabel;
+  const wound =
+    stage === 'finale'
+      ? 'исход истории'
+      : remainingPct != null
+        ? `ещё ${remainingPct}% до плохой концовки`
+        : threat?.stage === 'finale'
+          ? 'исход истории'
+          : threat?.remainingPct != null
+            ? `ещё ${threat.remainingPct}% до плохой концовки`
+            : null;
   return [
     'ПОВОД: город не успел, и то, чего боялись, случилось.',
     '',
@@ -368,7 +379,7 @@ export function formatThreatPrompt({
     threat?.text || '—',
     'Перепиши это как случившееся, в прошедшем времени, со своими подробностями места и людей.',
     'Не пиши, что это ещё только случится или что этого можно избежать.',
-    severity ? `Насколько тяжело (полоса движка, в запись не выноси): ${severity}.` : null,
+    wound ? `Насколько тяжело (в запись не выноси): ${wound}.` : null,
     'История не закрыта: беда случилась, но вопрос остался. Не пиши итог и мораль.',
     '',
     ...plotBlock(plot, chronicleTail),

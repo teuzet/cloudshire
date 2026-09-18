@@ -123,6 +123,7 @@ async function askEndings({ runtime, domain, plot, repair = '', log }) {
     toolChoice: { type: 'function', function: { name: 'submit_freeform_endings' } },
     log,
     scene: 'freeform_endings',
+    domainId: domain?.id,
     extraSystem: '',
     userMessages: [
       {
@@ -171,7 +172,7 @@ export function formatEndingsJudgeCase(plot, endings) {
 }
 
 /** Дешёвая проверка: снимает ли каждая концовка вопрос, и не подменён ли он ухудшением. */
-export async function judgeFreeformEndings({ runtime, plot, endings, log: parentLog } = {}) {
+export async function judgeFreeformEndings({ runtime, plot, endings, log: parentLog, domainId } = {}) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.endings.judge', plotId: plot?.id });
   const list = Array.isArray(endings) ? endings : [];
   const n = list.length;
@@ -225,6 +226,7 @@ export async function judgeFreeformEndings({ runtime, plot, endings, log: parent
     toolChoice: { type: 'function', function: { name: 'submit_endings_review' } },
     log,
     scene: 'freeform_endings_judge',
+    domainId,
     extraSystem: '',
     userMessages: [{ role: 'user', content: formatEndingsJudgeCase(plot, list) }],
   };
@@ -274,7 +276,7 @@ export async function refreshFreeformEndings({ runtime, domain, plot, log: paren
   let repairPrompt = '';
   // Судим только свежий список: тот, что уже стоит на нити, судья видел при выдаче.
   if (asked.endings?.length) {
-    const judged = await judgeFreeformEndings({ runtime, plot, endings: source, log });
+    const judged = await judgeFreeformEndings({ runtime, plot, endings: source, log, domainId: domain?.id });
     judgePrompt = judged.prompt;
     const repair = formatEndingsJudgeRepair(source, judged.reviews);
     if (repair) {

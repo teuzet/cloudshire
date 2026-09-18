@@ -262,14 +262,10 @@ function renderEvents(events) {
             })
             .join('')
         : '<p class="meta">Связанных дел нет.</p>';
-      const dread = e.dread && e.dread !== 'спокойно'
-        ? `<p class="meta dread">чутьё жреца: ${esc(e.dread)}</p>`
-        : '';
       return `
         <article class="card">
           <h2>${esc(e.title)}</h2>
           <p>${esc(e.synopsis)}</p>
-          ${dread}
           ${deeds}
         </article>`;
     })

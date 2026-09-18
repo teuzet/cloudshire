@@ -15,7 +15,7 @@ import { architectFreeformBlanks, packRejectedBlanks, architectShortText } from 
 export function normalizeSeedVariant(raw, cfg) {
   const title = clipPlotText(raw?.title, PLOT_TITLE_MAX);
   const synopsis = clipPlotText(raw?.synopsis, PLOT_SUMMARY_MAX);
-  const entry = clipPlotText(raw?.entry, cfg.chronicleMaxChars);
+  const entry = clipPlotText(raw?.entry, cfg.chronicleMaxChars.seed);
   const closeWhen = normalizeCloseWhenList(raw?.closeWhen);
   // У посева игрока тайна если и есть, то одна и это сразу разгадка:
   // подступы к ней городу ещё не попадались.

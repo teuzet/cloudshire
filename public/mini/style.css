@@ -107,7 +107,6 @@ h1 {
 }
 
 .card .threat.calm { border-left-color: #4e6d52; }
-.card .meta.dread { font-style: italic; }
 
 .stat-head {
   display: flex;

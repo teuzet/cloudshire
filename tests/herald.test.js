@@ -134,7 +134,7 @@ test('карточка нити отдаёт полосы и работу, но 
   assert.equal(card.livesLeft, 2);
   assert.equal(card.workLeft, 1.8);
   assert.deepEqual(card.knownThreats.map((t) => t.remainingBand), ['DAYS']);
-  assert.equal(card.dread, 'спокойно');
+  assert.equal(card.dread, undefined);
   const json = JSON.stringify(card);
   assert.ok(!json.includes('dueDay'));
   assert.ok(!json.includes('maxDepth'));
@@ -227,13 +227,14 @@ test('доклад по наказу несёт тему, о которой пр
   assert.match(text, /как идут дела в порту/);
 });
 
-test('скрытая угроза в промпт не попадает — только чувство', () => {
+test('скрытая угроза в промпт жреца не попадает', () => {
   const p = plot();
   threat(p, { total: 100, known: false, text: 'опора треснет насквозь' });
   const ctx = buildHeraldContext({ domain: domain(), plot: p, occasion: 'дело', day: 80 });
   const text = formatHeraldPrompt(ctx);
   assert.ok(!text.includes('опора треснет насквозь'));
-  assert.match(text, /Смутное чувство: очень тревожно/);
+  assert.doesNotMatch(text, /Смутное чувство|тревожно|dread/i);
+  assert.doesNotMatch(text, /Город знает о нависшем/);
 });
 
 test('на развязке жрец получает тройку концовки и запрет на продолжение', () => {
@@ -277,7 +278,7 @@ test('карточка закрытой нити не отдаёт ни жизн
   assert.equal(card.livesLeft, null);
   assert.equal(card.workLeft, null);
   assert.deepEqual(card.knownThreats, []);
-  assert.equal(card.dread, null);
+  assert.equal(card.dread, undefined);
 });
 
 test('без нити промпт всё равно собирается', () => {

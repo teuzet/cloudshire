@@ -101,14 +101,6 @@ export const THREAT_SPEC = {
   YEAR: { min: 150, max: 360, label: 'год' },
 };
 
-/** Насколько вероятно, что город изначально видит угрозу этой полосы. */
-export const THREAT_KNOWN_CHANCE = {
-  DAYS: 0.9,
-  WEEKS: 0.9,
-  SEASON: 0.6,
-  YEAR: 0.25,
-};
-
 export function normalizeThreatBand(raw, fallback = 'SEASON') {
   const key = String(raw || '').trim().toUpperCase();
   return THREAT_BANDS.includes(key) ? key : fallback;
@@ -130,15 +122,34 @@ export function rollThreatDays(band, rng = Math.random) {
 }
 
 /**
- * Полосы слотов параллельных угроз.
- * Веса падают у уже выпавшей полосы, чтобы набор обычно был разнородным,
- * но изредка выпадал целиком быстрым или целиком медленным.
+ * Базовые веса слотов. Gravity их не вычёркивает — только сдвигает все сразу:
+ * мелкая история чаще быстрая, крупная чаще медленная, любой срок всё ещё возможен.
  */
-export const THREAT_SLOT_WEIGHTS = { WEEKS: 40, SEASON: 40, YEAR: 20 };
+export const THREAT_SLOT_WEIGHTS = { DAYS: 8, WEEKS: 38, SEASON: 36, YEAR: 18 };
 export const THREAT_REPEAT_DAMPING = 0.35;
 
-export function pickThreatBands(count, rng = Math.random, { damping = THREAT_REPEAT_DAMPING } = {}) {
-  const weights = { ...THREAT_SLOT_WEIGHTS };
+/** Множители к базовым весам. Не жёсткая привязка полосы к масштабу. */
+export const GRAVITY_THREAT_SHIFT = {
+  SITUATION: { DAYS: 2.2, WEEKS: 1.5, SEASON: 0.7, YEAR: 0.35 },
+  EPISODE: { DAYS: 1, WEEKS: 1, SEASON: 1, YEAR: 1 },
+  CRISIS: { DAYS: 0.5, WEEKS: 0.75, SEASON: 1.15, YEAR: 1.55 },
+  RUPTURE: { DAYS: 0.3, WEEKS: 0.55, SEASON: 1.2, YEAR: 2.1 },
+};
+
+function threatSlotWeights(gravity) {
+  const key = String(gravity || '')
+    .trim()
+    .toUpperCase();
+  const shift = GRAVITY_THREAT_SHIFT[key] || GRAVITY_THREAT_SHIFT.EPISODE;
+  const out = {};
+  for (const band of Object.keys(THREAT_SLOT_WEIGHTS)) {
+    out[band] = THREAT_SLOT_WEIGHTS[band] * (shift[band] ?? 1);
+  }
+  return out;
+}
+
+export function pickThreatBands(count, rng = Math.random, { damping = THREAT_REPEAT_DAMPING, gravity } = {}) {
+  const weights = threatSlotWeights(gravity);
   const out = [];
   for (let i = 0; i < Math.max(0, Math.round(count)); i += 1) {
     const keys = Object.keys(weights);

@@ -18,7 +18,8 @@ import {
   fireThreat,
   revealThreat,
   livesLeft,
-  severityForLives,
+  remainingToBadEndingPct,
+  threatStageForPlot,
 } from './threats.js';
 
 export const CRIT_CASCADE_STEPS = ['reveal', 'reprieve', 'restore_life', 'depth'];
@@ -112,7 +113,8 @@ export function applyDeedToPlot({
     cascade: null,
     fired: null,
     livesLeft: livesLeft(plot),
-    severity: null,
+    stage: null,
+    remainingPct: null,
     revealed: [],
     answer: null,
   };
@@ -122,7 +124,8 @@ export function applyDeedToPlot({
     if (finish === 'fail') {
       plot.failCount = Math.max(0, Math.round(Number(plot.failCount) || 0)) + 1;
       out.livesLeft = livesLeft(plot);
-      out.severity = severityForLives(out.livesLeft + 1);
+      out.stage = threatStageForPlot(plot);
+      out.remainingPct = remainingToBadEndingPct(plot);
       return out;
     }
     const gain = depthGain({
@@ -169,7 +172,8 @@ export function applyDeedToPlot({
       out.fired = fireThreat(plot, threat, { day, firedBy: process?.id || null });
       out.closes = !!out.fired?.closes;
       out.endingKind = out.fired?.endingKind || null;
-      out.severity = out.fired?.severity || null;
+      out.stage = out.fired?.stage || null;
+      out.remainingPct = out.fired?.remainingPct ?? null;
       out.livesLeft = livesLeft(plot);
       return out;
     }

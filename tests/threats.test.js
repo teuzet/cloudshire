@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  SEVERITY_BANDS,
+  THREAT_STAGES,
   GRAVITY_THREAT_SLOTS,
   livesLeft,
-  severityForLives,
-  severityForPlot,
+  remainingToBadEndingPct,
+  threatStageForPlot,
   threatSlots,
   targetThreatCount,
   createThreat,
@@ -18,7 +18,6 @@ import {
   nearestThreat,
   surfaceOverdueThreats,
   revealThreat,
-  dreadFlag,
   knownThreatsForSpeech,
   deferSurvivors,
   fireThreat,
@@ -72,23 +71,24 @@ test('жизни считаются от gravity, если maxFails не зад�
   assert.equal(livesLeft(plot({ gravity: 'CRISIS', failCount: 2 })), 0);
 });
 
-test('полоса тяжести растёт по мере убывания жизней', () => {
-  assert.equal(severityForLives(5), 'ТРЕВОГА');
-  assert.equal(severityForLives(3), 'ТРЕВОГА');
-  assert.equal(severityForLives(2), 'УЩЕРБ');
-  assert.equal(severityForLives(1), 'УТРАТА');
-  assert.equal(severityForLives(0), 'КАТАСТРОФА');
-  assert.equal(SEVERITY_BANDS.indexOf(severityForLives(0)), SEVERITY_BANDS.length - 1);
+test('доля пути до плохой концовки считается от остатка жизней', () => {
+  assert.equal(remainingToBadEndingPct(plot({ gravity: 'CRISIS' })), 100);
+  assert.equal(remainingToBadEndingPct(plot({ gravity: 'CRISIS', failCount: 1 })), 50);
+  assert.equal(remainingToBadEndingPct(plot({ gravity: 'RUPTURE' })), 100);
+  assert.equal(remainingToBadEndingPct(plot({ gravity: 'RUPTURE', failCount: 1 })), 67);
+  assert.equal(remainingToBadEndingPct(plot({ gravity: 'RUPTURE', failCount: 2 })), 33);
+  assert.equal(remainingToBadEndingPct(plot({ gravity: 'SITUATION' })), 0);
 });
 
-test('у кризиса на первом шаге угроза не может быть катастрофой', () => {
-  assert.equal(severityForPlot(plot({ gravity: 'CRISIS' })), 'УЩЕРБ');
-  assert.equal(severityForPlot(plot({ gravity: 'CRISIS', failCount: 1 })), 'УТРАТА');
-  assert.equal(severityForPlot(plot({ gravity: 'CRISIS', failCount: 2 })), 'КАТАСТРОФА');
+test('у кризиса первый удар промежуточный, не исход', () => {
+  assert.equal(threatStageForPlot(plot({ gravity: 'CRISIS' })), 'interim');
+  assert.equal(threatStageForPlot(plot({ gravity: 'CRISIS', failCount: 1 })), 'interim');
+  assert.equal(threatStageForPlot(plot({ gravity: 'CRISIS', failCount: 2 })), 'finale');
+  assert.ok(THREAT_STAGES.includes('interim'));
 });
 
-test('ситуация без жизней катастрофична с первой же угрозы', () => {
-  assert.equal(severityForPlot(plot({ gravity: 'SITUATION' })), 'КАТАСТРОФА');
+test('ситуация без жизней сразу исход', () => {
+  assert.equal(threatStageForPlot(plot({ gravity: 'SITUATION' })), 'finale');
 });
 
 test('число слотов растёт с тяжестью истории', () => {
@@ -118,10 +118,11 @@ test('угроза получает срок внутри полосы и зап
   assert.equal(t.outcome, 'harm');
 });
 
-test('полоса тяжести проставляется при рождении по текущему остатку жизней', () => {
+test('промежуточный удар помнит долю пути до плохой концовки', () => {
   const p = plot({ gravity: 'CRISIS', failCount: 1 });
   const t = createThreat({ plot: p, band: 'WEEKS', rng: () => 0.5 });
-  assert.equal(t.severity, 'УТРАТА');
+  assert.equal(t.stage, 'interim');
+  assert.equal(t.remainingPct, 50);
 });
 
 test('замедление от защит сдвигает полосу при рождении', () => {
@@ -130,12 +131,11 @@ test('замедление от защит сдвигает полосу при 
   assert.equal(t.band, 'SEASON', 'DAYS + 2 ступени = SEASON');
 });
 
-test('видимость бросается по полосе, но может быть задана явно', () => {
+test('видимость задаёт автор, без ответа беда видна', () => {
   const p = plot();
-  const fast = createThreat({ plot: p, band: 'DAYS', rng: () => 0.5 });
-  assert.equal(fast.known, true, 'быстрая угроза почти всегда видна');
-  const slow = createThreat({ plot: p, band: 'YEAR', rng: () => 0.5 });
-  assert.equal(slow.known, false, 'медленная при том же жребии — нет');
+  const silent = createThreat({ plot: p, band: 'YEAR', rng: () => 0.5 });
+  assert.equal(silent.known, true, 'без known считаем видимой');
+  assert.equal(createThreat({ plot: p, band: 'YEAR', known: false, rng: () => 0.5 }).known, false);
   assert.equal(createThreat({ plot: p, band: 'YEAR', known: true, rng: () => 0.5 }).known, true);
 });
 
@@ -144,7 +144,7 @@ test('разрешение всегда видимо — иначе гонки �
   const t = createThreat({ plot: p, band: 'YEAR', outcome: 'neutral', known: false, rng: () => 0.99 });
   assert.equal(t.outcome, 'neutral');
   assert.equal(t.known, true);
-  assert.equal(t.severity, null);
+  assert.equal(t.stage, null);
 });
 
 // ──────────────────────────── видимость ────────────────────────────
@@ -174,28 +174,6 @@ test('revealThreat открывает разово', () => {
   assert.equal(t.surfacedDay, 10);
 });
 
-test('флаг тревоги отражает ближайшую скрытую угрозу', () => {
-  const p = plot({ gravity: 'RUPTURE' });
-  threat(p, { day: 0, known: false, total: 100 });
-  assert.equal(dreadFlag(p, 0), 'спокойно');
-  assert.equal(dreadFlag(p, 50), 'тревожно');
-  assert.equal(dreadFlag(p, 80), 'очень тревожно');
-  assert.equal(dreadFlag(p, 95), 'на пороге');
-});
-
-test('тревога усиливается на ступень, когда жизней почти нет', () => {
-  const p = plot({ gravity: 'RUPTURE', failCount: 2 });
-  threat(p, { day: 0, known: false, total: 100 });
-  assert.equal(severityForPlot(p), 'УТРАТА');
-  assert.equal(dreadFlag(p, 0), 'тревожно', 'спокойно + ступень');
-});
-
-test('без скрытых угроз флага тревоги нет', () => {
-  const p = plot();
-  threat(p, { known: true });
-  assert.equal(dreadFlag(p, 0), null);
-});
-
 test('жрец видит формулировку и полосу остатка, но не число дней', () => {
   const p = plot();
   const slow = threat(p, { day: 0, known: true, total: 120 });
@@ -218,7 +196,8 @@ test('срабатывание съедает жизнь и не закрыва�
   const res = fireThreat(p, t, { day: 100 });
   assert.equal(res.ok, true);
   assert.equal(res.closes, false);
-  assert.equal(res.severity, 'УЩЕРБ');
+  assert.equal(res.stage, 'interim');
+  assert.equal(res.remainingPct, 100);
   assert.equal(p.failCount, 1);
   assert.equal(res.livesLeft, 1);
   assert.equal(t.status, 'fired');
@@ -437,17 +416,19 @@ test('заявка несёт полосу тяжести, анти-таргет
   const p = plot({ gravity: 'CRISIS', failCount: 1 });
   const req = nextObligationRequest(p, { rng: () => 0.5 });
   assert.equal(req.outcome, 'harm');
-  assert.equal(req.severity, 'УТРАТА');
+  assert.equal(req.stage, 'interim');
+  assert.equal(req.remainingPct, 50);
   assert.equal(req.antiTarget, 'Северное крыло рушится вместе с людьми');
   assert.equal(req.livesLeft, 1);
-  assert.ok(req.severityGuidance.length > 10);
+  assert.match(req.woundGuidance, /50%/);
 });
 
 test('заявка на разрешение не несёт тяжести и не замедляется', () => {
   const p = plot({ depth: 3, maxDepth: 3 });
   const req = nextObligationRequest(p, { rng: () => 0.5 });
   assert.equal(req.outcome, 'neutral');
-  assert.equal(req.severity, null);
+  assert.equal(req.stage, null);
+  assert.equal(req.remainingPct, null);
   assert.equal(req.antiTarget, null);
   assert.equal(req.slowdown, 0);
 });
@@ -457,7 +438,9 @@ test('заявка показывает автору уже висящие уг�
   const t = threat(p, { day: 0, total: 100 });
   t.text = 'фундамент садится';
   const req = nextObligationRequest(p, { day: 60, rng: () => 0.5 });
-  assert.deepEqual(req.existingThreats, [{ text: 'фундамент садится', remainingBand: 'WEEKS' }]);
+  assert.deepEqual(req.existingThreats, [
+    { text: 'фундамент садится', remainingBand: 'WEEKS', known: true },
+  ]);
 });
 
 test('дозаполнение доводит историю до нормы слотов', () => {
@@ -485,10 +468,10 @@ test('после исчерпания ран заявка — финал к пл
   assert.equal(req.finale, true);
   assert.equal(req.endingId, 'e1');
   assert.equal(req.endingText, 'Северное крыло рушится вместе с людьми');
-  assert.equal(req.known, true);
+  assert.equal(req.known, null, 'видимость решает автор по скрытому слою');
   const [t] = replenishThreats(p, { day: 0, rng: () => 0.5, author: () => ({ text: 'сруб обвалится' }) });
   assert.equal(t.endingId, 'e1');
-  assert.equal(t.known, true);
+  assert.equal(t.known, true, 'без ответа автора беда видна');
 });
 
 test('пока висит финал, второй не заводим', () => {
@@ -558,5 +541,20 @@ test('нормализация выкидывает мусор и чинит п�
   assert.equal(p.threats.length, 1);
   assert.equal(p.threats[0].band, 'SEASON');
   assert.equal(p.threats[0].status, 'live');
-  assert.equal(p.threats[0].severity, 'ТРЕВОГА');
+  assert.equal(p.threats[0].stage, 'interim');
+});
+
+test('старые четыре слова тяжести читаются как стадия', () => {
+  const p = {
+    id: 'p',
+    gravity: 'CRISIS',
+    threats: [
+      { text: 'пыль', severity: 'УЩЕРБ' },
+      { text: 'обвал', severity: 'КАТАСТРОФА' },
+    ],
+  };
+  normalizePlotThreats(p);
+  assert.equal(p.threats[0].stage, 'interim');
+  assert.equal(p.threats[1].stage, 'finale');
+  assert.equal(p.threats[1].remainingPct, 0);
 });

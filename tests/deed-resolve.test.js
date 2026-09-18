@@ -155,7 +155,8 @@ test('DIRECT-провал стоит жизни, а не глубины', () => 
   assert.equal(p.depth, 0);
   assert.equal(p.failCount, 1);
   assert.equal(res.livesLeft, 1);
-  assert.equal(res.severity, 'УЩЕРБ');
+  assert.equal(res.stage, 'interim');
+  assert.equal(res.remainingPct, 50);
   assert.equal(res.closes, false);
 });
 

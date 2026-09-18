@@ -181,6 +181,7 @@ export const FREEFORM_PACK_JUDGE_CODES = [
   'ECONOMY',
   'CHEKHOV',
   'CHRONICLE',
+  'FORECAST',
   'AXIS',
   'PATRON',
   'CONFLUX',
@@ -467,7 +468,7 @@ export async function judgeFreeformCard({
     caseText: formatFreeformCardJudgeCase({ seedText, blank, card, gravity, config }),
     extraSystem,
     extraUser:
-      'Проверка собранной карточки, не выбор из пачки. PASS если шарнир на месте, whyMoves — путь к посадке из динамики, closeWhen различны и хотя бы один держит масштаб последствий, карточка — тот же сюжет, gravity совпадает с посадкой (синопсис может быть меньше), космология цела, hiddenPremises не выдуманы. Иначе FAIL одним из HINGE / PLAUSIBLE_ENOUGH / WHY_MOVES / CLOSE_WHEN / PREMISE_DRIFT / GRAVITY_FIDELITY / WORLD_FIDELITY / HIDDEN_INVENTED. UNCERTAIN пайплайн принимает. Историю не чини.',
+      'Проверка собранной карточки, не выбор из пачки. PASS если шарнир на месте, whyMoves — намёток последствий если не займутся, closeWhen различны и хотя бы один держит масштаб последствий, карточка — тот же сюжет, gravity совпадает с посадкой (синопсис может быть меньше), космология цела, hiddenPremises не выдуманы, хроника без прогноза. Иначе FAIL одним из HINGE / PLAUSIBLE_ENOUGH / WHY_MOVES / CLOSE_WHEN / PREMISE_DRIFT / GRAVITY_FIDELITY / WORLD_FIDELITY / HIDDEN_INVENTED. UNCERTAIN пайплайн принимает. Историю не чини.',
     log,
     domainId,
     codes: FREEFORM_CARD_JUDGE_CODES,

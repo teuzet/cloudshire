@@ -626,14 +626,6 @@ export function plotConfig(config) {
         inventChance: Math.max(0, Math.min(1, Number(p.mystery?.entities?.inventChance ?? 0.15))),
       };
     })(),
-    seedRoles: Array.isArray(p.seedRoles)
-      ? p.seedRoles
-          .map((r) => ({
-            role: String(r?.role || '').trim(),
-            about: String(r?.about || '').trim(),
-          }))
-          .filter((r) => r.role)
-      : [],
     acts: {
       maxEscalations: Math.max(1, Math.round(Number(p.acts?.maxEscalations ?? 3))),
       worsenMin: Number(p.acts?.worsenMin ?? 1.1),

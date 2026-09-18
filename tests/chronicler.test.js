@@ -270,13 +270,16 @@ test('промпт беды требует прошедшего времени',
     plot: plot(),
     threat: { text: 'Известковая пыль забьёт водосборный сток, и дождь смоет посевы' },
     kind: 'threat',
-    severity: 'УЩЕРБ',
+    stage: 'interim',
+    remainingPct: 50,
   });
   assert.match(text, /В БУДУЩЕМ ВРЕМЕНИ/);
   assert.match(text, /как случившееся, в прошедшем времени/);
   assert.match(text, /забьёт водосборный сток/, 'предсказание отдаём как есть');
+  assert.match(text, /ещё 50% до плохой концовки/);
   assert.match(text, /История не закрыта/);
   assert.doesNotMatch(text, /длиннее обычной/);
+  assert.doesNotMatch(text, /УЩЕРБ|ТРЕВОГА|КАТАСТРОФА/);
 });
 
 test('финальная запись несёт и случившееся, и всю тройку концовки', () => {

@@ -613,7 +613,13 @@ function plotCard(p, names = {}) {
   const threats = (p.threats || [])
     .map((t) => {
       const bits = [
-        t.outcome === 'neutral' ? 'разрешение' : t.severity || 'угроза',
+        t.outcome === 'neutral'
+          ? 'разрешение'
+          : t.stage === 'finale'
+            ? 'исход'
+            : t.remainingPct != null
+              ? `${t.remainingPct}%`
+              : 'угроза',
         t.known ? 'город знает' : 'скрыто',
         `${t.remainingDays ?? '?'} из ${t.totalDays ?? '?'} дн.`,
       ]

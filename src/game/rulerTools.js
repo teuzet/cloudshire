@@ -55,7 +55,6 @@ import {
 import { judgeDeed } from './deedJudge.js';
 import { scheduleDeedJob, cancelDeedJobs } from './worldLoop.js';
 import {
-  dreadFlag,
   knownThreatsForSpeech,
   liveThreats,
   nearestKnownDanger,
@@ -527,7 +526,6 @@ export function buildRulerTools(domain, storage, character, ctx) {
             remaining: DURATION_SPEC[normalizeDurationBand(t.remainingBand)].label,
             ending: t.endingText || null,
           })),
-          dread: dreadFlag(p, day),
           foreign: Boolean(ctx.partner && String(p.hostDomainId || domain.id) === String(ctx.partner.id)),
         })),
         standingRules: cityRules(domain).map((m) => ({ id: m.id, text: m.text, since: m.sinceLabel })),

@@ -14,6 +14,7 @@ import {
   clipPlotText,
   PLOT_SUMMARY_MAX,
   plotConfig,
+  ensurePlotStatBudget,
   parseFreeformGravity,
   parseFreeformUrgency,
   maxFailsForGravity,
@@ -30,6 +31,7 @@ import { gameDateFromTickIndex, worldDateLabel } from './tickClock.js';
 import { gameDateFromDay } from './gameClock.js';
 import { formatCityForAgents } from './cityContext.js';
 import { formatOfficersCastHint } from './officers.js';
+import { formatCastForPrompt } from './models.js';
 import { normalizeBeatDynamics } from './freeformDynamics.js';
 import { hiddenPremises, revealedPremises, hiddenAnswer, revealedAnswer } from './premises.js';
 
@@ -396,13 +398,39 @@ export function formatFreeformSeedBlank(blank) {
   return lines.join('\n');
 }
 
+const CHRONICLE_BUDGET_MIN = 180;
+const CHRONICLE_BUDGET_FALLBACK = 1200;
+
+function clipBudget(n, fallback = CHRONICLE_BUDGET_FALLBACK) {
+  return Math.max(CHRONICLE_BUDGET_MIN, Math.round(Number(n) || fallback));
+}
+
+/** Три бюджета хроники. Старое число в yaml — одно значение на все три. */
+export function chronicleBudgets(raw) {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const seed = clipBudget(raw.seed ?? raw.beat ?? raw.ending);
+    return {
+      seed: clipBudget(raw.seed, seed),
+      beat: clipBudget(raw.beat, seed),
+      ending: clipBudget(raw.ending, seed),
+    };
+  }
+  const n = clipBudget(raw);
+  return { seed: n, beat: n, ending: n };
+}
+
+export function chronicleBudget(config, kind = 'seed') {
+  const budgets = freeformConfig(config).chronicleMaxChars;
+  return budgets[kind] || budgets.seed;
+}
+
 export function freeformConfig(config) {
   const raw = config?.tick?.plot?.freeform || {};
   const board = plotConfig(config).board;
   return {
     variantsMin: Math.max(2, Math.round(Number(raw.variantsMin) || 3)),
     variantsMax: Math.max(3, Math.round(Number(raw.variantsMax) || 3)),
-    chronicleMaxChars: Math.max(180, Math.round(Number(raw.chronicleMaxChars) || 2800)),
+    chronicleMaxChars: chronicleBudgets(raw.chronicleMaxChars),
     lunaRepairRounds: Math.max(0, Math.min(2, Math.round(Number(raw.lunaRepairRounds ?? 2)))),
     seedMysteryChance: Math.max(0, Math.min(1, Number(raw.seedMysteryChance ?? 0.25) || 0)),
     seedChance: {
@@ -488,13 +516,14 @@ export function advanceWorldMonths(world, months = 1) {
 export function appendChronicle(
   domain,
   world,
-  { text, plotId = null, author, importance = 'major', tags = ['chronicle'], day = null },
+  { text, plotId = null, author, importance = 'major', tags = ['chronicle'], day = null, maxChars = null },
 ) {
   // `Number(null)` — это ноль, поэтому пустой день проверяется до приведения.
   const dated = day != null && day !== '' && Number.isFinite(Number(day));
+  const limit = Math.max(CHRONICLE_BUDGET_MIN, Math.round(Number(maxChars) || CHRONICLE_BUDGET_FALLBACK));
   const fact = createLoreFact({
     id: newId('lore'),
-    text: clipPlotText(text, 1200),
+    text: clipPlotText(text, limit),
     tags,
     gameDateLabel: dated ? gameDateFromDay(Number(day)).label : worldDateLabel(world),
     tick: world.tickIndex,
@@ -540,6 +569,7 @@ export function createFreeformPlot({ domain, world, variant, config, seedChronic
     tick: world.tickIndex,
     config,
   });
+  ensurePlotStatBudget(plot, config);
   if (seedChronicleId) plot.chronicleIds.push(seedChronicleId);
   domain.plotlines = domain.plotlines || [];
   domain.plotlines.push(plot);
@@ -566,7 +596,7 @@ export function applyFreeformState(plot, patch = {}) {
   return plot;
 }
 
-export function cityStateForPrompt(domain, world) {
+export function cityStateForPrompt(domain, world, { officers = true, cast = false } = {}) {
   const stats = domain?.stats || {};
   const statLine = Object.entries(stats)
     .map(([k, v]) => `${k} ${v}`)
@@ -575,11 +605,15 @@ export function cityStateForPrompt(domain, world) {
     .filter((p) => isStoryPlot(p))
     .map((p) => `- ${p.title}: ${clipPlotText(p.synopsis, 180)}`)
     .join('\n');
+  const people = cast
+    ? `Люди города:\n${formatCastForPrompt(domain?.lore, { includeOfficers: false })}`
+    : '';
   return [
     `Дата: ${worldDateLabel(world)} (тик ${world.tickIndex}).`,
     `Город «${domain?.name}».`,
     formatCityForAgents(domain),
-    formatOfficersCastHint(domain),
+    officers ? formatOfficersCastHint(domain) : '',
+    people,
     statLine ? `Статы: ${statLine}` : '',
     open ? `Открытые истории:\n${open}` : 'Открытых историй нет.',
   ]
@@ -597,8 +631,8 @@ export function plotCardForPrompt(plot, { revealHidden = true } = {}) {
     plot.cause ? `Первопричина: ${plot.cause}` : '',
     `Исходы:\n${formatFreeformEndings(plot) || formatCloseWhen(plot)}`,
     plot.whyMoves
-      ? `whyMoves: ${plot.whyMoves}`
-      : 'whyMoves: не задан.',
+      ? `если не займутся: ${plot.whyMoves}`
+      : '',
     // Раскрытое городом — уже не тайна, а установленный факт: об этом можно
     // говорить и писать в отличие от скрытого слоя ниже.
     solved ? `Город разгадал: ${solved}` : '',

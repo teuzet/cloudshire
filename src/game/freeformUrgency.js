@@ -45,6 +45,7 @@ export async function setFreeformUrgency({
     toolChoice: { type: 'function', function: { name: 'set_freeform_urgency' } },
     log,
     scene: 'freeform_urgency',
+    domainId: domain?.id,
     extraSystem: '',
     userMessages: [
       {

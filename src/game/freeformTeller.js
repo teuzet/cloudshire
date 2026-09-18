@@ -29,8 +29,9 @@ import { setFreeformUrgency } from './freeformUrgency.js';
 
 const MIN_PASS_SKIP_SECOND = 2;
 
-export function normalizeBeatVariant(raw, cfg) {
-  const chronicle = clipPlotText(raw?.chronicle || raw?.entry, cfg.chronicleMaxChars);
+export function normalizeBeatVariant(raw, cfg, { closing = false } = {}) {
+  const limit = closing ? cfg.chronicleMaxChars.ending : cfg.chronicleMaxChars.beat;
+  const chronicle = clipPlotText(raw?.chronicle || raw?.entry, limit);
   const synopsis = clipPlotText(raw?.synopsis, PLOT_SUMMARY_MAX);
   if (!chronicle || !synopsis) return null;
   return {
@@ -42,7 +43,7 @@ export function normalizeBeatVariant(raw, cfg) {
   };
 }
 
-export function beatCardFromBlank(blank, cfg) {
+export function beatCardFromBlank(blank, cfg, { closing = false } = {}) {
   if (!blank) return null;
   const paragraph = blank.text || blank.whatHappens || '';
   return normalizeBeatVariant(
@@ -52,6 +53,7 @@ export function beatCardFromBlank(blank, cfg) {
       hiddenPremises: blank.hiddenPremises,
     },
     cfg,
+    { closing },
   );
 }
 
@@ -107,7 +109,7 @@ async function constructBeat({ runtime, domain, world, plot, deed, blank, cfg, l
           },
         },
         handler: async (args) => {
-          const card = normalizeBeatVariant(args, cfg);
+          const card = normalizeBeatVariant(args, cfg, { closing });
           if (!card) {
             return toolFail('thin', 'Нужны chronicle и synopsis.');
           }
@@ -411,7 +413,7 @@ export async function tellFreeformBeat({
   } catch (err) {
     log.warn('freeform.construct_beat_failed', { error: err.message });
   }
-  winner = winner || beatCardFromBlank(blank, builtCfg);
+  winner = winner || beatCardFromBlank(blank, builtCfg, { closing });
   if (!winner) {
     plot.depth = snap.depth;
     plot.failCount = snap.failCount;

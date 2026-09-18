@@ -27,7 +27,7 @@ import {
   findVisiblePlot,
 } from '../src/game/plotlines.js';
 import { ensureErrandForProcess, planBeats } from '../src/game/plotEngine.js';
-import { peopleUnderWatch, priorPlotChronicle, mintSeedCast, offerMysterySeedNames } from '../src/game/storyteller.js';
+import { peopleUnderWatch, priorPlotChronicle } from '../src/game/storyteller.js';
 
 function plot(id, extra = {}) {
   return {
@@ -374,52 +374,6 @@ test('каталог тайны: поле и тип', async () => {
     { groupId: 'tone', groupName: 'Тон', tagName: 'Жуткие странности' },
   ]);
   assert.equal(hard.includes('ассоциации'), false);
-});
-
-test('посев тайны даёт 1–2 имени без готовых карточек', () => {
-  const domain = { characters: [{ name: 'Паэла' }], lore: [] };
-  const one = offerMysterySeedNames({
-    world: { namePool: { female: ['Айра', 'Найра', 'Вера'], male: ['Кален', 'Норвел'] } },
-    domain,
-    rng: () => 0.1,
-  });
-  assert.equal(one.length, 1);
-  assert.ok(one[0].name);
-  assert.notEqual(String(one[0].name).toLowerCase(), 'паэла');
-  assert.ok(['male', 'female'].includes(one[0].gender));
-  assert.equal(one[0].role, undefined);
-  assert.equal(one[0].about, undefined);
-  const two = offerMysterySeedNames({
-    world: { namePool: { female: ['Айра', 'Найра'], male: ['Кален', 'Норвел'] } },
-    domain,
-    rng: () => 0.9,
-  });
-  assert.equal(two.length, 2);
-  assert.notEqual(two[0].name, two[1].name);
-});
-
-test('посев даёт 1–2 готовых человека из пула', () => {
-  const domain = { characters: [{ name: 'Паэла' }], lore: [] };
-  const one = mintSeedCast({
-    world: { namePool: { female: ['Айра', 'Найра', 'Вера'], male: ['Кален', 'Норвел'] } },
-    domain,
-    rng: () => 0.1,
-  });
-  assert.equal(one.length, 1);
-  assert.ok(one[0].name);
-  assert.notEqual(String(one[0].name).toLowerCase(), 'паэла');
-  assert.ok(['male', 'female'].includes(one[0].gender));
-  assert.ok(one[0].role);
-  assert.ok(one[0].about);
-  assert.ok(one[0].ageYears >= 18);
-  const two = mintSeedCast({
-    world: { namePool: { female: ['Айра', 'Найра'], male: ['Кален', 'Норвел'] } },
-    domain,
-    rng: () => 0.9,
-  });
-  assert.equal(two.length, 2);
-  assert.notEqual(two[0].name, two[1].name);
-  assert.notEqual(two[0].role, two[1].role);
 });
 
 test('жребий источника уважает вес: unknown чаще economic', () => {

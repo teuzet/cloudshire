@@ -12,6 +12,7 @@
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { clipPlotText, PLOT_TITLE_MAX, PLOT_SUMMARY_MAX } from './plotlines.js';
+import { splitChronicleHiddenLayer } from './freeformAssemble.js';
 import {
   parseFreeformGravity,
   formatFreeformGravityForPrompt,
@@ -269,8 +270,11 @@ export function formatFreeformBrainstormRollsForPrompt(rolls) {
 }
 
 export function normalizeBrainstormCandidate(raw, roll, index = 1, maxChars = PLOT_SUMMARY_MAX) {
-  const chronicle = clipPlotText(raw?.chronicle || raw?.text || raw?.hook, maxChars);
-  if (!chronicle) return null;
+  const split = splitChronicleHiddenLayer(raw?.chronicle || raw?.text || raw?.hook);
+  const publicLayer = clipPlotText(split.chronicle, maxChars);
+  if (!publicLayer) return null;
+  const hidden = split.hiddenPremises.filter(Boolean);
+  const chronicle = hidden.length ? `${publicLayer}\nНа самом деле: ${hidden.join('\n')}` : publicLayer;
   return {
     title: clipPlotText(raw?.title, PLOT_TITLE_MAX) || '',
     chronicle,
@@ -334,7 +338,7 @@ function emitCandidatesTool({ n, rolls, draft, log, indices = null, maxChars = P
               chronicle: {
                 type: 'string',
                 description:
-                  `Сюжет-затравка: обычно 4–5 предложений, можно короткая сцена, до ${maxChars} символов`,
+                  `Сюжет-затравка: 5–8 кратких предложений, без лишних деталей, до ${maxChars} символов`,
               },
               arena: { type: 'string', description: 'Эхо оси arena этого набора.' },
               worldRelation: { type: 'string', description: 'Эхо оси worldRelation этого набора.' },
@@ -383,6 +387,7 @@ export async function brainstormFreeformSeeds({
   fromVoid = false,
   fromGenesis = false,
   note = '',
+  domainId = null,
 }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm' });
   const cfg = freeformConfig(config);
@@ -402,11 +407,12 @@ export async function brainstormFreeformSeeds({
   const draft = { variants: null };
   const runOpts = {
     agentId: 'freeformBrainstorm',
-    tools: [emitCandidatesTool({ n, rolls, draft, log, maxChars: cfg.chronicleMaxChars })],
+    tools: [emitCandidatesTool({ n, rolls, draft, log, maxChars: cfg.chronicleMaxChars.seed })],
     maxTurns: 3,
     toolChoice: { type: 'function', function: { name: 'emit_freeform_candidates' } },
     log,
     scene: 'freeform_brainstorm_seed',
+    domainId,
     extraSystem: extraWithNote(architectExtraSystem({ requireMystery, fromVoid, fromGenesis }), note),
     userMessages: [
       {
@@ -464,6 +470,7 @@ export async function reviewBrainstormPack({
   fromVoid = false,
   fromGenesis = false,
   note = '',
+  domainId = null,
 }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.judge' });
   const n = candidates.length;
@@ -528,6 +535,7 @@ export async function reviewBrainstormPack({
     toolChoice: { type: 'function', function: { name: 'submit_freeform_pack_review' } },
     log,
     scene: 'freeform_brainstorm_judge',
+    domainId,
     extraSystem: extraWithNote(judgeExtraSystem({ requireMystery, fromVoid, fromGenesis }), note),
     userMessages: [
       {
@@ -596,11 +604,12 @@ export async function repairBrainstormPack({
   agentId = 'freeformBrainstorm',
   omitSeed = false,
   onlyFailed = false,
+  domainId = null,
 }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.repair' });
   const n = drafts.length;
   const g = parseFreeformGravity(gravity);
-  const maxChars = freeformConfig(config).chronicleMaxChars;
+  const maxChars = freeformConfig(config).chronicleMaxChars.seed;
   if (!n) return { candidates: [], prompt: '' };
   const notes = (reviews || []).slice(0, n);
   const slots = drafts.map((candidate, i) => ({
@@ -630,6 +639,7 @@ export async function repairBrainstormPack({
     toolChoice: { type: 'function', function: { name: 'emit_freeform_candidates' } },
     log,
     scene: cheap ? 'freeform_brainstorm_luna_repair' : 'freeform_brainstorm_repair',
+    domainId,
     extraSystem: cheap
       ? extraWithNote(requireMystery ? MYSTERY_ARCHITECT_EXTRA : '', '')
       : [
@@ -728,6 +738,7 @@ export async function pickBrainstormPoolWinner({
   config,
   log: parentLog,
   rng = Math.random,
+  domainId = null,
 }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.pick' });
   const list = Array.isArray(pool) ? pool.filter(Boolean) : [];
@@ -774,6 +785,7 @@ export async function pickBrainstormPoolWinner({
     toolChoice: { type: 'function', function: { name: 'pick_freeform_pool_winner' } },
     log,
     scene: 'freeform_brainstorm_pick',
+    domainId,
     userMessages: [
       {
         role: 'user',
@@ -853,6 +865,7 @@ export async function brainstormFreeformPack({
   fromVoid = false,
   fromGenesis = false,
   note = '',
+  domainId = null,
 }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.pack' });
   const drafted = await brainstormFreeformSeeds({
@@ -865,6 +878,7 @@ export async function brainstormFreeformPack({
     fromVoid,
     fromGenesis,
     note,
+    domainId,
   });
   if (!drafted.ok) {
     return {
@@ -898,6 +912,7 @@ export async function brainstormFreeformPack({
     fromVoid,
     fromGenesis,
     note,
+    domainId,
   });
   const repaired = await repairBrainstormPack({
     runtime,
@@ -911,6 +926,7 @@ export async function brainstormFreeformPack({
     fromVoid,
     fromGenesis,
     note,
+    domainId,
   });
   let candidates = freezeFirstPass(drafted.candidates, judged.reviews, repaired.candidates);
   const retry = candidates.filter((_, i) => !isPackPass(judged.reviews[i]));
@@ -926,6 +942,7 @@ export async function brainstormFreeformPack({
         fromVoid,
         fromGenesis,
         note,
+        domainId,
       })
     : { reviews: [], prompt: '' };
   let finalReviews = scatterPackReviews(candidates.length, gated.reviews);
@@ -949,6 +966,7 @@ export async function brainstormFreeformPack({
       agentId: 'freeformBrainstormRepair',
       omitSeed: true,
       onlyFailed: true,
+      domainId,
     });
     if (!cheap.prompt) break;
     extraRepairPrompts.push(cheap.prompt);
@@ -966,6 +984,7 @@ export async function brainstormFreeformPack({
           fromVoid,
           fromGenesis,
           note,
+          domainId,
         })
       : { reviews: [], prompt: '' };
     if (lunaGated.prompt) extraJudgePrompts.push(lunaGated.prompt);
@@ -986,6 +1005,7 @@ export async function brainstormFreeformPack({
     config,
     log,
     rng,
+    domainId,
   });
   return {
     ok: Boolean(picked.winner),

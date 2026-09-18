@@ -284,6 +284,7 @@ export async function seedFreeformLab({ config, runtime, text, gravity, fromCity
       requireMystery,
       fromVoid: Boolean(fromVoid),
       log,
+      domainId: session.domain?.id,
     });
     session.lastArchitectPrompt = drafted.prompt || '';
     session.lastJudgePrompt = drafted.judgePrompt || '';

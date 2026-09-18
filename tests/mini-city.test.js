@@ -266,7 +266,7 @@ test('мини-аппка: свои истории и участие в сопр
 
   const well2 = view.events.find((e) => e.title === 'Гул колодца');
   assert.equal(well2.threats, undefined, 'конкретные угрозы в справочник не кладём');
-  assert.equal(typeof well2.dread, 'string', 'скрытая беда видна только как чутьё');
+  assert.equal(well2.dread, undefined);
   assert.equal('loyalty' in (view.city || {}), false);
   assert.equal(view.city.hasImage, false);
   assert.equal(view.city.imageUrl, null);

@@ -135,11 +135,11 @@ export function normalizeAssembledStory(raw, candidate, maxChars = PLOT_SUMMARY_
   if (!chronicle) return null;
   const whyMoves = clipPlotText(raw?.whyMoves, PLOT_SUMMARY_MAX) || fallback.whyMoves;
   const cause = clipPlotText(raw?.cause, PLOT_SUMMARY_MAX) || fallback.cause;
-  const answer = keepSeedAnswer(raw?.hiddenAnswer) || fallback.hiddenAnswer;
-  const hiddenFromTool = keepSeedReveals(raw?.hiddenPremises);
-  const hidden = hiddenFromTool.length
-    ? hiddenFromTool
-    : keepSeedReveals(split.hiddenPremises).filter((item) => item !== answer);
+  const answer = keepSeedAnswer(raw?.hiddenAnswer);
+  const hidden = uniqueHiddenLines([
+    ...(Array.isArray(raw?.hiddenPremises) ? raw.hiddenPremises : []),
+    ...split.hiddenPremises,
+  ]).filter((item) => item !== answer);
   return {
     title: keepStoryTitle(raw?.title, chronicle) || fallback.title || 'История',
     chronicle,
@@ -151,10 +151,137 @@ export function normalizeAssembledStory(raw, candidate, maxChars = PLOT_SUMMARY_
   };
 }
 
+function uniqueHiddenLines(list) {
+  const seen = new Set();
+  const out = [];
+  for (const item of keepSeedReveals(list)) {
+    const key = item.replace(/\s+/g, ' ').trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+export function collectAssembledHiddenLines(story, candidate) {
+  const fromStory = splitChronicleHiddenLayer(story?.chronicle || '');
+  const fromCandidate = splitChronicleHiddenLayer(candidate?.chronicle || candidate?.text || candidate?.hook || '');
+  return uniqueHiddenLines([
+    story?.hiddenAnswer,
+    ...(Array.isArray(story?.hiddenPremises) ? story.hiddenPremises : []),
+    ...fromStory.hiddenPremises,
+    ...fromCandidate.hiddenPremises,
+  ]);
+}
+
+export function heuristicHiddenSplit(lines) {
+  const layer = uniqueHiddenLines(lines);
+  const hiddenAnswer = keepSeedAnswer(layer[0]);
+  return {
+    hiddenAnswer,
+    hiddenPremises: layer.slice(1).filter((item) => item !== hiddenAnswer),
+  };
+}
+
+function formatHiddenBlob(lines) {
+  return uniqueHiddenLines(lines)
+    .map((item, i) => `${i + 1}. ${item}`)
+    .join('\n');
+}
+
+/** Разрез скрытого слоя: разгадка отдельно, подступы — только то, что уже сказано. */
+export async function splitAssembledHidden({
+  runtime,
+  story,
+  candidate,
+  requireMystery = false,
+  log: parentLog,
+  domainId = null,
+} = {}) {
+  const log = (parentLog || getLogger()).child({ scope: 'freeform.hidden' });
+  const fromStory = splitChronicleHiddenLayer(story?.chronicle || '');
+  const chronicle = fromStory.chronicle || String(story?.chronicle || '').trim();
+  const lines = collectAssembledHiddenLines(story, candidate);
+  const base = {
+    ...story,
+    chronicle,
+    synopsis: chronicle,
+  };
+  if (!lines.length) {
+    return { ...base, hiddenAnswer: '', hiddenPremises: [], prompt: '' };
+  }
+  const fallback = heuristicHiddenSplit(lines);
+  if (!runtime?.run) {
+    return { ...base, ...fallback, prompt: '' };
+  }
+  const draft = { hiddenAnswer: '', hiddenPremises: null };
+  const runOpts = {
+    agentId: 'freeformHiddenSplit',
+    tools: [
+      {
+        name: 'submit_hidden_layer',
+        description: 'Разгадка и подступы из уже данного скрытого слоя. Новых фактов нет.',
+        parameters: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['hiddenAnswer'],
+          properties: {
+            hiddenAnswer: {
+              type: 'string',
+              description: 'Разгадка одной строкой: что произошло, кто действует, почему. Не отговорка.',
+            },
+            hiddenPremises: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Подступы, которые уже есть в тексте. Пусто, если сказано только разгадку.',
+            },
+          },
+        },
+        handler: async (args) => {
+          const hiddenAnswer = keepSeedAnswer(args?.hiddenAnswer);
+          if (requireMystery && !hiddenAnswer) {
+            return toolFail(
+              'no_reveal',
+              'Нужна конкретная разгадка в hiddenAnswer, не «неизвестно» и не «мнения расходятся».',
+            );
+          }
+          draft.hiddenAnswer = hiddenAnswer;
+          draft.hiddenPremises = keepSeedReveals(args?.hiddenPremises).filter((item) => item !== hiddenAnswer);
+          return { ok: true };
+        },
+      },
+    ],
+    maxTurns: 2,
+    toolChoice: { type: 'function', function: { name: 'submit_hidden_layer' } },
+    log,
+    scene: 'freeform_hidden_split',
+    domainId,
+    userMessages: [
+      {
+        role: 'user',
+        content: [
+          'Скрытый слой. Разрежь. Нового не выдумывай.',
+          '',
+          formatHiddenBlob(lines),
+        ].join('\n'),
+      },
+    ],
+  };
+  const prompt = captureAgentPrompt(runtime, runOpts);
+  try {
+    await runtime.run(runOpts);
+  } catch (err) {
+    log.warn('freeform.hidden_split_failed', { error: err.message });
+  }
+  const hiddenAnswer = draft.hiddenAnswer || fallback.hiddenAnswer;
+  const hiddenPremises = Array.isArray(draft.hiddenPremises) ? draft.hiddenPremises : fallback.hiddenPremises;
+  return { ...base, hiddenAnswer, hiddenPremises, prompt };
+}
+
 /**
  * Имя по наблюдаемому слою. Тайну сюда не кладём: иначе заголовок сам её выдаёт.
  */
-export async function nameAssembledStory({ runtime, chronicle, cityName, log: parentLog }) {
+export async function nameAssembledStory({ runtime, chronicle, cityName, log: parentLog, domainId = null }) {
   const publicChronicle = String(chronicle || '').trim();
   if (!publicChronicle || !runtime?.run) return { title: 'История', prompt: '' };
   const log = (parentLog || getLogger()).child({ scope: 'freeform.title' });
@@ -190,6 +317,7 @@ export async function nameAssembledStory({ runtime, chronicle, cityName, log: pa
     toolChoice: { type: 'function', function: { name: 'submit_freeform_title' } },
     log,
     scene: 'freeform_title',
+    domainId,
     userMessages: [
       {
         role: 'user',
@@ -224,7 +352,7 @@ export async function constructFreeformStory({
 }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.assemble' });
   const g = parseFreeformGravity(gravity);
-  const maxChars = freeformConfig(config).chronicleMaxChars;
+  const maxChars = freeformConfig(config).chronicleMaxChars.seed;
   const draft = { card: null };
   const runOpts = {
     agentId: 'freeformAssemble',
@@ -235,15 +363,12 @@ export async function constructFreeformStory({
         parameters: {
           type: 'object',
           additionalProperties: false,
-          required: requireMystery
-            ? ['chronicle', 'cause', 'whyMoves', 'hiddenAnswer', 'hiddenPremises']
-            : ['chronicle', 'cause', 'whyMoves'],
+          required: ['chronicle', 'cause', 'whyMoves'],
           properties: {
             chronicle: {
               type: 'string',
               description:
-                'Стартовая хроника: наблюдаемый слой, посаженный в этот город. ' +
-                'Механизм должен читаться: что за вещь, кто действует, что случилось. Без блока «На самом деле:».',
+                'Стартовая хроника: наблюдаемый слой, посаженный в этот город. Без блока «На самом деле:».',
             },
             cause: {
               type: 'string',
@@ -255,38 +380,33 @@ export async function constructFreeformStory({
             },
             whyMoves: {
               type: 'string',
-              description: 'Одно-два предложения: что ситуация сделает следующим, если город ею не займётся.',
-            },
-            hiddenAnswer: {
-              type: 'string',
               description:
-                'Разгадка одной строкой: что произошло на самом деле, кто действует, почему. ' +
-                'Одна, самая сердцевина. Не отговорка.',
+                'Одно-два предложения: что ситуация сделает следующим, если город ею не займётся. ' +
+                'Конкретный процесс из этой истории, не «напряжение растёт» и не финал.',
             },
             hiddenPremises: {
               type: 'array',
               items: { type: 'string' },
-              description:
-                'Подступы к разгадке, каждый сам по себе: улика, человек, который знает, ' +
-                'старая запись, причина, по которой до сих пор не поняли. ' +
-                'Независимые друг от друга, не ступени одной лестницы. Саму разгадку сюда не кладут.',
+              description: 'Истины из блока «На самом деле:», вынесенные из хроники. Отговорки не клади.',
             },
           },
         },
         handler: async (args) => {
           const card = normalizeAssembledStory(args, candidate, maxChars);
           if (!card) return toolFail('thin', 'Нужны chronicle и whyMoves.');
-          if (!card.whyMoves) return toolFail('thin', 'Нужен whyMoves: следующий ход ситуации, если ею не занимаются.');
+          if (!card.whyMoves) {
+            return toolFail('thin', 'Нужен whyMoves: следующий ход ситуации, если ею не занимаются.');
+          }
           if (!card.cause) {
             return toolFail(
               'no_cause',
               'Нужна cause: вещь или процесс в мире, из-за которого вопрос стоит. Не спор сторон.',
             );
           }
-          if (requireMystery && !card.hiddenAnswer) {
+          if (requireMystery && !collectAssembledHiddenLines(card, candidate).length) {
             return toolFail(
               'no_reveal',
-              'Нужна конкретная разгадка в hiddenAnswer, не «неизвестно» и не «мнения расходятся».',
+              'Нужна конкретная разгадка из блока «На самом деле:», не «неизвестно» и не «мнения расходятся».',
             );
           }
           draft.card = card;
@@ -294,12 +414,11 @@ export async function constructFreeformStory({
         },
       },
     ],
-    maxTurns: 3,
-    toolChoice: { type: 'function', function: { name: 'submit_freeform_story' } },
+    maxTurns: 4,
     log,
     scene: 'freeform_assemble',
     domainId: domain?.id,
-    extraSystem: cityStateForPrompt(domain, world),
+    extraSystem: cityStateForPrompt(domain, world, { officers: false, cast: true }),
     userMessages: [
       {
         role: 'user',
@@ -310,26 +429,15 @@ export async function constructFreeformStory({
           '',
           'Собери из этой хроники историю в этом городе через submit_freeform_story.',
           'Имя истории ставится отдельно по готовой хронике; скрытый слой туда не попадает.',
-          'Стартовая хроника — первая запись этой истории в городской книге, не краткая заметка за срок.',
-          'Не схлопывай цепочку «знак → кто его читает → решение». Объявляет человек, не вещь и не тварь.',
           [
             'cause — первопричина: вещь или процесс в мире, из-за которого вопрос стоит.',
             'Проверь себя: если все спорщики разойдутся по домам, cause останется на месте.',
             'Разойдётся вместе с ними — значит это не первопричина, а спор.',
           ].join(' '),
+          'whyMoves — что ситуация сделает следующим, если город ею не займётся.',
           requireMystery
-            ? [
-                'Скрытый слой из блока «На самом деле:» разложи на два поля.',
-                'hiddenAnswer — сама разгадка, одной строкой: что произошло, кто действует, почему.',
-                'Конкретно и проверяемо. Не отговорки: ни «неизвестно», ни «мнения расходятся»,',
-                'ни «проверка не дала ответа».',
-                'hiddenPremises — подступы к ней: улика, человек, который знает и молчит,',
-                'старая запись, причина, по которой до сих пор не поняли.',
-                'Каждый подступ должен работать сам по себе, независимо от остальных:',
-                'город может прийти к разгадке любым из них, и порядка между ними нет.',
-                'Не пиши подступы как ступени одной лестницы и не повторяй в них разгадку.',
-              ].join(' ')
-            : '',
+            ? 'Разгадка обязательна: перенеси блок «На самом деле:» в hiddenPremises, отговорки не клади.'
+            : 'Если есть блок «На самом деле:» — перенеси его в hiddenPremises, в хронику не пиши.',
         ]
           .filter(Boolean)
           .join('\n'),
@@ -367,20 +475,29 @@ export async function assembleFreeformLabStory({
     log,
   });
   const story = constructed.card || fallbackAssembledStory(candidate);
-  if (requireMystery && !story.hiddenAnswer) {
-    return { ...story, hiddenAnswer: '', hiddenPremises: [], ok: false, error: 'no_reveal' };
+  const layered = await splitAssembledHidden({
+    runtime,
+    story,
+    candidate,
+    requireMystery,
+    log,
+    domainId: domain?.id,
+  });
+  if (requireMystery && !layered.hiddenAnswer) {
+    return { ...layered, hiddenAnswer: '', hiddenPremises: [], ok: false, error: 'no_reveal' };
   }
   const named = await nameAssembledStory({
     runtime,
-    chronicle: story.chronicle,
+    chronicle: layered.chronicle,
     cityName: domain?.name,
     log,
+    domainId: domain?.id,
   });
   return {
-    ...story,
-    title: named.title || story.title,
+    ...layered,
+    title: named.title || layered.title,
     gravity: parseFreeformGravity(gravity ?? candidate?.gravity),
-    cause: story.cause || '',
+    cause: layered.cause || '',
     arena: candidate?.arena || '',
     worldRelation: candidate?.worldRelation || '',
     target: candidate?.target || '',
@@ -388,6 +505,7 @@ export async function assembleFreeformLabStory({
     engine: candidate?.engine || '',
     timing: candidate?.timing || '',
     assemblePrompt: constructed.prompt || '',
+    hiddenPrompt: layered.prompt || '',
     titlePrompt: named.prompt || '',
   };
 }

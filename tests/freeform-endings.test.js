@@ -73,7 +73,7 @@ function endingsRuntime({ endings = [GOOD, NEUTRAL, BAD], reviews = null, repair
   return {
     calls,
     run: async (opts) => {
-      calls.push({ agentId: opts.agentId, user: opts.userMessages[0].content });
+      calls.push({ agentId: opts.agentId, user: opts.userMessages[0].content, domainId: opts.domainId });
       const tool = opts.tools[0];
       if (opts.agentId === 'freeformEndings') {
         asked += 1;
@@ -120,6 +120,7 @@ test('свежий список идёт к судье, PASS не гоняет �
     runtime.calls.map((c) => c.agentId),
     ['freeformEndings', 'freeformEndingsJudge'],
   );
+  assert.ok(runtime.calls.every((c) => c.domainId === 'd1'));
   assert.equal(res.endings.length, 3);
   assert.equal(p.endings[0].questionGone, GOOD.questionGone);
   assert.equal(p.closeWhen[0], 'Концовка 1');

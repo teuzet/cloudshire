@@ -508,7 +508,17 @@ function plotCard(p) {
     .map(
       (t) =>
         `<li>${esc(t.text || '')} <span class="muted small">${esc(
-          [t.severity || t.outcome, t.known ? 'город знает' : 'скрыто', `${t.totalDays ?? '?'} дн.`]
+          [
+            t.outcome === 'neutral'
+              ? 'разрешение'
+              : t.stage === 'finale'
+                ? 'исход'
+                : t.remainingPct != null
+                  ? `${t.remainingPct}%`
+                  : 'угроза',
+            t.known ? 'город знает' : 'скрыто',
+            `${t.totalDays ?? '?'} дн.`,
+          ]
             .filter(Boolean)
             .join(' · '),
         )}</span></li>`,
