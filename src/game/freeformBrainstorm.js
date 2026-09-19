@@ -2,9 +2,9 @@
  * Генератор трёх следующих хроник: код бросает четыре оси мира, модель пишет один текст на набор.
  * Лаборатория: пачка → судья. PASS сразу в пул и не чинится.
  * Не-PASS всегда идут на починку, даже если PASS уже ≥2.
+ * Первая починка — sonnet, дальше до двух кругов luna.
+ * Ремонтник видит бриф, автора и все предыдущие черновики слота.
  * Второй судья видит только чиненные слоты.
- * Пока есть FAIL с правкой — до двух дешёвых кругов luna
- * (gravity, оси, текст, замечание судьи; без брифа города).
  * Победителя из PASS выбирает дешёвый агент; случайный — только запасной путь.
  */
 
@@ -100,6 +100,7 @@ export const GENESIS_JUDGE_EXTRA = [
   'Критерий CHRONICLE не требуй как вытекание из одной строки брифа.',
   'FAIL, если история противоречит брифу, происходит на чужом острове, или это пересказ брифа без новой завязки.',
   'Не ставь FAIL только за то, что конфликт не вырос из конкретной фразы брифа: бриф — фон и материал, не обязательный крючок.',
+  'Критерий UNKNOWNS: наблюдаемый слой не закрывает пункт из «Неизвестно (канон)» как уже установленный факт.',
 ].join('\n');
 
 function extraWithNote(base, note) {
@@ -246,7 +247,7 @@ function emitCandidatesTool({ n, rolls, draft, log, indices = null, maxChars = P
               chronicle: {
                 type: 'string',
                 description:
-                  `Сюжет-затравка: 5–8 кратких предложений, без лишних деталей, до ${maxChars} символов`,
+                  `Сюжет-затравка: 5–7 кратких предложений, без лишних деталей, до ${maxChars} символов`,
               },
               arena: { type: 'string', description: 'Эхо оси arena этого набора.' },
               worldRelation: { type: 'string', description: 'Эхо оси worldRelation этого набора.' },
@@ -444,6 +445,9 @@ export async function reviewBrainstormPack({
           '',
           formatSeedUserBlock(seedText, fromVoid, fromGenesis),
           '',
+          'ОСИ',
+          formatFreeformAxisCatalogs(config),
+          '',
           formatPackForJudge(candidates),
         ]
           .filter((line) => line != null)
@@ -466,15 +470,50 @@ export async function reviewBrainstormPack({
   return { reviews, prompt };
 }
 
-function formatRepairSlot(candidate, review, index, { includeAuthor = true } = {}) {
-  const note = review || { index, verdict: 'PASS', repair: '', summary: '', issues: [] };
+export const SONNET_REPAIR_AGENT = 'freeformBrainstormRepairSonnet';
+export const LUNA_REPAIR_AGENT = 'freeformBrainstormRepair';
+
+function formatReviewNotes(review) {
+  const note = review || { verdict: 'PASS', repair: '', summary: '', issues: [] };
   const issues = (note.issues || []).map((x) => `[${x.code}] ${x.reason}`).join('\n');
   return [
-    formatBrainstormCandidateForPrompt(candidate, index, { includeAuthor }),
-    `вердикт: ${note.verdict}`,
+    note.verdict ? `вердикт: ${note.verdict}` : null,
     note.summary ? `кратко: ${note.summary}` : null,
     issues ? `замечания:\n${issues}` : null,
     reviewNeedsRewrite(note) ? `правка:\n${note.repair}` : 'правка: без изменений',
+  ].filter(Boolean);
+}
+
+function priorChronicle(step) {
+  return String(step?.candidate?.chronicle || step?.chronicle || '').trim();
+}
+
+export function pushFailedRepairHistory(history, candidates, reviews) {
+  const next = { ...(history || {}) };
+  for (let i = 0; i < (candidates || []).length; i += 1) {
+    const candidate = candidates[i];
+    const review = reviews?.[i];
+    if (!reviewNeedsRewrite(review)) continue;
+    const index = Number(candidate?.index) || i + 1;
+    next[index] = [...(next[index] || []), { candidate, review }];
+  }
+  return next;
+}
+
+function formatRepairSlot(candidate, review, index, { includeAuthor = true, prior = [] } = {}) {
+  const older = (prior || [])
+    .map((step, i) => {
+      const chronicle = priorChronicle(step);
+      if (!chronicle) return null;
+      return [`черновик ${i + 1}:`, chronicle, ...formatReviewNotes(step.review)].filter(Boolean).join('\n');
+    })
+    .filter(Boolean);
+  return [
+    formatBrainstormCandidateForPrompt(candidate, index, { includeAuthor }),
+    older.length
+      ? `предыдущие черновики (не возвращайся к формулировкам, которые судья уже отверг):\n${older.join('\n\n')}`
+      : null,
+    ...formatReviewNotes(review),
   ]
     .filter(Boolean)
     .join('\n');
@@ -501,10 +540,10 @@ export async function repairBrainstormPack({
   fromVoid = false,
   fromGenesis = false,
   note = '',
-  agentId = 'freeformBrainstorm',
-  omitSeed = false,
+  agentId = SONNET_REPAIR_AGENT,
   onlyFailed = false,
   domainId = null,
+  history = null,
 }) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.brainstorm.repair' });
   const n = drafts.length;
@@ -526,12 +565,16 @@ export async function repairBrainstormPack({
   const indices = work.map((slot) => slot.index);
   const draft = { variants: null };
   const pack = work
-    .map((slot) =>
-      formatRepairSlot(slot.candidate, slot.review, slot.index, { includeAuthor: !omitSeed }),
-    )
+    .map((slot) => {
+      const trail = history?.[slot.index] || [];
+      const last = trail[trail.length - 1];
+      const sameLast = last && priorChronicle(last) === String(slot.candidate?.chronicle || '').trim();
+      const prior = sameLast ? trail.slice(0, -1) : trail;
+      return formatRepairSlot(slot.candidate, slot.review, slot.index, { includeAuthor: true, prior });
+    })
     .join('\n\n');
 
-  const cheap = omitSeed || agentId === 'freeformBrainstormRepair';
+  const cheap = agentId === LUNA_REPAIR_AGENT;
   const runOpts = {
     agentId,
     tools: [emitCandidatesTool({ n: work.length, rolls, draft, log, indices, maxChars })],
@@ -540,29 +583,15 @@ export async function repairBrainstormPack({
     log,
     scene: cheap ? 'freeform_brainstorm_luna_repair' : 'freeform_brainstorm_repair',
     domainId,
-    extraSystem: cheap
-      ? extraWithNote(requireMystery ? MYSTERY_ARCHITECT_EXTRA : '', '')
-      : [
-          'Сейчас ты не придумываешь новую пачку. Ты правишь уже написанные три хроники по замечаниям судьи.',
-          'Оси и автора не меняй. Центральный механизм не подменяй, кроме случая, когда судья требует убрать новый закон мира — тогда тот же двигатель внутри уже данного порядка.',
-          'Не подменяй двигатель инженерией: желоб, водосток, водоотвод, скрытая галерея, дорога, подъёмник, настил или склад как новая причинная система.',
-          'Если просят поднять Gravity — укрупни уже данный конфликт (обряд, существо, ветер, спор), не сажай второй сюжет про трубы и влагу. Места из брифа города — декорации, не новый механизм.',
-          'Не поднимай и не опускай Gravity риторикой. Правь угрозу или возможность в хронике и динамику, которая её зарабатывает.',
-          'Если просят обострить — конкретный конфликт и явную динамику в том же тексте, не новая посадка. Если просят ужать — вырежи орнамент, механизм оставь.',
-          'Кандидат без замечания верни без изменений. Не делай кандидатов близнецами.',
-          architectExtraSystem({ requireMystery, fromVoid, fromGenesis }),
-          String(note || '').trim(),
-        ]
-          .filter(Boolean)
-          .join('\n'),
+    extraSystem: extraWithNote(architectExtraSystem({ requireMystery, fromVoid, fromGenesis }), note),
     userMessages: [
       {
         role: 'user',
         content: [
           'GRAVITY',
           formatFreeformGravityForPrompt(g, config),
-          cheap ? null : '',
-          cheap ? null : formatSeedUserBlock(seedText, fromVoid, fromGenesis),
+          '',
+          formatSeedUserBlock(seedText, fromVoid, fromGenesis),
           '',
           'ДОРАБОТКА',
           pack,
@@ -814,6 +843,7 @@ export async function brainstormFreeformPack({
     note,
     domainId,
   });
+  let repairHistory = pushFailedRepairHistory({}, drafted.candidates, judged.reviews);
   const repaired = await repairBrainstormPack({
     runtime,
     seedText,
@@ -827,6 +857,7 @@ export async function brainstormFreeformPack({
     fromGenesis,
     note,
     domainId,
+    history: repairHistory,
   });
   let candidates = freezeFirstPass(drafted.candidates, judged.reviews, repaired.candidates);
   const retry = candidates.filter((_, i) => !isPackPass(judged.reviews[i]));
@@ -852,6 +883,7 @@ export async function brainstormFreeformPack({
   for (let round = 0; round < lunaMax; round += 1) {
     const slotReviews = latestSlotReviews(judged.reviews, finalReviews);
     if (!slotReviews.some(reviewNeedsRewrite)) break;
+    repairHistory = pushFailedRepairHistory(repairHistory, candidates, slotReviews);
     const cheap = await repairBrainstormPack({
       runtime,
       seedText,
@@ -863,10 +895,11 @@ export async function brainstormFreeformPack({
       requireMystery,
       fromVoid,
       fromGenesis,
-      agentId: 'freeformBrainstormRepair',
-      omitSeed: true,
+      note,
+      agentId: LUNA_REPAIR_AGENT,
       onlyFailed: true,
       domainId,
+      history: repairHistory,
     });
     if (!cheap.prompt) break;
     extraRepairPrompts.push(cheap.prompt);
