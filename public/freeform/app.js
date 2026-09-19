@@ -118,7 +118,7 @@ function judgeHtml(review) {
       review.summary ? ` — ${esc(review.summary)}` : ''
     }</p>
     ${issues ? `<ul>${issues}</ul>` : ''}
-    ${repair ? `<p class="rejected-text"><strong>правка.</strong> ${esc(repair)}</p>` : '<p class="muted">без правки</p>'}
+    ${repair ? `<p class="rejected-text"><strong>правка.</strong> ${esc(repair)}</p>` : ''}
   </aside>`;
 }
 

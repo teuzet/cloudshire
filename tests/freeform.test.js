@@ -26,6 +26,7 @@ import {
   brainstormFreeformSeeds,
   brainstormFreeformPack,
   repairBrainstormPack,
+  pushFailedRepairHistory,
   normalizeBrainstormCandidate,
   pickPassedBrainstormCandidate,
   pickBrainstormPoolWinner,
@@ -466,7 +467,9 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformBrainstormJudge.instructions, /тайну не требуй/);
   assert.match(agents.freeformBrainstormJudge.instructions, /верховный жрец/);
   assert.match(agents.freeformBrainstormJudge.instructions, /не обязательно из последней строки/);
-  assert.match(agents.freeformBrainstormJudge.instructions, /repair всё равно напиши/);
+  assert.match(agents.freeformBrainstormJudge.instructions, /список замечаний по этим критериям/);
+  assert.match(agents.freeformBrainstormJudge.instructions, /Отдельную инструкцию на починку не пиши/);
+  assert.doesNotMatch(agents.freeformBrainstormJudge.instructions, /Пустой repair|repair всё равно|repair —/);
   assert.doesNotMatch(agents.freeformBrainstormJudge.instructions, /вход для дела/);
   assert.doesNotMatch(agents.freeformBrainstormJudge.instructions, /4–5 предложен|Шестое/);
   assert.doesNotMatch(agents.freeformBrainstormJudge.instructions, /четыре поля|четырьмя полями/);
@@ -485,13 +488,14 @@ test('конфиг freeform читается из YAML', () => {
   assert.deepEqual(agents.freeformBrainstormRepair.canon, ['world']);
   assert.equal(agents.freeformBrainstormRepair.instructions, agents.freeformBrainstormRepairSonnet.instructions);
   assert.match(agents.freeformBrainstormRepair.instructions, /исправить ровно то/);
+  assert.match(agents.freeformBrainstormRepair.instructions, /код критерия/);
   assert.match(agents.freeformBrainstormRepair.instructions, /Не выдумывай будущие и текущие сопряжения/);
   assert.match(agents.freeformBrainstormRepair.instructions, /knowledge не OPEN/);
   assert.match(agents.freeformBrainstormRepair.instructions, /Неизвестно \(канон\)/);
   assert.match(agents.freeformBrainstormRepair.instructions, /5–7 кратких предложений/);
   assert.match(agents.freeformBrainstormRepair.instructions, /водоотвод/);
   assert.match(agents.freeformBrainstormRepair.instructions, /подъёмник/);
-  assert.match(agents.freeformBrainstormRepair.instructions, /предыдущие черновики/);
+  assert.match(agents.freeformBrainstormRepair.instructions, /текущее состояние/);
   assert.match(agents.freeformBrainstormRepair.instructions, /emit_freeform_candidates/);
   assert.doesNotMatch(agents.freeformBrainstormRepair.instructions, /нет полного описания города/);
   assert.doesNotMatch(agents.freeformBrainstormRepair.instructions, /cityBrief|конструктор/);
@@ -1538,11 +1542,10 @@ test('пачка: два PASS после первого судьи — FAIL вс
                     index: 1,
                     verdict: 'FAIL',
                     summary: 'новый закон мира',
-                    repair: 'убери новый закон, оставь угрозу внутри данного порядка',
                     issues: [{ code: 'COSMOLOGY', reason: 'посадка держится на новом законе мира' }],
                   },
-                  { index: 2, verdict: 'PASS', summary: 'держит полосу', repair: 'обостри динамику' },
-                  { index: 3, verdict: 'PASS', summary: 'держит полосу', repair: '' },
+                  { index: 2, verdict: 'PASS', summary: 'держит полосу' },
+                  { index: 3, verdict: 'PASS', summary: 'держит полосу' },
                 ]
               : [{ index: 1, verdict: 'PASS', summary: 'починилось' }],
         });
@@ -1580,10 +1583,14 @@ test('пачка: два PASS после первого судьи — FAIL вс
   assert.equal(packed.finalReviews[2], null);
   assert.equal(packed.winner.chronicle, 'Починка 1');
   assert.equal(packed.pickedIndex, 1);
-  assert.match(packed.repairPrompt, /убери новый закон/);
+  assert.match(packed.repairPrompt, /новом законе мира/);
+  assert.match(packed.repairPrompt, /\[COSMOLOGY\]/);
+  assert.doesNotMatch(packed.repairPrompt, /правка:/);
   assert.match(packed.finalJudgePrompt, /Починка 1/);
   assert.doesNotMatch(packed.finalJudgePrompt, /Хроника сапога 2/);
   assert.match(packed.judgePrompt, /submit_freeform_pack_review/);
+  assert.match(packed.judgePrompt, /Дефекты по критериям/);
+  assert.doesNotMatch(packed.judgePrompt, /Минимальная инструкция автору/);
   assert.match(packed.judgePrompt, /PATRON/);
   assert.match(packed.judgePrompt, /CONFLUX/);
   assert.match(packed.judgePrompt, /^ОСИ$/m);
@@ -1628,21 +1635,19 @@ test('пачка: один PASS — чинятся только FAIL, второ
                     index: 1,
                     verdict: 'FAIL',
                     summary: 'новый закон мира',
-                    repair: 'убери новый закон',
                     issues: [{ code: 'COSMOLOGY', reason: 'новый закон' }],
                   },
                   {
                     index: 2,
                     verdict: 'FAIL',
                     summary: 'мелко',
-                    repair: 'подними посадку',
                     issues: [{ code: 'GRAVITY', reason: 'эпизод' }],
                   },
-                  { index: 3, verdict: 'PASS', summary: 'держит полосу', repair: 'обостри' },
+                  { index: 3, verdict: 'PASS', summary: 'держит полосу' },
                 ]
               : [
                   { index: 1, verdict: 'PASS', summary: 'починилось' },
-                  { index: 2, verdict: 'FAIL', summary: 'всё ещё мелко' },
+                  { index: 2, verdict: 'PASS', summary: 'тоже' },
                 ],
         });
       }
@@ -1662,12 +1667,18 @@ test('пачка: один PASS — чинятся только FAIL, второ
     'freeformBrainstormJudge',
     'freeformBrainstormPick',
   ]);
-  assert.match(packed.repairPrompt, /правка: без изменений/);
-  assert.match(packed.repairPrompt, /убери новый закон/);
+  assert.doesNotMatch(packed.repairPrompt, /стартовый вариант:/);
+  assert.match(packed.repairPrompt, /текущее состояние:/);
+  assert.match(packed.repairPrompt, /актуальный вердикт судьи:/);
+  assert.match(packed.repairPrompt, /актуальный вердикт судьи:\nPASS/);
+  assert.match(packed.repairPrompt, /\[COSMOLOGY\]/);
+  assert.match(packed.repairPrompt, /новый закон/);
+  assert.doesNotMatch(packed.repairPrompt, /правка:/);
+  assert.doesNotMatch(packed.repairPrompt, /черновик 1:|предыдущие черновики/);
   assert.equal(packed.candidates[2].chronicle, 'Хроника сапога 3');
   assert.equal(packed.candidates[0].chronicle, 'Починка 1');
   assert.equal(packed.finalReviews[0].verdict, 'PASS');
-  assert.equal(packed.finalReviews[1].verdict, 'FAIL');
+  assert.equal(packed.finalReviews[1].verdict, 'PASS');
   assert.equal(packed.finalReviews[2], null);
   assert.doesNotMatch(packed.finalJudgePrompt, /Хроника сапога 3/);
   assert.doesNotMatch(packed.finalJudgePrompt, /Кандидат 3/);
@@ -1700,9 +1711,9 @@ test('пачка: второй судья не видит средний PASS и
           reviews:
             judgeN === 1
               ? [
-                  { index: 1, verdict: 'FAIL', repair: 'чини 1', summary: 'дыряво' },
+                  { index: 1, verdict: 'FAIL', summary: 'дыряво', issues: [{ code: 'HINGE', reason: 'дыры' }] },
                   { index: 2, verdict: 'PASS', summary: 'держит' },
-                  { index: 3, verdict: 'FAIL', repair: 'чини 3', summary: 'мелко' },
+                  { index: 3, verdict: 'FAIL', summary: 'мелко', issues: [{ code: 'GRAVITY', reason: 'эпизод' }] },
                 ]
               : [
                   { index: 1, verdict: 'PASS', summary: 'починилось' },
@@ -1772,21 +1783,21 @@ test('после sonnet-починки PASS < 2 — luna с брифом и пр
           reviews:
             judgeN === 1
               ? [
-                  { index: 1, verdict: 'FAIL', repair: 'чини 1', summary: 'дыряво' },
-                  { index: 2, verdict: 'FAIL', repair: 'чини 2', summary: 'мелко' },
+                  { index: 1, verdict: 'FAIL', summary: 'дыряво', issues: [{ code: 'HINGE', reason: 'дыры' }] },
+                  { index: 2, verdict: 'FAIL', summary: 'мелко', issues: [{ code: 'GRAVITY', reason: 'эпизод' }] },
                   { index: 3, verdict: 'PASS', summary: 'держит' },
                 ]
               : judgeN === 2
                 ? [
-                    { index: 1, verdict: 'FAIL', repair: 'ещё раз 1', summary: 'всё ещё дыряво' },
-                    { index: 2, verdict: 'FAIL', repair: 'ещё раз 2', summary: 'всё ещё мелко' },
+                    { index: 1, verdict: 'FAIL', summary: 'всё ещё дыряво', issues: [{ code: 'HINGE', reason: 'дыры остались' }] },
+                    { index: 2, verdict: 'FAIL', summary: 'всё ещё мелко', issues: [{ code: 'GRAVITY', reason: 'всё ещё эпизод' }] },
                   ]
                 : judgeN === 3
                   ? [
                       { index: 1, verdict: 'PASS', summary: 'луна починила' },
-                      { index: 2, verdict: 'FAIL', repair: 'нет', summary: 'нет' },
+                      { index: 2, verdict: 'FAIL', summary: 'нет', issues: [{ code: 'GRAVITY', reason: 'нет' }] },
                     ]
-                  : [{ index: 2, verdict: 'FAIL', repair: 'нет', summary: 'нет' }],
+                  : [{ index: 2, verdict: 'FAIL', summary: 'нет', issues: [{ code: 'GRAVITY', reason: 'нет' }] }],
         });
       }
     },
@@ -1809,15 +1820,27 @@ test('после sonnet-починки PASS < 2 — luna с брифом и пр
     'freeformBrainstormJudge',
     'freeformBrainstormPick',
   ]);
+  const sonnet = extras.find((e) => e.agentId === 'freeformBrainstormRepairSonnet');
+  assert.ok(sonnet);
+  assert.match(sonnet.user, /текущее состояние:/);
+  assert.doesNotMatch(sonnet.user, /стартовый вариант:/);
   const luna = extras.find((e) => e.agentId === 'freeformBrainstormRepair');
   assert.ok(luna);
   assert.match(luna.user, /GRAVITY/);
   assert.match(luna.user, /оси:/);
-  assert.match(luna.user, /правка:/);
+  assert.match(luna.user, /стартовый вариант:/);
+  assert.match(luna.user, /текущее состояние:/);
+  assert.match(luna.user, /актуальный вердикт судьи:/);
+  assert.match(luna.user, /замечания:/);
+  assert.match(luna.user, /\[HINGE\]/);
+  assert.doesNotMatch(luna.user, /правка:/);
+  assert.doesNotMatch(luna.user, /черновик 1:|предыдущие черновики/);
   assert.match(luna.user, /ЗАТРАВКА/);
   assert.match(luna.user, /На площади нашли чужой сапог/);
-  assert.match(luna.user, /черновик 1:/);
   assert.match(luna.user, /Хроника сапога 1/);
+  assert.match(luna.user, /Починка 1/);
+  assert.ok(luna.user.indexOf('стартовый вариант:') < luna.user.indexOf('текущее состояние:'));
+  assert.ok(luna.user.indexOf('Хроника сапога 1') < luna.user.indexOf('Починка 1'));
   assert.match(luna.user, /автор:/);
   assert.doesNotMatch(luna.user, /Хроника сапога 3/);
   assert.doesNotMatch(luna.extraSystem, /cityBrief/);
@@ -1974,16 +1997,18 @@ test('посев с тайной добавляет блоки архитект�
     gravity: 'EPISODE',
     drafts,
     reviews: [
-      { index: 1, verdict: 'FAIL', repair: 'добавь разгадку' },
-      { index: 2, verdict: 'PASS', repair: '' },
-      { index: 3, verdict: 'PASS', repair: '' },
+      { index: 1, verdict: 'FAIL', issues: [{ code: 'MYSTERY_PLAUSIBLE', reason: 'нет разгадки' }] },
+      { index: 2, verdict: 'PASS' },
+      { index: 3, verdict: 'PASS' },
     ],
     requireMystery: true,
     config: loadConfig(),
   });
   assert.match(repairExtra, /ОБЯЗАТЕЛЬНАЯ ТАЙНА/);
   assert.match(repairedMystery.prompt, /исправить ровно то/);
+  assert.match(repairedMystery.prompt, /\[MYSTERY_PLAUSIBLE\] нет разгадки/);
   assert.match(repairedMystery.prompt, /agent: freeformBrainstormRepairSonnet/);
+  assert.doesNotMatch(repairedMystery.prompt, /правка:/);
 });
 
 test('посев из пустоты: архитектор и судья пишут про абстрактный город', async () => {
@@ -2195,6 +2220,118 @@ test('PASS с советом repair не идёт на починку', async ()
   });
   assert.equal(calls.length, 0);
   assert.equal(out.candidates, drafts);
+});
+
+test('FAIL без repair идёт на починку по замечаниям', async () => {
+  const calls = [];
+  let user = '';
+  const drafts = [1, 2, 3].map((i) => ({
+    index: i,
+    chronicle: `Хроника ${i}`,
+    hook: `Хроника ${i}`,
+    arena: 'HUMAN',
+    worldRelation: 'NATIVE',
+    target: 'FOOD',
+    knowledge: 'OPEN',
+    engine: 'REFUSAL',
+    timing: 'FRESH_INCIDENT',
+  }));
+  const out = await repairBrainstormPack({
+    runtime: {
+      assembleChat: () => ({ systemContent: '', messages: [], tools: [] }),
+      async run(opts) {
+        calls.push(opts.agentId);
+        user = String(opts.userMessages?.[0]?.content || '');
+        const tool = opts.tools?.[0];
+        if (!tool) return;
+        await tool.handler({
+          candidates: drafts.map((c) => ({ chronicle: `Починка ${c.index}` })),
+        });
+      },
+    },
+    seedText: 'На площади нашли чужой сапог и двор его держит.',
+    gravity: 'EPISODE',
+    drafts,
+    reviews: [
+      { index: 1, verdict: 'FAIL', issues: [{ code: 'GRAVITY', reason: 'это эпизод, не разрыв' }] },
+      { index: 2, verdict: 'PASS' },
+      { index: 3, verdict: 'PASS' },
+    ],
+  });
+  assert.equal(calls.length, 1);
+  assert.match(user, /\[GRAVITY\] это эпизод, не разрыв/);
+  assert.match(user, /замечания:/);
+  assert.doesNotMatch(user, /стартовый вариант:/);
+  assert.match(user, /текущее состояние:/);
+  assert.match(user, /актуальный вердикт судьи:/);
+  assert.doesNotMatch(user, /правка:/);
+  assert.equal(out.candidates[0].chronicle, 'Починка 1');
+});
+
+test('ремонтник: первая итерация без лога, следующая видит стартовый вариант и не дублирует текущее', async () => {
+  const start = {
+    index: 1,
+    chronicle: 'Стартовая хроника',
+    arena: 'HUMAN',
+    worldRelation: 'NATIVE',
+    target: 'FOOD',
+    knowledge: 'OPEN',
+  };
+  const firstReview = {
+    index: 1,
+    verdict: 'FAIL',
+    issues: [{ code: 'GRAVITY', reason: 'это эпизод' }],
+  };
+  const capture = async ({ drafts, reviews, history }) => {
+    let user = '';
+    await repairBrainstormPack({
+      runtime: {
+        assembleChat: () => ({ systemContent: '', messages: [], tools: [] }),
+        async run(opts) {
+          user = String(opts.userMessages?.[0]?.content || '');
+          const tool = opts.tools?.[0];
+          if (!tool) return;
+          await tool.handler({ candidates: [{ chronicle: 'Следующая починка' }] });
+        },
+      },
+      seedText: 'На площади нашли чужой сапог и двор его держит.',
+      gravity: 'RUPTURE',
+      drafts,
+      reviews,
+      history,
+    });
+    return user;
+  };
+
+  const first = await capture({
+    drafts: [start],
+    reviews: [firstReview],
+    history: pushFailedRepairHistory({}, [start], [firstReview]),
+  });
+  assert.match(first, /текущее состояние:\nСтартовая хроника/);
+  assert.doesNotMatch(first, /стартовый вариант:/);
+  assert.equal((first.match(/Стартовая хроника/g) || []).length, 1);
+
+  const repaired = [{ ...start, chronicle: 'Починка 1' }];
+  const stillFail = {
+    index: 1,
+    verdict: 'FAIL',
+    issues: [{ code: 'HINGE', reason: 'дыры остались' }],
+  };
+  const second = await capture({
+    drafts: repaired,
+    reviews: [stillFail],
+    history: pushFailedRepairHistory(
+      pushFailedRepairHistory({}, [start], [firstReview]),
+      repaired,
+      [stillFail],
+    ),
+  });
+  assert.match(second, /стартовый вариант:\nСтартовая хроника/);
+  assert.match(second, /текущее состояние:\nПочинка 1/);
+  assert.doesNotMatch(second, /стартовый вариант:\nПочинка 1/);
+  assert.ok(second.indexOf('стартовый вариант:') < second.indexOf('текущее состояние:'));
+  assert.equal((second.match(/Починка 1/g) || []).length, 1);
 });
 
 test('лабораторный payload отдаёт затравки без сюжета', () => {

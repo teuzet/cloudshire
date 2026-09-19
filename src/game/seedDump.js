@@ -65,26 +65,68 @@ function formatCandidateBlock(candidate, index) {
     .join('\n');
 }
 
-function formatReviewBlock(review, index) {
-  const n = Number(review?.index) || index;
-  const verdict = String(review?.verdict || '?').trim();
-  const issues = (review?.issues || [])
+function formatDumpVerdict(review) {
+  if (!review) return '_нет отзыва_';
+  const verdict = String(review.verdict || '?').trim();
+  const issues = (review.issues || [])
     .map((issue) => `- \`${issue.code}\`: ${issue.reason}`)
     .join('\n');
   return [
-    `### ${n} — ${verdict}`,
+    `**${verdict}**${review.summary ? ` — ${review.summary}` : ''}`,
+    review.repair ? `repair: ${review.repair}` : null,
+    issues || null,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function reviewForIndex(reviews, index, fallbackIndex) {
+  const list = reviews || [];
+  return list.find((item) => Number(item?.index) === Number(index)) || list[fallbackIndex] || null;
+}
+
+function formatDumpSlot(draft, firstReview, current, actualReview, index) {
+  const n = Number(draft?.index || current?.index) || index;
+  const axes = formatAxes(draft) || formatAxes(current);
+  const author = String(draft?.authorName || current?.authorName || '').trim();
+  return [
+    `### Кандидат ${n}`,
+    axes || null,
+    author ? `автор: ${author}` : null,
     '',
-    review?.summary || '_нет краткого отзыва_',
-    review?.repair ? `\n**repair:** ${review.repair}` : null,
-    issues ? `\n${issues}` : null,
+    '**Стартовый вариант**',
+    '',
+    candidateText(draft) || '_пусто_',
+    '',
+    '**Вердикт судьи**',
+    '',
+    formatDumpVerdict(firstReview),
+    '',
+    '**Текущее состояние**',
+    '',
+    candidateText(current || draft) || '_пусто_',
+    '',
+    '**Актуальный вердикт судьи**',
+    '',
+    formatDumpVerdict(actualReview || firstReview),
   ]
     .filter((line) => line != null)
     .join('\n');
 }
 
-function sameCandidatePack(left = [], right = []) {
-  if (left.length !== right.length) return false;
-  return left.every((item, i) => candidateText(item) === candidateText(right[i]));
+function formatDumpSlots(data) {
+  const drafts = data.drafts || [];
+  const later = data.candidates || [];
+  const n = Math.max(drafts.length, later.length);
+  if (!n) return '_нет кандидатов_';
+  return Array.from({ length: n }, (_, i) => {
+    const draft = drafts[i] || later[i];
+    const index = Number(draft?.index) || i + 1;
+    const firstReview = reviewForIndex(data.reviews, index, i);
+    const current = later[i] || draft;
+    const actualReview = (data.finalReviews || [])[i] || firstReview;
+    return formatDumpSlot(draft, firstReview, current, actualReview, index);
+  }).join('\n\n');
 }
 
 const POOL_SOURCE_LABEL = {
@@ -167,9 +209,6 @@ export function serializePlotSeedDump(payload) {
 export function formatPlotSeedDumpMarkdown(payload) {
   const data = serializePlotSeedDump(payload);
   const rolls = pickRolls({ rolls: data.rolls });
-  const drafts = data.drafts || [];
-  const later = data.candidates || [];
-  const repairedDiffer = drafts.length && later.length && !sameCandidatePack(drafts, later);
   const grain = data.request.fromGenesis
     ? 'описание города'
     : data.request.fromVoid
@@ -201,33 +240,10 @@ export function formatPlotSeedDumpMarkdown(payload) {
     '',
     rolls.length ? rolls.map((line) => `- \`${line}\``).join('\n') : '_жребий не сохранился_',
     '',
-    '## Черновик',
+    '## Кандидаты',
     '',
-    drafts.length
-      ? drafts.map((item, i) => formatCandidateBlock(item, i + 1)).join('\n\n')
-      : '_нет черновиков_',
-    '',
-    '## Судья пачки',
-    '',
-    (data.reviews || []).length
-      ? data.reviews.map((item, i) => formatReviewBlock(item, i + 1)).join('\n\n')
-      : '_нет отзыва_',
+    formatDumpSlots(data),
   ];
-
-  if (repairedDiffer) {
-    lines.push('', '## После починки', '', later.map((item, i) => formatCandidateBlock(item, i + 1)).join('\n\n'));
-  }
-  if ((data.finalReviews || []).some(Boolean)) {
-    lines.push(
-      '',
-      '## Судья после починки',
-      '',
-      data.finalReviews
-        .filter(Boolean)
-        .map((item, i) => formatReviewBlock(item, i + 1))
-        .join('\n\n'),
-    );
-  }
   if ((data.pool || []).length) {
     lines.push(
       '',

@@ -3,7 +3,7 @@
  * Лаборатория: пачка → судья. PASS сразу в пул и не чинится.
  * Не-PASS всегда идут на починку, даже если PASS уже ≥2.
  * Первая починка — sonnet, дальше до двух кругов luna.
- * Ремонтник видит бриф, автора и все предыдущие черновики слота.
+ * Ремонтник видит бриф, автора и текущее состояние слота; лог прошлых починок — только со второй итерации.
  * Второй судья видит только чиненные слоты.
  * Победителя из PASS выбирает дешёвый агент; случайный — только запасной путь.
  */
@@ -383,7 +383,7 @@ export async function reviewBrainstormPack({
     tools: [
       {
         name: 'submit_freeform_pack_review',
-        description: `Вердикт и правка по каждому из ${n} кандидатов (${indexHint}). Победителя не выбирай.`,
+        description: `Вердикт и замечания по каждому из ${n} кандидатов (${indexHint}). Победителя не выбирай.`,
         parameters: {
           type: 'object',
           additionalProperties: false,
@@ -400,12 +400,9 @@ export async function reviewBrainstormPack({
                   index: { type: 'integer', description: `Номер кандидата: ${indexHint}.` },
                   verdict: { type: 'string', enum: ['PASS', 'FAIL', 'UNCERTAIN'] },
                   summary: { type: 'string', description: 'Одно предложение: что с этим кандидатом.' },
-                  repair: {
-                    type: 'string',
-                    description: 'Минимальная инструкция автору. Пусто, если чинить нечего.',
-                  },
                   issues: {
                     type: 'array',
+                    description: 'Дефекты по критериям. Пусто при PASS. Не пиши отдельную инструкцию на починку.',
                     items: {
                       type: 'object',
                       required: ['code', 'reason'],
@@ -474,18 +471,25 @@ export const SONNET_REPAIR_AGENT = 'freeformBrainstormRepairSonnet';
 export const LUNA_REPAIR_AGENT = 'freeformBrainstormRepair';
 
 function formatReviewNotes(review) {
-  const note = review || { verdict: 'PASS', repair: '', summary: '', issues: [] };
+  const note = review || { verdict: 'PASS', summary: '', issues: [] };
   const issues = (note.issues || []).map((x) => `[${x.code}] ${x.reason}`).join('\n');
   return [
-    note.verdict ? `вердикт: ${note.verdict}` : null,
+    note.verdict || 'PASS',
     note.summary ? `кратко: ${note.summary}` : null,
     issues ? `замечания:\n${issues}` : null,
-    reviewNeedsRewrite(note) ? `правка:\n${note.repair}` : 'правка: без изменений',
   ].filter(Boolean);
 }
 
 function priorChronicle(step) {
   return String(step?.candidate?.chronicle || step?.chronicle || '').trim();
+}
+
+function formatStoryBlock(heading, chronicle) {
+  return `${heading}\n${String(chronicle || '').trim() || '—'}`;
+}
+
+function formatVerdictBlock(heading, review) {
+  return `${heading}\n${formatReviewNotes(review).join('\n')}`;
 }
 
 export function pushFailedRepairHistory(history, candidates, reviews) {
@@ -501,22 +505,33 @@ export function pushFailedRepairHistory(history, candidates, reviews) {
 }
 
 function formatRepairSlot(candidate, review, index, { includeAuthor = true, prior = [] } = {}) {
-  const older = (prior || [])
-    .map((step, i) => {
-      const chronicle = priorChronicle(step);
-      if (!chronicle) return null;
-      return [`черновик ${i + 1}:`, chronicle, ...formatReviewNotes(step.review)].filter(Boolean).join('\n');
-    })
-    .filter(Boolean);
-  return [
-    formatBrainstormCandidateForPrompt(candidate, index, { includeAuthor }),
-    older.length
-      ? `предыдущие черновики (не возвращайся к формулировкам, которые судья уже отверг):\n${older.join('\n\n')}`
-      : null,
-    ...formatReviewNotes(review),
+  const n = Number.isInteger(Number(index)) ? Number(index) : candidate?.index;
+  const axes = [candidate?.arena, candidate?.worldRelation, candidate?.target, candidate?.knowledge]
+    .map((s) => String(s || '').trim())
+    .filter(Boolean)
+    .join(' · ');
+  const currentText = String(candidate?.chronicle || candidate?.text || candidate?.hook || '').trim();
+  const header = [
+    `=== Кандидат ${n || '?'} ===`,
+    axes ? `оси: ${axes}` : null,
+    includeAuthor && candidate?.authorName ? `автор: ${candidate.authorName}` : null,
   ]
     .filter(Boolean)
     .join('\n');
+  const log = (prior || [])
+    .map((step, i) => {
+      const title = i === 0 ? 'стартовый вариант:' : `итерация ${i + 1}:`;
+      return [
+        formatStoryBlock(title, priorChronicle(step)),
+        formatVerdictBlock('вердикт судьи:', step.review),
+      ].join('\n\n');
+    })
+    .join('\n\n');
+  const now = [
+    formatStoryBlock('текущее состояние:', currentText),
+    formatVerdictBlock('актуальный вердикт судьи:', review),
+  ].join('\n\n');
+  return [header, log, now].filter(Boolean).join('\n\n');
 }
 
 function mergeRepairedSlots(drafts, variants) {

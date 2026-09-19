@@ -278,9 +278,9 @@ export function isPackPass(review) {
   return String(review?.verdict || '').toUpperCase() === 'PASS';
 }
 
-/** PASS не переписываем, даже если судья приложил совет. */
+/** Не-PASS идёт на починку. PASS не переписываем. */
 export function reviewNeedsRewrite(review) {
-  return !isPackPass(review) && reviewNeedsRepair(review);
+  return !isPackPass(review);
 }
 
 export function scatterPackReviews(slotCount, reviews) {
