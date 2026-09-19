@@ -8,6 +8,8 @@ import {
   parseCityBrief,
   formatCityBrief,
   CANONICAL_UNKNOWNS_HEADING,
+  CITY_BRIEF_MAX,
+  CITY_BRIEF_AGENT_MAX,
 } from '../src/game/cityContext.js';
 
 test('агентам бриф и дописки в хвосте', () => {
@@ -54,4 +56,26 @@ test('канонические неизвестности живут в бриф
   const parsed = parseCityBrief(assembled);
   assert.equal(parsed.unknowns.length, 2);
   assert.match(formatCityForAgents({ cityBrief: assembled }), /Неизвестно \(канон\)/);
+});
+
+test('агентам бриф уходит целиком: без потолка обрезки и без схлопывания абзацев', () => {
+  const body = `Первый абзац.\n\n${'ярус '.repeat(800)}хвост брифа`;
+  const brief = `${body}\n\n${CANONICAL_UNKNOWNS_HEADING}\n- источник набегов чудовищ официально не установлен`;
+  assert.ok(brief.length > CITY_BRIEF_MAX);
+  const sent = formatCityForAgents({ cityBrief: brief });
+  assert.equal(sent, brief);
+  assert.match(sent, /хвост брифа/);
+  assert.match(sent, /Первый абзац\.\n\n/);
+  assert.doesNotMatch(sent, /…/);
+});
+
+test('хранение брифа режет на 4000, писателю говорят 3500', () => {
+  assert.equal(CITY_BRIEF_MAX, 4000);
+  assert.equal(CITY_BRIEF_AGENT_MAX, 3500);
+  const kept = formatCityBrief({ body: 'а'.repeat(3600) });
+  assert.equal(kept.length, 3600);
+  const clipped = formatCityBrief({ body: 'а'.repeat(4500) });
+  assert.match(clipped, /…$/);
+  assert.ok(clipped.length <= CITY_BRIEF_MAX + 1);
+  assert.ok(clipped.length < 4500);
 });

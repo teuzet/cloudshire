@@ -93,7 +93,7 @@ function seedFieldsHtml(v) {
 }
 
 function axesLine(v) {
-  const parts = [v?.arena, v?.worldRelation, v?.target, v?.knowledge, v?.engine, v?.timing]
+  const parts = [v?.arena, v?.worldRelation, v?.target, v?.knowledge]
     .map((s) => String(s || '').trim())
     .filter(Boolean);
   const author = String(v?.authorName || '').trim();

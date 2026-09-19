@@ -126,7 +126,7 @@ export async function maybeRewriteCityGenesis({
 
   if (!runtime) return null;
 
-  const current = formatCityBrief(parseCityBrief(domain.cityBrief));
+  const current = String(domain.cityBrief || '').trim();
   const draft = { skip: true, edit: null };
   await runtime.run({
     agentId: 'cityGenesisRewrite',

@@ -253,8 +253,11 @@ function normalizeContinuationAuthors(raw) {
     .filter((a) => a.name);
 }
 
-/** Оси завязки, которые бросает код. Порядок — порядок вывода в промпте. */
+/** Оси, которые лежат в каталоге конфига. */
 export const FREEFORM_AXIS_IDS = ['arena', 'worldRelation', 'target', 'knowledge', 'engine', 'timing'];
+
+/** Оси завязки, которые бросает код. Порядок — порядок вывода в промпте. */
+export const FREEFORM_SEED_AXIS_IDS = ['arena', 'worldRelation', 'target', 'knowledge'];
 
 export const FREEFORM_AXIS_TITLE = {
   arena: 'arena — где живёт причина: причинный субстрат, не место действия и не происхождение',
@@ -381,8 +384,6 @@ export function formatBrainstormCandidateForPrompt(candidate, index, { includeAu
     candidate.worldRelation,
     candidate.target,
     candidate.knowledge,
-    candidate.engine,
-    candidate.timing,
   ]
     .map((s) => String(s || '').trim())
     .filter(Boolean)

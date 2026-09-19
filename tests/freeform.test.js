@@ -45,6 +45,7 @@ import {
   keepStoryTitle,
   nameAssembledStory,
   heuristicHiddenSplit,
+  splitAssembledHidden,
 } from '../src/game/freeformAssemble.js';
 import { plantStakedStory } from '../src/game/storyteller.js';
 import { startFreeformStory, normalizeSeedVariant } from '../src/game/freeformStarter.js';
@@ -396,7 +397,10 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformBrainstorm.instructions, /записей хроники/);
   assert.match(agents.freeformBrainstorm.instructions, /не обязательно из последней строки/);
   assert.match(agents.freeformBrainstorm.instructions, /будущие и текущие сопряжения/);
-  assert.match(agents.freeformBrainstorm.instructions, /arena, worldRelation, target, knowledge, engine, timing/);
+  assert.match(agents.freeformBrainstorm.instructions, /arena, worldRelation, target, knowledge/);
+  assert.doesNotMatch(agents.freeformBrainstorm.instructions, /engine, timing/);
+  assert.doesNotMatch(agents.freeformBrainstorm.instructions, /- engine —/);
+  assert.doesNotMatch(agents.freeformBrainstorm.instructions, /- timing —/);
   assert.match(agents.freeformBrainstorm.instructions, /причина живёт на arena, ломается target/);
   assert.doesNotMatch(agents.freeformBrainstorm.instructions, /выбираешь сам/);
   assert.match(agents.freeformBrainstorm.instructions, /emit_freeform_candidates/);
@@ -519,10 +523,14 @@ test('конфиг freeform читается из YAML', () => {
   assert.doesNotMatch(agents.freeformAssemble.instructions, /depth|countdown|urgency|не ставь/i);
   assert.doesNotMatch(agents.freeformAssemble.instructions, /title — короткое имя/);
   assert.equal(agents.freeformHiddenSplit.model, 'gpt-5.6-luna');
-  assert.equal(agents.freeformHiddenSplit.maxTokens, 800);
+  assert.equal(agents.freeformHiddenSplit.maxTokens, 1600);
   assert.deepEqual(agents.freeformHiddenSplit.canon, []);
   assert.match(agents.freeformHiddenSplit.instructions, /submit_hidden_layer/);
-  assert.match(agents.freeformHiddenSplit.instructions, /Не дописывай подступы/);
+  assert.match(agents.freeformHiddenSplit.instructions, /разгадываемую историю/);
+  assert.match(agents.freeformHiddenSplit.instructions, /обнажает первопричину/);
+  assert.match(agents.freeformHiddenSplit.instructions, /намекают на разгадку/);
+  assert.doesNotMatch(agents.freeformHiddenSplit.instructions, /Не дописывай подступы/);
+  assert.doesNotMatch(agents.freeformHiddenSplit.instructions, /cityBrief/);
   assert.equal(agents.freeformTitle.model, 'gpt-5.6-luna');
   assert.equal(agents.freeformTitle.maxTokens, 400);
   assert.equal(agents.freeformTitle.reasoningEffort, undefined);
@@ -541,10 +549,11 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformEndings.instructions, /submit_freeform_endings/);
   assert.match(agents.freeformEndings.instructions, /GOOD_ENDING/);
   assert.match(agents.freeformEndings.instructions, /вопрос в городе больше не стоит/);
-  assert.match(agents.freeformEndings.instructions, /УХУДШЕНИЕ — НЕ УТРАТА/);
+  assert.match(agents.freeformEndings.instructions, /соотносить масштаб последствий с уровнем GRAVITY/);
   assert.match(agents.freeformEndings.instructions, /questionGone/);
   assert.match(agents.freeformEndings.instructions, /nowDifferent/);
   assert.match(agents.freeformEndings.instructions, /к зиме/, 'горизонт последствий запрещён');
+  assert.doesNotMatch(agents.freeformEndings.instructions, /cityBrief/);
   assert.equal(agents.freeformEndingsJudge.reasoningEffort, 'low', 'судья концовок дешёвый');
   assert.match(agents.freeformEndingsJudge.instructions, /submit_endings_review/);
   assert.match(agents.freeformEndingsJudge.instructions, /QUESTION_OPEN/);
@@ -1226,75 +1235,80 @@ test('RELATED на maxDepth не закрывает, провал DIRECT даё�
   );
 });
 
-test('жребий завязки — шесть осей мира из каталога конфига', () => {
+test('жребий завязки — четыре оси мира из каталога конфига', () => {
   const cfg = loadConfig();
   const tags = pickFreeformSeedAxes(cfg, () => 0);
   assert.deepEqual(
     tags.map((t) => t.groupId),
-    ['arena', 'worldRelation', 'target', 'knowledge', 'engine', 'timing'],
+    ['arena', 'worldRelation', 'target', 'knowledge'],
   );
   assert.deepEqual(
     tags.map((t) => t.tagId),
-    ['human', 'native', 'food', 'open', 'refusal', 'fresh_incident'],
+    ['human', 'native', 'food', 'open'],
   );
   assert.match(tags[0].about, /поступке|решении/);
 
   const setsText = formatFreeformSeedAxisSetsForPrompt([tags], cfg);
   assert.match(
     setsText,
-    /1\. arena HUMAN · worldRelation NATIVE · target FOOD · knowledge OPEN · engine REFUSAL · timing FRESH_INCIDENT/,
+    /1\. arena HUMAN · worldRelation NATIVE · target FOOD · knowledge OPEN/,
   );
+  assert.doesNotMatch(setsText, /\bengine\b|\btiming\b/);
   assert.match(setsText, /четыре поля/);
   assert.match(setsText, /ассоциативн/);
 
   const catalogs = formatFreeformAxisCatalogs(cfg);
-  for (const axis of ['arena', 'worldRelation', 'target', 'knowledge', 'engine', 'timing']) {
+  for (const axis of ['arena', 'worldRelation', 'target', 'knowledge']) {
     assert.match(catalogs, new RegExp(`^${axis} — `, 'm'));
   }
+  assert.doesNotMatch(catalogs, /^engine — /m);
+  assert.doesNotMatch(catalogs, /^timing — /m);
   assert.match(catalogs, /^PHENOMENON — /m);
   assert.match(catalogs, /^SURFACED — /m);
   assert.match(catalogs, /^RITE — /m);
   assert.match(catalogs, /^FALSE_BELIEF — /m);
-  assert.match(catalogs, /^CYCLICAL_PATTERN — /m);
-  assert.match(catalogs, /^PRICE_OF_SUCCESS — /m);
-  assert.match(catalogs, /^DID_NOT_HAPPEN — /m);
+  assert.doesNotMatch(catalogs, /CYCLICAL_PATTERN|PRICE_OF_SUCCESS|DID_NOT_HAPPEN/);
   assert.doesNotMatch(catalogs, /FREE|вайлдкард|CONTACT|^BUILT|^EARTH/im);
   assert.doesNotMatch(catalogs, /EXTERNAL_THREAT|DELAYED_CONSEQUENCE|SUPERNATURAL_ANOMALY/);
 
   const sets = pickFreeformSeedAxisSets(cfg, 4, () => 0);
   assert.equal(sets.length, 4);
-  for (const axis of ['arena', 'worldRelation', 'target', 'knowledge', 'engine', 'timing']) {
+  for (const axis of ['arena', 'worldRelation', 'target', 'knowledge']) {
     const drawn = sets.map((s) => s.find((t) => t.groupId === axis).tagId);
     assert.equal(new Set(drawn).size, 4, `${axis} повторился в пачке`);
   }
 });
 
-test('жребий брейншторма — шесть осей без повторов, двигатель и время из броска', () => {
+test('жребий брейншторма — четыре оси без повторов, без engine и timing', () => {
   const cfg = loadConfig();
   const zero = pickFreeformBrainstormRolls(cfg, 3, () => 0);
   assert.equal(zero.length, 3);
-  assert.equal(zero[0].engine, undefined);
-  assert.equal(zero[0].timing, undefined);
+  assert.deepEqual(
+    zero[0].axes.map((t) => t.groupId),
+    ['arena', 'worldRelation', 'target', 'knowledge'],
+  );
   assert.deepEqual(
     zero[0].axes.map((t) => t.tagId),
-    ['human', 'native', 'food', 'open', 'refusal', 'fresh_incident'],
+    ['human', 'native', 'food', 'open'],
   );
   assert.equal(new Set(zero.map((r) => r.author.id)).size, 3);
   assert.equal(zero[0].author.name, 'Эдгар Аллан По');
   for (let i = 0; i < 20; i += 1) {
     const rolls = pickFreeformBrainstormRolls(cfg, 3);
     assert.equal(new Set(rolls.map((r) => r.author.id)).size, 3);
-    for (const axis of ['arena', 'worldRelation', 'target', 'knowledge', 'engine', 'timing']) {
+    for (const axis of ['arena', 'worldRelation', 'target', 'knowledge']) {
       const drawn = rolls.map((r) => r.axes.find((t) => t.groupId === axis).tagId);
       assert.equal(new Set(drawn).size, 3, `${axis} повторился в пачке`);
     }
+    assert.equal(rolls[0].axes.some((t) => t.groupId === 'engine' || t.groupId === 'timing'), false);
   }
 
   const text = formatFreeformBrainstormRollsForPrompt(zero);
   assert.match(
     text,
-    /1\. arena HUMAN · worldRelation NATIVE · target FOOD · knowledge OPEN · engine REFUSAL · timing FRESH_INCIDENT · автор Эдгар Аллан По/,
+    /1\. arena HUMAN · worldRelation NATIVE · target FOOD · knowledge OPEN · автор Эдгар Аллан По/,
   );
+  assert.doesNotMatch(text, /\bengine\b|\btiming\b/);
   assert.doesNotMatch(text, /conflictSource|temporalShape/);
   assert.doesNotMatch(text, /не канцелярия|ассоциативн|кликбейт|ориентир|четыре поля/);
 
@@ -1316,8 +1330,8 @@ test('жребий брейншторма — шесть осей без пов�
   assert.equal(blank.worldRelation, 'NATIVE');
   assert.equal(blank.target, 'FOOD');
   assert.equal(blank.knowledge, 'OPEN');
-  assert.equal(blank.engine, 'REFUSAL');
-  assert.equal(blank.timing, 'FRESH_INCIDENT');
+  assert.equal(blank.engine, undefined);
+  assert.equal(blank.timing, undefined);
   assert.equal(blank.authorName, 'Эдгар Аллан По');
   assert.equal(blank.index, 1);
   assert.equal(normalizeBrainstormCandidate({ hook: 'Сапог на площади.' }, zero[0], 2).chronicle, 'Сапог на площади.');
@@ -1326,19 +1340,19 @@ test('жребий брейншторма — шесть осей без пов�
   assert.ok(normalizeBrainstormCandidate({ hook: longHook }, zero[0], 3, 20).chronicle.length <= 21);
 
   const shown = formatBrainstormCandidateForPrompt(blank, 1);
-  assert.match(shown, /оси: HUMAN · NATIVE · FOOD · OPEN · REFUSAL · FRESH_INCIDENT/);
+  assert.match(shown, /оси: HUMAN · NATIVE · FOOD · OPEN/);
+  assert.doesNotMatch(shown, /REFUSAL|FRESH_INCIDENT/);
   assert.match(shown, /хроника: На площади нашли сапог/);
   assert.doesNotMatch(shown, /конфликт:|динамика:|последствия:|автор:/);
   assert.match(formatBrainstormCandidateForPrompt(blank, 1, { includeAuthor: true }), /автор: Эдгар Аллан По/);
 
-  // Починка не даёт агенту переголосовать двигатель и время.
   const again = normalizeBrainstormCandidate(
     { chronicle: 'Тот же двор, тот же сапог.', engine: 'MORAL_DILEMMA', timing: 'BLOW' },
     rollFromBrainstormCandidate(blank),
     1,
   );
-  assert.equal(again.engine, 'REFUSAL');
-  assert.equal(again.timing, 'FRESH_INCIDENT');
+  assert.equal(again.engine, undefined);
+  assert.equal(again.timing, undefined);
   assert.equal(again.target, 'FOOD');
 });
 
@@ -1374,8 +1388,8 @@ test('брейншторм не видит город, не зовёт судь�
     assert.equal(c.worldRelation, axes.find((t) => t.groupId === 'worldRelation').tagName);
     assert.equal(c.target, axes.find((t) => t.groupId === 'target').tagName);
     assert.equal(c.knowledge, axes.find((t) => t.groupId === 'knowledge').tagName);
-    assert.equal(c.engine, axes.find((t) => t.groupId === 'engine').tagName);
-    assert.equal(c.timing, axes.find((t) => t.groupId === 'timing').tagName);
+    assert.equal(c.engine, undefined);
+    assert.equal(c.timing, undefined);
     assert.equal(c.authorName, drafted.rolls[i].author.name);
     assert.equal(c.chronicle, `Хроника сапога ${i + 1}`);
     assert.equal(c.hook, c.chronicle);
@@ -1391,18 +1405,19 @@ test('брейншторм не видит город, не зовёт судь�
   assert.match(drafted.prompt, /Судьбоносность/);
   assert.match(drafted.prompt, /Война/);
   assert.match(drafted.prompt, /emit_freeform_candidates/);
-  assert.match(drafted.prompt, /engine/);
-  assert.match(drafted.prompt, /timing/);
+  assert.doesNotMatch(drafted.prompt, /^engine — /m);
+  assert.doesNotMatch(drafted.prompt, /^timing — /m);
   const user = String(drafted.prompt.split('=== USER ===')[1] || '').split('=== TOOLS ===')[0];
   assert.match(user, /GRAVITY: RUPTURE/);
   assert.match(user, /ЗАТРАВКА/);
   assert.match(user, /ОСИ/);
   assert.match(user, /^arena — /m);
   assert.match(user, /^knowledge — /m);
-  assert.match(user, /^engine — /m);
-  assert.match(user, /^timing — /m);
+  assert.doesNotMatch(user, /^engine — /m);
+  assert.doesNotMatch(user, /^timing — /m);
   assert.match(user, /^НАБОРЫ$/m);
-  assert.match(user, /^1\. arena \w+ · worldRelation \w+ · target \w+ · knowledge \w+ · engine \w+ · timing \w+ · автор /m);
+  assert.match(user, /^1\. arena \w+ · worldRelation \w+ · target \w+ · knowledge \w+ · автор /m);
+  assert.doesNotMatch(user, /\bengine\b|\btiming\b/);
   assert.match(user, /На площади нашли чужой сапог/);
   assert.doesNotMatch(user, /не канцелярия|ассоциативн|кликбейт|Верни ровно|emit_freeform_candidates/);
   assert.doesNotMatch(user, /Судьбоносность/);
@@ -2385,6 +2400,11 @@ test('живой посев без флага и без выпавшего ша�
   assert.equal(planted.requireMystery, false);
   assert.deepEqual(planted.plot.hiddenPremises, []);
   assert.ok(extras.some((e) => e.agentId === 'freeformBrainstorm'));
+  assert.equal(
+    extras.some((e) => e.agentId === 'freeformHiddenSplit'),
+    false,
+    'пустой hiddenPremises сборщика не зовёт разрезчика',
+  );
   assert.ok(extras.some((e) => e.agentId === 'freeformEndings'));
   assert.ok(extras.some((e) => e.agentId === 'freeformUrgency'));
   assert.ok(extras.every((e) => e.domainId === 'domain_1'));
@@ -2474,6 +2494,92 @@ test('скрытый слой отрезается от наблюдаемой �
   assert.equal(clampFreeformCountdown('x', 2), 2);
 });
 
+test('hiddenSplit не зовут при пустом слое; иначе организует разгадку и подступы', async () => {
+  let called = 0;
+  const silentLog = { child: () => silentLog, info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
+  const skipped = await splitAssembledHidden({
+    runtime: {
+      assembleChat: () => ({ systemContent: '', userContent: '' }),
+      async run() {
+        called += 1;
+      },
+    },
+    story: {
+      chronicle: 'Двор чинит мосток у межи.',
+      cause: 'Опоры сгнили от воды.',
+      hiddenPremises: [],
+    },
+    domain: { name: 'Грасток', cityBrief: 'ЦИСТЕРНЫ_МАРКЕР питают водосборы.' },
+    log: silentLog,
+  });
+  assert.equal(called, 0);
+  assert.equal(skipped.hiddenAnswer, '');
+  assert.deepEqual(skipped.hiddenPremises, []);
+
+  const runtime = {
+    assembleChat: (opts) => ({
+      systemContent: String(opts.extraSystem || ''),
+      userContent: String(opts.userMessages?.[0]?.content || ''),
+    }),
+    async run(opts) {
+      called += 1;
+      const asked = String(opts.userMessages?.[0]?.content || '');
+      assert.match(asked, /Хроника:/);
+      assert.match(asked, /площади Грастока/);
+      assert.match(asked, /Первопричина:/);
+      assert.match(asked, /разлома края/);
+      assert.match(asked, /Соль сыплется/);
+      assert.match(asked, /расходную книгу/);
+      assert.doesNotMatch(asked, /cityBrief/i);
+      assert.match(opts.extraSystem || '', /ЦИСТЕРНЫ_МАРКЕР/);
+      assert.match(opts.extraSystem || '', /стандартный бриф/);
+      assert.doesNotMatch(opts.extraSystem || '', /cityBrief/i);
+      await opts.tools[0].handler({
+        hiddenAnswer: 'Соль сыплется из разлома края, не из склада.',
+        hiddenPremises: ['Старший видел расходную книгу деда — по ней можно выйти на разлом.'],
+      });
+    },
+  };
+  const organized = await splitAssembledHidden({
+    runtime,
+    story: {
+      chronicle: 'На площади Грастока двор держит сапог без пары.',
+      cause: 'Соль сыплется из разлома края, и двор не знает, чей это сапог.',
+      hiddenPremises: [
+        'Соль сыплется из разлома края, не из склада.',
+        'Старший видел расходную книгу деда.',
+      ],
+    },
+    domain: { name: 'Грасток', cityBrief: 'ЦИСТЕРНЫ_МАРКЕР питают водосборы.' },
+    gravity: 'EPISODE',
+    config: loadConfig(),
+    log: silentLog,
+  });
+  assert.equal(called, 1);
+  assert.match(organized.hiddenAnswer, /Соль сыплется/);
+  assert.match(organized.hiddenPremises[0], /расходную книгу/);
+
+  const keepDump = await splitAssembledHidden({
+    runtime: {
+      assembleChat: () => ({ systemContent: '', userContent: '' }),
+      async run(opts) {
+        await opts.tools[0].handler({
+          hiddenAnswer: '',
+          hiddenPremises: ['не надо переписывать в подступы'],
+        });
+      },
+    },
+    story: {
+      chronicle: 'На площади лежит сапог.',
+      cause: 'Край крошится.',
+      hiddenPremises: ['Соль сыплется из разлома края, не из склада.'],
+    },
+    log: silentLog,
+  });
+  assert.equal(keepDump.hiddenAnswer, '');
+  assert.deepEqual(keepDump.hiddenPremises, ['Соль сыплется из разлома края, не из склада.']);
+});
+
 test('имя-агент не принимает пересказ хроники', async () => {
   const chronicle =
     'На восточном дереве, где стоит храм Ориона, каменщики и смолокуры давно замечали: кора сочится гуще.';
@@ -2497,6 +2603,7 @@ test('конструктор собирает хронику и hidden — бе�
   const calls = [];
   const domain = {
     name: 'Грасток',
+    cityBrief: 'ЦИСТЕРНЫ_МАРКЕР питают водосборы и колёса.',
     lore: [],
     plotlines: [],
     officers: [{ id: 'o1', office: 'keeper', title: 'Хранитель', name: 'Элана' }],
@@ -2527,8 +2634,16 @@ test('конструктор собирает хронику и hidden — бе�
         });
       } else if (opts.agentId === 'freeformHiddenSplit') {
         const asked = String(opts.userMessages?.[0]?.content || '');
+        assert.match(asked, /Хроника:/);
+        assert.match(asked, /площади Грастока/);
+        assert.match(asked, /Первопричина:/);
+        assert.match(asked, /разлома края/);
         assert.match(asked, /Соль сыплется/);
         assert.match(asked, /расходную книгу/);
+        assert.doesNotMatch(asked, /cityBrief/i);
+        assert.match(opts.extraSystem || '', /ЦИСТЕРНЫ_МАРКЕР/);
+        assert.match(opts.extraSystem || '', /стандартный бриф/);
+        assert.doesNotMatch(opts.extraSystem || '', /cityBrief/i);
         await tool.handler({
           hiddenAnswer: 'Соль сыплется из разлома края, не из склада.',
           hiddenPremises: ['Старший видел расходную книгу деда.'],
@@ -2572,6 +2687,10 @@ test('конструктор собирает хронику и hidden — бе�
   assert.doesNotMatch(out.assemblePrompt, /\bdepth\b|countdown|urgency/i);
   assert.doesNotMatch(out.assemblePrompt, /САНОВНИКИ НЕ ГЕРОИ/);
   assert.match(out.hiddenPrompt, /submit_hidden_layer/);
+  assert.match(out.hiddenPrompt, /Хроника:/);
+  assert.match(out.hiddenPrompt, /Первопричина:/);
+  assert.match(out.hiddenPrompt, /ЦИСТЕРНЫ_МАРКЕР/);
+  assert.doesNotMatch(out.hiddenPrompt, /cityBrief/i);
   assert.match(out.titlePrompt, /то, что город уже знает/);
   assert.match(out.titlePrompt, /площади Грастока/);
   assert.doesNotMatch(out.titlePrompt, /соль сыплется/);

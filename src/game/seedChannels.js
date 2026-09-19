@@ -5,7 +5,6 @@
 
 import { chronicleEntries } from './models.js';
 import { countOpen, plotConfig, isStoryPlot } from './plotlines.js';
-import { formatCityBrief, parseCityBrief } from './cityContext.js';
 import { FINISH_SHORT } from './rolls.js';
 import {
   SEED_SOURCES,
@@ -137,8 +136,7 @@ export function formatErrandGrain(outcome, chronicleAdds = []) {
 
 /** Зерно генезиса: стандартный бриф города, тот же, что получают агенты. */
 export function cityGenesisGrainText(domain) {
-  const raw = String(domain?.cityBrief || '').trim();
-  return raw ? formatCityBrief(parseCityBrief(raw)) : '';
+  return String(domain?.cityBrief || '').trim();
 }
 
 export function voidGrainPack(domain, { config, rng = Math.random } = {}) {

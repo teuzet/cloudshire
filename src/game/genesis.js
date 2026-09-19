@@ -20,6 +20,7 @@ import { ensureCityEntities } from './cityEntities.js';
 import {
   clipCityText,
   CITY_BRIEF_MAX,
+  CITY_BRIEF_AGENT_MAX,
   parseCityBrief,
   formatCityBrief,
   normalizeCanonicalUnknowns,
@@ -537,7 +538,7 @@ async function generateCityBrief({ runtime, domain, log }) {
         properties: {
           brief: {
             type: 'string',
-            description: `Сухие постоянные факты города, до ${CITY_BRIEF_MAX} символов: места, институты, ресурсы, уклады, напряжения. Без сиюминутного, без сюжета и без пересказа неизвестностей.`,
+            description: `Сухие постоянные факты города, до ${CITY_BRIEF_AGENT_MAX} символов: места, институты, ресурсы, уклады, напряжения. Без сиюминутного, без сюжета и без пересказа неизвестностей.`,
           },
           unknowns: {
             type: 'array',
@@ -591,6 +592,7 @@ async function generateCityBrief({ runtime, domain, log }) {
           role: 'user',
           content: [
             'Собери КОМПАКТНЫЙ фактический бриф этого города для других агентов.',
+            `Уложись в ${CITY_BRIEF_AGENT_MAX} знаков.`,
             'Не пересказывай генезис литературно. Не пиши хронику месяца и не выдумывай тайну.',
             'Оставь: рельеф и хозяйство, институты, ключевые места, устойчивые напряжения, необычные постоянные черты.',
             'Только извлекай, ничего не добавляй. Не выдумывай офицеров, сановников и статы.',

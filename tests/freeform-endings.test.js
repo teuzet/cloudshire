@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { loadConfig } from '../src/config.js';
 import {
   formatEndingsJudgeCase,
   formatEndingsJudgeRepair,
@@ -34,7 +35,7 @@ function plot(extra = {}) {
   };
 }
 
-const domain = { id: 'd1', name: 'Варшена', lore: [], plotlines: [] };
+const domain = { id: 'd1', name: 'Варшена', cityBrief: 'ЦИСТЕРНЫ_МАРКЕР питают водосборы.', lore: [], plotlines: [] };
 
 function triple(kind, n) {
   return {
@@ -73,7 +74,12 @@ function endingsRuntime({ endings = [GOOD, NEUTRAL, BAD], reviews = null, repair
   return {
     calls,
     run: async (opts) => {
-      calls.push({ agentId: opts.agentId, user: opts.userMessages[0].content, domainId: opts.domainId });
+      calls.push({
+        agentId: opts.agentId,
+        user: opts.userMessages[0].content,
+        extraSystem: String(opts.extraSystem || ''),
+        domainId: opts.domainId,
+      });
       const tool = opts.tools[0];
       if (opts.agentId === 'freeformEndings') {
         asked += 1;
@@ -115,12 +121,20 @@ test('без questionGone и nowDifferent список не принимаетс
 test('свежий список идёт к судье, PASS не гоняет автора второй раз', async () => {
   const runtime = endingsRuntime();
   const p = plot();
-  const res = await refreshFreeformEndings({ runtime, domain, plot: p, log: silentLog });
+  const res = await refreshFreeformEndings({ runtime, domain, plot: p, config: loadConfig(), log: silentLog });
   assert.deepEqual(
     runtime.calls.map((c) => c.agentId),
     ['freeformEndings', 'freeformEndingsJudge'],
   );
   assert.ok(runtime.calls.every((c) => c.domainId === 'd1'));
+  assert.match(runtime.calls[0].user, /GRAVITY: CRISIS/);
+  assert.match(runtime.calls[0].user, /пожар|осада|Восстание/);
+  assert.doesNotMatch(runtime.calls[0].user, /SITUATION|EPISODE|RUPTURE/);
+  assert.match(runtime.calls[0].extraSystem, /ЦИСТЕРНЫ_МАРКЕР/);
+  assert.match(runtime.calls[0].extraSystem, /стандартный бриф/);
+  assert.doesNotMatch(runtime.calls[0].extraSystem, /cityBrief/i);
+  assert.doesNotMatch(runtime.calls[0].user, /cityBrief/i);
+  assert.doesNotMatch(runtime.calls[1].extraSystem, /ЦИСТЕРНЫ_МАРКЕР/);
   assert.equal(res.endings.length, 3);
   assert.equal(p.endings[0].questionGone, GOOD.questionGone);
   assert.equal(p.closeWhen[0], 'Концовка 1');

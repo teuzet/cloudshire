@@ -103,7 +103,7 @@ export async function plantStakedStory({
           maxChars: chronicleBudget(config, 'seed'),
         })
       : null;
-    await refreshFreeformEndings({ runtime, domain, plot, log });
+    await refreshFreeformEndings({ runtime, domain, plot, config, log });
     await setFreeformUrgency({ runtime, domain, plot, log });
     await writePlotSeedDump(
       {

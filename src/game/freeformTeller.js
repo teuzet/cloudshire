@@ -439,7 +439,7 @@ export async function tellFreeformBeat({
   let endingsPrompt = '';
   let urgencyPrompt = '';
   if (!winner.closed) {
-    const ended = await refreshFreeformEndings({ runtime, domain, plot, log });
+    const ended = await refreshFreeformEndings({ runtime, domain, plot, config, log });
     endingsPrompt = ended.prompt || '';
     const urgent = await setFreeformUrgency({ runtime, domain, plot, log, rng });
     urgencyPrompt = urgent.prompt || '';

@@ -8,7 +8,20 @@ import {
   normalizeFreeformEndings,
   parseFreeformEndingKind,
 } from './plotlines.js';
-import { plotCardForPrompt, plotChronicleForPrompt } from './freeform.js';
+import { formatFreeformGravityForPrompt, plotCardForPrompt, plotChronicleForPrompt } from './freeform.js';
+import { formatCityForAgents } from './cityContext.js';
+
+function formatEndingsBrief(domain) {
+  if (!domain) return '';
+  const brief = formatCityForAgents(domain);
+  return [
+    domain.name ? `Город «${domain.name}».` : '',
+    'БРИФ ГОРОДА (стандартный бриф для агентов, не полное описание)',
+    brief,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
 
 export function fallbackFreeformEndings() {
   return normalizeFreeformEndings([
@@ -82,7 +95,7 @@ function endingsToolSchema() {
   };
 }
 
-async function askEndings({ runtime, domain, plot, repair = '', log }) {
+async function askEndings({ runtime, domain, plot, repair = '', log, config }) {
   const draft = { keep: false, endings: null };
   const runOpts = {
     agentId: 'freeformEndings',
@@ -124,12 +137,14 @@ async function askEndings({ runtime, domain, plot, repair = '', log }) {
     log,
     scene: 'freeform_endings',
     domainId: domain?.id,
-    extraSystem: '',
+    extraSystem: formatEndingsBrief(domain),
     userMessages: [
       {
         role: 'user',
         content: [
           plotCardForPrompt(plot, { revealHidden: true }),
+          '',
+          formatFreeformGravityForPrompt(plot?.gravity, config),
           '',
           plotChronicleForPrompt(domain, plot),
           '',
@@ -260,11 +275,11 @@ export function formatEndingsJudgeRepair(endings, reviews) {
     .join('\n');
 }
 
-export async function refreshFreeformEndings({ runtime, domain, plot, log: parentLog } = {}) {
+export async function refreshFreeformEndings({ runtime, domain, plot, config, log: parentLog } = {}) {
   const log = (parentLog || getLogger()).child({ scope: 'freeform.endings', plotId: plot?.id });
   if (!plot) return { endings: [], keep: false, prompt: '' };
 
-  const asked = await askEndings({ runtime, domain, plot, log });
+  const asked = await askEndings({ runtime, domain, plot, log, config });
   const current = Array.isArray(plot.endings) ? plot.endings : [];
   if (asked.keep && current.length) {
     const endings = applyEndings(plot, current);
@@ -280,7 +295,7 @@ export async function refreshFreeformEndings({ runtime, domain, plot, log: paren
     judgePrompt = judged.prompt;
     const repair = formatEndingsJudgeRepair(source, judged.reviews);
     if (repair) {
-      const patched = await askEndings({ runtime, domain, plot, repair, log });
+      const patched = await askEndings({ runtime, domain, plot, repair, log, config });
       repairPrompt = patched.prompt;
       if (patched.endings?.length) source = patched.endings;
     }

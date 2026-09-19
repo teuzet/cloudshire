@@ -9,7 +9,7 @@ import {
   formatStoryForBeatArchitect,
   finishLabel,
   pickContinuationAuthor,
-  FREEFORM_AXIS_IDS,
+  FREEFORM_SEED_AXIS_IDS,
   FREEFORM_AXIS_TITLE,
 } from './freeform.js';
 import { repairFreeformVariant } from './freeformJudge.js';
@@ -48,10 +48,10 @@ export function pickFreeformSeedAxisSets(config, count, rng = Math.random) {
   const n = Math.max(1, Math.round(Number(count) || 1));
   const catalog = freeformConfig(config).axes;
   const drawn = Object.fromEntries(
-    FREEFORM_AXIS_IDS.map((id) => [id, drawWeighted(catalog[id] || [], n, rng)]),
+    FREEFORM_SEED_AXIS_IDS.map((id) => [id, drawWeighted(catalog[id] || [], n, rng)]),
   );
   return Array.from({ length: n }, (_, i) =>
-    FREEFORM_AXIS_IDS.map((groupId) => {
+    FREEFORM_SEED_AXIS_IDS.map((groupId) => {
       const value = drawn[groupId][i] || drawn[groupId][0] || {};
       return {
         groupId,
@@ -70,7 +70,7 @@ export function pickFreeformSeedAxes(config, rng = Math.random) {
 /** Каталоги брошенных осей: единственный источник значений — конфиг. */
 export function formatFreeformAxisCatalogs(config) {
   const catalog = freeformConfig(config).axes;
-  return FREEFORM_AXIS_IDS.map((id) =>
+  return FREEFORM_SEED_AXIS_IDS.map((id) =>
     [
       FREEFORM_AXIS_TITLE[id] || id,
       ...(catalog[id] || []).map((v) => `${v.name} — ${v.about}`),
@@ -95,7 +95,7 @@ export function formatFreeformSeedAxisSetsForPrompt(sets, config) {
 
 /** Одна строка набора: ключи те же, что поля эха в инструменте. */
 export function formatAxisSetLine(tags) {
-  return FREEFORM_AXIS_IDS.map((id) => `${id} ${axisTagName(tags, id) || '?'}`).join(' · ');
+  return FREEFORM_SEED_AXIS_IDS.map((id) => `${id} ${axisTagName(tags, id) || '?'}`).join(' · ');
 }
 
 function axisTagName(tags, groupId) {

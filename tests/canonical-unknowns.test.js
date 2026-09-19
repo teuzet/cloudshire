@@ -136,4 +136,6 @@ test('в конфиге есть агент раскрытия неизвест�
   assert.match(cfg.agents.cityUnknownsReveal.instructions, /submit_unknowns_reveal/);
   assert.match(cfg.agents.loremaster.instructions, /canonicalUnknowns/);
   assert.match(cfg.agents.cityBrief.instructions, /unknowns/);
+  assert.match(cfg.agents.cityBrief.instructions, /3500/);
+  assert.doesNotMatch(cfg.agents.cityBrief.instructions, /4000/);
 });

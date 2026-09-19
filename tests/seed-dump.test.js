@@ -66,7 +66,8 @@ test('дамп посева держит полную хронику, а не о
     const md = formatPlotSeedDumpMarkdown(payload);
     assert.match(md, /спрятал страницу/);
     assert.match(md, /`arena:creature\+worldRelation:surfaced\+target:work\+knowledge:few_know\+mieville`/);
-    assert.match(md, /CREATURE · SURFACED · WORK · FEW_KNOW · DISCOVERY · FRESH_INCIDENT/);
+    assert.match(md, /CREATURE · SURFACED · WORK · FEW_KNOW/);
+    assert.doesNotMatch(md, /DISCOVERY|FRESH_INCIDENT/);
     assert.doesNotMatch(md, /Тварь оказ…/);
     assert.match(md, /Финальный пул: пуст/);
     assert.match(md, /Пул пуст: ни один кандидат не получил PASS/);

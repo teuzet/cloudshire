@@ -43,8 +43,6 @@ function formatAxes(candidate) {
     candidate?.worldRelation,
     candidate?.target,
     candidate?.knowledge,
-    candidate?.engine,
-    candidate?.timing,
   ]
     .map((part) => String(part || '').trim())
     .filter(Boolean)

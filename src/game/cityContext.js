@@ -9,7 +9,9 @@
 import { newId } from './ids.js';
 
 export const CITY_MODIFIER_MAX = 400;
-export const CITY_BRIEF_MAX = 3500;
+export const CITY_BRIEF_MAX = 4000;
+/** Писателю брифа: цель по объёму. Обрезка при сохранении — CITY_BRIEF_MAX. */
+export const CITY_BRIEF_AGENT_MAX = 3500;
 export const CANONICAL_UNKNOWNS_HEADING = 'Неизвестно (канон):';
 const UNKNOWN_ITEM_MAX = 220;
 const UNKNOWN_MAX_ITEMS = 8;
@@ -176,20 +178,17 @@ export function formatCityModifiersForPrompt(domain) {
   return `Постоянные изменения города:\n${lines.join('\n')}`;
 }
 
-/** То, что видят агенты вместо полного генезиса: бриф и дописки. */
+/** То, что видят агенты вместо полного генезиса: бриф как есть и дописки. */
 export function formatCityForAgents(domain) {
   const raw = String(domain?.cityBrief || '').trim();
-  const brief = raw
-    ? formatCityBrief(parseCityBrief(raw))
-    : String(domain?.description || '').trim() || '(описание пусто)';
+  const brief = raw || String(domain?.description || '').trim() || '(описание пусто)';
   const mods = formatCityModifiersForPrompt(domain);
   return mods ? `${brief}\n\n${mods}` : brief;
 }
 
-/** Зерно посева из генезиса: бриф, иначе сжатое описание. Пустая строка, если города ещё нет. */
+/** Зерно посева из генезиса: бриф как есть. Пустая строка, если города ещё нет. */
 export function cityGenesisSeedText(domain) {
   const raw = String(domain?.cityBrief || '').trim();
-  if (raw) return formatCityBrief(parseCityBrief(raw));
-  const desc = String(domain?.description || '').trim();
-  return desc ? clipCityText(desc, CITY_BRIEF_MAX) : '';
+  if (raw) return raw;
+  return String(domain?.description || '').trim();
 }

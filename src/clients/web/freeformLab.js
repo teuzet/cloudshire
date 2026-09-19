@@ -363,6 +363,7 @@ export async function seedFreeformLab({ config, runtime, text, gravity, fromCity
       runtime,
       domain: session.domain,
       plot,
+      config,
       log,
     });
     const urgent = await setFreeformUrgency({

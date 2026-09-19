@@ -15,6 +15,7 @@ import {
   formatBrainstormCandidateForPrompt,
   freeformConfig,
 } from './freeform.js';
+import { formatCityForAgents } from './cityContext.js';
 
 const HIDDEN_SPLIT = /\n*[ \t]*На самом деле:\s*/i;
 
@@ -179,11 +180,54 @@ function formatHiddenBlob(lines) {
     .join('\n');
 }
 
-/** Разрез скрытого слоя: разгадка отдельно, подступы — только то, что уже сказано. */
+function collectAssemblerHiddenDump(story) {
+  const fromStory = splitChronicleHiddenLayer(story?.chronicle || '');
+  return uniqueHiddenLines([
+    ...(Array.isArray(story?.hiddenPremises) ? story.hiddenPremises : []),
+    ...fromStory.hiddenPremises,
+  ]);
+}
+
+function formatStoryForHiddenSplit(story, dump, { gravity, config } = {}) {
+  const fromStory = splitChronicleHiddenLayer(story?.chronicle || '');
+  const chronicle = fromStory.chronicle || String(story?.chronicle || '').trim();
+  return [
+    'ИСТОРИЯ',
+    chronicle ? `Хроника:\n${chronicle}` : '',
+    story?.cause ? `Первопричина: ${story.cause}` : '',
+    gravity != null ? formatFreeformGravityForPrompt(gravity, config) : '',
+    '',
+    'СКРЫТЫЕ ФАКТЫ (сборщик уже вынес из наблюдаемого слоя):',
+    formatHiddenBlob(dump) || '(нет)',
+    '',
+    'Если среди скрытых фактов есть самый главный — он обнажает первопричину и позволяет решать историю — это hiddenAnswer.',
+    'Дальше сделай новый набор hiddenPremises: каждый намекает на эту разгадку или на способ её получить.',
+    'Если главного факта нет — hiddenAnswer пустой, скрытые факты не переписывай в подступы.',
+    'Новых тайн и фактов не выдумывай.',
+  ]
+    .filter((line) => line != null && line !== '')
+    .join('\n');
+}
+
+function formatHiddenBrief(domain) {
+  if (!domain) return '';
+  const brief = formatCityForAgents(domain);
+  return [
+    domain.name ? `Город «${domain.name}».` : '',
+    'БРИФ ГОРОДА (стандартный бриф для агентов, не полное описание)',
+    brief,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** Скрытый слой сборщика: разгадка, если она решает историю, и подступы к ней. */
 export async function splitAssembledHidden({
   runtime,
   story,
-  candidate,
+  domain = null,
+  gravity = null,
+  config = null,
   requireMystery = false,
   log: parentLog,
   domainId = null,
@@ -191,26 +235,33 @@ export async function splitAssembledHidden({
   const log = (parentLog || getLogger()).child({ scope: 'freeform.hidden' });
   const fromStory = splitChronicleHiddenLayer(story?.chronicle || '');
   const chronicle = fromStory.chronicle || String(story?.chronicle || '').trim();
-  const lines = collectAssembledHiddenLines(story, candidate);
+  const dump = collectAssemblerHiddenDump(story);
+  const facts = uniqueHiddenLines([story?.hiddenAnswer, ...dump]);
   const base = {
     ...story,
     chronicle,
     synopsis: chronicle,
   };
-  if (!lines.length) {
-    return { ...base, hiddenAnswer: '', hiddenPremises: [], prompt: '' };
+  if (!dump.length) {
+    return {
+      ...base,
+      hiddenAnswer: keepSeedAnswer(story?.hiddenAnswer),
+      hiddenPremises: [],
+      prompt: '',
+    };
   }
-  const fallback = heuristicHiddenSplit(lines);
+  const fallback = heuristicHiddenSplit(facts);
   if (!runtime?.run) {
     return { ...base, ...fallback, prompt: '' };
   }
-  const draft = { hiddenAnswer: '', hiddenPremises: null };
+  const draft = { submitted: false, hiddenAnswer: '', hiddenPremises: [] };
   const runOpts = {
     agentId: 'freeformHiddenSplit',
     tools: [
       {
         name: 'submit_hidden_layer',
-        description: 'Разгадка и подступы из уже данного скрытого слоя. Новых фактов нет.',
+        description:
+          'Главный скрытый факт, если он решает историю, и подступы к нему. Новых тайн нет.',
         parameters: {
           type: 'object',
           additionalProperties: false,
@@ -218,12 +269,14 @@ export async function splitAssembledHidden({
           properties: {
             hiddenAnswer: {
               type: 'string',
-              description: 'Разгадка одной строкой: что произошло, кто действует, почему. Не отговорка.',
+              description:
+                'Самый главный скрытый факт: обнажает первопричину и позволяет решать историю. Пусто, если среди фактов такого нет.',
             },
             hiddenPremises: {
               type: 'array',
               items: { type: 'string' },
-              description: 'Подступы, которые уже есть в тексте. Пусто, если сказано только разгадку.',
+              description:
+                'Подступы: каждый намекает на hiddenAnswer или на способ его получить. Если разгадки нет — исходные скрытые факты.',
             },
           },
         },
@@ -235,8 +288,10 @@ export async function splitAssembledHidden({
               'Нужна конкретная разгадка в hiddenAnswer, не «неизвестно» и не «мнения расходятся».',
             );
           }
+          const hints = keepSeedReveals(args?.hiddenPremises).filter((item) => item !== hiddenAnswer);
+          draft.submitted = true;
           draft.hiddenAnswer = hiddenAnswer;
-          draft.hiddenPremises = keepSeedReveals(args?.hiddenPremises).filter((item) => item !== hiddenAnswer);
+          draft.hiddenPremises = hiddenAnswer ? hints : dump.filter((item) => item !== hiddenAnswer);
           return { ok: true };
         },
       },
@@ -245,15 +300,12 @@ export async function splitAssembledHidden({
     toolChoice: { type: 'function', function: { name: 'submit_hidden_layer' } },
     log,
     scene: 'freeform_hidden_split',
-    domainId,
+    domainId: domainId || domain?.id,
+    extraSystem: formatHiddenBrief(domain),
     userMessages: [
       {
         role: 'user',
-        content: [
-          'Скрытый слой. Разрежь. Нового не выдумывай.',
-          '',
-          formatHiddenBlob(lines),
-        ].join('\n'),
+        content: formatStoryForHiddenSplit(story, facts, { gravity, config }),
       },
     ],
   };
@@ -263,9 +315,15 @@ export async function splitAssembledHidden({
   } catch (err) {
     log.warn('freeform.hidden_split_failed', { error: err.message });
   }
-  const hiddenAnswer = draft.hiddenAnswer || fallback.hiddenAnswer;
-  const hiddenPremises = Array.isArray(draft.hiddenPremises) ? draft.hiddenPremises : fallback.hiddenPremises;
-  return { ...base, hiddenAnswer, hiddenPremises, prompt };
+  if (!draft.submitted) {
+    return { ...base, ...fallback, prompt };
+  }
+  return {
+    ...base,
+    hiddenAnswer: draft.hiddenAnswer,
+    hiddenPremises: draft.hiddenPremises,
+    prompt,
+  };
 }
 
 /**
@@ -458,7 +516,9 @@ export async function assembleFreeformLabStory({
   const layered = await splitAssembledHidden({
     runtime,
     story,
-    candidate,
+    domain,
+    gravity,
+    config,
     requireMystery,
     log,
     domainId: domain?.id,
@@ -482,8 +542,6 @@ export async function assembleFreeformLabStory({
     worldRelation: candidate?.worldRelation || '',
     target: candidate?.target || '',
     knowledge: candidate?.knowledge || '',
-    engine: candidate?.engine || '',
-    timing: candidate?.timing || '',
     assemblePrompt: constructed.prompt || '',
     hiddenPrompt: layered.prompt || '',
     titlePrompt: named.prompt || '',

@@ -1,5 +1,5 @@
 /**
- * Генератор трёх следующих хроник: код бросает шесть осей мира, модель пишет один текст на набор.
+ * Генератор трёх следующих хроник: код бросает четыре оси мира, модель пишет один текст на набор.
  * Лаборатория: пачка → судья. PASS сразу в пул и не чинится.
  * Не-PASS всегда идут на починку, даже если PASS уже ≥2.
  * Второй судья видит только чиненные слоты.
@@ -17,7 +17,7 @@ import {
   formatFreeformGravityForPrompt,
   formatBrainstormCandidateForPrompt,
   freeformConfig,
-  FREEFORM_AXIS_IDS,
+  FREEFORM_SEED_AXIS_IDS,
 } from './freeform.js';
 import {
   pickFreeformSeedAxisSets,
@@ -197,8 +197,6 @@ export function normalizeBrainstormCandidate(raw, roll, index = 1, maxChars = PL
     worldRelation: axisTagName(roll?.axes, 'worldRelation'),
     target: axisTagName(roll?.axes, 'target'),
     knowledge: axisTagName(roll?.axes, 'knowledge'),
-    engine: axisTagName(roll?.axes, 'engine'),
-    timing: axisTagName(roll?.axes, 'timing'),
     authorId: roll.author?.id || '',
     authorName: roll.author?.name || '',
   };
@@ -207,9 +205,9 @@ export function normalizeBrainstormCandidate(raw, roll, index = 1, maxChars = PL
 /** Эхо сверяем по брошенным осям: агент их не выбирает. */
 function logAxisEchoMismatch(log, index, raw, roll) {
   const expected = Object.fromEntries(
-    FREEFORM_AXIS_IDS.map((id) => [id, axisTagName(roll.axes, id)]),
+    FREEFORM_SEED_AXIS_IDS.map((id) => [id, axisTagName(roll.axes, id)]),
   );
-  const got = Object.fromEntries(FREEFORM_AXIS_IDS.map((id) => [id, axisEcho(raw, id)]));
+  const got = Object.fromEntries(FREEFORM_SEED_AXIS_IDS.map((id) => [id, axisEcho(raw, id)]));
   const mismatched = Object.keys(expected).filter((key) => got[key] && got[key] !== expected[key]);
   if (!mismatched.length) return;
   log.warn('freeform.brainstorm.axis_echo_mismatch', { index, expected, got, mismatched });
@@ -217,7 +215,7 @@ function logAxisEchoMismatch(log, index, raw, roll) {
 
 export function rollFromBrainstormCandidate(candidate) {
   return {
-    axes: FREEFORM_AXIS_IDS.map((groupId) => {
+    axes: FREEFORM_SEED_AXIS_IDS.map((groupId) => {
       const name = String(candidate?.[groupId] || '').trim();
       return { groupId, tagId: name.toLowerCase(), tagName: name };
     }).filter((tag) => tag.tagName),
@@ -254,8 +252,6 @@ function emitCandidatesTool({ n, rolls, draft, log, indices = null, maxChars = P
               worldRelation: { type: 'string', description: 'Эхо оси worldRelation этого набора.' },
               target: { type: 'string', description: 'Эхо оси target этого набора.' },
               knowledge: { type: 'string', description: 'Эхо оси knowledge этого набора.' },
-              engine: { type: 'string', description: 'Эхо оси engine этого набора.' },
-              timing: { type: 'string', description: 'Эхо оси timing этого набора.' },
             },
           },
         },
