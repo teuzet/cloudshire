@@ -11,7 +11,7 @@
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { clipPlotText, PLOT_TITLE_MAX, PLOT_SUMMARY_MAX } from './plotlines.js';
-import { splitChronicleHiddenLayer } from './freeformAssemble.js';
+import { splitChronicleHiddenLayer, candidateHiddenLayer } from './freeformAssemble.js';
 import {
   parseFreeformGravity,
   formatFreeformGravityForPrompt,
@@ -54,11 +54,11 @@ export const MYSTERY_ARCHITECT_EXTRA = [
   'Это переопределяет правило «тайну ради тайны не выдумывай».',
   '',
   '- В наблюдаемом слое игрок видит странность, нестыковку или сокрытие, которую нельзя сразу объяснить. Не обязательно преступление: ложь, пропажа, подмена, необъяснимый поступок, секрет, который кто-то бережёт.',
-  '- В конце каждого кандидата блок «На самом деле:» с полной разгадкой: что произошло, кто знает, кто врёт, какая улика это подтвердит. Разгадка конкретна и проверяема в мире — не магия, не сон, не «все сошли с ума».',
+  '- В hiddenLayer каждого кандидата — полная разгадка: что произошло, кто знает, кто врёт, какая улика это подтвердит. Разгадка конкретна и проверяема в мире — не магия, не сон, не «все сошли с ума».',
   '- Разгадка не разочаровывает: она следует из уже названных фактов и характеров. Читатель, узнав её, говорит «так вот оно что», а не «и это всё?».',
   '- «Неизвестно», «мнения расходятся», «проверка ничего не дала» — это не разгадка. Нужен конкретный ответ, который можно вскрыть делом.',
   '- Тайна не декоративна: без неё история теряет смысл. Концы (GOOD/NEUTRAL/BAD) зависят от того, вскроется ли тайна и чем это обернётся.',
-  '- Не пропускай «На самом деле:» ни у одного из трёх кандидатов.',
+  '- Не пропускай hiddenLayer ни у одного из трёх кандидатов.',
 ].join('\n');
 
 export const MYSTERY_JUDGE_EXTRA = [
@@ -66,11 +66,11 @@ export const MYSTERY_JUDGE_EXTRA = [
   '13. BUREAUCRACY — двигатель не канцелярия. FAIL, только если без протоколов, сверки записей, комиссии, отложенного заседания или потерянной бумаги от сюжета ничего не остаётся. Правовой или социальный конфликт, где документ — предлог или фон, допустим.',
   '13b. ENGINEERING_PORN — двигатель не инженерия города. FAIL, только если без дорог, подъёмников, желобов, галерей, водостоков, подпорок, складов, настилов или контура «чинить инфраструктуру» от сюжета ничего не остаётся. Лес, каменоломня, осыпь, тварь или совет, где путь или кромка — место или цена, допустимы.',
   '14. MYSTERY — в пакете есть настоящая тайна: странность, которую персонажи и игрок не могут сразу объяснить. Если завязка прозрачна и нечего разгадывать — FAIL.',
-  '15. MYSTERY_PLAUSIBLE — разгадка в «На самом деле:» логична, конкретна и не разочаровывает. FAIL если разгадки нет, она отговорка («неизвестно», «мнения расходятся», «проверка ничего не дала»), противоречит фактам, или вся разгадка сводится к «ну так вышло» без механизма.',
+  '15. MYSTERY_PLAUSIBLE — разгадка в hiddenLayer логична, конкретна и не разочаровывает. FAIL если разгадки нет, она отговорка («неизвестно», «мнения расходятся», «проверка ничего не дала»), противоречит фактам, или вся разгадка сводится к «ну так вышло» без механизма.',
   'Конкретный механизм, в котором есть случай, ирония или «обряд сработал не по той причине, что думали» — PASS, не отговорка.',
   'Не ставь FAIL только потому, что разгадка не выводит каждую регулярность из первых принципов или «ослабляет» тайну иронией.',
   '',
-  'CHEKHOV при этом посеве не опционален: блок «На самом деле:» обязателен у каждого кандидата.',
+  'CHEKHOV при этом посеве не опционален: hiddenLayer обязателен у каждого кандидата.',
 ].join('\n');
 
 export const VOID_ARCHITECT_EXTRA = [
@@ -186,13 +186,14 @@ export function normalizeBrainstormCandidate(raw, roll, index = 1, maxChars = PL
   const split = splitChronicleHiddenLayer(raw?.chronicle || raw?.text || raw?.hook);
   const publicLayer = clipPlotText(split.chronicle, maxChars);
   if (!publicLayer) return null;
-  const hidden = split.hiddenPremises.filter(Boolean);
-  const chronicle = hidden.length ? `${publicLayer}\nНа самом деле: ${hidden.join('\n')}` : publicLayer;
+  const fromField = candidateHiddenLayer({ hiddenLayer: raw?.hiddenLayer });
+  const hiddenLayer = clipPlotText(fromField || split.hiddenPremises.join('\n'), maxChars) || '';
   return {
     title: clipPlotText(raw?.title, PLOT_TITLE_MAX) || '',
-    chronicle,
-    text: chronicle,
-    hook: chronicle,
+    chronicle: publicLayer,
+    text: publicLayer,
+    hook: publicLayer,
+    hiddenLayer,
     index,
     arena: axisTagName(roll?.axes, 'arena'),
     worldRelation: axisTagName(roll?.axes, 'worldRelation'),
@@ -227,6 +228,23 @@ export function rollFromBrainstormCandidate(candidate) {
   };
 }
 
+/** Claude иногда кладёт массив candidates JSON-строкой, а не массивом. */
+export function parseEmitCandidateList(raw) {
+  let value = raw;
+  for (let i = 0; i < 3; i += 1) {
+    if (Array.isArray(value)) return value;
+    if (typeof value !== 'string') return [];
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    try {
+      value = JSON.parse(trimmed);
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(value) ? value : [];
+}
+
 function emitCandidatesTool({ n, rolls, draft, log, indices = null, maxChars = PLOT_SUMMARY_MAX }) {
   return {
     name: 'emit_freeform_candidates',
@@ -249,6 +267,11 @@ function emitCandidatesTool({ n, rolls, draft, log, indices = null, maxChars = P
                 description:
                   `Сюжет-затравка: 5–7 кратких предложений, без лишних деталей, до ${maxChars} символов`,
               },
+              hiddenLayer: {
+                type: 'string',
+                description:
+                  'Скрытый слой: правда, которую город ещё не знает. Пусто, если тайна не нужна.',
+              },
               arena: { type: 'string', description: 'Эхо оси arena этого набора.' },
               worldRelation: { type: 'string', description: 'Эхо оси worldRelation этого набора.' },
               target: { type: 'string', description: 'Эхо оси target этого набора.' },
@@ -259,7 +282,7 @@ function emitCandidatesTool({ n, rolls, draft, log, indices = null, maxChars = P
       },
     },
     handler: async (args) => {
-      const list = Array.isArray(args?.candidates) ? args.candidates : [];
+      const list = parseEmitCandidateList(args?.candidates);
       const variants = rolls
         .map((roll, i) => {
           logAxisEchoMismatch(log, i + 1, list[i], roll);
@@ -480,8 +503,15 @@ function formatReviewNotes(review) {
   ].filter(Boolean);
 }
 
+function candidatePromptBody(candidate) {
+  const chronicle = String(candidate?.chronicle || candidate?.text || candidate?.hook || '').trim();
+  const hidden = String(candidate?.hiddenLayer || '').trim();
+  return [chronicle, hidden ? `hiddenLayer:\n${hidden}` : ''].filter(Boolean).join('\n\n');
+}
+
 function priorChronicle(step) {
-  return String(step?.candidate?.chronicle || step?.chronicle || '').trim();
+  if (step?.candidate) return candidatePromptBody(step.candidate);
+  return String(step?.chronicle || '').trim();
 }
 
 function formatStoryBlock(heading, chronicle) {
@@ -510,7 +540,7 @@ function formatRepairSlot(candidate, review, index, { includeAuthor = true, prio
     .map((s) => String(s || '').trim())
     .filter(Boolean)
     .join(' · ');
-  const currentText = String(candidate?.chronicle || candidate?.text || candidate?.hook || '').trim();
+  const currentText = candidatePromptBody(candidate);
   const header = [
     `=== Кандидат ${n || '?'} ===`,
     axes ? `оси: ${axes}` : null,
@@ -539,7 +569,12 @@ function mergeRepairedSlots(drafts, variants) {
   const byIndex = new Map(variants.map((item) => [Number(item.index) || 0, item]));
   return drafts.map((item, i) => {
     const index = Number(item.index) || i + 1;
-    return byIndex.get(index) || item;
+    const next = byIndex.get(index) || item;
+    if (next === item) return item;
+    return {
+      ...next,
+      hiddenLayer: String(next.hiddenLayer || '').trim() || item.hiddenLayer || '',
+    };
   });
 }
 
@@ -583,7 +618,7 @@ export async function repairBrainstormPack({
     .map((slot) => {
       const trail = history?.[slot.index] || [];
       const last = trail[trail.length - 1];
-      const sameLast = last && priorChronicle(last) === String(slot.candidate?.chronicle || '').trim();
+      const sameLast = last && priorChronicle(last) === candidatePromptBody(slot.candidate);
       const prior = sameLast ? trail.slice(0, -1) : trail;
       return formatRepairSlot(slot.candidate, slot.review, slot.index, { includeAuthor: true, prior });
     })

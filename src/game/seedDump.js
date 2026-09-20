@@ -34,7 +34,10 @@ function stampName(at = new Date()) {
 }
 
 function candidateText(candidate) {
-  return String(candidate?.chronicle || candidate?.text || candidate?.hook || '').trim();
+  const chronicle = String(candidate?.chronicle || candidate?.text || candidate?.hook || '').trim();
+  const hidden = String(candidate?.hiddenLayer || '').trim();
+  if (!hidden) return chronicle;
+  return `${chronicle}\n\nhiddenLayer:\n${hidden}`;
 }
 
 function formatAxes(candidate) {

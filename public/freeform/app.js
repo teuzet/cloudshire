@@ -76,12 +76,19 @@ function modeText(mode) {
 
 function seedFieldsHtml(v) {
   const chronicle = String(v?.chronicle || '').trim();
-  if (chronicle) return `<p class="rejected-text">${esc(chronicle)}</p>`;
+  const hidden = String(v?.hiddenLayer || '').trim();
+  if (chronicle) {
+    return [
+      `<p class="rejected-text">${esc(chronicle)}</p>`,
+      hidden ? `<p class="rejected-text"><strong>hiddenLayer.</strong> ${esc(hidden)}</p>` : '',
+    ].join('');
+  }
   const rows = [
     ['затравка', v?.hook],
     ['конфликт', v?.conflict],
     ['динамика', v?.dynamics],
     ['последствия', v?.consequences],
+    ['hiddenLayer', v?.hiddenLayer],
   ].filter(([, val]) => String(val || '').trim());
   if (!rows.length) {
     const body = v?.text || v?.premise || v?.whatHappens || '';
@@ -103,7 +110,8 @@ function axesLine(v) {
 
 function fieldsEqual(a, b) {
   if (!a || !b) return false;
-  const body = (v) => String(v?.chronicle || v?.text || v?.hook || '').trim();
+  const body = (v) =>
+    `${String(v?.chronicle || v?.text || v?.hook || '').trim()}\n${String(v?.hiddenLayer || '').trim()}`;
   return body(a) === body(b);
 }
 

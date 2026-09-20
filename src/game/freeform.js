@@ -390,11 +390,13 @@ export function formatBrainstormCandidateForPrompt(candidate, index, { includeAu
     .join(' · ');
   const n = Number.isInteger(Number(index)) ? Number(index) : candidate.index;
   const chronicle = String(candidate.chronicle || candidate.text || candidate.hook || '').trim();
+  const hiddenLayer = String(candidate.hiddenLayer || '').trim();
   return [
     `=== Кандидат ${n || '?'} ===`,
     axes ? `оси: ${axes}` : null,
     includeAuthor && candidate.authorName ? `автор: ${candidate.authorName}` : null,
     chronicle ? `хроника: ${chronicle}` : null,
+    hiddenLayer ? `hiddenLayer: ${hiddenLayer}` : null,
   ]
     .filter(Boolean)
     .join('\n');

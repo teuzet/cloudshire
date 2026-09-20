@@ -7,8 +7,10 @@ import { formatPlotSeedDumpMarkdown, writePlotSeedDump } from '../src/game/seedD
 import { plantStakedStory } from '../src/game/storyteller.js';
 import { loadConfig } from '../src/config.js';
 
-const LONG =
-  'Смолосборщики, разрабатывавшие новый мёртвый наплыв на восточном откосе, вскрыли под коркой смолы полость с телом твари — крупной, с костяным гребнем, каких прежде не добывали в этих лесах. Тварь оказалась жива. На самом деле: старший смолосборщик уже видел такой гребень в расходных книгах деда и спрятал страницу.';
+const LONG_PUBLIC =
+  'Смолосборщики, разрабатывавшие новый мёртвый наплыв на восточном откосе, вскрыли под коркой смолы полость с телом твари — крупной, с костяным гребнем, каких прежде не добывали в этих лесах. Тварь оказалась жива.';
+const LONG_HIDDEN =
+  'старший смолосборщик уже видел такой гребень в расходных книгах деда и спрятал страницу.';
 
 test('дамп посева держит полную хронику, а не обрезку в 200 знаков', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'cloudshire-seed-dump-'));
@@ -43,7 +45,8 @@ test('дамп посева держит полную хронику, а не о
           knowledge: 'FEW_KNOW',
           engine: 'DISCOVERY',
           timing: 'FRESH_INCIDENT',
-          chronicle: LONG,
+          chronicle: LONG_PUBLIC,
+          hiddenLayer: LONG_HIDDEN,
         },
       ],
       reviews: [
@@ -55,7 +58,7 @@ test('дамп посева держит полную хронику, а не о
           issues: [{ code: 'GRAVITY', reason: 'Одна тварь.' }],
         },
       ],
-      candidates: [{ index: 1, arena: 'CREATURE', chronicle: LONG }],
+      candidates: [{ index: 1, arena: 'CREATURE', chronicle: LONG_PUBLIC, hiddenLayer: LONG_HIDDEN }],
       finalReviews: [],
       winner: null,
       pickedIndex: null,
@@ -76,9 +79,12 @@ test('дамп посева держит полную хронику, а не о
     const files = await readdir(dir);
     assert.ok(files.some((name) => name.endsWith('.md')));
     const saved = await readFile(written.mdPath, 'utf8');
-    assert.ok(saved.includes(LONG));
+    assert.ok(saved.includes(LONG_PUBLIC));
+    assert.ok(saved.includes(LONG_HIDDEN));
+    assert.match(saved, /hiddenLayer:/);
     const json = JSON.parse(await readFile(written.jsonPath, 'utf8'));
-    assert.equal(json.drafts[0].chronicle, LONG);
+    assert.equal(json.drafts[0].chronicle, LONG_PUBLIC);
+    assert.equal(json.drafts[0].hiddenLayer, LONG_HIDDEN);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -144,7 +150,10 @@ test('живой посев пишет в дамп полную затравку
       if (!tool) return;
       if (opts.agentId === 'freeformBrainstorm') {
         await tool.handler({
-          candidates: [1, 2, 3].map(() => ({ chronicle: LONG })),
+          candidates: [1, 2, 3].map(() => ({
+            chronicle: LONG_PUBLIC,
+            hiddenLayer: LONG_HIDDEN,
+          })),
         });
       } else if (opts.agentId === 'freeformBrainstormJudge') {
         await tool.handler({
@@ -153,7 +162,7 @@ test('живой посев пишет в дамп полную затравку
       } else if (opts.agentId === 'freeformAssemble') {
         await tool.handler({
           title: 'Смоляная полость',
-          chronicle: LONG,
+          chronicle: LONG_PUBLIC,
           hiddenPremises: ['старший спрятал страницу деда'],
         });
       }

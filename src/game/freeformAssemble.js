@@ -158,21 +158,55 @@ export function heuristicHiddenSplit(lines) {
 }
 
 export function candidateSeedText(candidate) {
-  return String(candidate?.chronicle || candidate?.text || candidate?.hook || '').trim();
+  const raw = String(candidate?.chronicle || candidate?.text || candidate?.hook || '').trim();
+  return splitChronicleHiddenLayer(raw).chronicle;
 }
 
-export function leftoverSeedFacts(seed, chronicle) {
+export function candidateHiddenLayer(candidate) {
+  const field = String(candidate?.hiddenLayer || '').trim();
+  if (field) {
+    const split = splitChronicleHiddenLayer(field);
+    return [split.chronicle, ...split.hiddenPremises].filter(Boolean).join('\n').trim();
+  }
+  return splitChronicleHiddenLayer(
+    candidate?.chronicle || candidate?.text || candidate?.hook || '',
+  ).hiddenPremises.join('\n');
+}
+
+export function formatCandidateSeed(candidate) {
+  const publicLayer = candidateSeedText(candidate);
+  const hidden = candidateHiddenLayer(candidate);
+  if (!hidden) return publicLayer;
+  return `${publicLayer}\n\nhiddenLayer:\n${hidden}`;
+}
+
+function hiddenLayerLines(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return [];
+  const split = splitChronicleHiddenLayer(raw);
+  const blob = [split.chronicle, ...split.hiddenPremises].filter(Boolean).join('\n');
+  const lines = [];
+  for (const line of blob.split(/\n+/)) {
+    const item = line.replace(/^[-–—•]\s*/, '').trim();
+    if (item.length >= 8) lines.push(item);
+  }
+  if (!lines.length && blob.length >= 8) lines.push(blob);
+  return lines;
+}
+
+export function leftoverSeedFacts(seed, chronicle, hiddenLayer = '') {
   const fromSeed = splitChronicleHiddenLayer(seed);
   const publicChronicle = splitChronicleHiddenLayer(chronicle).chronicle;
-  return uniqueHiddenLines(fromSeed.hiddenPremises).filter((item) => {
+  return uniqueHiddenLines([...fromSeed.hiddenPremises, ...hiddenLayerLines(hiddenLayer)]).filter((item) => {
     const folded = item.replace(/\s+/g, ' ').trim().toLowerCase();
     return folded && !publicChronicle.toLowerCase().includes(folded);
   });
 }
 
-function formatStoryForHiddenSplit(story, seed, { gravity, config } = {}) {
+function formatStoryForHiddenSplit(story, seed, { gravity, config, hiddenLayer } = {}) {
   const fromStory = splitChronicleHiddenLayer(story?.chronicle || '');
   const chronicle = fromStory.chronicle || String(story?.chronicle || '').trim();
+  const hidden = String(hiddenLayer || '').trim();
   return [
     'ИСТОРИЯ',
     chronicle ? `Хроника:\n${chronicle}` : '',
@@ -181,6 +215,7 @@ function formatStoryForHiddenSplit(story, seed, { gravity, config } = {}) {
     '',
     'ЗАТРАВКА',
     seed || '(нет)',
+    hidden ? `hiddenLayer:\n${hidden}` : '',
     '',
     'Вынеси в скрытый слой части затравки, которые не вошли в хронику.',
     'Если среди них есть самый главный — он обнажает первопричину и позволяет решать историю — это hiddenAnswer.',
@@ -209,6 +244,7 @@ export async function splitAssembledHidden({
   runtime,
   story,
   seed = '',
+  hiddenLayer = '',
   domain = null,
   gravity = null,
   config = null,
@@ -220,13 +256,14 @@ export async function splitAssembledHidden({
   const fromStory = splitChronicleHiddenLayer(story?.chronicle || '');
   const chronicle = fromStory.chronicle || String(story?.chronicle || '').trim();
   const seedText = String(seed || '').trim();
-  const leftover = leftoverSeedFacts(seedText, chronicle);
+  const hiddenText = String(hiddenLayer || '').trim();
+  const leftover = leftoverSeedFacts(seedText, chronicle, hiddenText);
   const base = {
     ...story,
     chronicle,
     synopsis: chronicle,
   };
-  if (!seedText) {
+  if (!seedText && !hiddenText) {
     return {
       ...base,
       hiddenAnswer: '',
@@ -293,7 +330,7 @@ export async function splitAssembledHidden({
     userMessages: [
       {
         role: 'user',
-        content: formatStoryForHiddenSplit(story, seedText, { gravity, config }),
+        content: formatStoryForHiddenSplit(story, seedText, { gravity, config, hiddenLayer: hiddenText }),
       },
     ],
   };
@@ -404,7 +441,7 @@ export async function constructFreeformStory({
             chronicle: {
               type: 'string',
               description:
-                'Стартовая хроника: наблюдаемое событие, обозначающее конфликт. Не обязательно вся затравка. Без блока «На самом деле:».',
+                'Стартовая хроника: наблюдаемое событие, обозначающее конфликт. Не обязательно вся затравка. Без скрытого слоя.',
             },
             cause: {
               type: 'string',
@@ -487,12 +524,13 @@ export async function assembleFreeformLabStory({
     requireMystery,
     log,
   });
-  const seed = candidateSeedText(candidate);
+  const seed = formatCandidateSeed(candidate);
   const story = constructed.card || fallbackAssembledStory(candidate);
   const layered = await splitAssembledHidden({
     runtime,
     story,
-    seed,
+    seed: candidateSeedText(candidate),
+    hiddenLayer: candidateHiddenLayer(candidate),
     domain,
     gravity,
     config,
