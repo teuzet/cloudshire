@@ -207,6 +207,11 @@ function renderPlot(plot, align = {}) {
     <h2 class="plot-title">${esc(plot.title)}</h2>
     ${axes ? `<p class="axes">${esc(axes)}</p>` : ''}
     <p class="meta">${esc(plot.synopsis || '')}</p>
+    ${
+      plot.seed
+        ? `<p class="muted"><strong>завязка.</strong></p><p class="meta">${esc(plot.seed)}</p>`
+        : ''
+    }
     ${plot.cause ? `<p class="muted"><strong>первопричина.</strong> ${esc(plot.cause)}</p>` : ''}
     <p class="muted">${[urgency, countdown, gravity, depth, fails, alignLine].filter(Boolean).join(' · ')}</p>
     ${endings ? `<h2>endings</h2><ul>${endings}</ul>` : ''}

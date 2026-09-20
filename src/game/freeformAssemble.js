@@ -1,5 +1,6 @@
 /**
- * Сборка freeform-карточки из прошедшей хроники: конструктор в городе.
+ * Сборка freeform-карточки из затравки: конструктор пишет стартовое наблюдаемое событие.
+ * Исходная завязка кладётся в seed; скрытый слой выносит hiddenSplit из того, что не вошло в хронику.
  * Концовки и urgency ставит лаборатория после посадки плота.
  */
 
@@ -109,15 +110,13 @@ export function fallbackAssembledStory(candidate) {
   const split = splitChronicleHiddenLayer(candidate?.chronicle || candidate?.text || candidate?.hook || '');
   const chronicle = split.chronicle;
   const title = keepStoryTitle(candidate?.title, chronicle) || 'История';
-  // В блоке «На самом деле:» разгадка идёт первой строкой, остальное — подступы.
-  const layer = keepSeedReveals(split.hiddenPremises);
   return {
     title,
     chronicle,
     synopsis: chronicle,
     cause: '',
-    hiddenAnswer: keepSeedAnswer(layer[0]),
-    hiddenPremises: layer.slice(1),
+    hiddenAnswer: '',
+    hiddenPremises: [],
   };
 }
 
@@ -127,18 +126,13 @@ export function normalizeAssembledStory(raw, candidate, maxChars = PLOT_SUMMARY_
   const chronicle = clipPlotText(split.chronicle || fallback.chronicle, maxChars);
   if (!chronicle) return null;
   const cause = clipPlotText(raw?.cause, PLOT_SUMMARY_MAX) || fallback.cause;
-  const answer = keepSeedAnswer(raw?.hiddenAnswer);
-  const hidden = uniqueHiddenLines([
-    ...(Array.isArray(raw?.hiddenPremises) ? raw.hiddenPremises : []),
-    ...split.hiddenPremises,
-  ]).filter((item) => item !== answer);
   return {
     title: keepStoryTitle(raw?.title, chronicle) || fallback.title || 'История',
     chronicle,
     synopsis: chronicle,
     cause,
-    hiddenAnswer: answer,
-    hiddenPremises: hidden,
+    hiddenAnswer: '',
+    hiddenPremises: [],
   };
 }
 
@@ -154,17 +148,6 @@ function uniqueHiddenLines(list) {
   return out;
 }
 
-export function collectAssembledHiddenLines(story, candidate) {
-  const fromStory = splitChronicleHiddenLayer(story?.chronicle || '');
-  const fromCandidate = splitChronicleHiddenLayer(candidate?.chronicle || candidate?.text || candidate?.hook || '');
-  return uniqueHiddenLines([
-    story?.hiddenAnswer,
-    ...(Array.isArray(story?.hiddenPremises) ? story.hiddenPremises : []),
-    ...fromStory.hiddenPremises,
-    ...fromCandidate.hiddenPremises,
-  ]);
-}
-
 export function heuristicHiddenSplit(lines) {
   const layer = uniqueHiddenLines(lines);
   const hiddenAnswer = keepSeedAnswer(layer[0]);
@@ -174,21 +157,20 @@ export function heuristicHiddenSplit(lines) {
   };
 }
 
-function formatHiddenBlob(lines) {
-  return uniqueHiddenLines(lines)
-    .map((item, i) => `${i + 1}. ${item}`)
-    .join('\n');
+export function candidateSeedText(candidate) {
+  return String(candidate?.chronicle || candidate?.text || candidate?.hook || '').trim();
 }
 
-function collectAssemblerHiddenDump(story) {
-  const fromStory = splitChronicleHiddenLayer(story?.chronicle || '');
-  return uniqueHiddenLines([
-    ...(Array.isArray(story?.hiddenPremises) ? story.hiddenPremises : []),
-    ...fromStory.hiddenPremises,
-  ]);
+export function leftoverSeedFacts(seed, chronicle) {
+  const fromSeed = splitChronicleHiddenLayer(seed);
+  const publicChronicle = splitChronicleHiddenLayer(chronicle).chronicle;
+  return uniqueHiddenLines(fromSeed.hiddenPremises).filter((item) => {
+    const folded = item.replace(/\s+/g, ' ').trim().toLowerCase();
+    return folded && !publicChronicle.toLowerCase().includes(folded);
+  });
 }
 
-function formatStoryForHiddenSplit(story, dump, { gravity, config } = {}) {
+function formatStoryForHiddenSplit(story, seed, { gravity, config } = {}) {
   const fromStory = splitChronicleHiddenLayer(story?.chronicle || '');
   const chronicle = fromStory.chronicle || String(story?.chronicle || '').trim();
   return [
@@ -197,10 +179,11 @@ function formatStoryForHiddenSplit(story, dump, { gravity, config } = {}) {
     story?.cause ? `Первопричина: ${story.cause}` : '',
     gravity != null ? formatFreeformGravityForPrompt(gravity, config) : '',
     '',
-    'СКРЫТЫЕ ФАКТЫ (сборщик уже вынес из наблюдаемого слоя):',
-    formatHiddenBlob(dump) || '(нет)',
+    'ЗАТРАВКА',
+    seed || '(нет)',
     '',
-    'Если среди скрытых фактов есть самый главный — он обнажает первопричину и позволяет решать историю — это hiddenAnswer.',
+    'Вынеси в скрытый слой части затравки, которые не вошли в хронику.',
+    'Если среди них есть самый главный — он обнажает первопричину и позволяет решать историю — это hiddenAnswer.',
     'Дальше сделай новый набор hiddenPremises: каждый намекает на эту разгадку или на способ её получить.',
     'Если главного факта нет — hiddenAnswer пустой, скрытые факты не переписывай в подступы.',
     'Новых тайн и фактов не выдумывай.',
@@ -221,10 +204,11 @@ function formatHiddenBrief(domain) {
     .join('\n');
 }
 
-/** Скрытый слой сборщика: разгадка, если она решает историю, и подступы к ней. */
+/** Скрытый слой: части затравки, которые не вошли в наблюдаемую хронику. */
 export async function splitAssembledHidden({
   runtime,
   story,
+  seed = '',
   domain = null,
   gravity = null,
   config = null,
@@ -235,22 +219,22 @@ export async function splitAssembledHidden({
   const log = (parentLog || getLogger()).child({ scope: 'freeform.hidden' });
   const fromStory = splitChronicleHiddenLayer(story?.chronicle || '');
   const chronicle = fromStory.chronicle || String(story?.chronicle || '').trim();
-  const dump = collectAssemblerHiddenDump(story);
-  const facts = uniqueHiddenLines([story?.hiddenAnswer, ...dump]);
+  const seedText = String(seed || '').trim();
+  const leftover = leftoverSeedFacts(seedText, chronicle);
   const base = {
     ...story,
     chronicle,
     synopsis: chronicle,
   };
-  if (!dump.length) {
+  if (!seedText) {
     return {
       ...base,
-      hiddenAnswer: keepSeedAnswer(story?.hiddenAnswer),
+      hiddenAnswer: '',
       hiddenPremises: [],
       prompt: '',
     };
   }
-  const fallback = heuristicHiddenSplit(facts);
+  const fallback = heuristicHiddenSplit(leftover);
   if (!runtime?.run) {
     return { ...base, ...fallback, prompt: '' };
   }
@@ -276,7 +260,7 @@ export async function splitAssembledHidden({
               type: 'array',
               items: { type: 'string' },
               description:
-                'Подступы: каждый намекает на hiddenAnswer или на способ его получить. Если разгадки нет — исходные скрытые факты.',
+                'Подступы: каждый намекает на hiddenAnswer или на способ его получить. Если разгадки нет — части затравки, не вошедшие в хронику.',
             },
           },
         },
@@ -291,7 +275,11 @@ export async function splitAssembledHidden({
           const hints = keepSeedReveals(args?.hiddenPremises).filter((item) => item !== hiddenAnswer);
           draft.submitted = true;
           draft.hiddenAnswer = hiddenAnswer;
-          draft.hiddenPremises = hiddenAnswer ? hints : dump.filter((item) => item !== hiddenAnswer);
+          draft.hiddenPremises = hiddenAnswer
+            ? hints
+            : leftover.length
+              ? leftover.filter((item) => item !== hiddenAnswer)
+              : hints;
           return { ok: true };
         },
       },
@@ -305,7 +293,7 @@ export async function splitAssembledHidden({
     userMessages: [
       {
         role: 'user',
-        content: formatStoryForHiddenSplit(story, facts, { gravity, config }),
+        content: formatStoryForHiddenSplit(story, seedText, { gravity, config }),
       },
     ],
   };
@@ -407,7 +395,7 @@ export async function constructFreeformStory({
     tools: [
       {
         name: 'submit_freeform_story',
-        description: 'Карточка истории: стартовая хроника в этом городе и скрытый слой.',
+        description: 'Карточка истории: стартовое наблюдаемое событие в этом городе.',
         parameters: {
           type: 'object',
           additionalProperties: false,
@@ -416,7 +404,7 @@ export async function constructFreeformStory({
             chronicle: {
               type: 'string',
               description:
-                'Стартовая хроника: наблюдаемый слой, посаженный в этот город. Без блока «На самом деле:».',
+                'Стартовая хроника: наблюдаемое событие, обозначающее конфликт. Не обязательно вся затравка. Без блока «На самом деле:».',
             },
             cause: {
               type: 'string',
@@ -425,11 +413,6 @@ export async function constructFreeformStory({
                 'Не спор сторон и не чьё-то упрямство: то, что останется, даже если все спорщики разойдутся.',
                 'Пример: «гон костоломов — сезонный цикл карьерных птиц, из-за которого нельзя работать в выработке».',
               ].join(' '),
-            },
-            hiddenPremises: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Истины из блока «На самом деле:», вынесенные из хроники. Отговорки не клади.',
             },
           },
         },
@@ -440,12 +423,6 @@ export async function constructFreeformStory({
             return toolFail(
               'no_cause',
               'Нужна cause: вещь или процесс в мире, из-за которого вопрос стоит. Не спор сторон.',
-            );
-          }
-          if (requireMystery && !collectAssembledHiddenLines(card, candidate).length) {
-            return toolFail(
-              'no_reveal',
-              'Нужна конкретная разгадка из блока «На самом деле:», не «неизвестно» и не «мнения расходятся».',
             );
           }
           draft.card = card;
@@ -466,16 +443,14 @@ export async function constructFreeformStory({
           '',
           formatBrainstormCandidateForPrompt(candidate, candidate?.index || 1),
           '',
-          'Собери из этой хроники историю в этом городе через submit_freeform_story.',
+          'Собери из этой затравки стартовое наблюдаемое событие в этом городе через submit_freeform_story.',
+          'Не обязательно раскрывать всю подноготную — достаточно обозначить конфликт.',
           'Имя истории ставится отдельно по готовой хронике; скрытый слой туда не попадает.',
           [
             'cause — первопричина: вещь или процесс в мире, из-за которого вопрос стоит.',
             'Проверь себя: если все спорщики разойдутся по домам, cause останется на месте.',
             'Разойдётся вместе с ними — значит это не первопричина, а спор.',
           ].join(' '),
-          requireMystery
-            ? 'Разгадка обязательна: перенеси блок «На самом деле:» в hiddenPremises, отговорки не клади.'
-            : 'Если есть блок «На самом деле:» — перенеси его в hiddenPremises, в хронику не пиши.',
         ]
           .filter(Boolean)
           .join('\n'),
@@ -512,10 +487,12 @@ export async function assembleFreeformLabStory({
     requireMystery,
     log,
   });
+  const seed = candidateSeedText(candidate);
   const story = constructed.card || fallbackAssembledStory(candidate);
   const layered = await splitAssembledHidden({
     runtime,
     story,
+    seed,
     domain,
     gravity,
     config,
@@ -524,7 +501,7 @@ export async function assembleFreeformLabStory({
     domainId: domain?.id,
   });
   if (requireMystery && !layered.hiddenAnswer) {
-    return { ...layered, hiddenAnswer: '', hiddenPremises: [], ok: false, error: 'no_reveal' };
+    return { ...layered, seed, hiddenAnswer: '', hiddenPremises: [], ok: false, error: 'no_reveal' };
   }
   const named = await nameAssembledStory({
     runtime,
@@ -535,6 +512,7 @@ export async function assembleFreeformLabStory({
   });
   return {
     ...layered,
+    seed,
     title: named.title || layered.title,
     gravity: parseFreeformGravity(gravity ?? candidate?.gravity),
     cause: layered.cause || '',

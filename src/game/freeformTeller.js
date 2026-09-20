@@ -123,7 +123,7 @@ async function constructBeat({ runtime, domain, world, plot, deed, blank, cfg, l
     log,
     scene: 'freeform_tell',
     domainId: domain?.id,
-    extraSystem: [cityStateForPrompt(domain, world), plotCardForPrompt(plot, { revealHidden: true })].join(
+    extraSystem: [cityStateForPrompt(domain, world), plotCardForPrompt(plot, { revealHidden: true, includeSeed: true })].join(
       '\n\n',
     ),
     userMessages: [
@@ -231,7 +231,7 @@ async function pickBeatBlank({
       drafts: retryDrafts,
       reviews: retryReviews,
       log,
-      extra: [plotCardForPrompt(plot, { revealHidden: true }), plotChronicleForPrompt(domain, plot)]
+      extra: [plotCardForPrompt(plot, { revealHidden: true, includeSeed: true }), plotChronicleForPrompt(domain, plot)]
         .filter(Boolean)
         .join('\n\n'),
     });

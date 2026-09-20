@@ -570,6 +570,7 @@ export function createFreeformPlot({ domain, world, variant, config, seedChronic
     type: 'story',
     hiddenPremises: variant.hiddenPremises,
     hiddenAnswer: variant.hiddenAnswer,
+    seed: variant.seed,
     urgency,
     gravity,
     depth: Math.max(0, Math.round(Number(variant.depth) || 0)),
@@ -633,13 +634,14 @@ export function cityStateForPrompt(domain, world, { officers = true, cast = fals
     .join('\n\n');
 }
 
-export function plotCardForPrompt(plot, { revealHidden = true } = {}) {
+export function plotCardForPrompt(plot, { revealHidden = true, includeSeed = false } = {}) {
   if (!plot) return '';
   const known = revealedPremises(plot);
   const solved = revealedAnswer(plot);
   const lines = [
     `История «${plot.title}».`,
     `Синопсис: ${plot.synopsis || '—'}`,
+    includeSeed && plot.seed ? `Завязка:\n${plot.seed}` : '',
     plot.cause ? `Первопричина: ${plot.cause}` : '',
     `Исходы:\n${formatFreeformEndings(plot) || formatCloseWhen(plot)}`,
     // Раскрытое городом — уже не тайна, а установленный факт: об этом можно
@@ -675,6 +677,7 @@ export function formatStoryForBeatArchitect(domain, plot) {
   return [
     plot.title ? `История «${plot.title}».` : 'История.',
     plot.synopsis || '',
+    plot.seed ? `Завязка:\n${plot.seed}` : '',
     plot.cause ? `Первопричина: ${plot.cause}` : '',
     plotChronicleForPrompt(domain, plot),
     solved ? `Город разгадал: ${solved}` : '',

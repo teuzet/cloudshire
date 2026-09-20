@@ -392,6 +392,8 @@ function storyActState(p = {}) {
       urgency: parseFreeformUrgency(p.urgency),
       gravity,
       countdown: parseStoryCountdown(p.countdown),
+      // Исходная завязка: полный текст посева. Не синопсис и не хроника.
+      seed: clipText(p.seed, PLOT_SUMMARY_MAX),
       // Первопричина живёт столько же, сколько нить: концовки обязаны снять
       // именно её, а не спор сторон вокруг неё.
       cause: clipText(p.cause, PLOT_SUMMARY_MAX),
@@ -781,6 +783,7 @@ export function createPlotline({
   maxDepth = null,
   hiddenPremises = [],
   hiddenAnswer = '',
+  seed = '',
   cause = '',
   countdown = null,
   config = null,
@@ -833,6 +836,7 @@ export function createPlotline({
       endings,
       hiddenPremises,
       hiddenAnswer,
+      seed,
       cause,
       countdown,
       shared,
@@ -1778,6 +1782,7 @@ export function stripPlotSecrets(plot) {
     resolutionFacts: _res,
     hiddenPremises: _hidden,
     hiddenAnswer: _answer,
+    seed: _seed,
     discoveryLadder: _ladder,
     closureGate: _gate,
     ...rest

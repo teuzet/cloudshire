@@ -165,6 +165,7 @@ function labPlot(plot) {
     ...publicPlot,
     hiddenAnswer: plot.hiddenAnswer || '',
     hiddenPremises: plot.hiddenPremises || [],
+    seed: plot.seed || '',
     closeWhen: Array.isArray(plot.closeWhen) ? plot.closeWhen : plot.closeWhen ? [plot.closeWhen] : [],
     endings: Array.isArray(plot.endings) ? plot.endings : [],
     urgency: plot.urgency || null,

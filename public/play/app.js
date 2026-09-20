@@ -646,6 +646,7 @@ function plotCard(p, names = {}) {
     `<article class="ins-card"><h4>${esc(p.title)}</h4>` +
     `<div class="muted small">${esc(meta)}</div>` +
     (p.synopsis ? `<p class="pre">${esc(p.synopsis)}</p>` : '') +
+    (p.seed ? `<p class="small muted">завязка:</p><p class="pre">${esc(p.seed)}</p>` : '') +
     (p.cause ? `<p class="small muted">первопричина: ${esc(p.cause)}</p>` : '') +
     facts.known +
     facts.hidden +

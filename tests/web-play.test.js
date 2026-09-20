@@ -85,6 +85,7 @@ function makeDomain() {
         kind: 'story',
         title: 'Гул колодца',
         synopsis: 'Вода поёт.',
+        seed: 'На площади нашли чужой сапог, и двор его держит.\nНа самом деле: под срубом чужая кладка.',
         cause: 'под срубом чужая кладка, и колодец держится на ней',
         gravity: 'CRISIS',
         depth: 1,
@@ -368,6 +369,7 @@ test('инспектор показывает и скрытое нависшее
     assert.equal(plot.canDrop, false, 'на нити живое дело — снимать нельзя');
     assert.equal(plot.hiddenAnswer, 'кладку клали не городские, а чужие');
     assert.deepEqual(plot.hiddenPremises, ['под срубом чужая кладка, не городская']);
+    assert.match(plot.seed, /чужой сапог/);
     assert.equal(plot.revealedAnswer, 'воду ведёт подземный ход за межой');
     assert.deepEqual(plot.revealedPremises, ['воду мутит не сруб, а подземный сток']);
     assert.equal(plot.discoveryLadder[0].promise, 'кто клал камень');
@@ -463,6 +465,7 @@ test('клиент рисует концовки списком с пометк�
     assert.match(js, /вопрос снят:/);
     assert.match(js, /теперь иначе:/);
     assert.match(js, /первопричина:/);
+    assert.match(js, /завязка:/);
     assert.doesNotMatch(js, /если не займутся:/);
     assert.match(js, /data-seed-form/);
     assert.match(js, /посеять с тайной/);

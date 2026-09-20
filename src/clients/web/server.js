@@ -78,6 +78,7 @@ function plotSecrets(plot) {
   return {
     hiddenAnswer: plot.hiddenAnswer || '',
     hiddenPremises: Array.isArray(plot.hiddenPremises) ? plot.hiddenPremises : [],
+    seed: plot.seed || '',
     discoveryLadder: Array.isArray(plot.discoveryLadder) ? plot.discoveryLadder : [],
     truth: plot.truth || null,
   };

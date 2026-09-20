@@ -46,6 +46,7 @@ import {
   keepStoryTitle,
   nameAssembledStory,
   heuristicHiddenSplit,
+  leftoverSeedFacts,
   splitAssembledHidden,
 } from '../src/game/freeformAssemble.js';
 import { plantStakedStory } from '../src/game/storyteller.js';
@@ -535,10 +536,11 @@ test('конфиг freeform читается из YAML', () => {
   assert.doesNotMatch(agents.freeformAssemble.instructions, /что ситуация сделает следующим/);
   assert.doesNotMatch(agents.freeformAssemble.instructions, /САНОВНИКИ НЕ ГЕРОИ|столпов не используй/i);
   assert.match(agents.freeformBrainstormJudge.instructions, /MYSTERY_CANDIDATE/);
-  assert.match(agents.freeformAssemble.instructions, /На самом деле/);
-  assert.match(agents.freeformAssemble.instructions, /неизвестно/);
   assert.match(agents.freeformAssemble.instructions, /наблюдаемый слой/);
+  assert.match(agents.freeformAssemble.instructions, /обозначить конфликт/);
   assert.match(agents.freeformAssemble.instructions, /не изменяй основы истории/);
+  assert.doesNotMatch(agents.freeformAssemble.instructions, /hiddenPremises/);
+  assert.doesNotMatch(agents.freeformAssemble.instructions, /На самом деле/);
   assert.doesNotMatch(agents.freeformAssemble.instructions, /claim_character/);
   assert.doesNotMatch(agents.freeformAssemble.instructions, /Не схлопывай цепочку/);
   assert.doesNotMatch(agents.freeformAssemble.instructions, /первая запись этой истории/);
@@ -550,6 +552,7 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformHiddenSplit.instructions, /submit_hidden_layer/);
   assert.match(agents.freeformHiddenSplit.instructions, /разгадываемую историю/);
   assert.match(agents.freeformHiddenSplit.instructions, /обнажает первопричину/);
+  assert.match(agents.freeformHiddenSplit.instructions, /не вошли в наблюдаемую хронику/);
   assert.match(agents.freeformHiddenSplit.instructions, /намекают на разгадку/);
   assert.doesNotMatch(agents.freeformHiddenSplit.instructions, /Не дописывай подступы/);
   assert.doesNotMatch(agents.freeformHiddenSplit.instructions, /cityBrief/);
@@ -2515,6 +2518,8 @@ test('отговорка не считается разгадкой', () => {
       'На склоне лежат круги.\nНа самом деле: неизвестно; садовники расходятся во мнениях.',
   });
   assert.deepEqual(hollow.hiddenPremises, []);
+  assert.equal(hollow.hiddenAnswer, '');
+  assert.equal(hollow.chronicle, 'На склоне лежат круги.');
 });
 
 test('живой посев бросает шанс тайны, явный флаг его перекрывает', async () => {
@@ -2580,9 +2585,12 @@ test('живой посев без флага и без выпавшего ша�
   assert.ok(extras.some((e) => e.agentId === 'freeformBrainstorm'));
   assert.equal(
     extras.some((e) => e.agentId === 'freeformHiddenSplit'),
-    false,
-    'пустой hiddenPremises сборщика не зовёт разрезчика',
+    true,
+    'после хроники разрезчик всегда видит seed',
   );
+  assert.match(planted.plot.seed, /мосток у межи/);
+  assert.match(planted.plot.synopsis, /мосток/);
+  assert.doesNotMatch(planted.plot.synopsis, /На самом деле/i);
   assert.ok(extras.some((e) => e.agentId === 'freeformEndings'));
   assert.ok(extras.some((e) => e.agentId === 'freeformUrgency'));
   assert.ok(extras.every((e) => e.domainId === 'domain_1'));
@@ -2638,6 +2646,8 @@ test('живой посев с выпавшей тайной просит раз
   assert.match(judge.extraSystem, /MYSTERY_PLAUSIBLE/);
   assert.equal(planted.requireMystery, true);
   assert.match(planted.plot.hiddenAnswer, /подпилил/);
+  assert.match(planted.plot.seed, /На самом деле: сосед подпилил/);
+  assert.doesNotMatch(planted.plot.synopsis, /подпилил/);
 });
 
 test('скрытый слой отрезается от наблюдаемой хроники', () => {
@@ -2651,7 +2661,15 @@ test('скрытый слой отрезается от наблюдаемой �
   });
   assert.doesNotMatch(fallback.chronicle, /На самом деле/i);
   assert.equal(fallback.whyMoves, undefined);
-  assert.match(fallback.hiddenAnswer, /не сапог/);
+  assert.equal(fallback.hiddenAnswer, '');
+  assert.deepEqual(fallback.hiddenPremises, []);
+  assert.deepEqual(
+    leftoverSeedFacts(
+      'Сапог лежит на площади и зовёт хозяина дворами.\nНа самом деле: это не сапог, а край.',
+      fallback.chronicle,
+    ),
+    ['это не сапог, а край.'],
+  );
   assert.deepEqual(
     heuristicHiddenSplit(['соль сыплется из разлома края.', 'двор видел расходную книгу деда']),
     {
@@ -2672,7 +2690,7 @@ test('скрытый слой отрезается от наблюдаемой �
   assert.equal(clampFreeformCountdown('x', 2), 2);
 });
 
-test('hiddenSplit не зовут при пустом слое; иначе организует разгадку и подступы', async () => {
+test('hiddenSplit не зовут без затравки; иначе выносит не вошедшее в хронику', async () => {
   let called = 0;
   const silentLog = { child: () => silentLog, info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
   const skipped = await splitAssembledHidden({
@@ -2685,7 +2703,6 @@ test('hiddenSplit не зовут при пустом слое; иначе ор�
     story: {
       chronicle: 'Двор чинит мосток у межи.',
       cause: 'Опоры сгнили от воды.',
-      hiddenPremises: [],
     },
     domain: { name: 'Грасток', cityBrief: 'ЦИСТЕРНЫ_МАРКЕР питают водосборы.' },
     log: silentLog,
@@ -2694,6 +2711,8 @@ test('hiddenSplit не зовут при пустом слое; иначе ор�
   assert.equal(skipped.hiddenAnswer, '');
   assert.deepEqual(skipped.hiddenPremises, []);
 
+  const seed =
+    'На площади Грастока двор держит сапог без пары.\nНа самом деле: Соль сыплется из разлома края, не из склада.\nСтарший видел расходную книгу деда.';
   const runtime = {
     assembleChat: (opts) => ({
       systemContent: String(opts.extraSystem || ''),
@@ -2705,6 +2724,7 @@ test('hiddenSplit не зовут при пустом слое; иначе ор�
       assert.match(asked, /Хроника:/);
       assert.match(asked, /площади Грастока/);
       assert.match(asked, /Первопричина:/);
+      assert.match(asked, /ЗАТРАВКА/);
       assert.match(asked, /разлома края/);
       assert.match(asked, /Соль сыплется/);
       assert.match(asked, /расходную книгу/);
@@ -2723,11 +2743,8 @@ test('hiddenSplit не зовут при пустом слое; иначе ор�
     story: {
       chronicle: 'На площади Грастока двор держит сапог без пары.',
       cause: 'Соль сыплется из разлома края, и двор не знает, чей это сапог.',
-      hiddenPremises: [
-        'Соль сыплется из разлома края, не из склада.',
-        'Старший видел расходную книгу деда.',
-      ],
     },
+    seed,
     domain: { name: 'Грасток', cityBrief: 'ЦИСТЕРНЫ_МАРКЕР питают водосборы.' },
     gravity: 'EPISODE',
     config: loadConfig(),
@@ -2750,8 +2767,8 @@ test('hiddenSplit не зовут при пустом слое; иначе ор�
     story: {
       chronicle: 'На площади лежит сапог.',
       cause: 'Край крошится.',
-      hiddenPremises: ['Соль сыплется из разлома края, не из склада.'],
     },
+    seed: 'На площади лежит сапог.\nНа самом деле: Соль сыплется из разлома края, не из склада.',
     log: silentLog,
   });
   assert.equal(keepDump.hiddenAnswer, '');
@@ -2804,17 +2821,18 @@ test('конструктор собирает хронику и hidden — бе�
         );
         assert.doesNotMatch(opts.extraSystem || '', /САНОВНИКИ НЕ ГЕРОИ/);
         assert.deepEqual(opts.tools[0].parameters.required, ['chronicle', 'cause']);
+        assert.equal(opts.tools[0].parameters.properties.hiddenPremises, undefined);
         assert.equal(opts.tools[0].parameters.properties.whyMoves, undefined);
         await tool.handler({
           chronicle: 'На площади Грастока двор держит сапог без пары.',
           cause: 'Соль сыплется из разлома края, и двор не знает, чей это сапог.',
-          hiddenPremises: ['Соль сыплется из разлома края, не из склада.', 'Старший видел расходную книгу деда.'],
         });
       } else if (opts.agentId === 'freeformHiddenSplit') {
         const asked = String(opts.userMessages?.[0]?.content || '');
         assert.match(asked, /Хроника:/);
         assert.match(asked, /площади Грастока/);
         assert.match(asked, /Первопричина:/);
+        assert.match(asked, /ЗАТРАВКА/);
         assert.match(asked, /разлома края/);
         assert.match(asked, /Соль сыплется/);
         assert.match(asked, /расходную книгу/);
@@ -2842,7 +2860,8 @@ test('конструктор собирает хронику и hidden — бе�
     world,
     candidate: {
       index: 1,
-      chronicle: 'Двор держит сапог.\nНа самом деле: соль сыплется из разлома края.',
+      chronicle:
+        'Двор держит сапог.\nНа самом деле: соль сыплется из разлома края.\nСтарший видел расходную книгу деда.',
       arena: 'HUMAN',
       worldRelation: 'NATIVE',
     },
@@ -2860,6 +2879,8 @@ test('конструктор собирает хронику и hidden — бе�
   assert.match(out.assemblePrompt, /submit_freeform_story/);
   assert.doesNotMatch(out.assemblePrompt, /whyMoves|что ситуация сделает следующим/);
   assert.match(out.assemblePrompt, /Первопричина/);
+  assert.match(out.assemblePrompt, /стартовое наблюдаемое событие/);
+  assert.doesNotMatch(out.assemblePrompt, /hiddenPremises/);
   assert.doesNotMatch(out.assemblePrompt, /claim_character/);
   assert.doesNotMatch(out.assemblePrompt, /Не схлопывай цепочку/);
   assert.doesNotMatch(out.assemblePrompt, /\bdepth\b|countdown|urgency/i);
@@ -2867,6 +2888,7 @@ test('конструктор собирает хронику и hidden — бе�
   assert.match(out.hiddenPrompt, /submit_hidden_layer/);
   assert.match(out.hiddenPrompt, /Хроника:/);
   assert.match(out.hiddenPrompt, /Первопричина:/);
+  assert.match(out.hiddenPrompt, /ЗАТРАВКА/);
   assert.match(out.hiddenPrompt, /ЦИСТЕРНЫ_МАРКЕР/);
   assert.doesNotMatch(out.hiddenPrompt, /cityBrief/i);
   assert.match(out.titlePrompt, /то, что город уже знает/);
@@ -2886,6 +2908,13 @@ test('конструктор собирает хронику и hidden — бе�
   assert.equal(plot.countdown, null);
   assert.equal(plot.whyMoves, undefined);
   assert.equal(plot.cause, out.cause, 'первопричина живёт на нити, а не только в сборке');
+  assert.equal(plot.seed, out.seed);
+  assert.match(plot.seed, /На самом деле: соль сыплется/);
+  assert.equal(plot.synopsis, out.chronicle);
+  assert.doesNotMatch(plot.synopsis, /На самом деле/i);
+  assert.doesNotMatch(plotCardForPrompt(plot), /Завязка:/);
+  assert.match(plotCardForPrompt(plot, { includeSeed: true }), /Завязка:/);
+  assert.match(plotCardForPrompt(plot, { includeSeed: true }), /соль сыплется/);
   assert.equal(plot.arena, undefined);
   assert.equal(plot.hook, undefined);
   assert.equal(plot.conflict, undefined);
@@ -2893,6 +2922,27 @@ test('конструктор собирает хронику и hidden — бе�
   assert.equal(plot.maxDepth, 2);
   assert.equal(plot.maxFails, 1);
   assert.equal(formatFreeformDepth(plot), 'глубина 0/2');
+  const held = { plotlines: [{ ...plot }] };
+  normalizePlotlines(held);
+  assert.equal(held.plotlines[0].seed, plot.seed);
+  const payload = sessionPayload({
+    mode: 'story',
+    cityName: 'Грасток',
+    world: { tickIndex: 1, gameDate: { year: 1, month: 1 } },
+    domain: { name: 'Грасток', lore: [], plotlines: [plot] },
+    plotId: plot.id,
+  });
+  assert.match(payload.plot.seed, /соль сыплется/);
+  assert.equal(payload.plot.synopsis, plot.synopsis);
+});
+
+test('сборщик не пишет hidden, разрезчик берёт остаток затравки', () => {
+  const agents = loadConfig().agents;
+  assert.match(agents.freeformAssemble.instructions, /обозначить конфликт/);
+  assert.doesNotMatch(agents.freeformAssemble.instructions, /hiddenPremises/);
+  assert.doesNotMatch(agents.freeformAssemble.instructions, /На самом деле/);
+  assert.match(agents.freeformHiddenSplit.instructions, /не вошли в наблюдаемую хронику/);
+  assert.match(agents.freeformHiddenSplit.instructions, /submit_hidden_layer/);
 });
 
 test('системный пакет архитекторов без cityBrief', () => {
