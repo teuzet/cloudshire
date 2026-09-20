@@ -1049,6 +1049,28 @@ export function createWebServer({ config, app, runtime, storage }) {
         }
       });
 
+      server.post('/api/play/notify-chronicle', async (req, res) => {
+        try {
+          const userId = String(req.body?.userId || 'local-user');
+          const result = await app.notifyPlayChronicle(userId, {
+            factId: req.body?.factId,
+          });
+          if (!result.ok) {
+            const status =
+              result.error === 'ticking'
+                ? 409
+                : result.error === 'not_found' || result.error === 'no_domain'
+                  ? 404
+                  : 400;
+            return res.status(status).json(result);
+          }
+          res.json(result);
+        } catch (err) {
+          req.log?.error('http.error', { error: err.message, stack: err.stack });
+          res.status(500).json({ error: err.message });
+        }
+      });
+
       server.post('/api/play/drop-story', async (req, res) => {
         try {
           const userId = String(req.body?.userId || 'local-user');

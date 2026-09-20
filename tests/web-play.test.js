@@ -10,6 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createWebServer } from '../src/clients/web/server.js';
 import { dropPlayStory } from '../src/game/playDev.js';
+import { GameApp } from '../src/game/app.js';
 
 const config = {
   web: { play: true, admin: false },
@@ -242,6 +243,11 @@ function makeApp(calls = [], hooks = {}) {
       if (hooks.forcePlayDeed) return hooks.forcePlayDeed(userId, opts);
       return { ok: true, processId: opts.processId, finish: opts.finish, summary: 'Укрепить колодец', closed: false };
     },
+    notifyPlayChronicle: async (userId, opts) => {
+      calls.push({ kind: 'notify-chronicle', userId, ...opts });
+      if (hooks.notifyPlayChronicle) return hooks.notifyPlayChronicle(userId, opts);
+      return { ok: true, factId: opts.factId, plotId: 'plot_well', occasion: 'дело' };
+    },
     setClockHeld: async (held) => {
       calls.push({ kind: 'clock', held });
       if (hooks.world) hooks.world.clockHeldAt = held ? Date.now() : null;
@@ -377,6 +383,7 @@ test('инспектор показывает и скрытое нависшее
       plot.chronicles.map((e) => e.text),
       ['Колодец загудел в ночь.'],
     );
+    assert.equal(plot.chronicles[0].id, 'lore_1');
     const closed = data.domain.closedPlotlines[0];
     assert.equal(closed.title, 'Сухая межа');
     assert.deepEqual(closed.hiddenPremises, ['ветер с края сдул посев']);
@@ -473,6 +480,9 @@ test('клиент рисует концовки списком с пометк�
     assert.match(js, /data-drop/);
     assert.match(js, /data-fire-threat/);
     assert.match(js, /data-finish/);
+    assert.match(js, /data-notify-chronicle/);
+    assert.match(js, /\/api\/play\/notify-chronicle/);
+    assert.match(js, />оповестить</);
     assert.match(js, /на самом деле:/);
     assert.match(js, /город выяснил:/);
     assert.match(js, /разгадка:/);
@@ -662,6 +672,12 @@ test('без playDev посев и снятие не торчат', async () => 
         body: JSON.stringify({ userId: 'local-user', processId: 'act_1', finish: 'ok' }),
       });
       assert.equal(deed.status, 404);
+      const notify = await fetch(`${base}/api/play/notify-chronicle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: 'local-user', factId: 'lore_1' }),
+      });
+      assert.equal(notify.status, 404);
       const clock = await fetch(`${base}/api/play/clock`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -700,12 +716,20 @@ test('кнопки инспектора срабатывают угрозу и �
       });
       assert.equal(deed.status, 200);
       assert.equal((await deed.json()).finish, 'crit');
+
+      const notify = await fetch(`${base}/api/play/notify-chronicle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: 'local-user', factId: 'lore_1' }),
+      });
+      assert.equal(notify.status, 200);
+      assert.equal((await notify.json()).factId, 'lore_1');
     },
     { calls },
   );
   assert.deepEqual(
     calls.map((c) => c.kind),
-    ['force-threat', 'force-deed'],
+    ['force-threat', 'force-deed', 'notify-chronicle'],
   );
   assert.equal(calls[0].threatId, 'thr_hidden');
   assert.equal(calls[1].finish, 'crit');
@@ -806,5 +830,33 @@ test('загрузка снимка во время шага времени от
     },
     { hooks: { ticking: true } },
   );
+});
+
+test('оповещение хроники кладёт речь жреца в чат и не трогает статы', async () => {
+  const domain = makeDomain();
+  const world = makeWorld();
+  world.jobs = [];
+  const storage = makeStorage(domain, world);
+  const app = new GameApp({
+    config,
+    storage,
+    runtime: {
+      assembleChat: () => ({ systemContent: '', userContent: '' }),
+      async run() {
+        return { text: 'Колодец гудел всю ночь, покровитель. Город это слышал.' };
+      },
+    },
+  });
+  const result = await app.notifyPlayChronicle('local-user', { factId: 'lore_1' });
+  assert.equal(result.ok, true);
+  assert.equal(result.factId, 'lore_1');
+  assert.equal(result.plotId, 'plot_well');
+  assert.equal(result.occasion, 'дело');
+  const last = domain.characters[0].dialogHistory.at(-1);
+  assert.equal(last.role, 'assistant');
+  assert.equal(last.kind, 'event');
+  assert.match(last.content, /Колодец гудел всю ночь/);
+  assert.equal(domain.stats.prosperity, 55);
+  assert.equal(domain.stats.security, 40);
 });
 

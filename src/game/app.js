@@ -78,7 +78,7 @@ import {
   mergeWorldJobs,
 } from './scheduler.js';
 import { syncWorldClock } from './gameClock.js';
-import { formatBoardForSpeech, findPlotline } from './plotlines.js';
+import { formatBoardForSpeech, findPlotline, findClosedPlotline } from './plotlines.js';
 import { plantStakedStory } from './storyteller.js';
 import { ensurePlotObligations, fireThreatEvent, resolveDeedEvent, cancelDeedJobs } from './worldLoop.js';
 import { deliverEvent, settleEvents } from './dayLoop.js';
@@ -168,6 +168,37 @@ function stripSpeakerPrefix(text, characterName) {
   return t.trim();
 }
 
+function findPlayLoreFact({ domain, conflux, partner }, factId) {
+  const id = String(factId || '');
+  if (!id) return null;
+  for (const lore of [domain?.lore, conflux?.lore, partner?.lore]) {
+    const hit = (lore || []).find((f) => String(f.id) === id);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function findPlayPlot({ domain, conflux, partner }, plotId) {
+  const id = String(plotId || '');
+  if (!id) return null;
+  return (
+    findPlotline(domain, id) ||
+    findClosedPlotline(domain, id) ||
+    (partner ? findPlotline(partner, id) || findClosedPlotline(partner, id) : null) ||
+    (conflux?.plotlines || []).find((p) => String(p.id) === id) ||
+    (conflux?.closedPlotlines || []).find((p) => String(p.id) === id) ||
+    null
+  );
+}
+
+function occasionFromChronicleFact(fact) {
+  const author = String(fact?.author || '');
+  const tags = fact?.tags || [];
+  if (author.includes('seed') || tags.includes('opening')) return 'новая история';
+  if (author.includes('threat') || tags.includes('threat')) return 'угроза';
+  if (fact?.processFinish) return 'развязка';
+  return 'дело';
+}
 
 export class GameApp {
   constructor({ config, storage, runtime }) {
@@ -1540,19 +1571,22 @@ export class GameApp {
     try {
       const result = await run({ uid, world, domain, conflux, partner, day, log });
       if (!result?.ok) return result;
-      const { event, ...publicResult } = result;
+      const { event, settle = true, ...publicResult } = result;
       if (event && !event.skipped) {
         // Порядок как в дневном цикле: последствия сначала, речь жреца потом —
         // иначе жрец говорит о городе, статы и синопсис которого ещё не сдвинулись.
-        await settleEvents({
-          config: this.config,
-          runtime: this.runtime,
-          domain,
-          world,
-          events: [event],
-          day,
-          log,
-        });
+        // Повтор оповещения уже записанной хроники settle не зовёт: статы уже стоят.
+        if (settle) {
+          await settleEvents({
+            config: this.config,
+            runtime: this.runtime,
+            domain,
+            world,
+            events: [event],
+            day,
+            log,
+          });
+        }
         await deliverEvent({
           config: this.config,
           runtime: this.runtime,
@@ -1658,6 +1692,36 @@ export class GameApp {
         closed: Boolean(event.closed),
         occasion: event.occasion || 'угроза',
         event,
+      };
+    });
+  }
+
+  /** Тестовый клиент: жрец рассказывает уже записанную хронику в чат. */
+  async notifyPlayChronicle(userId, { factId } = {}) {
+    const id = String(factId || '').trim();
+    if (!id) return { ok: false, error: 'not_found', message: 'не указана запись хроники' };
+    return this.runPlayForce(userId, async ({ domain, conflux, partner, log }) => {
+      const fact = findPlayLoreFact({ domain, conflux, partner }, id);
+      if (!fact || !(fact.tags || []).includes('chronicle')) {
+        return { ok: false, error: 'not_found', message: 'такой записи хроники нет' };
+      }
+      const plotId = String(fact.sourcePlotId || fact.relatedPlotlineIds?.[0] || '').trim() || null;
+      const plot = plotId ? findPlayPlot({ domain, conflux, partner }, plotId) : null;
+      const occasion = occasionFromChronicleFact(fact);
+      log.info('play.chronicle_notify', { factId: fact.id, plotId, occasion });
+      return {
+        ok: true,
+        factId: fact.id,
+        plotId,
+        occasion,
+        settle: false,
+        event: {
+          fact,
+          plot: plot || null,
+          plotId,
+          occasion,
+          closed: Boolean(plot?.status === 'closed' || plot?.closeReason),
+        },
       };
     });
   }

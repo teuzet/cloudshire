@@ -561,16 +561,23 @@ function endingsBlock(p) {
   return `${happened}<p class="small muted">закроется, когда:</p><ul class="small endings">${rows}</ul>`;
 }
 
+function chronicleNotifyBtn(id) {
+  if (!canDev || !id) return '';
+  return `<button type="button" class="force-btn" data-notify-chronicle="${esc(id)}">оповестить</button>`;
+}
+
 function plotChroniclesBlock(p) {
   const list = p.chronicles || [];
   if (!list.length) return '<p class="small muted">хроники этой нити нет</p>';
   const rows = list
     .map((e) => {
       const meta = [e.gameDateLabel, e.importance, e.author].filter(Boolean).join(' · ');
+      const notify = chronicleNotifyBtn(e.id);
       return (
         `<li>` +
         (meta ? `<div class="muted small">${esc(meta)}</div>` : '') +
         `<div class="pre">${esc(e.text)}</div>` +
+        (notify ? `<div class="row-actions">${notify}</div>` : '') +
         `</li>`
       );
     })
@@ -984,9 +991,12 @@ function renderChronicleTab(d) {
         const meta = [e.gameDateLabel, e.importance, e.author, stats, ...links]
           .filter(Boolean)
           .join(' · ');
+        const notify = chronicleNotifyBtn(e.id);
         return (
           `<article class="ins-card"><div class="muted small">${esc(meta)}</div>` +
-          `<p class="pre">${esc(e.text)}</p></article>`
+          `<p class="pre">${esc(e.text)}</p>` +
+          (notify ? `<div class="row-actions">${notify}</div>` : '') +
+          `</article>`
         );
       })
       .join(''),
@@ -1154,6 +1164,25 @@ $('inspectBody').addEventListener('click', async (e) => {
       await refresh({ force: true });
     } catch (err) {
       fire.disabled = false;
+      setBanner(err.message);
+    }
+    return;
+  }
+  const notify = e.target.closest('[data-notify-chronicle]');
+  if (notify) {
+    const factId = notify.getAttribute('data-notify-chronicle');
+    notify.disabled = true;
+    setBanner('Жрец рассказывает запись…');
+    try {
+      await api('/api/play/notify-chronicle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, factId }),
+      });
+      setBanner('Жрец рассказал о записи в чат.');
+      await refresh({ force: true });
+    } catch (err) {
+      notify.disabled = false;
       setBanner(err.message);
     }
     return;

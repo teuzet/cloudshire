@@ -395,7 +395,7 @@ export function formatBrainstormCandidateForPrompt(candidate, index, { includeAu
     `=== Кандидат ${n || '?'} ===`,
     axes ? `оси: ${axes}` : null,
     includeAuthor && candidate.authorName ? `автор: ${candidate.authorName}` : null,
-    chronicle ? `хроника: ${chronicle}` : null,
+    chronicle ? `Описание истории: ${chronicle}` : null,
     hiddenLayer ? `hiddenLayer: ${hiddenLayer}` : null,
   ]
     .filter(Boolean)
