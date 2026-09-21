@@ -1,17 +1,15 @@
 /**
- * Тулы жреца: чтение города, дела, постоянный порядок, ломастер, память.
+ * Тулы жреца: дела, постоянный порядок, лормастер, память.
+ * Состояние города собирает readDomainBrief и кладётся в блок хода, отдельного тула нет.
  * Вызываются из GameApp.runRuler; submit_reply собирается отдельно.
  *
  * Месяцев здесь нет. Дело живёт в игровых днях, а наружу отдаются полосы:
  * жрец не знает точного срока и потому не может его пообещать.
  */
 
-import { formatCastForPrompt, applyPatronName } from './models.js';
+import { formatCastForPrompt, chronicleEntries, formatChroniclePriestMark } from './models.js';
 import {
   qualitativePopulation,
-  qualitativeStatsBrief,
-  formatRulerAttitudes,
-  adjustAttitude,
   normalizeRulerAttitudes,
 } from './stats.js';
 import { askLoremaster } from './loremaster.js';
@@ -34,10 +32,8 @@ import {
 import {
   DURATION_SPEC,
   DIFFICULTY_SPEC,
-  deedBeatsThreat,
   normalizeDurationBand,
   normalizeDifficultyBand,
-  remainingBand,
   durationBandIndex,
   difficultyBandIndex,
 } from './bands.js';
@@ -45,7 +41,6 @@ import { paceLabel, normalizePaceShift } from './deedMath.js';
 import {
   applyPace,
   deedRemainingBand,
-  deedRemainingDays,
   deedElapsedDays,
   normalizeDeed,
   pauseDeedClock,
@@ -55,12 +50,6 @@ import {
 import { judgeDeed } from './deedJudge.js';
 import { scheduleDeedJob, cancelDeedJobs } from './worldLoop.js';
 import {
-  knownThreatsForSpeech,
-  liveThreats,
-  nearestKnownDanger,
-  remainingDays as threatRemainingDays,
-} from './threats.js';
-import {
   cityRules,
   isRuleDeed,
   markRuleDeed,
@@ -69,15 +58,7 @@ import {
   proxyText,
   setProxyText,
 } from './cityRules.js';
-import { applyPriestNotifyChange, notifySettings, setQuietHours } from './notify.js';
 import { holdPassageShut } from './passage.js';
-import {
-  MAX_PRIEST_ORDERS,
-  addPriestOrder,
-  findPriestOrder,
-  priestOrders,
-  removePriestOrder,
-} from './priestOrders.js';
 import {
   normalizeDomainProcesses,
   normalizeProcess,
@@ -108,12 +89,13 @@ import {
   isStakedStory,
   isErrandPlot,
   isConfluxPlot,
-  plotTypeOf,
-  plotHasLiveProcess,
 } from './plotlines.js';
 import {
-  formatOfficersForPrompt,
   findOfficer,
+  listOfficers,
+  officeById,
+  officeStrategy,
+  formatAxesForSpeech,
   pickRandomFreeOfficer,
   bindOfficerProcess,
   releaseOfficerProcess,
@@ -130,8 +112,8 @@ import {
   detachProcessFromPlots,
 } from './plotEngine.js';
 import { judgeProcessAlignment, engagementOf, engagementAttends } from './plotAlign.js';
-import { speechHintsHidden } from './premises.js';
-import { writeRulerMemory, forgetRulerMemory } from './rulerMemory.js';
+import { stableCityProse, formatCityModifiersForPrompt } from './cityContext.js';
+import { writeRulerMemory, forgetRulerMemory, formatRulerVoiceForPrompt } from './rulerMemory.js';
 import { toolFail } from '../agents/toolResult.js';
 
 /** Полоса срока словами — единственное, что жрец знает о времени дела. */
@@ -192,19 +174,6 @@ function paceHint(action, note = null) {
   return `${span}${reason} ${tail}`;
 }
 
-/** Успевает ли дело к сроку известной беды — повод жрецу поправить покровителя. */
-function threatTimingHint(plot, action, day) {
-  const soonest = nearestKnownDanger(plot, day);
-  if (!soonest) return '';
-  const left = threatRemainingDays(soonest, day);
-  if (deedBeatsThreat(deedRemainingDays(action, day), left)) return '';
-  return (
-    ` Осторожно: до «${soonest.text}» остаётся ${DURATION_SPEC[normalizeDurationBand(remainingBand(left))].label},` +
-    ` а работы тут на ${bandWord(action?.durationBand)}. Скажи прямо, что столько времени нет,` +
-    ' и предложи то, что успеет.'
-  );
-}
-
 function syncErrandFromProcess(domain, action) {
   const plot = findPlotline(domain, action.plotlineId);
   if (!plot || !isErrandPlot(plot)) return;
@@ -249,14 +218,220 @@ function queueAttachHint(domain, plot, action) {
   );
 }
 
+function deedsTiedToPlot(actions, plot) {
+  const ids = new Set((plot?.relatedProcessIds || []).map(String));
+  const pid = String(plot?.id || '');
+  return (actions || []).filter(
+    (action) => ids.has(String(action.id)) || (pid && String(action.plotlineId || '') === pid),
+  );
+}
+
+function deedPhrase(action, day) {
+  const remaining = DURATION_SPEC[deedRemainingBand(action, day)].label;
+  const pace = paceLabel(action.paceShift);
+  const hard = DIFFICULTY_SPEC[normalizeDifficultyBand(action.difficulty)].label;
+  const moved = processIsFresh(action, day) ? 'ещё не сдвинулось' : 'уже идёт';
+  const hurry =
+    normalizePaceShift(action.paceShift) === 0
+      ? 'темп ещё можно сдвинуть один раз'
+      : 'темп уже задан, второй раз не сдвинуть';
+  const blessed = action.blessed ? ' Покровитель это дело благословил.' : '';
+  const started =
+    action.initiative === 'ruler'
+      ? ' Ты завёл это сам, пока покровитель молчал.'
+      : action.initiative === 'officer'
+        ? ' Сановник начал это сам, пока покровитель молчал.'
+        : '';
+  return `«${action.summary}» (id ${action.id}): ждать ещё ${remaining}, трудность ${hard}, темп ${pace}, ${moved}, ${hurry}.${blessed}${started}`;
+}
+
+function officerDeedShownOnStory(deedId, plots) {
+  const id = String(deedId || '');
+  if (!id) return false;
+  return (plots || []).some((plot) => (plot.deeds || []).some((action) => String(action.id) === id));
+}
+
+function uniqueDeeds(actions) {
+  const seen = new Set();
+  const out = [];
+  for (const action of actions || []) {
+    const id = String(action?.id || '');
+    if (id && seen.has(id)) continue;
+    if (id) seen.add(id);
+    out.push(action);
+  }
+  return out;
+}
+
+/**
+ * Сборка состояния города, которую раньше отдавал тул read_domain_brief.
+ * Жрецу этот тул больше не регистрируется: текст хода строится отсюда.
+ */
+export function readDomainBrief(domain, character, ctx = {}) {
+  const config = ctx.config;
+  const partner = ctx.partner || null;
+  const day = Number.isFinite(Number(ctx.day))
+    ? Math.max(0, Math.round(Number(ctx.day)))
+    : Math.max(0, Math.round(Number(ctx.world?.dayIndex) || 0));
+  if (character) normalizeRulerAttitudes(character);
+  normalizeDomainProcesses(domain, config);
+  const ownActive = activeProcesses(domain, config);
+  const paused = pausedProcesses(domain, config);
+  const partnerActive = (partner?.state?.pendingActions || []).filter(
+    (action) => action && (!action.status || action.status === 'active'),
+  );
+  const plots = plotsForPriest(domain.plotlines, { partner }).map((plot) => {
+    const host = String(plot.hostDomainId || domain.id);
+    return {
+      id: plot.id,
+      foreign: Boolean(partner && host === String(partner.id)),
+      synopsis: String(plot.synopsis || '').trim(),
+      deeds: uniqueDeeds(
+        deedsTiedToPlot(ownActive, plot).concat(deedsTiedToPlot(partnerActive, plot)),
+      ),
+      pausedHere: deedsTiedToPlot(paused, plot).length > 0,
+    };
+  });
+  const people = formatCastForPrompt(domain.lore, { limit: 20 });
+  return {
+    name: domain.name,
+    status: domain.status,
+    day,
+    dateLabel: ctx.world?.gameDate?.label || '',
+    patronName: domain.state?.patronName || null,
+    patronGender: domain.state?.patronGender || null,
+    populationFeel: qualitativePopulation(domain.population || 0),
+    knownPeople: people === '(названных людей пока нет)' ? '' : people,
+    plots,
+    officers: listOfficers(domain).map((officer) => {
+      const def = officeById(config, officer.office);
+      const duty = officerActiveProcess(domain, officer);
+      const onStory = duty ? officerDeedShownOnStory(duty.id, plots) : false;
+      return {
+        title: officer.title,
+        name: officer.name,
+        gender: officer.gender,
+        nature: String(officer.nature || '').trim() || formatAxesForSpeech(officer.axes, config),
+        strategy: officeStrategy(officer, config),
+        focus: String(def?.focus || '').trim(),
+        deed: duty && !onStory ? duty : null,
+        busyOnStory: Boolean(duty && onStory),
+      };
+    }),
+    paused,
+    recentlyClosed: recentlyClosedProcesses(domain, ctx.world?.tickIndex, { day }).filter(
+      (action) => action.status !== 'paused',
+    ),
+    proxyText: proxyText(domain) || '',
+    modifiers: formatCityModifiersForPrompt(domain),
+  };
+}
+
+function storyParagraph(plot, day) {
+  const kind = plot.foreign ? 'История соседа' : 'Своя история';
+  const now = plot.synopsis || 'только началось';
+  const parts = [`[${plot.id}] ${kind}. Сейчас: ${now}`];
+  if (plot.deeds?.length) {
+    parts.push(`По этой истории идёт ${plot.deeds.map((action) => deedPhrase(action, day)).join(' ')}`);
+  } else if (plot.pausedHere) {
+    parts.push('Дело по этой истории на паузе.');
+  } else {
+    parts.push('Поручения по этой истории нет.');
+  }
+  return parts.join(' ');
+}
+
+function officerParagraph(officer, day) {
+  const sex =
+    officer.gender === 'female' ? 'женщина' : officer.gender === 'male' ? 'мужчина' : 'пол не задан';
+  const free = officer.gender === 'female' ? 'Сейчас свободна.' : 'Сейчас свободен.';
+  let duty = free;
+  if (officer.deed) duty = `Сейчас ведёт ${deedPhrase(officer.deed, day)}`;
+  else if (officer.busyOnStory) duty = 'Сейчас занят делом, оно написано при истории.';
+  return [
+    `${officer.title} ${officer.name}, ${sex}.`,
+    officer.nature ? `Нрав: ${officer.nature}.` : '',
+    officer.strategy ? `Как действует: ${officer.strategy}` : '',
+    officer.focus ? `Ведает: ${officer.focus}.` : '',
+    duty,
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+function pausedParagraph(action, day) {
+  const where = action.plotlineId ? `, история ${action.plotlineId}` : '';
+  return `«${action.summary}» (id ${action.id}${where}), осталось ${DURATION_SPEC[deedRemainingBand(action, day)].label}.`;
+}
+
+const PRIEST_CHRONICLE_LIMIT = 10;
+
+function recentChronicleParagraph(domain) {
+  const rows = chronicleEntries(domain?.lore).slice(-PRIEST_CHRONICLE_LIMIT);
+  if (!rows.length) return 'НЕДАВНЯЯ ХРОНИКА: записей ещё нет.';
+  const body = rows
+    .map((entry) => {
+      const date = entry.gameDateLabel || 'без даты';
+      const text = String(entry.text || '').trim();
+      return `${date}: ${text}${formatChroniclePriestMark(entry)}`;
+    })
+    .join('\n\n');
+  return `НЕДАВНЯЯ ХРОНИКА\n${body}`;
+}
+
+/**
+ * Блок хода жреца. stable — текст города, его ставят сразу после инструкций.
+ * dynamic — всё, что меняется чаще.
+ */
+export function formatPriestTurn(domain, character, ctx = {}) {
+  const brief = readDomainBrief(domain, character, ctx);
+  const stable = `ГОРОД\n${stableCityProse(domain)}`;
+  const patronGenderWord =
+    brief.patronGender === 'female' ? 'женщина' : brief.patronGender === 'male' ? 'мужчина' : '';
+  const patronLine = brief.patronName
+    ? `Имя покровителя: «${brief.patronName}»${patronGenderWord ? `, пол: ${patronGenderWord}` : ''}. Обращайся только так.`
+    : 'Имя покровителя ещё не названо.';
+  const stories = brief.plots.length
+    ? brief.plots.map((plot) => storyParagraph(plot, brief.day)).join('\n\n')
+    : 'Живых историй нет.';
+  const officers = brief.officers.length
+    ? brief.officers.map((officer) => officerParagraph(officer, brief.day)).join('\n\n')
+    : 'Сановников нет.';
+  const paused = brief.paused.length
+    ? `НА ПАУЗЕ\n${brief.paused.map((action) => pausedParagraph(action, brief.day)).join('\n')}`
+    : '';
+  const closed = brief.recentlyClosed.length
+    ? `НЕДАВНО ЗАКРЫТЫЕ ДЕЛА\n${brief.recentlyClosed
+        .map((action) => `«${action.summary}» — ${action.outcome}.`)
+        .join('\n')}`
+    : '';
+  const proxy = brief.proxyText ? `ДОВЕРЕННОСТЬ\n${brief.proxyText}` : '';
+  const people = brief.knownPeople ? `ИЗВЕСТНЫЕ ЛЮДИ\n${brief.knownPeople}` : '';
+  const dynamic = [
+    formatRulerVoiceForPrompt(domain, { writable: true }),
+    brief.dateLabel ? `ДАТА СЕЙЧАС: ${brief.dateLabel}.` : '',
+    patronLine,
+    `Население: ${brief.populationFeel}`,
+    brief.modifiers,
+    `ЖИВЫЕ ИСТОРИИ\n${stories}`,
+    `САНОВНИКИ\n${officers}`,
+    paused,
+    closed,
+    proxy,
+    people,
+    recentChronicleParagraph(domain),
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+  return { stable, dynamic, brief };
+}
+
 export function rulerReplyCommitError({
   requestKind,
   commitment,
-  text = '',
   okTools = new Set(),
 } = {}) {
   const succeeded = (...names) => names.some((n) => okTools.has(n));
-  const asked = /[?]/.test(String(text || ''));
   if (commitment === 'process' && !succeeded('declare_process', 'update_process')) {
     return {
       error: 'process_missing',
@@ -307,14 +482,6 @@ export function rulerReplyCommitError({
           'Для беседы и вопросов — commitment=none.',
       };
     }
-    if (!asked) {
-      return {
-        error: 'clarify_no_question',
-        message:
-          'commitment=clarify: в речи должен быть вопрос покровителю (со знаком вопроса). ' +
-          'Не додумывай недостающее и не обещай, что дело уже начато.',
-      };
-    }
     return null;
   }
   if (requestKind === 'order_long' && commitment === 'none') {
@@ -337,27 +504,15 @@ export function rulerReplyCommitError({
         'Сцену, будто это происходит, не отыгрывай.',
     };
   }
-  if (requestKind === 'question' && questionLooksUnanswered(text)) {
-    return {
-      error: 'question_unanswered',
-      message:
-        'Покровитель спросил — ответь на вопрос из того, что городу уже известно (хроника, бриф, предыдущая речь). ' +
-        'Не подменяй ответ «я услышал / приказа не было» и не проси новый приказ. commitment=none.',
-    };
-  }
   return null;
 }
 
-export function questionLooksUnanswered(text) {
-  const t = String(text || '').replace(/\s+/g, ' ').trim();
-  if (!t) return true;
-  return (
-    /(услышал[аи]? тебя|слово принято).{0,120}(нового приказа|не отдавал|поручения не отдал)/i.test(t) ||
-    /нового приказа.{0,40}не отдавал/i.test(t)
-  );
+/** Латиница и десятичные цифры в речи жреца. Кириллица и знаки проходят. */
+export function replyHasLatinOrDigits(text) {
+  return /[A-Za-z0-9]/.test(String(text || ''));
 }
 
-export function submitReplyTool(turn, character, { plots = [], userText = '' } = {}) {
+export function submitReplyTool(turn, character) {
   return {
     name: 'submit_reply',
     description:
@@ -417,23 +572,21 @@ export function submitReplyTool(turn, character, { plots = [], userText = '' } =
     },
     handler: async ({ text, requestKind, commitment, touchedPlotIds, dayNote }) => {
       const body = String(text || '').trim();
-      if (body.length < 2) {
-        return toolFail('too_short', 'Речь пустая. Напиши ответ покровителю в text.');
+      if (!body) {
+        return toolFail('empty', 'Речь пустая. Напиши ответ покровителю в text.');
+      }
+      if (replyHasLatinOrDigits(body)) {
+        return toolFail(
+          'latin_or_digits',
+          'В речи только кириллица и знаки. Латиницу и цифры убери.',
+        );
       }
       const commitErr = rulerReplyCommitError({
         requestKind,
         commitment,
-        text: body,
         okTools: turn.okTools,
       });
       if (commitErr) return toolFail(commitErr.error, commitErr.message);
-      if ((plots || []).some((p) => speechHintsHidden(p, body, { alreadySaid: userText }))) {
-        return toolFail(
-          'hidden_leak',
-          'В речи проступила скрытая причина живой истории. Скажи только уже видимое городу. ' +
-            'Неизвестную причину не называй даже отрицанием и не перечисляй, чего именно не нашли.',
-        );
-      }
       turn.reply = body;
       turn.meta = {
         requestKind,
@@ -470,167 +623,24 @@ export function buildRulerTools(domain, storage, character, ctx) {
 
   return [
     {
-      name: 'read_domain_brief',
-      description:
-        'Состояние города: население, статы (эпитеты), идущие дела, постоянный порядок, нити и нависшее. ' +
-        'Нужен и для «как дела», и для «что ты решил / какие приказы действуют».',
-      parameters: { type: 'object', properties: {} },
-      handler: async () => ({
-        ok: true,
-        name: domain.name,
-        status: domain.status,
-        patronName: domain.state?.patronName || null,
-        populationFeel: qualitativePopulation(domain.population || 0),
-        conditionFeel: qualitativeStatsBrief(domain.stats || {}, ctx.config),
-        attitudes: formatRulerAttitudes(character, ctx.config),
-        // Без каста правитель не знает своих же людей и додумывает за них.
-        knownPeople: formatCastForPrompt(domain.lore, { limit: 20 }),
-        officers: formatOfficersForPrompt(domain, ctx.config),
-        processes: activeProcesses(domain, ctx.config).map((a) => ({
-          id: a.id,
-          summary: a.summary,
-          detail: a.detail,
-          goal: a.goal || null,
-          // Полосы, не числа: точного срока жрец не знает и обещать его не может.
-          remaining: DURATION_SPEC[deedRemainingBand(a, day)].label,
-          duration: DURATION_SPEC[normalizeDurationBand(a.durationBand)].label,
-          difficulty: DIFFICULTY_SPEC[normalizeDifficultyBand(a.difficulty)].label,
-          pace: paceLabel(a.paceShift),
-          linkedStats: a.linkedStats,
-          initiative: a.initiative || 'patron',
-          fresh: processIsFresh(a, day),
-          // Ускорять второй раз нельзя: сказал «быстрее» — быстрее уже некуда.
-          canHurry: normalizePaceShift(a.paceShift) === 0,
-          rule: a.ruleText ? parseRuleAction(a.ruleAction) : null,
-          blessed: Boolean(a.blessed),
-          intel: Boolean(a.intel),
-        })),
-        pausedProcesses: pausedProcesses(domain, ctx.config).map((a) => ({
-          id: a.id,
-          summary: a.summary,
-          remaining: DURATION_SPEC[deedRemainingBand(a, day)].label,
-          detail: a.detail,
-        })),
-        recentlyClosed: recentlyClosedProcesses(domain, world?.tickIndex, { day }),
-        processSlots: canStartProcess(domain, ctx.config),
-        plots: plotsForPriest(domain.plotlines, { partner: ctx.partner }).map((p) => ({
-          id: p.id,
-          title: p.title,
-          type: plotTypeOf(p),
-          hasProcess: plotHasLiveProcess(domain, p) || Boolean(ctx.partner && plotHasLiveProcess(ctx.partner, p)),
-          shared: Boolean(p.shared),
-          // Нависшее, о чём город знает: формулировка и полоса остатка, без дней.
-          threats: knownThreatsForSpeech(p, day).map((t) => ({
-            kind: t.kind,
-            text: t.text,
-            remaining: DURATION_SPEC[normalizeDurationBand(t.remainingBand)].label,
-            ending: t.endingText || null,
-          })),
-          foreign: Boolean(ctx.partner && String(p.hostDomainId || domain.id) === String(ctx.partner.id)),
-        })),
-        standingRules: cityRules(domain).map((m) => ({ id: m.id, text: m.text, since: m.sinceLabel })),
-        proxyText: proxyText(domain) || null,
-      }),
-    },
-    !domain.state?.patronName && {
-      name: 'set_patron_name',
-      description:
-        'Запомнить имя/обращение к божеству-покровителю. Только если имени ещё нет.',
-      parameters: {
-        type: 'object',
-        required: ['name'],
-        properties: {
-          name: {
-            type: 'string',
-            description: 'Имя или культовый титул обращения к покровителю',
-          },
-        },
-      },
-      handler: async ({ name }) => {
-        const result = applyPatronName(domain, name, { world, allowReplace: false });
-        if (result.error === 'too_short') {
-          return toolFail(
-            'too_short',
-            'Имя покровителя слишком короткое. Передай нормальное имя или титул (от 2 символов).',
-          );
-        }
-        if (result.error === 'locked') {
-          return toolFail(
-            'locked',
-            `Имя уже дано: «${result.patronName}». Его нельзя сменить.`,
-            { patronName: result.patronName },
-          );
-        }
-        await save();
-        return {
-          ok: true,
-          patronName: result.patronName,
-          previous: result.previous,
-          hint: `Дальше обращайся только так: «${result.patronName}».`,
-        };
-      },
-    },
-    {
-      name: 'adjust_loyalty',
-      description:
-        'Изменить лояльность к покровителю (−25…+25). Милость, доверие, общая цель → вверх; насмешка, унижение слуги, бессмысленная жестокость → вниз.',
-      parameters: {
-        type: 'object',
-        required: ['delta'],
-        properties: {
-          delta: { type: 'number', description: 'Обычно ±5…15 за заметный жест' },
-          reason: { type: 'string' },
-        },
-      },
-      handler: async ({ delta, reason }) => {
-        const result = adjustAttitude(character, 'loyalty', delta);
-        if (!result.ok) return result;
-        await save();
-        return {
-          ...result,
-          reason: reason || null,
-          feel: formatRulerAttitudes(character, ctx.config),
-        };
-      },
-    },
-    {
-      name: 'adjust_terror',
-      description:
-        'Изменить ужас/благоговение перед покровителем (−25…+25). Явление силы, угроза, чудо → вверх; панибратство, бессилие божества → вниз.',
-      parameters: {
-        type: 'object',
-        required: ['delta'],
-        properties: {
-          delta: { type: 'number', description: 'Обычно ±5…15 за заметный жест' },
-          reason: { type: 'string' },
-        },
-      },
-      handler: async ({ delta, reason }) => {
-        const result = adjustAttitude(character, 'terror', delta);
-        if (!result.ok) return result;
-        await save();
-        return {
-          ...result,
-          reason: reason || null,
-          feel: formatRulerAttitudes(character, ctx.config),
-        };
-      },
-    },
-    {
       name: 'consult_loremaster',
       description:
+        'Только если этой конкретики нет в блоке хода. Если ответ из него выводится целиком — не вызывай. ' +
+        'Один фактический вопрос о том, что есть, что произошло, кто, где и как устроен этот мир. ' +
+        'Не просьба выбрать действие, оценить волю покровителя или разобрать предположение. ' +
         'Справка о фактах мира: имена, места, устройство города, прошлое, уже установленный канон. ' +
         'Если вопрос про идущую историю — передай plotId этой нити: лормастер увидит её канон и сможет дописать детали, не ломая повествование. ' +
         'Закрытую или сыгранную нить не передавай — тогда он читает только хронику. ' +
         'Канонические неизвестности из брифа и скрытое открытой нити он не раскрывает; соседние бытовые пробелы может установить.',
       parameters: {
         type: 'object',
-        required: ['questions'],
+        required: ['question'],
         properties: {
-          questions: {
-            type: 'array',
-            items: { type: 'string' },
-            description: '1–5 конкретных вопросов',
+          question: {
+            type: 'string',
+            description:
+              'Один вопрос о факте этого мира: что есть, что произошло, кто, где, как устроено. ' +
+              'Не выбор действия, не оценка воли покровителя и не разбор предположения.',
           },
           plotId: {
             type: 'string',
@@ -639,13 +649,15 @@ export function buildRulerTools(domain, storage, character, ctx) {
           },
         },
       },
-      handler: async ({ questions, plotId }) => {
+      handler: async ({ question, plotId }) => {
+        const q = String(question || '').trim();
+        if (!q) return toolFail('empty_question', 'Нужен один фактический вопрос в поле question.');
         const result = await askLoremaster({
           config: ctx.config,
           runtime: ctx.runtime,
           storage,
           domain,
-          questions: questions || [],
+          questions: [q],
           asker: `ruler:${character.name}`,
           plotId: plotId || null,
           conflux: ctx.conflux || null,
@@ -1120,7 +1132,6 @@ export function buildRulerTools(domain, storage, character, ctx) {
             ruleWarn +
             impossibleWarn +
             ' Не говори «уже сделали» и не рапортуй механику: весть об исходе принесёшь сам, когда работа кончится.' +
-            threatTimingHint(plot, action, day) +
             queueAttachHint(domain, plot, action);
         return {
           ok: true,
@@ -1350,7 +1361,6 @@ export function buildRulerTools(domain, storage, character, ctx) {
             ? unrelatedAttachHint(paceHint(action))
             : `${mode}. ${paceHint(action)}` +
               ' В речи не обещай, что уже сделано: весть об исходе принесёшь сам.' +
-              threatTimingHint(plot, action, day) +
               queueAttachHint(domain, plot, action),
         };
       },
@@ -1516,154 +1526,6 @@ export function buildRulerTools(domain, storage, character, ctx) {
         if (!result.ok) return { ok: false, error: result.error };
         await save();
         return { ok: true };
-      },
-    },
-    {
-      name: 'set_notify',
-      description:
-        'Как часто и о чём беспокоить покровителя вестями. Хроника пишется всегда и полностью — ' +
-        'это только про то, когда трогать его самого. Полную тишину ставит только он сам, руками.',
-      parameters: {
-        type: 'object',
-        properties: {
-          intensity: {
-            type: 'string',
-            enum: ['всё', 'важное'],
-            description:
-              '«всё» — говорить про каждое событие; «важное» — только про беды, концовки и новые истории. ' +
-              'Ниже «важного» ты опустить не можешь.',
-          },
-          triggers: {
-            type: 'object',
-            description:
-              'Точечные просьбы: { newStory, threatSurfaced, deedDone, deedFailed, errandDone, plotClosed, priestReport, conflux } — ' +
-              'true говорить, false молчать. О сработавшей беде и о враждебном действии соседа ты молчать не вправе.',
-          },
-          detail: {
-            type: 'string',
-            enum: ['коротко', 'обычно', 'подробно'],
-            description: 'Насколько длинно рассказывать.',
-          },
-          ask: { type: 'boolean', description: 'Заканчивать вести вопросом, что делать.' },
-        },
-      },
-      handler: async ({ intensity = null, triggers = null, detail = null, ask = null }) => {
-        const style = {};
-        if (detail) style.detail = detail;
-        if (ask != null) style.ask = ask;
-        const notify = applyPriestNotifyChange(domain, {
-          intensity,
-          triggers,
-          style: Object.keys(style).length ? style : null,
-        });
-        await save();
-        return {
-          ok: true,
-          notify,
-          hint:
-            'В речи: как теперь будешь беспокоить покровителя. Полей движка не называй. ' +
-            'Если он просил замолчать совсем — скажи, что о настоящей беде всё равно доложишь.',
-        };
-      },
-    },
-    {
-      name: 'set_quiet_hours',
-      description:
-        'Тихие часы покровителя: в это время сопряжение по возможности не назначают и телефон молчит. ' +
-        'fromHour и toHour — часы 0–23 в зоне tz (IANA, например Europe/Moscow).',
-      parameters: {
-        type: 'object',
-        properties: {
-          fromHour: { type: 'number' },
-          toHour: { type: 'number' },
-          tz: { type: 'string' },
-        },
-      },
-      handler: async ({ fromHour = null, toHour = null, tz = null }) => {
-        const quiet = setQuietHours(domain, { fromHour, toHour, tz });
-        await save();
-        return { ok: true, quiet, hint: 'В речи: в какие часы не беспокоить. Без механики.' };
-      },
-    },
-    {
-      name: 'read_notify',
-      description: 'Как сейчас настроены вести покровителю. Для вопроса «о чём ты мне пишешь».',
-      parameters: { type: 'object', properties: {} },
-      handler: async () => ({
-        ok: true,
-        notify: notifySettings(domain),
-        reportSubjects: priestOrders(domain).map((o) => ({ id: o.id, subject: o.subject })),
-      }),
-    },
-    {
-      name: 'add_report_subject',
-      description:
-        'Покровитель велел держать его в курсе чего-то определённого («как идут дела в порту»). ' +
-        'Это не расписание: тему ты поднимешь попутно, когда в следующий раз будешь писать о случившемся.',
-      parameters: {
-        type: 'object',
-        required: ['subject'],
-        properties: {
-          subject: {
-            type: 'string',
-            description: 'О чём докладывать, словами покровителя: «как идут дела в порту».',
-          },
-        },
-      },
-      handler: async ({ subject }) => {
-        const res = addPriestOrder(domain, { subject, day });
-        if (!res.ok && res.error === 'too_many') {
-          return {
-            ok: false,
-            error: 'too_many',
-            limit: MAX_PRIEST_ORDERS,
-            subjects: priestOrders(domain).map((o) => ({ id: o.id, subject: o.subject })),
-            hint:
-              'Больше тем ты не удержишь. Скажи покровителю, о чём уже докладываешь, ' +
-              'и спроси, что из этого снять.',
-          };
-        }
-        if (!res.ok && res.error === 'duplicate') {
-          return {
-            ok: true,
-            subject: res.order.subject,
-            hint: 'Такой наказ у тебя уже есть — просто подтверди, что помнишь о нём.',
-          };
-        }
-        if (!res.ok) return { ok: false, error: res.error };
-        await save();
-        return {
-          ok: true,
-          subject: res.order.subject,
-          hint:
-            'В речи: запомнил и будешь поминать. Не обещай срок и не называй расписания — ' +
-            'ты поднимешь тему, когда в следующий раз будешь писать о случившемся.',
-        };
-      },
-    },
-    {
-      name: 'drop_report_subject',
-      description: 'Покровитель больше не хочет слышать про эту тему. Ищи по словам наказа или по id.',
-      parameters: {
-        type: 'object',
-        properties: {
-          subject: { type: 'string', description: 'Слова наказа, как их помнит покровитель.' },
-          orderId: { type: 'string' },
-        },
-      },
-      handler: async ({ subject = '', orderId = '' }) => {
-        const found = findPriestOrder(domain, { orderId, subject });
-        if (!found) {
-          return {
-            ok: false,
-            error: 'not_found',
-            subjects: priestOrders(domain).map((o) => ({ id: o.id, subject: o.subject })),
-            hint: 'Такого наказа нет. Переспроси, что именно снять.',
-          };
-        }
-        removePriestOrder(domain, found.id);
-        await save();
-        return { ok: true, subject: found.subject, hint: 'В речи: больше про это не поминаешь.' };
       },
     },
   ].filter(Boolean);

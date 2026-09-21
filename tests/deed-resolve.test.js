@@ -345,19 +345,19 @@ test('RELEVANT без угрозы вовсе не падает', () => {
 
 // ──────────────────── каскад крита на RELEVANT ────────────────────
 
-test('крит сначала открывает скрытую угрозу', () => {
+test('крит даёт передышку другой угрозе и не открывает её', () => {
   const p = plot({ gravity: 'RUPTURE' });
   const target = threat(p);
-  const hidden = threat(p, { known: false, text: 'фундамент садится' });
+  const other = threat(p, { text: 'фундамент садится' });
   const res = applyDeedToPlot({
     plot: p,
     process: deed('RELEVANT', { threatId: target.id }),
     finish: 'crit',
     day: 5,
   });
-  assert.equal(res.cascade.step, 'reveal');
-  assert.equal(res.cascade.threatId, hidden.id);
-  assert.equal(hidden.known, true);
+  assert.equal(res.cascade.step, 'reprieve');
+  assert.equal(res.cascade.threatId, other.id);
+  assert.equal(other.known, undefined);
 });
 
 test('если скрытых нет — другая угроза получает передышку', () => {
@@ -403,12 +403,13 @@ test('когда дать нечего — крит добавляет немн�
 test('каскад срабатывает ровно один раз', () => {
   const p = plot({ gravity: 'RUPTURE', failCount: 1 });
   const target = threat(p);
-  const hidden = threat(p, { known: false });
+  const first = threat(p, { day: 0, total: 80 });
   const other = threat(p, { day: 0, total: 60 });
   const res = critCascade(p, target, { day: 0 });
-  assert.equal(res.step, 'reveal');
-  assert.equal(hidden.known, true);
-  assert.equal(other.dueDay, 60, 'передышки не было');
+  assert.equal(res.step, 'reprieve');
+  assert.equal(res.threatId, first.id);
+  assert.equal(first.dueDay, 120);
+  assert.equal(other.dueDay, 60, 'второй беде передышки не было');
   assert.equal(p.failCount, 1, 'жизнь не вернулась');
   assert.equal(p.depth, 0);
 });

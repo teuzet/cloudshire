@@ -40,6 +40,7 @@ import { paceLabel } from '../../game/deedMath.js';
 import { blessManaCost } from '../../game/mana.js';
 import { liveThreats, remainingDays as threatRemainingDays } from '../../game/threats.js';
 import { priestOrders } from '../../game/priestOrders.js';
+import { visibleDialogHistory } from '../../game/memory.js';
 import { notifySettings } from '../../game/notify.js';
 import { canDropPlayStory } from '../../game/playDev.js';
 import { mountFreeformLab } from './freeformLab.js';
@@ -114,8 +115,8 @@ function inspectPlotChronicles(plot, lore) {
 }
 
 /**
- * Нить для инспектора. Здесь, в отличие от речи жреца, видно всё нависшее —
- * включая то, о чём город ещё не знает: иначе отлаживать угрозы нечем.
+ * Нить для инспектора. Речь жреца нависшее не видит; здесь сроки видны,
+ * иначе отлаживать часы угроз нечем.
  * Скрытый слой и хроника нити тоже здесь: иначе нечем проследить, как она шла.
  */
 function inspectPlot(plot, day, lore = []) {
@@ -131,7 +132,6 @@ function inspectPlot(plot, day, lore = []) {
       stage: t.stage || null,
       remainingPct: t.remainingPct ?? null,
       outcome: t.outcome,
-      known: Boolean(t.known),
       totalDays: t.totalDays,
       remainingDays: threatRemainingDays(t, day),
     })),
@@ -628,7 +628,7 @@ export function createWebServer({ config, app, runtime, storage }) {
         const source = domain
           ? character?.dialogHistory || []
           : (await storage.getUserBinding(userId))?.onboarding?.messages || [];
-        const history = source.slice(-40).map((m) => ({
+        const history = visibleDialogHistory(source).slice(-40).map((m) => ({
           role: m.role,
           content: m.content,
           kind: m.kind || (domain ? null : 'onboarding'),
@@ -1145,7 +1145,13 @@ export function createWebServer({ config, app, runtime, storage }) {
     try {
       const domain = await app.inspectDomain(req.params.id);
       if (!domain) return res.status(404).json({ error: 'not found' });
-      res.json(domain);
+      res.json({
+        ...domain,
+        characters: (domain.characters || []).map((ch) => ({
+          ...ch,
+          dialogHistory: visibleDialogHistory(ch.dialogHistory),
+        })),
+      });
     } catch (err) {
       req.log?.error('http.error', { error: err.message });
       res.status(500).json({ error: err.message });

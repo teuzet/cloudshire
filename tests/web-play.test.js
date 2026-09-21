@@ -365,12 +365,13 @@ test('инспектор показывает и скрытое нависшее
     const data = await get(base, '/api/play/inspect?userId=local-user');
     const plot = data.domain.plotlines[0];
     assert.deepEqual(
-      plot.threats.map((t) => [t.text, t.known, t.remainingDays]),
+      plot.threats.map((t) => [t.text, t.remainingDays]),
       [
-        ['Колодец обвалится', true, 5],
-        ['Вода уйдёт совсем', false, 65],
+        ['Колодец обвалится', 5],
+        ['Вода уйдёт совсем', 65],
       ],
     );
+    assert.equal('known' in plot.threats[0], false);
     assert.equal(plot.depth, 1);
     assert.equal(plot.canDrop, false, 'на нити живое дело — снимать нельзя');
     assert.equal(plot.hiddenAnswer, 'кладку клали не городские, а чужие');

@@ -501,8 +501,7 @@ function plotCard(p) {
   ]
     .filter(Boolean)
     .join(' · ');
-  // Нависшее целиком, включая скрытое: админка — единственное место,
-  // где счётчики угроз видно как есть.
+  // Нависшее целиком: админка — место, где счётчики угроз видно как есть.
   const threats = (p.threats || [])
     .filter((t) => !t.status || t.status === 'live')
     .map(
@@ -516,7 +515,6 @@ function plotCard(p) {
                 : t.remainingPct != null
                   ? `${t.remainingPct}%`
                   : 'угроза',
-            t.known ? 'город знает' : 'скрыто',
             `${t.totalDays ?? '?'} дн.`,
           ]
             .filter(Boolean)

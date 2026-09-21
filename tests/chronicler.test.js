@@ -86,14 +86,16 @@ test('закрывшее историю дело получает право н�
   assert.doesNotMatch(lines, /История не закрыта/);
 });
 
-test('снятая беда идёт в запись предотвращённой, а не случившейся', () => {
+test('снятая беда в запись текстом не попадает', () => {
   const lines = deedConsequenceLines({
     plot: plot(),
     applied: { alignment: 'RELEVANT', finish: 'ok' },
-    threat: { id: 't1', known: true, text: 'Известковая пыль забьёт водосборный сток' },
+    threat: { id: 't1', text: 'Известковая пыль забьёт водосборный сток' },
   }).join('\n');
-  assert.match(lines, /Нависшее снято/);
-  assert.match(lines, /как случившуюся не пиши/);
+  assert.match(lines, /которой город не видел/);
+  assert.match(lines, /город этого не знает/);
+  assert.doesNotMatch(lines, /Известковая пыль/);
+  assert.doesNotMatch(lines, /Нависшее снято/);
 });
 
 test('снятая беда, которой город не видел, в запись текстом не попадает', () => {

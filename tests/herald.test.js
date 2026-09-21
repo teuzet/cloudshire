@@ -126,32 +126,47 @@ test('в контекст идёт короткий хвост разговор�
   assert.equal(chat.at(-2).role, 'покровитель');
 });
 
-test('карточка нити отдаёт полосы и работу, но не сроки в днях', () => {
+test('старт острова не попадает в хвост разговора жреца', () => {
+  const chat = recentChat(
+    domain({
+      dialogue: [
+        { role: 'assistant', kind: 'island_reveal', content: 'Остров «Варскен» готов.' },
+        { role: 'assistant', content: 'Елмир: Пока назову тех, кто держит город: Маршал Нела.' },
+        { role: 'user', content: 'что с зерном?' },
+        { role: 'assistant', content: 'Зерно держат отдельно.' },
+      ],
+    }),
+  );
+  assert.deepEqual(
+    chat.map((m) => m.text),
+    ['что с зерном?', 'Зерно держат отдельно.'],
+  );
+});
+
+test('карточка нити отдаёт полосы и работу, но не сроки и не текст беды', () => {
   const p = plot();
-  threat(p, { total: 12, known: true, text: 'обвал' });
-  threat(p, { total: 200, known: false });
+  threat(p, { total: 12, text: 'обвал' });
+  threat(p, { total: 200, text: 'просадка' });
   const card = threadCard(p, 0);
   assert.equal(card.livesLeft, 2);
   assert.equal(card.workLeft, 1.8);
-  assert.deepEqual(card.knownThreats.map((t) => t.remainingBand), ['DAYS']);
+  assert.equal(card.knownThreats, undefined);
   assert.equal(card.dread, undefined);
   const json = JSON.stringify(card);
   assert.ok(!json.includes('dueDay'));
   assert.ok(!json.includes('maxDepth'));
+  assert.ok(!json.includes('обвал'));
+  assert.ok(!json.includes('просадка'));
 });
 
-test('жрец может противопоставить срочное и медленное', () => {
+test('жрец не видит нависшие беды и их сроки', () => {
   const p = plot({ gravity: 'RUPTURE' });
-  threat(p, { total: 10, known: true, text: 'обвал крыла' });
-  threat(p, { total: 200, known: true, text: 'просадка фундамента' });
-  const card = threadCard(p, 0);
-  assert.deepEqual(
-    card.knownThreats.map((t) => [t.text, t.remainingBand]),
-    [
-      ['обвал крыла', 'DAYS'],
-      ['просадка фундамента', 'YEAR'],
-    ],
-  );
+  threat(p, { total: 10, text: 'обвал крыла' });
+  threat(p, { total: 200, text: 'просадка фундамента' });
+  const text = formatHeraldPrompt(buildHeraldContext({ domain: domain(), plot: p, day: 0 }));
+  assert.doesNotMatch(text, /обвал крыла/);
+  assert.doesNotMatch(text, /просадка фундамента/);
+  assert.doesNotMatch(text, /Город знает о нависшем/);
 });
 
 test('промпт несёт повод, событие, нить и одну просьбу', () => {
@@ -175,7 +190,7 @@ test('промпт несёт повод, событие, нить и одну �
   assert.match(text, /ПОВОД: дело/);
   assert.match(text, /каменщики закрепили опору/);
   assert.match(text, /Трещина в опорном столбе/);
-  assert.match(text, /обвал северного крыла/);
+  assert.doesNotMatch(text, /обвал северного крыла/);
   assert.match(text, /подпорки поставлены/);
   assert.match(text, /покровитель: что там со столбом\?/);
   assert.match(text, /покровитель не любит длинных писем/);
@@ -277,7 +292,7 @@ test('карточка закрытой нити не отдаёт ни жизн
   assert.equal(card.closed, true);
   assert.equal(card.livesLeft, null);
   assert.equal(card.workLeft, null);
-  assert.deepEqual(card.knownThreats, []);
+  assert.equal(card.knownThreats, undefined);
   assert.equal(card.dread, undefined);
 });
 

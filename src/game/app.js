@@ -3,17 +3,9 @@ import {
   chronicleEntries,
   formatChroniclePriestMark,
   normalizeDomain,
-  formatCastForPrompt,
-  firstMentionHintForSpeech,
   inferRulerGender,
 } from './models.js';
-import {
-  qualitativePopulation,
-  qualitativeStatsBrief,
-  statEpithetsShort,
-  formatRulerAttitudes,
-  normalizeRulerAttitudes,
-} from './stats.js';
+import { normalizeRulerAttitudes } from './stats.js';
 import { noteRulerActivity } from './activity.js';
 import { confluxConfig, daysUntilDock, remainingDockDays } from './confluxTime.js';
 import { findActiveConfluxForDomain, formatContactForPrompt } from './conflux.js';
@@ -78,7 +70,7 @@ import {
   mergeWorldJobs,
 } from './scheduler.js';
 import { syncWorldClock } from './gameClock.js';
-import { formatBoardForSpeech, findPlotline, findClosedPlotline } from './plotlines.js';
+import { findPlotline, findClosedPlotline } from './plotlines.js';
 import { plantStakedStory } from './storyteller.js';
 import { ensurePlotObligations, fireThreatEvent, resolveDeedEvent, cancelDeedJobs } from './worldLoop.js';
 import { deliverEvent, settleEvents } from './dayLoop.js';
@@ -100,7 +92,6 @@ import { islandDeleteCheck } from '../clients/telegram/access.js';
 import { generateIslandImage, removeIslandImage } from './islandImage.js';
 import { generateOfficerPortraits, removeOfficerPortraits } from './officerImage.js';
 import { generateDomain } from './genesis.js';
-import { formatOfficersForPrompt } from './officers.js';
 import { formatIslandReveal } from './islandReveal.js';
 import { formatProgressBar, genesisTutorialText } from './progressBar.js';
 import { genesisDateMessage } from './tickClock.js';
@@ -115,7 +106,7 @@ import { clearPatronPresenceAsked } from './steward.js';
 import { getLogger, truncate, setLoggerWorldId } from '../log.js';
 import { initUsageRecording } from '../llm/usage.js';
 import { purgeDomainMedia } from '../storage/r2.js';
-import { buildRulerTools, submitReplyTool } from './rulerTools.js';
+import { buildRulerTools, submitReplyTool, formatPriestTurn } from './rulerTools.js';
 export { rulerReplyCommitError } from './rulerTools.js';
 
 /** Недавняя запись расстыковки из хроники домена (если есть). */
@@ -137,7 +128,7 @@ function looksLikeToolDump(text) {
   if (!t.trim()) return false;
   if (/tools\.\w+/i.test(t)) return true;
   if (/天天送json|комментary|commentary\s+json/i.test(t)) return true;
-  if (/declare_action|declare_process|consult_loremaster|set_patron_name|read_domain_brief|set_proxy/i.test(t) && /\{/.test(t)) {
+  if (/declare_action|declare_process|consult_loremaster|set_proxy/i.test(t) && /\{/.test(t)) {
     return true;
   }
   if (/"summary"\s*:/.test(t) && (/"durationMonths"\s*:/.test(t) || /"expectedMonths"\s*:/.test(t))) return true;
@@ -494,7 +485,6 @@ export class GameApp {
 
         await pushProgress(5, 'остров готов');
         const reveal = formatIslandReveal(domain);
-        await this.persistDialog(domain, 'assistant', reveal, { kind: 'island_reveal' });
         await this.emitOutbound(uid, reveal, {
           channel,
           agent: 'onboarding',
@@ -504,7 +494,6 @@ export class GameApp {
           photoPath: picture?.abs || null,
         });
         const dateNote = genesisDateMessage(await this.storage.getWorld());
-        await this.persistDialog(domain, 'assistant', dateNote, { kind: 'game_date' });
         await this.emitOutbound(uid, dateNote, {
           channel,
           agent: 'onboarding',
@@ -518,19 +507,6 @@ export class GameApp {
           domainId: domain.id,
           kind: 'game_start',
         });
-        const officerIntro = domain._officerIntro;
-        if (officerIntro) {
-          const officerLine = officerIntro.startsWith(domain.characters[0].name)
-            ? officerIntro
-            : `${domain.characters[0].name}: ${officerIntro}`;
-          await this.persistDialog(domain, 'assistant', officerLine);
-          await this.emitOutbound(uid, officerLine, {
-            channel,
-            agent: 'ruler',
-            domainId: domain.id,
-            kind: 'officer_intro',
-          });
-        }
         log.info('genesis.done', {
           domainId: domain.id,
           name: domain.name,
@@ -958,15 +934,6 @@ export class GameApp {
     normalizeRulerAttitudes(character);
     const history = dialogHistoryForPrompt(character.dialogHistory || [], this.config);
 
-    const conditionFeel = qualitativeStatsBrief(domain.stats || {}, this.config);
-    const attitudes = formatRulerAttitudes(character, this.config);
-    const patronName = domain.state?.patronName || null;
-    const patronGender = domain.state?.patronGender || null;
-    const patronGenderWord =
-      patronGender === 'female' ? 'женщина' : patronGender === 'male' ? 'мужчина' : null;
-    const patronLine = patronName
-      ? `Имя покровителя: «${patronName}»${patronGenderWord ? `, пол: ${patronGenderWord}` : ''} — обращайся только так. Не предлагай другое и не вызывай set_patron_name.`
-      : 'Имя покровителя ещё не названо.';
     const undock = recentUndockFact(domain);
     const undockCanon = undock
       ? [
@@ -976,55 +943,31 @@ export class GameApp {
         ].join('\n')
       : '';
     const confluxCanon = await this.buildConfluxCanon(domain, world);
-    const plotBrief = formatBoardForSpeech(domain, {
-      statsFeel: (ids) => statEpithetsShort(domain.stats || {}, this.config, ids),
-      viewerId: domain.id,
+    const askNow = shouldRulerAskPatron(domain, world);
+    const priestTurn = formatPriestTurn(domain, character, {
+      config: this.config,
+      world,
       partner,
+      day: worldDay(world, { config: this.config }),
     });
 
-    const askNow = shouldRulerAskPatron(domain, world);
-
-    // Здесь только данные хода. Правила поведения живут в instructions агента.
+    // Текст города — сразу после инструкций: он меняется редко и держит префикс кэша.
+    // Сопряжение и прочий ход — в хвосте, после этого текста.
     const extraSystem = [
-      formatRulerVoiceForPrompt(domain, { writable: true }),
-      world?.gameDate?.label ? `ДАТА СЕЙЧАС: ${world.gameDate.label}.` : '',
-      patronLine,
+      priestTurn.stable,
+      priestTurn.dynamic,
       confluxCanon,
       undockCanon,
       'Вести о случившемся приходят сами, по одной. Сближение островов не глуши.',
       askNow
         ? 'В ЭТОЙ реплике задай покровителю один короткий живой вопрос: о его воле, о страхе за нынешнее или о том, как жить. Не лекцию и не каждый раз — сейчас как раз тот случай.'
         : '',
-      'ОБСТОЯТЕЛЬСТВА ГОРОДА (внутренняя правда):',
-      `Население: ${qualitativePopulation(domain.population || 0)}`,
-      conditionFeel,
-      'ОТНОШЕНИЕ К ПОКРОВИТЕЛЮ (внутренняя правда):',
-      attitudes,
-      plotBrief
-        ? [
-            'ЖИВЫЕ НИТИ СЮЖЕТА (внутренняя правда; вплетай в речь, не рапортуй списком):',
-            plotBrief,
-            'id нити — только в инструменты (plotId). В речи не называй историю заголовком и не бери название в кавычки: говори о месте, людях и случившемся. Не говори «доска» и «карточка».',
-            'Каждая нить сама по себе. Общее место или общие люди не делают их одним делом.',
-            'plotId вешай на ту живую историю, которую покровитель этим делом пытается сдвинуть — читай замысел из разговора, не «единственную открытую» карточку. Закрытую нить не подставляй: продолжение закрытого — новое поручение без plotId.',
-            'Если неясно, про какую беду приказ или это отдельное хозяйство — спроси (commitment=clarify), не гадай id. Лучше спросить до приказа, чем потом снимать дело с истории.',
-            'Приказ по истории без поручения — новое дело с plotId этой истории, не правка соседнего.',
-            conflux
-              ? 'Чужая нить, которую город уже знает как линию — обычное дело с plotId. Разведка ещё не раскрытой — intel=true с plotId или chronicleId.'
-              : '',
-          ]
-            .filter(Boolean)
-            .join('\n')
-        : '',
-      `Известные люди города:\n${formatCastForPrompt(domain.lore, { limit: 16 })}`,
-      formatOfficersForPrompt(domain, this.config),
-      firstMentionHintForSpeech(),
       conflux
         ? 'Доверенность — set_proxy: свободный текст, как городу себя вести. Сановник может по ней действовать или нет.'
         : '',
     ]
       .filter(Boolean)
-      .join('\n');
+      .join('\n\n');
 
     // Реплай — отдельный блок перед репликой: склеенный с ней, он уводит
     // жреца отвечать на цитату вместо самого вопроса.
@@ -1052,7 +995,7 @@ export class GameApp {
           return res;
         },
       })),
-      submitReplyTool(turn, character, { plots: domain.plotlines || [], userText: turnText }),
+      submitReplyTool(turn, character),
     ];
 
     const holdMs = Number(this.config.agents?.ruler?.holdAfterMs);
@@ -1083,34 +1026,7 @@ export class GameApp {
           domainId: domain.id,
           deadlineAt,
         });
-
-        if (!turn.reply && Date.now() < deadlineAt - 5000) {
-          log.warn('ruler.no_submit_reply', { preview: truncate(result.text, 200) });
-          await this.runtime.run({
-            agentId: 'ruler',
-            userMessages: [
-              ...history,
-              { role: 'user', content: turnText },
-              {
-                role: 'user',
-                content:
-                  'Ответ не принят: речь передаётся только через submit_reply. Вызови его сейчас. ' +
-                  'Если покровитель спросил — ответь на вопрос, не пиши «приказа не было». ' +
-                  'Если дела ты не заводил — commitment=none (или refused, если отговариваешь; ' +
-                  'clarify — если приказ есть, но нужно уточнить волю), ' +
-                  'и в речи не обещай долгих работ.',
-              },
-            ],
-            tools,
-            maxTurns: 4,
-            toolChoice: { type: 'function', function: { name: 'submit_reply' } },
-            extraSystem,
-            log,
-            scene: 'ruler_submit_retry',
-            domainId: domain.id,
-            deadlineAt,
-          });
-        } else if (!turn.reply) {
+        if (!turn.reply) {
           log.warn('ruler.no_submit_reply', { preview: truncate(result.text, 200) });
         }
       } catch (err) {

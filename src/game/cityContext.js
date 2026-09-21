@@ -178,10 +178,15 @@ export function formatCityModifiersForPrompt(domain) {
   return `Постоянные изменения города:\n${lines.join('\n')}`;
 }
 
+/** Редко меняющийся текст города: бриф, иначе описание. Без дописок. */
+export function stableCityProse(domain) {
+  const raw = String(domain?.cityBrief || '').trim();
+  return raw || String(domain?.description || '').trim() || '(описание пусто)';
+}
+
 /** То, что видят агенты вместо полного генезиса: бриф как есть и дописки. */
 export function formatCityForAgents(domain) {
-  const raw = String(domain?.cityBrief || '').trim();
-  const brief = raw || String(domain?.description || '').trim() || '(описание пусто)';
+  const brief = stableCityProse(domain);
   const mods = formatCityModifiersForPrompt(domain);
   return mods ? `${brief}\n\n${mods}` : brief;
 }

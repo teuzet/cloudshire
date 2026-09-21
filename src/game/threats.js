@@ -40,9 +40,6 @@ export const GRAVITY_THREAT_SLOTS = {
   RUPTURE: 3,
 };
 
-/** Неизвестная угроза всплывает сама, когда прошло больше трёх четвертей срока. */
-export const SURFACE_AT_REMAINING_SHARE = 0.25;
-
 /** Замедление после успешной защиты и потолок этого замедления. */
 export const DEFENSE_SLOWDOWN_CAP = 'YEAR';
 export const MAX_DEFENSE_SLOWDOWN = 3;
@@ -113,10 +110,8 @@ export function formatKnownUnknown(plot) {
     known.length ? known.join('\n') : 'Город видит только то, что уже записано в хронике.',
     hidden.length
       ? `СКРЫТО:\n${hidden.join('\n')}`
-      : 'Скрытого слоя нет: город понимает, откуда идёт причина.',
-    'known=true — эту беду город уже может назвать своими словами, без разгадки.',
-    'known=false — беда следует из скрытого или город ещё не видит, откуда удар.',
-    'В формулировке известной беды скрытый слой не сливай.',
+      :     'Скрытого слоя нет: город понимает, откуда идёт причина.',
+    'В формулировке беды скрытый слой не сливай.',
   ].join('\n');
 }
 
@@ -201,7 +196,7 @@ function nextThreatId(plotId) {
 
 /**
  * Завести угрозу. Полосу и текст даёт автор; срок бросает код.
- * Видимость решает автор беды (`known`); без ответа считаем беду видимой.
+ * До срока беда городу не видна: отдельного признака видимости нет.
  */
 export const THREAT_VALENCES = ['good', 'neutral', 'bad'];
 
@@ -217,7 +212,6 @@ export function createThreat({
   band = 'SEASON',
   day = 0,
   outcome = 'harm',
-  known = null,
   slowdown = 0,
   rng = Math.random,
   dueDay = null,
@@ -240,7 +234,6 @@ export function createThreat({
     : THREAT_STAGES.includes(stage)
       ? stage
       : wound.stage;
-  const visible = isNeutral ? true : known == null ? true : !!known;
   return {
     id: nextThreatId(plot?.id),
     plotId: plot?.id || null,
@@ -255,7 +248,6 @@ export function createThreat({
       : remainingPct == null
         ? wound.remainingPct
         : Math.max(0, Math.round(Number(remainingPct) || 0)),
-    known: visible,
     outcome: isNeutral ? 'neutral' : 'harm',
     valence: resolvedValence,
     endingId: endingId ? String(endingId) : null,
@@ -270,60 +262,6 @@ export function attachThreat(plot, threat) {
   if (!Array.isArray(plot.threats)) plot.threats = [];
   plot.threats.push(threat);
   return threat;
-}
-
-// ──────────────────────────────── видимость ────────────────────────────────
-
-/** Неизвестная угроза открывается сама, когда до срока осталась четверть пути. */
-export function surfaceOverdueThreats(plot, day) {
-  const surfaced = [];
-  for (const t of liveThreats(plot)) {
-    if (t.known) continue;
-    const share = remainingDays(t, day) / Math.max(1, t.totalDays);
-    if (share < SURFACE_AT_REMAINING_SHARE) {
-      t.known = true;
-      t.surfacedDay = Math.round(Number(day) || 0);
-      surfaced.push(t);
-    }
-  }
-  return surfaced;
-}
-
-export function revealThreat(threat, day) {
-  if (!threat || threat.known) return false;
-  threat.known = true;
-  threat.surfacedDay = Math.round(Number(day) || 0);
-  return true;
-}
-
-/** Что жрец может сказать вслух про известные угрозы: формулировка и полоса остатка. */
-export function knownThreatsForSpeech(plot, day) {
-  return liveThreats(plot)
-    .filter((t) => t.known)
-    .map((t) => {
-      const ending = t.endingId
-        ? (plot?.endings || []).find((e) => String(e.id) === String(t.endingId))
-        : null;
-      return {
-        id: t.id,
-        text: t.text,
-        remainingBand: remainingBand(remainingDays(t, day)),
-        kind: t.outcome === 'neutral' ? 'разрешение' : ending ? 'финал' : 'угроза',
-        endingId: t.endingId || null,
-        endingText: ending?.text || null,
-      };
-    })
-    .sort((a, b) => remainingDays(findThreat(plot, a.id), day) - remainingDays(findThreat(plot, b.id), day));
-}
-
-/** Ближайшая известная беда (без нейтральных разрешений) — движку, с днями. */
-export function nearestKnownDanger(plot, day) {
-  let best = null;
-  for (const t of liveThreats(plot)) {
-    if (!t.known || t.outcome === 'neutral') continue;
-    if (!best || remainingDays(t, day) < remainingDays(best, day)) best = t;
-  }
-  return best;
 }
 
 // ──────────────────────────── срабатывание ────────────────────────────
@@ -515,7 +453,6 @@ export function nextObligationRequest(plot, { day = 0, rng = Math.random } = {})
   const existing = live.map((t) => ({
     text: t.text,
     remainingBand: remainingBand(remainingDays(t, day)),
-    known: Boolean(t.known),
   }));
   const depth = Math.max(0, Number(plot?.depth) || 0);
   const maxDepth = Math.max(0.01, Number(plot?.maxDepth) || 1);
@@ -536,7 +473,6 @@ export function nextObligationRequest(plot, { day = 0, rng = Math.random } = {})
         woundGuidance: null,
         antiTarget: null,
         endingText: null,
-        known: true,
         livesLeft: livesLeft(plot),
         existingThreats: existing,
         usedBands: used,
@@ -559,7 +495,6 @@ export function nextObligationRequest(plot, { day = 0, rng = Math.random } = {})
       remainingPct: wound.remainingPct,
       woundGuidance: wound.guidance,
       antiTarget: ending?.text || null,
-      known: null,
       livesLeft: livesLeft(plot),
       existingThreats: existing,
       usedBands: used,
@@ -587,7 +522,6 @@ export function nextObligationRequest(plot, { day = 0, rng = Math.random } = {})
     woundGuidance: wantsResolution ? null : wound.guidance,
     antiTarget: wantsResolution ? null : badEnding?.text || null,
     endingText: null,
-    known: wantsResolution ? true : null,
     livesLeft: livesLeft(plot),
     existingThreats: existing,
     usedBands: used,
@@ -614,7 +548,6 @@ export function replenishThreats(plot, { day = 0, rng = Math.random, author = nu
       band: drafted?.band || req.band,
       outcome: req.outcome,
       slowdown: req.slowdown,
-      known: req.outcome === 'neutral' ? true : drafted?.known ?? req.known,
       endingId: req.endingId || null,
       valence: req.finale ? 'bad' : req.outcome === 'neutral' ? 'neutral' : 'bad',
       stage: req.stage,
@@ -657,13 +590,11 @@ export function normalizeThreat(raw, plotId = null) {
     createdDay: Math.round(Number(raw.createdDay) || 0),
     stage: outcome === 'neutral' ? null : stage,
     remainingPct,
-    known: outcome === 'neutral' ? true : !!raw.known,
     outcome,
     valence: normalizeValence(raw.valence, { outcome }),
     endingId: raw.endingId ? String(raw.endingId) : null,
     status,
     firedBy: raw.firedBy || null,
-    ...(raw.surfacedDay != null ? { surfacedDay: Math.round(Number(raw.surfacedDay)) } : {}),
     ...(raw.delayedDays != null ? { delayedDays: Math.max(0, Math.round(Number(raw.delayedDays))) } : {}),
   };
 }

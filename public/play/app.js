@@ -615,8 +615,7 @@ function plotCard(p, names = {}) {
   ]
     .filter(Boolean)
     .join(' · ');
-  // Нависшее целиком, вместе со скрытым: справочник игрока показывает только
-  // известное, а отлаживать сроки надо по всем счётчикам.
+  // Нависшее целиком: городу оно не показывается, а отлаживать сроки надо здесь.
   const threats = (p.threats || [])
     .map((t) => {
       const bits = [
@@ -627,7 +626,6 @@ function plotCard(p, names = {}) {
             : t.remainingPct != null
               ? `${t.remainingPct}%`
               : 'угроза',
-        t.known ? 'город знает' : 'скрыто',
         `${t.remainingDays ?? '?'} из ${t.totalDays ?? '?'} дн.`,
       ]
         .filter(Boolean)

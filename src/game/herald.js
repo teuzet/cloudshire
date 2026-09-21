@@ -12,7 +12,8 @@
 import { getLogger } from '../log.js';
 import { captureAgentPrompt } from './agentPrompt.js';
 import { chronicleEntries } from './models.js';
-import { knownThreatsForSpeech, livesLeft } from './threats.js';
+import { isGenesisNotice } from './memory.js';
+import { livesLeft } from './threats.js';
 import { revealedPremises, revealedAnswer } from './premises.js';
 import { remainingWork } from './deedMath.js';
 
@@ -70,7 +71,7 @@ export function threadHistory(domain, plotId, { limit = THREAD_HISTORY_LIMIT, ta
 export function recentChat(domain, { limit = CHAT_WINDOW } = {}) {
   const rows = domain?.characters?.[0]?.dialogHistory || [];
   return rows
-    .filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
+    .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && !isGenesisNotice(m))
     .slice(-limit)
     .map((m) => ({
       role: m.role === 'assistant' ? 'жрец' : 'покровитель',
@@ -94,7 +95,6 @@ export function threadCard(plot, day, { closed = false } = {}) {
       closed: true,
       livesLeft: null,
       workLeft: null,
-      knownThreats: [],
     };
   }
   return {
@@ -104,7 +104,6 @@ export function threadCard(plot, day, { closed = false } = {}) {
     closed: false,
     livesLeft: livesLeft(plot),
     workLeft: remainingWork(plot),
-    knownThreats: knownThreatsForSpeech(plot, day),
     // Выясненное городом. Жрецу это можно говорить — в отличие от того,
     // что ещё скрыто и ему вовсе не показывается.
     established: [
@@ -166,13 +165,6 @@ const CLOSING_KIND_LINE = {
   BAD_ENDING: 'Кончилась плохо: города лишился того, из-за чего всё это стояло. Это утрата, а не трудность.',
 };
 
-function formatThreats(rows = []) {
-  if (!rows.length) return '';
-  return rows
-    .map((t) => `- ${t.kind}: ${t.text} — срок: ${t.remainingBand}`)
-    .join('\n');
-}
-
 export function formatHeraldPrompt(ctx) {
   const lines = [`ПОВОД: ${ctx.occasion}`];
   if (ctx.reportSubject) lines.push(`О ЧЁМ ПРОСИЛИ ДОКЛАДЫВАТЬ: ${ctx.reportSubject}`);
@@ -195,8 +187,6 @@ export function formatHeraldPrompt(ctx) {
   if (ctx.thread) {
     lines.push('', `ИСТОРИЯ: «${ctx.thread.title}»`);
     if (ctx.thread.synopsis) lines.push(`Сейчас: ${ctx.thread.synopsis}`);
-    const threats = formatThreats(ctx.thread.knownThreats);
-    if (threats) lines.push('Город знает о нависшем:', threats);
     if (ctx.thread.established?.length) {
       lines.push('Город это уже выяснил, и об этом ты говоришь как об установленном:');
       for (const text of ctx.thread.established) lines.push(`- ${text}`);

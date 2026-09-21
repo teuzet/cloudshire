@@ -16,26 +16,19 @@ import {
   hastenThreat,
   reprieveThreat,
   fireThreat,
-  revealThreat,
   livesLeft,
   remainingToBadEndingPct,
   threatStageForPlot,
 } from './threats.js';
 
-export const CRIT_CASCADE_STEPS = ['reveal', 'reprieve', 'restore_life', 'depth'];
+export const CRIT_CASCADE_STEPS = ['reprieve', 'restore_life', 'depth'];
 
 /**
  * Каскад крита на RELEVANT-деле. Детерминированный, срабатывает ровно один пункт.
- * Порядок от самого информативного к самому скучному: сначала знание,
- * потом время, потом жизнь, и только если нечего дать — чуть глубины.
+ * Сначала время другой беде, потом жизнь, и только если нечего дать — чуть глубины.
  */
-export function critCascade(plot, threat, { day = 0 } = {}) {
+export function critCascade(plot, threat) {
   const others = liveThreats(plot).filter((t) => t.id !== threat?.id);
-
-  const hidden = others.find((t) => !t.known);
-  if (hidden && revealThreat(hidden, day)) {
-    return { step: 'reveal', threatId: hidden.id, text: hidden.text };
-  }
 
   const other = others[0];
   if (other) {

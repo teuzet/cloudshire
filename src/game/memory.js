@@ -135,6 +135,25 @@ export function formatFactsForPrompt(lore = [], { limit = 40 } = {}) {
 }
 
 /**
+ * Служебные строки старта: остров, календарь, перечень сановников.
+ * Игроку их можно показать один раз, но это не речь жреца и не лог чата.
+ */
+export function isGenesisNotice(entry) {
+  if (!entry) return false;
+  const kind = entry.kind;
+  if (kind === 'island_reveal' || kind === 'game_date' || kind === 'officer_intro') return true;
+  const text = String(entry.content || '').trim();
+  if (text.includes('Пока назову тех, кто держит город')) return true;
+  if (/^Остров «[^»]+» готов\./.test(text)) return true;
+  if (text.startsWith('Сейчас в мире —')) return true;
+  return false;
+}
+
+export function visibleDialogHistory(dialogHistory = []) {
+  return (dialogHistory || []).filter((entry) => !isGenesisNotice(entry));
+}
+
+/**
  * История для промпта правителя: старые tick_news сжимаем, оригинал в dialogHistory целый.
  */
 export function dialogHistoryForPrompt(dialogHistory = [], config = null) {
@@ -143,7 +162,7 @@ export function dialogHistoryForPrompt(dialogHistory = [], config = null) {
   const raw = dialogHistory || [];
   for (let i = 0; i < raw.length; i += 1) {
     const m = raw[i];
-    if (m?.kind === 'system' || m?.kind === 'ruler_hold') continue;
+    if (m?.kind === 'system' || m?.kind === 'ruler_hold' || isGenesisNotice(m)) continue;
     if (m?.role === 'user' && raw[i + 1]?.kind === 'system') continue;
     kept.push(m);
   }

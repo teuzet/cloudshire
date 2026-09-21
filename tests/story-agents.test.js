@@ -102,8 +102,8 @@ test('автор беды получает правило независимых
   assert.match(ins, /параллельные часы/);
   assert.match(ins, /даже если остальные/);
   assert.match(ins, /ещё 50%/);
-  assert.match(ins, /known=true/);
-  assert.match(ins, /known=false/);
+  assert.match(ins, /скрытый слой не сливай/);
+  assert.doesNotMatch(ins, /known=/);
   assert.doesNotMatch(ins, /ТРЕВОГА|УЩЕРБ|КАТАСТРОФА|dread/i);
 });
 
@@ -129,15 +129,16 @@ test('текст беды приходит от агента и обрезает
   assert.equal(runtime.calls[0].agentId, 'threatSmith');
 });
 
-test('автор решает, видит ли город беду', async () => {
+test('автор не задаёт видимость беды', async () => {
   const p = plot({ gravity: 'EPISODE' });
   const runtime = fakeRuntime({
     submit_threat: { text: 'Пыль забьёт водосборный сток', known: false },
   });
   const created = await replenishPlotThreats({ runtime, domain, plot: p, day: 10, rng: () => 0.5 });
   assert.equal(created.length, 1);
-  assert.equal(created[0].known, false);
+  assert.equal(created[0].known, undefined);
   assert.equal(created[0].text, 'Пыль забьёт водосборный сток');
+  assert.doesNotMatch(runtime.calls[0].prompt, /Верни known|\[скрыта\]|\[видна\]/);
 });
 
 test('дозаполнение с агентом ставит обязательства с его текстом', async () => {

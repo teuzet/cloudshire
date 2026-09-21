@@ -155,7 +155,7 @@ test('заявка разбора не отдаёт агенту чисел ме
   });
   assert.equal(req.plotTitle, 'Беглый мздоимец');
   assert.deepEqual(req.deeds, [{ id: 'proc2', summary: 'арестовать', goal: '', officer: 'Малуша' }]);
-  assert.deepEqual(req.threats, [{ id: t.id, text: 'уйдёт с острова', known: t.known }]);
+  assert.deepEqual(req.threats, [{ id: t.id, text: 'уйдёт с острова' }]);
   const json = JSON.stringify(req);
   assert.ok(!json.includes('dueDay'));
   assert.ok(!json.includes('totalDays'));

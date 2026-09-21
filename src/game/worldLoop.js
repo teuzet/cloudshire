@@ -44,7 +44,6 @@ import {
   liveThreats,
   findThreat,
   fireThreat,
-  surfaceOverdueThreats,
   normalizePlotThreats,
 } from './threats.js';
 import { replenishPlotThreats } from './threatSmith.js';
@@ -824,14 +823,6 @@ export async function drainDomainJobs({
     }
   }
 
-  // Скрытые угрозы всплывают сами, когда до срока осталась четверть пути.
-  for (const plot of domain.plotlines || []) {
-    if (!isStakedStory(plot)) continue;
-    for (const threat of surfaceOverdueThreats(plot, day)) {
-      events.push({ occasion: 'угроза', plot, plotId: plot.id, surfaced: threat });
-    }
-  }
-
   return events;
 }
 
@@ -845,7 +836,7 @@ export function askForEvent(domain, event, config = null) {
     plot && !event.closed && Number(plot.depth) >= Number(plot.maxDepth) * 0.75 && !liveThreats(plot).length;
   return decideAsk({
     plotClosable: Boolean(closable),
-    needsHelp: Boolean(plot) && !event.closed && liveThreats(plot).some((t) => t.known),
+    needsHelp: false,
   });
 }
 

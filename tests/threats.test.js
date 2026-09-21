@@ -16,9 +16,6 @@ import {
   findThreat,
   remainingDays,
   nearestThreat,
-  surfaceOverdueThreats,
-  revealThreat,
-  knownThreatsForSpeech,
   deferSurvivors,
   fireThreat,
   defendThreat,
@@ -131,61 +128,14 @@ test('замедление от защит сдвигает полосу при 
   assert.equal(t.band, 'SEASON', 'DAYS + 2 ступени = SEASON');
 });
 
-test('видимость задаёт автор, без ответа беда видна', () => {
+test('угроза не хранит видимость', () => {
   const p = plot();
-  const silent = createThreat({ plot: p, band: 'YEAR', rng: () => 0.5 });
-  assert.equal(silent.known, true, 'без known считаем видимой');
-  assert.equal(createThreat({ plot: p, band: 'YEAR', known: false, rng: () => 0.5 }).known, false);
-  assert.equal(createThreat({ plot: p, band: 'YEAR', known: true, rng: () => 0.5 }).known, true);
-});
-
-test('разрешение всегда видимо — иначе гонки не будет', () => {
-  const p = plot();
-  const t = createThreat({ plot: p, band: 'YEAR', outcome: 'neutral', known: false, rng: () => 0.99 });
-  assert.equal(t.outcome, 'neutral');
-  assert.equal(t.known, true);
-  assert.equal(t.stage, null);
-});
-
-// ──────────────────────────── видимость ────────────────────────────
-
-test('неизвестная угроза всплывает сама на последней четверти срока', () => {
-  const p = plot();
-  const t = threat(p, { band: 'SEASON', day: 0, known: false, total: 100 });
-  assert.deepEqual(surfaceOverdueThreats(p, 70), []);
-  assert.equal(t.known, false);
-  const surfaced = surfaceOverdueThreats(p, 76);
-  assert.deepEqual(surfaced.map((x) => x.id), [t.id]);
-  assert.equal(t.known, true);
-  assert.equal(t.surfacedDay, 76);
-});
-
-test('уже открытая угроза не всплывает второй раз', () => {
-  const p = plot();
-  threat(p, { band: 'SEASON', day: 0, known: true, total: 100 });
-  assert.deepEqual(surfaceOverdueThreats(p, 99), []);
-});
-
-test('revealThreat открывает разово', () => {
-  const p = plot();
-  const t = threat(p, { known: false });
-  assert.equal(revealThreat(t, 10), true);
-  assert.equal(revealThreat(t, 20), false);
-  assert.equal(t.surfacedDay, 10);
-});
-
-test('жрец видит формулировку и полосу остатка, но не число дней', () => {
-  const p = plot();
-  const slow = threat(p, { day: 0, known: true, total: 120 });
-  const fast = threat(p, { day: 0, known: true, total: 8 });
-  threat(p, { day: 0, known: false, total: 50 });
-  const speech = knownThreatsForSpeech(p, 0);
-  assert.equal(speech.length, 2, 'скрытая угроза в речь не попадает');
-  assert.equal(speech[0].id, fast.id, 'ближайшая первой');
-  assert.equal(speech[0].remainingBand, 'DAYS');
-  assert.equal(speech[1].id, slow.id);
-  assert.equal(speech[1].remainingBand, 'SEASON');
-  assert.ok(!('remainingDays' in speech[0]));
+  const harm = createThreat({ plot: p, band: 'YEAR', known: false, rng: () => 0.5 });
+  assert.equal(harm.known, undefined);
+  const neutral = createThreat({ plot: p, band: 'YEAR', outcome: 'neutral', known: true, rng: () => 0.99 });
+  assert.equal(neutral.outcome, 'neutral');
+  assert.equal(neutral.known, undefined);
+  assert.equal(neutral.stage, null);
 });
 
 // ──────────────────────────── срабатывание ────────────────────────────
@@ -439,7 +389,7 @@ test('заявка показывает автору уже висящие уг�
   t.text = 'фундамент садится';
   const req = nextObligationRequest(p, { day: 60, rng: () => 0.5 });
   assert.deepEqual(req.existingThreats, [
-    { text: 'фундамент садится', remainingBand: 'WEEKS', known: true },
+    { text: 'фундамент садится', remainingBand: 'WEEKS' },
   ]);
 });
 
@@ -468,10 +418,10 @@ test('после исчерпания ран заявка — финал к пл
   assert.equal(req.finale, true);
   assert.equal(req.endingId, 'e1');
   assert.equal(req.endingText, 'Северное крыло рушится вместе с людьми');
-  assert.equal(req.known, null, 'видимость решает автор по скрытому слою');
-  const [t] = replenishThreats(p, { day: 0, rng: () => 0.5, author: () => ({ text: 'сруб обвалится' }) });
+  assert.equal(req.known, undefined);
+  const [t] = replenishThreats(p, { day: 0, rng: () => 0.5, author: () => ({ text: 'сруб обвалится', known: false }) });
   assert.equal(t.endingId, 'e1');
-  assert.equal(t.known, true, 'без ответа автора беда видна');
+  assert.equal(t.known, undefined);
 });
 
 test('пока висит финал, второй не заводим', () => {
@@ -501,7 +451,7 @@ test('после набранной глубины дозаполнение ст
   const p = plot({ depth: 3, maxDepth: 3, defenseCount: 3 });
   const [t] = replenishThreats(p, { day: 0, rng: () => 0.5, author: () => ({ text: 'всё утихло' }) });
   assert.equal(t.outcome, 'neutral');
-  assert.equal(t.known, true);
+  assert.equal(t.known, undefined);
   assert.deepEqual(liveResolutions(p).map((x) => x.id), [t.id]);
 });
 
@@ -529,19 +479,25 @@ test('нормализация переживает круг через JSON', (
   threat(p, { day: 0, total: 90, outcome: 'neutral' });
   const revived = normalizePlotThreats(JSON.parse(JSON.stringify(p)));
   assert.equal(revived.threats.length, 2);
-  assert.equal(revived.threats[0].known, false);
+  assert.equal(revived.threats[0].known, undefined);
   assert.equal(revived.threats[1].outcome, 'neutral');
-  assert.equal(revived.threats[1].known, true);
+  assert.equal(revived.threats[1].known, undefined);
   assert.equal(revived.defenseCount, 0);
 });
 
 test('нормализация выкидывает мусор и чинит поля', () => {
-  const p = { id: 'p', gravity: 'CRISIS', threats: [null, 'мусор', { text: 'беда', band: 'нет' }] };
+  const p = {
+    id: 'p',
+    gravity: 'CRISIS',
+    threats: [null, 'мусор', { text: 'беда', band: 'нет', known: false, surfacedDay: 3 }],
+  };
   normalizePlotThreats(p);
   assert.equal(p.threats.length, 1);
   assert.equal(p.threats[0].band, 'SEASON');
   assert.equal(p.threats[0].status, 'live');
   assert.equal(p.threats[0].stage, 'interim');
+  assert.equal(p.threats[0].known, undefined);
+  assert.equal(p.threats[0].surfacedDay, undefined);
 });
 
 test('старые четыре слова тяжести читаются как стадия', () => {

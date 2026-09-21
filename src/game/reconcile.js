@@ -133,7 +133,6 @@ export function reconcileRequest({ plot, resolved, scope, day = 0 } = {}) {
     threats: (scope?.threats || []).map((t) => ({
       id: t.id,
       text: t.text,
-      known: !!t.known,
     })),
   };
 }

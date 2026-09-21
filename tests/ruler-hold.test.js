@@ -41,3 +41,17 @@ test('системный отказ не попадает в промпт жре
     ['ещё раз: патруль', 'Будет сделано.'],
   );
 });
+
+test('старт острова не считается речью жреца', () => {
+  const prompt = dialogHistoryForPrompt([
+    { role: 'assistant', content: 'Остров «Варскен» готов.\n\nЧёрный зуб.', kind: 'island_reveal' },
+    { role: 'assistant', content: 'Сейчас в мире — Год 1, месяц 1.' },
+    { role: 'assistant', content: 'Елмир: Пока назову тех, кто держит город: Казначей Олмир.' },
+    { role: 'assistant', content: 'Елмир: Слушаю.' },
+    { role: 'user', content: 'что с зерном?' },
+  ]);
+  assert.deepEqual(
+    prompt.map((m) => m.content),
+    ['Елмир: Слушаю.', 'что с зерном?'],
+  );
+});

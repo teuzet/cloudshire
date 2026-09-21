@@ -743,13 +743,13 @@ test('слив разбирает просроченное и не трогае�
   assert.equal(findThreat(plot, later.id).status, 'live');
 });
 
-test('скрытая беда всплывает сама на исходе срока', async () => {
+test('беда до срока не всплывает', async () => {
   const plot = makePlot();
   const domain = makeDomain({ plots: [plot] });
   const world = makeWorld();
   const hidden = attachThreat(
     plot,
-    createThreat({ plot, text: 'просадка', band: 'SEASON', day: 100, known: false, rng: () => 0.5 }),
+    createThreat({ plot, text: 'просадка', band: 'SEASON', day: 100, rng: () => 0.5 }),
   );
   const events = await drainDomainJobs({
     config,
@@ -760,8 +760,9 @@ test('скрытая беда всплывает сама на исходе ср
     rng: () => 0.5,
     log: silentLog,
   });
-  assert.equal(hidden.known, true);
-  assert.ok(events.some((e) => e.surfaced?.id === hidden.id));
+  assert.equal(hidden.status, 'live');
+  assert.equal(hidden.known, undefined);
+  assert.equal(events.some((e) => e.surfaced || e.occasion === 'угроза'), false);
 });
 
 test('слив начисляет ману за прошедшие дни', async () => {
