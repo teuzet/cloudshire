@@ -1,6 +1,6 @@
 /**
  * Генератор трёх следующих хроник: код бросает четыре оси мира, модель пишет один текст на набор.
- * Лаборатория: пачка → судья. PASS сразу в пул и не чинится.
+ * Лаборатория: пачка → два независимых судьи, в ремонт пересечение кодов. PASS сразу в пул и не чинится.
  * Не-PASS всегда идут на починку, даже если PASS уже ≥2.
  * Первая починка — sonnet, дальше до двух кругов luna.
  * Ремонтник видит бриф, автора и текущее состояние слота; лог прошлых починок — только со второй итерации.
@@ -64,7 +64,6 @@ export const MYSTERY_ARCHITECT_EXTRA = [
 export const MYSTERY_JUDGE_EXTRA = [
   '==== ДОПОЛНИТЕЛЬНЫЕ КРИТЕРИИ (тайна обязательна) ====',
   '13. BUREAUCRACY — двигатель не канцелярия. FAIL, только если без протоколов, сверки записей, комиссии, отложенного заседания или потерянной бумаги от сюжета ничего не остаётся. Правовой или социальный конфликт, где документ — предлог или фон, допустим.',
-  '13b. ENGINEERING_PORN — двигатель не инженерия города. FAIL, только если без дорог, подъёмников, желобов, галерей, водостоков, подпорок, складов, настилов или контура «чинить инфраструктуру» от сюжета ничего не остаётся. Лес, каменоломня, осыпь, тварь или совет, где путь или кромка — место или цена, допустимы.',
   '14. MYSTERY — в пакете есть настоящая тайна: странность, которую персонажи и игрок не могут сразу объяснить. Если завязка прозрачна и нечего разгадывать — FAIL.',
   '15. MYSTERY_PLAUSIBLE — разгадка в hiddenLayer логична, конкретна и не разочаровывает. FAIL если разгадки нет, она отговорка («неизвестно», «мнения расходятся», «проверка ничего не дала»), противоречит фактам, или вся разгадка сводится к «ну так вышло» без механизма.',
   'Конкретный механизм, в котором есть случай, ирония или «обряд сработал не по той причине, что думали» — PASS, не отговорка.',
@@ -421,7 +420,7 @@ export async function reviewBrainstormPack({
                 required: ['index', 'verdict'],
                 properties: {
                   index: { type: 'integer', description: `Номер кандидата: ${indexHint}.` },
-                  verdict: { type: 'string', enum: ['PASS', 'FAIL', 'UNCERTAIN'] },
+                  verdict: { type: 'string', enum: ['PASS', 'FAIL'] },
                   summary: { type: 'string', description: 'Одно предложение: что с этим кандидатом.' },
                   issues: {
                     type: 'array',
@@ -441,7 +440,12 @@ export async function reviewBrainstormPack({
           },
         },
         handler: async (args) => {
-          const reviews = parseFreeformPackReview(args, n, indices);
+          const reviews = parseFreeformPackReview(
+            args,
+            n,
+            indices,
+            freeformPackJudgeCodes({ requireMystery }),
+          );
           if (reviews.length !== n) {
             return toolFail('thin', `Нужен отзыв ровно по ${n} кандидатам.`);
           }
@@ -481,7 +485,12 @@ export async function reviewBrainstormPack({
   } catch (err) {
     log.warn('freeform.brainstorm.judge_failed', { error: err.message });
   }
-  const reviews = draft.reviews || parseFreeformPackReview({}, n, indices);
+  const reviews = draft.reviews || parseFreeformPackReview(
+    {},
+    n,
+    indices,
+    freeformPackJudgeCodes({ requireMystery }),
+  );
   log.info('freeform.brainstorm.judge', {
     gravity: g,
     verdicts: reviews.map((r) => r.verdict),
@@ -495,12 +504,58 @@ export const LUNA_REPAIR_AGENT = 'freeformBrainstormRepair';
 
 function formatReviewNotes(review) {
   const note = review || { verdict: 'PASS', summary: '', issues: [] };
-  const issues = (note.issues || []).map((x) => `[${x.code}] ${x.reason}`).join('\n');
+  const issues = (note.issues || []).map((x) => `[${x.code}]\n${x.reason}`).join('\n');
   return [
     note.verdict || 'PASS',
     note.summary ? `кратко: ${note.summary}` : null,
     issues ? `замечания:\n${issues}` : null,
   ].filter(Boolean);
+}
+
+function issueReasons(review, code) {
+  return (review?.issues || [])
+    .filter((x) => x.code === code)
+    .map((x) => String(x.reason || '').trim())
+    .filter(Boolean);
+}
+
+function uniqueIssueCodes(review) {
+  const out = [];
+  for (const issue of review?.issues || []) {
+    if (issue?.code && !out.includes(issue.code)) out.push(issue.code);
+  }
+  return out;
+}
+
+/** Солидарность двух судей: в ремонт только коды, которые есть у обоих. */
+export function intersectPackReviews(left, right) {
+  const n = Math.max(left?.length || 0, right?.length || 0);
+  const out = [];
+  for (let i = 0; i < n; i += 1) {
+    const a = left?.[i] || { index: i + 1, verdict: 'PASS', issues: [] };
+    const b = right?.[i] || { index: i + 1, verdict: 'PASS', issues: [] };
+    const inB = new Set(uniqueIssueCodes(b));
+    const shared = uniqueIssueCodes(a).filter((code) => inB.has(code));
+    const index = a.index || b.index || i + 1;
+    if (!shared.length) {
+      out.push({ index, verdict: 'PASS', summary: '', issues: [], repair: '' });
+      continue;
+    }
+    out.push({
+      index,
+      verdict: 'FAIL',
+      summary: a.summary || b.summary || '',
+      issues: shared.map((code) => ({
+        code,
+        reason: [
+          `Судья 1: ${issueReasons(a, code).join('; ') || '—'}`,
+          `Судья 2: ${issueReasons(b, code).join('; ') || '—'}`,
+        ].join('\n'),
+      })),
+      repair: '',
+    });
+  }
+  return out;
 }
 
 function candidatePromptBody(candidate) {
@@ -591,7 +646,6 @@ export async function repairBrainstormPack({
   fromGenesis = false,
   note = '',
   agentId = SONNET_REPAIR_AGENT,
-  onlyFailed = false,
   domainId = null,
   history = null,
 }) {
@@ -601,13 +655,14 @@ export async function repairBrainstormPack({
   const maxChars = freeformConfig(config).chronicleMaxChars.seed;
   if (!n) return { candidates: [], prompt: '' };
   const notes = (reviews || []).slice(0, n);
-  const slots = drafts.map((candidate, i) => ({
-    candidate,
-    review: notes[i],
-    index: Number(candidate.index) || i + 1,
-  }));
-  const work = onlyFailed ? slots.filter((slot) => reviewNeedsRewrite(slot.review)) : slots;
-  if (!work.length || !work.some((slot) => reviewNeedsRewrite(slot.review))) {
+  const work = drafts
+    .map((candidate, i) => ({
+      candidate,
+      review: notes[i],
+      index: Number(candidate.index) || i + 1,
+    }))
+    .filter((slot) => reviewNeedsRewrite(slot.review));
+  if (!work.length) {
     return { candidates: drafts, prompt: '' };
   }
 
@@ -880,19 +935,38 @@ export async function brainstormFreeformPack({
       pickWhy: '',
     };
   }
-  const judged = await reviewBrainstormPack({
-    runtime,
-    seedText,
-    gravity: drafted.gravity,
-    candidates: drafted.candidates,
-    config,
-    log,
-    requireMystery,
-    fromVoid,
-    fromGenesis,
-    note,
-    domainId,
-  });
+  const [judgedA, judgedB] = await Promise.all([
+    reviewBrainstormPack({
+      runtime,
+      seedText,
+      gravity: drafted.gravity,
+      candidates: drafted.candidates,
+      config,
+      log,
+      requireMystery,
+      fromVoid,
+      fromGenesis,
+      note,
+      domainId,
+    }),
+    reviewBrainstormPack({
+      runtime,
+      seedText,
+      gravity: drafted.gravity,
+      candidates: drafted.candidates,
+      config,
+      log,
+      requireMystery,
+      fromVoid,
+      fromGenesis,
+      note,
+      domainId,
+    }),
+  ]);
+  const judged = {
+    reviews: intersectPackReviews(judgedA.reviews, judgedB.reviews),
+    prompt: judgedA.prompt || judgedB.prompt,
+  };
   let repairHistory = pushFailedRepairHistory({}, drafted.candidates, judged.reviews);
   const repaired = await repairBrainstormPack({
     runtime,
@@ -947,7 +1021,6 @@ export async function brainstormFreeformPack({
       fromGenesis,
       note,
       agentId: LUNA_REPAIR_AGENT,
-      onlyFailed: true,
       domainId,
       history: repairHistory,
     });

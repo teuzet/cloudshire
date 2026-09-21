@@ -170,35 +170,40 @@ export async function pickFreeformVariant({
   return { ...verdict, index, prompt };
 }
 
-export const FREEFORM_PACK_JUDGE_CODES = [
+export const FREEFORM_BRAINSTORM_JUDGE_CODES = [
   'GRAVITY',
   'COSMOLOGY',
   'HINGE',
   'CAUSALITY',
   'MOTION',
-  'DRAMA',
   'TEMPO',
   'ECONOMY',
   'CHEKHOV',
   'CHRONICLE',
-  'FORECAST',
   'AXIS',
-  'UNKNOWNS',
   'PATRON',
   'CONFLUX',
-  'BUREAUCRACY',
-  'ENGINEERING_PORN',
-  'UNCAUSED_WATER_SYSTEMS',
+  'BUREAUCRACY_PORN',
   'WATER_SYSTEMS_PORN',
+  'CANONICAL_UNKNOWNS',
+];
+
+export const FREEFORM_BEAT_JUDGE_CODES = [
   'SAME_STORY',
-  'HIDDEN',
+  'HINGE',
+  'CAUSALITY',
+  'GRAVITY',
+  'COSMOLOGY',
   'ENDING',
-  'MYSTERY',
-  'MYSTERY_PLAUSIBLE',
-  'OTHER',
 ];
 
 export const FREEFORM_MYSTERY_PACK_CODES = ['MYSTERY', 'MYSTERY_PLAUSIBLE'];
+
+/** Коды посевного судьи. Без OTHER/HIDDEN/FORECAST. */
+export const FREEFORM_PACK_JUDGE_CODES = [
+  ...FREEFORM_BRAINSTORM_JUDGE_CODES,
+  ...FREEFORM_MYSTERY_PACK_CODES,
+];
 
 export function freeformPackJudgeCodes({ requireMystery = false } = {}) {
   if (requireMystery) return [...FREEFORM_PACK_JUDGE_CODES];
@@ -206,28 +211,30 @@ export function freeformPackJudgeCodes({ requireMystery = false } = {}) {
 }
 
 const PACK_CODE_ALIASES = {
-  BUREAUCRACY_PORN: 'BUREAUCRACY',
-  ENGINEERING: 'ENGINEERING_PORN',
+  BUREAUCRACY: 'BUREAUCRACY_PORN',
+  UNKNOWNS: 'CANONICAL_UNKNOWNS',
 };
 
-function asPackCode(raw) {
+const PARSE_PACK_CODES = [...new Set([...FREEFORM_PACK_JUDGE_CODES, ...FREEFORM_BEAT_JUDGE_CODES])];
+
+function asPackCode(raw, allowed) {
   const c = String(raw || '')
     .trim()
     .toUpperCase()
     .replace(/[\s-]+/g, '_');
   const mapped = PACK_CODE_ALIASES[c] || c;
-  return FREEFORM_PACK_JUDGE_CODES.includes(mapped) ? mapped : 'OTHER';
+  return allowed.includes(mapped) ? mapped : '';
 }
 
 function asPackVerdict(raw) {
   const v = String(raw || '')
     .trim()
     .toUpperCase();
-  if (v === 'FAIL' || v === 'UNCERTAIN') return v;
-  return 'PASS';
+  return v === 'FAIL' ? 'FAIL' : 'PASS';
 }
 
-export function parseFreeformPackReview(raw, variantCount, allowedIndices = null) {
+export function parseFreeformPackReview(raw, variantCount, allowedIndices = null, allowedCodes = null) {
+  const codeList = Array.isArray(allowedCodes) && allowedCodes.length ? allowedCodes : PARSE_PACK_CODES;
   const allowed = (Array.isArray(allowedIndices) && allowedIndices.length
     ? allowedIndices
     : Array.from({ length: Math.max(0, Math.round(Number(variantCount) || 0)) }, (_, i) => i + 1)
@@ -247,12 +254,15 @@ export function parseFreeformPackReview(raw, variantCount, allowedIndices = null
     const issues = [];
     for (const issue of item?.issues || []) {
       const reason = clipPlotText(issue?.reason, 400);
-      if (!reason) continue;
-      issues.push({ code: asPackCode(issue?.code), reason });
+      const code = asPackCode(issue?.code, codeList);
+      if (!reason || !code) continue;
+      issues.push({ code, reason });
     }
+    let verdict = asPackVerdict(item?.verdict);
+    if (verdict === 'FAIL' && !issues.length) verdict = 'PASS';
     byIndex.set(index, {
       index,
-      verdict: asPackVerdict(item?.verdict),
+      verdict,
       summary: clipPlotText(item?.summary, 400),
       issues,
       repair: clipPlotText(item?.repair, 800),
@@ -327,7 +337,7 @@ export async function reviewFreeformPack({
                 required: ['index', 'verdict'],
                 properties: {
                   index: { type: 'integer', description: `Номер кандидата: ${indexHint}.` },
-                  verdict: { type: 'string', enum: ['PASS', 'FAIL', 'UNCERTAIN'] },
+                  verdict: { type: 'string', enum: ['PASS', 'FAIL'] },
                   summary: { type: 'string', description: 'Одно предложение: что с этим кандидатом.' },
                   repair: {
                     type: 'string',
@@ -339,7 +349,7 @@ export async function reviewFreeformPack({
                       type: 'object',
                       required: ['code', 'reason'],
                       properties: {
-                        code: { type: 'string', enum: freeformPackJudgeCodes() },
+                        code: { type: 'string', enum: [...FREEFORM_BEAT_JUDGE_CODES] },
                         reason: { type: 'string' },
                       },
                     },
@@ -350,7 +360,7 @@ export async function reviewFreeformPack({
           },
         },
         handler: async (args) => {
-          const reviews = parseFreeformPackReview(args, n, indices);
+          const reviews = parseFreeformPackReview(args, n, indices, FREEFORM_BEAT_JUDGE_CODES);
           if (reviews.length !== n) {
             return toolFail('thin', `Нужен отзыв ровно по ${n} кандидатам.`);
           }
@@ -377,7 +387,7 @@ export async function reviewFreeformPack({
   } catch (err) {
     log.warn('freeform.pack_judge_failed', { error: err.message });
   }
-  const reviews = draft.reviews || parseFreeformPackReview({}, n, indices);
+  const reviews = draft.reviews || parseFreeformPackReview({}, n, indices, FREEFORM_BEAT_JUDGE_CODES);
   log.info('freeform.pack_judge', {
     agentId,
     verdicts: reviews.map((r) => r.verdict),
