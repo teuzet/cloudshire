@@ -74,17 +74,10 @@ function stakedPlot(extra = {}) {
   };
 }
 
-test('концовки нити со ставками — варианты будущего, а не случившийся исход', () => {
+test('нить со ставками не показывает заготовленные концовки', () => {
   const text = formatKeepPlotBlock(stakedPlot(), ['ступени вскрыли, нашли водоотводный ход']);
-  assert.match(text, /ВОЗМОЖНЫЕ ИСХОДЫ/);
-  assert.match(text, /ни один ещё не наступил/);
-  assert.doesNotMatch(
-    text,
-    /Успешный исход/,
-    'склеенный список концовок под этим заголовком reducer читал как развязку',
-  );
-  assert.match(text, /Причину гула нашли/);
-  assert.match(text, /Ступени обрушились/);
+  assert.doesNotMatch(text, /ВОЗМОЖНЫЕ ИСХОДЫ/);
+  assert.doesNotMatch(text, /Успешный исход/);
   assert.match(text, /ОТКРЫТА и не разрешена: пройдено 0 из 2, промахов 0 из 2/);
   assert.match(text, /ступени вскрыли/);
 });

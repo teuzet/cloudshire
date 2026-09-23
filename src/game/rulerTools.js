@@ -108,10 +108,9 @@ import {
   ensureErrandForProcess,
   linkProcessToPlotline,
   rehomeUnrelatedProcess,
-  attendingQueueForPlot,
   detachProcessFromPlots,
 } from './plotEngine.js';
-import { judgeProcessAlignment, engagementOf, engagementAttends } from './plotAlign.js';
+import { judgeProcessAlignment, engagementOf } from './plotAlign.js';
 import { stableCityProse, formatCityModifiersForPrompt } from './cityContext.js';
 import { writeRulerMemory, forgetRulerMemory, formatRulerVoiceForPrompt } from './rulerMemory.js';
 import { toolFail } from '../agents/toolResult.js';
@@ -205,16 +204,6 @@ function unrelatedAttachHint(paceLine = '') {
     'велит оставить как есть — оставляй. ' +
     'Приказ ты только что отдал, поэтому сам его не сворачивай: revoke_process не вызывай. ' +
     'commitment=process.'
-  );
-}
-
-function queueAttachHint(domain, plot, action) {
-  if (!plot || !isStakedStory(plot) || !engagementAttends(engagementOf(action))) return '';
-  const head = attendingQueueForPlot(domain, plot)[0];
-  if (!head || String(head.id) === String(action.id)) return '';
-  return (
-    ` На этой беде уже идёт «${head.summary}». Новое дело в очереди: сдвинется, когда прежнее завершит месяц ` +
-    '(или сразу в тот месяц, когда прежнее закончится). В речи можно сказать, что сначала доведут прежнее.'
   );
 }
 
@@ -1131,8 +1120,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
           : `В речи: принял повеление. ${paceHint(action, judged?.note)}` +
             ruleWarn +
             impossibleWarn +
-            ' Не говори «уже сделали» и не рапортуй механику: весть об исходе принесёшь сам, когда работа кончится.' +
-            queueAttachHint(domain, plot, action);
+            ' Не говори «уже сделали» и не рапортуй механику: весть об исходе принесёшь сам, когда работа кончится.';
         return {
           ok: true,
           process: action,
@@ -1360,8 +1348,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
           hint: rehomed
             ? unrelatedAttachHint(paceHint(action))
             : `${mode}. ${paceHint(action)}` +
-              ' В речи не обещай, что уже сделано: весть об исходе принесёшь сам.' +
-              queueAttachHint(domain, plot, action),
+              ' В речи не обещай, что уже сделано: весть об исходе принесёшь сам.',
         };
       },
     },

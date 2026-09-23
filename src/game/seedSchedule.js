@@ -5,8 +5,8 @@
  * о делах. Теперь у домена есть свой срок следующей попытки: пришёл — решаем,
  * сеять ли и откуда. Температуры каналов остаются, но считаются на попытку.
  *
- * Главный регулятор — число живых угроз, а не число историй: угрозы и есть
- * генераторы событий, а история без угрозы событий не производит.
+ * Главный регулятор — число открытых историй: у каждой свой пул бед,
+ * и город, у которого историй уже много, новую не получает.
  */
 
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, realMsToGameDays } from './gameClock.js';
@@ -75,7 +75,17 @@ export function inSeedCooldown(domain, day) {
   return Math.round(Number(day) || 0) < until;
 }
 
-/** Сколько обязательств мира сейчас висит на домене. */
+/** Сколько открытых историй сейчас ведёт домен. */
+export function countOpenStories(domain) {
+  let n = 0;
+  for (const plot of domain?.plotlines || []) {
+    if (!isStakedStory(plot) || plot.status === 'closed') continue;
+    n += 1;
+  }
+  return n;
+}
+
+/** @deprecated считайте открытые истории через countOpenStories */
 export function countLiveThreats(domain) {
   let n = 0;
   for (const plot of domain?.plotlines || []) {
@@ -106,7 +116,7 @@ export function saturationFactor(liveCount) {
 export function decideSeedAttempt(domain, { day = 0, config = null, rng = Math.random } = {}) {
   const cfg = seedConfig(config);
   const temps = normalizeSeedTemp(domain?.state?.seedTemp, cfg);
-  const factor = saturationFactor(countLiveThreats(domain));
+  const factor = saturationFactor(countOpenStories(domain));
 
   if (inSeedCooldown(domain, day) || factor <= 0) {
     return { seed: false, reason: factor <= 0 ? 'saturated' : 'cooldown', temps };

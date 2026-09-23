@@ -645,7 +645,6 @@ export function plotCardForPrompt(plot, { revealHidden = true, includeSeed = fal
     `Синопсис: ${plot.synopsis || '—'}`,
     includeSeed && plot.seed ? `Завязка:\n${plot.seed}` : '',
     plot.cause ? `Первопричина: ${plot.cause}` : '',
-    `Исходы:\n${formatFreeformEndings(plot) || formatCloseWhen(plot)}`,
     // Раскрытое городом — уже не тайна, а установленный факт: об этом можно
     // говорить и писать в отличие от скрытого слоя ниже.
     solved ? `Город разгадал: ${solved}` : '',

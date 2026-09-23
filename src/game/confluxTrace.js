@@ -6,7 +6,6 @@ import { addCityEntity } from './cityEntities.js';
 import { appendCityModifier } from './cityContext.js';
 import { enqueueSeedRequest } from './seedSchedule.js';
 import { isStakedStory } from './plotlines.js';
-import { liveThreats } from './threats.js';
 
 function originWeight(entity) {
   const src = String(entity?.origin || entity?.source || 'genesis');
@@ -43,15 +42,9 @@ export function applyEntityTransfer(toDomain, entity, { fromName } = {}) {
   return added;
 }
 
-export function collectContagionThreats(domain) {
-  const out = [];
-  for (const plot of domain?.plotlines || []) {
-    if (!isStakedStory(plot)) continue;
-    for (const threat of liveThreats(plot)) {
-      out.push({ plot, threat });
-    }
-  }
-  return out;
+/** Одна история — одно семя соседу, не по беде из пула. */
+export function collectContagionStories(domain) {
+  return (domain?.plotlines || []).filter((plot) => isStakedStory(plot) && plot.status !== 'closed');
 }
 
 export function applyUndockTrace({ a, b, conflux, world, day, rng = Math.random, contagion = true }) {
@@ -67,24 +60,24 @@ export function applyUndockTrace({ a, b, conflux, world, day, rng = Math.random,
   }
 
   if (contagion) {
-    for (const { plot, threat } of collectContagionThreats(a)) {
+    for (const plot of collectContagionStories(a)) {
       if (rng() < 0.5) {
         enqueueSeedRequest(b, {
-          grain: threat.text || plot.synopsis,
+          grain: plot.synopsis || plot.title,
           source: 'chronicle',
           day,
         });
-        traces.push({ to: b.id, contagion: threat.id || plot.id });
+        traces.push({ to: b.id, contagion: plot.id });
       }
     }
-    for (const { plot, threat } of collectContagionThreats(b)) {
+    for (const plot of collectContagionStories(b)) {
       if (rng() < 0.5) {
         enqueueSeedRequest(a, {
-          grain: threat.text || plot.synopsis,
+          grain: plot.synopsis || plot.title,
           source: 'chronicle',
           day,
         });
-        traces.push({ to: a.id, contagion: threat.id || plot.id });
+        traces.push({ to: a.id, contagion: plot.id });
       }
     }
   }

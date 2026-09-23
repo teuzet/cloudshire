@@ -34,7 +34,7 @@ function deed(id, extra = {}) {
 
 test('словари вердиктов различаются по типу', () => {
   assert.deepEqual(DEED_VERDICTS, ['CONTINUE', 'PAUSE', 'CANCEL', 'RETARGET']);
-  assert.deepEqual(THREAT_VERDICTS, ['CONTINUE', 'CANCEL', 'DELAY']);
+  assert.deepEqual(THREAT_VERDICTS, ['CONTINUE', 'CANCEL']);
   assert.equal(parseThreatVerdict('PAUSE'), 'CONTINUE', 'угрозу нельзя запаузить');
   assert.equal(parseDeedVerdict('DELAY'), 'CONTINUE', 'дело нельзя отсрочить');
 });
@@ -103,14 +103,13 @@ test('CONTINUE ничего не меняет', () => {
   assert.equal(d.pausedDay, undefined);
 });
 
-test('вердикт по угрозе: отмена и отсрочка', () => {
+test('вердикт по угрозе: отмена, отсрочки больше нет', () => {
   const p = plot();
-  const t = threat(p, { total: 60 });
-  assert.equal(applyThreatVerdict(p, t.id, 'DELAY', { day: 10 }).bonus, 90);
-  assert.equal(t.dueDay, 150);
+  const t = threat(p);
+  assert.equal(applyThreatVerdict(p, t.id, 'DELAY', { day: 10 }).verdict, 'CONTINUE');
+  assert.equal(t.status, 'live');
   applyThreatVerdict(p, t.id, 'CANCEL', { day: 20, reason: 'ловить больше некого' });
   assert.equal(t.status, 'cancelled');
-  assert.equal(p.defenseCount, 0, 'разбор не считается обороной');
 });
 
 test('вердикт по несуществующей угрозе — мягкий отказ', () => {

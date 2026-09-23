@@ -38,7 +38,8 @@ import { DIFFICULTY_SPEC, DURATION_SPEC, normalizeDifficultyBand } from '../../g
 import { deedDurationBand, deedRemainingBand, deedRemainingDays } from '../../game/deeds.js';
 import { paceLabel } from '../../game/deedMath.js';
 import { blessManaCost } from '../../game/mana.js';
-import { liveThreats, remainingDays as threatRemainingDays } from '../../game/threats.js';
+import { stageScale } from '../../game/threats.js';
+import { pressureAt, fillDay } from '../../game/pressure.js';
 import { priestOrders } from '../../game/priestOrders.js';
 import { visibleDialogHistory } from '../../game/memory.js';
 import { notifySettings } from '../../game/notify.js';
@@ -125,16 +126,22 @@ function inspectPlot(plot, day, lore = []) {
   return {
     ...bare,
     ...plotSecrets(plot),
-    threats: liveThreats(plot).map((t) => ({
+    threats: (plot.threats || []).map((t) => ({
       id: t.id,
       text: t.text,
-      band: t.band,
-      stage: t.stage || null,
-      remainingPct: t.remainingPct ?? null,
-      outcome: t.outcome,
-      totalDays: t.totalDays,
-      remainingDays: threatRemainingDays(t, day),
+      status: t.status,
+      stage: t.stage ?? null,
+      final: Boolean(t.final),
+      scale: stageScale(plot),
     })),
+    pressure: plot.pressure
+      ? {
+          value: Math.round(pressureAt(plot, day)),
+          fillDays: plot.pressure.fillDays,
+          fillDay: fillDay(plot),
+        }
+      : null,
+    stage: plot.stage ?? 0,
     chronicles: inspectPlotChronicles(plot, lore),
   };
 }
@@ -996,6 +1003,29 @@ export function createWebServer({ config, app, runtime, storage }) {
             mystery: Boolean(result.requireMystery),
             title: result.plot?.title,
           });
+          res.json(result);
+        } catch (err) {
+          req.log?.error('http.error', { error: err.message, stack: err.stack });
+          res.status(500).json({ error: err.message });
+        }
+      });
+
+      server.post('/api/play/pressure', async (req, res) => {
+        try {
+          const userId = String(req.body?.userId || 'local-user');
+          const result = await app.setPlayPressure(userId, {
+            plotId: req.body?.plotId,
+            value: req.body?.value,
+          });
+          if (!result.ok) {
+            const status =
+              result.error === 'ticking'
+                ? 409
+                : result.error === 'not_found' || result.error === 'no_domain'
+                  ? 404
+                  : 400;
+            return res.status(status).json(result);
+          }
           res.json(result);
         } catch (err) {
           req.log?.error('http.error', { error: err.message, stack: err.stack });

@@ -17,7 +17,6 @@ import { gameDateFromDay } from './gameClock.js';
 import {
   scheduleJob,
   cancelJobsForPlot,
-  cancelJobsForThreat,
   cancelJobs,
   dueJobs,
   claimJob,
@@ -44,9 +43,12 @@ import {
   liveThreats,
   findThreat,
   fireThreat,
+  firedThreatScale,
   normalizePlotThreats,
 } from './threats.js';
-import { replenishPlotThreats } from './threatSmith.js';
+import { fillStageThreats } from './threatSmith.js';
+import { pickConsequenceThreat } from './threatPick.js';
+import { ensurePressure, fillDay, pressureAt, resetPressure } from './pressure.js';
 import {
   deedTriggerLines,
   fallbackDeedEntry,
@@ -127,45 +129,24 @@ export function appendEventFact(
   return fact;
 }
 
-/** Поставить срабатывание угрозы в очередь. Один job на угрозу. */
-export function scheduleThreatJob(world, domain, threat) {
-  if (!world || !threat) return null;
+/** Один job на историю: день, когда шкала дойдёт до ста. */
+export function schedulePressureJob(world, domain, plot) {
+  if (!world || !plot) return null;
+  const due = fillDay(plot);
+  if (due == null) return null;
+  const existing = (world.jobs || []).find(
+    (j) => j.state === 'pending' && j.kind === 'pressure_fire' && j.payload?.plotId === plot.id,
+  );
+  if (existing) {
+    existing.dueDay = due;
+    return existing;
+  }
   return scheduleJob(world, {
     domainId: domain?.id || null,
-    kind: 'threat_fire',
-    dueDay: threat.dueDay,
-    payload: { plotId: threat.plotId, threatId: threat.id, outcome: threat.outcome },
+    kind: 'pressure_fire',
+    dueDay: due,
+    payload: { plotId: plot.id },
   });
-}
-
-/** Переставить job под изменившийся срок угрозы (отсрочка, ускорение, разбор). */
-export function resyncThreatJobs(world, domain, plot) {
-  if (!world || !plot) return [];
-  const out = [];
-  for (const threat of liveThreats(plot)) {
-    const job = (world.jobs || []).find(
-      (j) => j.state === 'pending' && j.kind === 'threat_fire' && j.payload?.threatId === threat.id,
-    );
-    if (!job) {
-      out.push(scheduleThreatJob(world, domain, threat));
-      continue;
-    }
-    if (job.dueDay !== threat.dueDay) {
-      job.dueDay = threat.dueDay;
-      out.push(job);
-    }
-  }
-  // Угрозы, которые больше не живы, снимаются с очереди.
-  for (const job of world.jobs || []) {
-    if (job.state !== 'pending' || job.kind !== 'threat_fire') continue;
-    if (job.payload?.plotId !== plot.id) continue;
-    const threat = findThreat(plot, job.payload?.threatId);
-    if (!threat || threat.status !== 'live') {
-      job.state = 'failed';
-      job.cancelled = true;
-    }
-  }
-  return out.filter(Boolean);
 }
 
 /**
@@ -185,7 +166,9 @@ export function sweepOrphanJobs(world, domain, { conflux = null, log = null } = 
   const deeds = new Set((domain.state?.pendingActions || []).map((a) => a.id));
   const dropped = cancelJobs(world, (job) => {
     if (job.domainId !== domain.id) return false;
-    if (job.kind === 'threat_fire') return job.payload?.plotId && !plots.has(job.payload.plotId);
+    if (job.kind === 'pressure_fire' || job.kind === 'threat_fire') {
+      return job.payload?.plotId && !plots.has(job.payload.plotId);
+    }
     if (job.kind === 'process_finish') return job.payload?.processId && !deeds.has(job.payload.processId);
     return false;
   });
@@ -201,22 +184,32 @@ export function sweepOrphanJobs(world, domain, { conflux = null, log = null } = 
 }
 
 /**
- * Дозаполнить обязательства нити и поставить их в очередь.
- * Живая история без счётчика — история, которая никогда ничего не породит.
+ * Завести шкалу, если её ещё нет, наполнить пул стадии и поставить день срабатывания.
  */
 export async function ensurePlotObligations({
   runtime,
   domain,
+  loreDomain = null,
   world,
   plot,
   day = 0,
+  config = null,
   rng = Math.random,
   log,
 } = {}) {
-  if (!plot || !isStakedStory(plot)) return [];
+  if (!plot || !isStakedStory(plot) || plot.status === 'closed') return [];
   normalizePlotThreats(plot);
-  const created = await replenishPlotThreats({ runtime, domain, plot, day, rng, log });
-  for (const threat of created) scheduleThreatJob(world, domain, threat);
+  ensurePressure(plot, day, config, rng);
+  const created = await fillStageThreats({
+    runtime,
+    domain: loreDomain || domain,
+    plot,
+    day,
+    config,
+    rng,
+    log,
+  });
+  schedulePressureJob(world, domain, plot);
   return created;
 }
 
@@ -317,8 +310,29 @@ export async function resolveDeedEvent({
 
   const { plot, host: plotHost } = storyForProcess(domain, process, partner);
   const applied = plot
-    ? applyDeedToPlot({ plot, process, finish: rolled.finish, day, rng })
+    ? applyDeedToPlot({ plot, process, finish: rolled.finish, day, rng, config })
     : { alignment: alignmentOf(process) || 'UNRELATED', closes: false, depthGain: 0 };
+
+  let firedThreat = null;
+  let fireRes = null;
+  if (plot && applied.triggerThreat) {
+    fireRes = fireThreat(plot, applied.triggerThreat, { day, firedBy: process.id, config });
+    if (fireRes.ok) firedThreat = applied.triggerThreat;
+  } else if (plot && applied.pressureFilled) {
+    const picked = await pickConsequenceThreat({
+      runtime,
+      domain: plotHost || domain,
+      plot,
+      deed: process,
+      log,
+    });
+    if (picked) {
+      fireRes = fireThreat(plot, picked, { day, firedBy: process.id, config });
+      if (fireRes.ok) firedThreat = picked;
+    } else {
+      resetPressure(plot, day, config, rng);
+    }
+  }
 
   // Постоянный порядок — тоже обычное дело, только его след ложится не в
   // глубину истории, а в постоянные изменения города.
@@ -329,7 +343,7 @@ export async function resolveDeedEvent({
   // Порядок города говорит сам за себя — там текст уже предметный.
   let text = rule?.text || null;
   let pairNarration = null;
-  const closesStory = Boolean(applied.closes) && Boolean(plot);
+  const closesStory = Boolean(applied.closes || fireRes?.closes) && Boolean(plot);
   const pairDeed = !rule && conflux?.status === 'docked' && isPairCrossingDeed(process, plot, partner);
   if (!text && pairDeed) {
     pairNarration = await narratePairDeed({
@@ -367,7 +381,9 @@ export async function resolveDeedEvent({
             plot,
             process,
             applied,
-            threat: plot ? findThreat(plot, applied.threatId) : null,
+            threat: firedThreat || (plot ? findThreat(plot, applied.threatId) : null),
+            averted: applied.averted || [],
+            linked: Boolean(firedThreat),
             closed: false,
             chronicleTail: plotChronicleTail(plotHost || domain, plot?.id),
             partnerName: process.crossIsland ? partner?.name || '' : '',
@@ -398,13 +414,13 @@ export async function resolveDeedEvent({
         secretForDomainId: process.secret ? domain.id : null,
         extra: {
           statPocket: closesStory ? 'ending' : 'deed',
-          endingKind: plot?.ending?.kind || applied.endingKind || null,
+          endingKind: plot?.ending?.kind || fireRes?.endingKind || applied.endingKind || null,
           plotClosed: closesStory,
         },
       });
   if (!pairNarration?.fact && fact) {
     fact.statPocket = closesStory ? 'ending' : 'deed';
-    if (closesStory) fact.endingKind = plot?.ending?.kind || applied.endingKind || null;
+    if (closesStory) fact.endingKind = plot?.ending?.kind || fireRes?.endingKind || applied.endingKind || null;
   }
 
   const pairSpread =
@@ -458,18 +474,30 @@ export async function resolveDeedEvent({
 
   let closed = null;
   const host = plotHost && plotHost.id !== domain.id ? plotHost : domain;
-  if (plot && applied.closes) {
+  if (plot && (applied.closes || fireRes?.closes)) {
+    const endingKind = plot.ending?.kind || fireRes?.endingKind || applied.endingKind;
     closed = closePlotWithJobs(host, world, plot, {
       day,
-      reason: applied.endingKind === 'GOOD_ENDING' ? 'depth' : 'lives',
+      reason: endingKind === 'GOOD_ENDING' ? 'depth' : endingKind === 'NEUTRAL_ENDING' ? 'neutral' : 'lives',
       fact,
     });
     if (storage && host !== domain) await storage.saveDomain(host);
   } else if (plot) {
-    resyncThreatJobs(world, host, plot);
+    if (fireRes?.ok) resetPressure(plot, day, config, rng);
+    schedulePressureJob(world, host, plot);
     await reconcilePlot({ runtime, domain: host, plot, resolved: outcome, day, log });
-    resyncThreatJobs(world, host, plot);
-    await ensurePlotObligations({ runtime, domain: host, world, plot, day, rng, log });
+    // Хроника дела уже лежит на домене актёра. Новый пул пишется после неё.
+    await ensurePlotObligations({
+      runtime,
+      domain: host,
+      loreDomain: domain,
+      world,
+      plot,
+      day,
+      config,
+      rng,
+      log,
+    });
     if (storage && host !== domain) await storage.saveDomain(host);
   }
 
@@ -501,8 +529,8 @@ export async function resolveDeedEvent({
 // ──────────────────────────── угроза сработала ────────────────────────────
 
 /**
- * Обязательство мира дошло до срока. Это и есть бывший автотик: новая запись
- * в хронике появляется потому, что город не успел, а не потому, что «был месяц».
+ * Шкала дошла до ста, либо дело само вызвало беду.
+ * Пустой пул ничего не делает: шкала просто начинается заново.
  */
 export async function fireThreatEvent({
   runtime,
@@ -526,11 +554,9 @@ export async function fireThreatEvent({
   if (!threat || threat.status !== 'live') return { skipped: 'threat_not_live' };
 
   const tail = plotChronicleTail(domain, plot.id);
-  const res = fireThreat(plot, threat, { day });
+  const res = fireThreat(plot, threat, { day, config });
   if (!res.ok) return { skipped: res.reason };
 
-  // Текст угрозы написан в будущем времени: это предсказание, которое движок
-  // держал до срока. В летопись оно должно лечь уже случившимся.
   const closesStory = Boolean(res.closes);
   const occasion = closesStory ? 'развязка' : 'угроза';
   const written = await writeChronicle({
@@ -546,16 +572,17 @@ export async function fireThreatEvent({
           triggerLines: threatTriggerLines(threat),
           chronicleTail: tail,
           dateLabel: gameDateFromDay(day).label,
+          config,
+          scale: firedThreatScale(plot, threat),
         })
       : formatThreatPrompt({
           plot,
           threat,
-          kind: res.kind,
           closed: false,
           stage: res.stage,
-          remainingPct: res.remainingPct,
           chronicleTail: tail,
           dateLabel: gameDateFromDay(day).label,
+          config,
         }),
     log,
   });
@@ -564,7 +591,7 @@ export async function fireThreatEvent({
     text: written?.text || threat.text || 'В городе случилось то, чего боялись.',
     plotId: plot.id,
     day,
-    author: res.kind === 'resolution' ? 'engine:resolution' : 'engine:threat',
+    author: 'engine:threat',
     importance: 'major',
     extra: {
       statPocket: closesStory ? 'ending' : 'threat',
@@ -591,21 +618,21 @@ export async function fireThreatEvent({
   if (res.closes) {
     closed = closePlotWithJobs(domain, world, plot, {
       day,
-      reason: res.kind === 'resolution' ? 'neutral' : 'lives',
+      reason: res.endingKind === 'NEUTRAL_ENDING' ? 'neutral' : 'lives',
       fact,
     });
   } else {
-    resyncThreatJobs(world, domain, plot);
+    resetPressure(plot, day, config, rng);
+    schedulePressureJob(world, domain, plot);
     await reconcilePlot({ runtime, domain, plot, resolved: { summary: threat.text, kind: 'threat' }, day, log });
-    resyncThreatJobs(world, domain, plot);
-    await ensurePlotObligations({ runtime, domain, world, plot, day, rng, log });
+    // Запись о сработавшей беде уже в хронике. Следующий пул пишется по ней.
+    await ensurePlotObligations({ runtime, domain, world, plot, day, config, rng, log });
   }
 
   log.info('loop.threat_fired', {
     title: plot.title,
-    kind: res.kind,
     stage: res.stage,
-    remainingPct: res.remainingPct,
+    endingKind: res.endingKind || null,
     closed: Boolean(closed),
     livesLeft: res.livesLeft ?? null,
   });
@@ -617,9 +644,29 @@ export async function fireThreatEvent({
     occasion,
     closed: Boolean(closed),
     stage: res.stage || null,
-    remainingPct: res.remainingPct ?? null,
+    endingKind: res.endingKind || null,
     pairSpread,
   };
+}
+
+/** Шкала сама дошла до ста. Беда берётся из пула жребием. */
+export async function firePressureEvent(ctx) {
+  const { domain, world, day = 0, plotId, config = null, rng = Math.random, plot: givenPlot = null } = ctx;
+  const plot = givenPlot || findPlotline(domain, plotId);
+  if (!plot || plot.status === 'closed') return { skipped: 'plot_gone' };
+  ensurePressure(plot, day, config, rng);
+  if (pressureAt(plot, day) < 100) {
+    schedulePressureJob(world, domain, plot);
+    return { skipped: 'not_full' };
+  }
+  const live = liveThreats(plot);
+  if (!live.length) {
+    resetPressure(plot, day, config, rng);
+    schedulePressureJob(world, domain, plot);
+    return { skipped: 'empty_pool' };
+  }
+  const threat = live[Math.floor(rng() * live.length)];
+  return fireThreatEvent({ ...ctx, plot, threatId: threat.id });
 }
 
 // ──────────────────────────────── посев ────────────────────────────────
@@ -764,8 +811,8 @@ const HANDLERS = {
   async process_finish(ctx, job) {
     return resolveDeedEvent({ ...ctx, processId: job.payload?.processId });
   },
-  async threat_fire(ctx, job) {
-    return fireThreatEvent({ ...ctx, plotId: job.payload?.plotId, threatId: job.payload?.threatId });
+  async pressure_fire(ctx, job) {
+    return firePressureEvent({ ...ctx, plotId: job.payload?.plotId });
   },
   async seed_attempt(ctx) {
     seedAttemptEvent(ctx);
@@ -833,7 +880,7 @@ export async function drainDomainJobs({
 export function askForEvent(domain, event, config = null) {
   const plot = event?.plot;
   const closable =
-    plot && !event.closed && Number(plot.depth) >= Number(plot.maxDepth) * 0.75 && !liveThreats(plot).length;
+    plot && !event.closed && Number(plot.maxDepth) > 0 && Number(plot.depth) >= Number(plot.maxDepth) * 0.75;
   return decideAsk({
     plotClosable: Boolean(closable),
     needsHelp: false,
@@ -874,5 +921,3 @@ export function scheduleDeedJob(world, domain, process) {
     payload: { processId: process.id },
   });
 }
-
-export { cancelJobsForThreat };

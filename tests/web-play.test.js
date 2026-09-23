@@ -365,10 +365,10 @@ test('инспектор показывает и скрытое нависшее
     const data = await get(base, '/api/play/inspect?userId=local-user');
     const plot = data.domain.plotlines[0];
     assert.deepEqual(
-      plot.threats.map((t) => [t.text, t.remainingDays]),
+      plot.threats.map((t) => [t.text, t.status]),
       [
-        ['Колодец обвалится', 5],
-        ['Вода уйдёт совсем', 65],
+        ['Колодец обвалится', 'live'],
+        ['Вода уйдёт совсем', 'live'],
       ],
     );
     assert.equal('known' in plot.threats[0], false);

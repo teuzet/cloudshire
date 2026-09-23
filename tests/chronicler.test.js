@@ -86,27 +86,14 @@ test('закрывшее историю дело получает право н�
   assert.doesNotMatch(lines, /История не закрыта/);
 });
 
-test('снятая беда в запись текстом не попадает', () => {
+test('отведённая беда называется в записи', () => {
   const lines = deedConsequenceLines({
     plot: plot(),
     applied: { alignment: 'RELEVANT', finish: 'ok' },
-    threat: { id: 't1', text: 'Известковая пыль забьёт водосборный сток' },
+    averted: [{ id: 't1', text: 'Известковая пыль забьёт водосборный сток' }],
   }).join('\n');
-  assert.match(lines, /которой город не видел/);
-  assert.match(lines, /город этого не знает/);
-  assert.doesNotMatch(lines, /Известковая пыль/);
-  assert.doesNotMatch(lines, /Нависшее снято/);
-});
-
-test('снятая беда, которой город не видел, в запись текстом не попадает', () => {
-  const lines = deedConsequenceLines({
-    plot: plot(),
-    applied: { alignment: 'RELEVANT', finish: 'ok' },
-    threat: { id: 't1', known: false, text: 'Стая хищных тварей сорвёт загон на дальнем выгоне' },
-  }).join('\n');
-  assert.match(lines, /которой город не видел/);
-  assert.match(lines, /город этого не знает/);
-  assert.doesNotMatch(lines, /хищных тварей/);
+  assert.match(lines, /Известковая пыль/);
+  assert.match(lines, /чего избежал/);
 });
 
 test('UNRELATED-делу прямо запрещают двигать историю', () => {
@@ -268,20 +255,41 @@ test('конфиг: три исхода расшифрованы и крит н�
 });
 
 test('промпт беды требует прошедшего времени', () => {
+  const cfg = loadConfig();
   const text = formatThreatPrompt({
     plot: plot(),
-    threat: { text: 'Известковая пыль забьёт водосборный сток, и дождь смоет посевы' },
+    threat: { text: 'Известковая пыль забьёт водосборный сток, и дождь смоет посевы', stage: 0 },
     kind: 'threat',
     stage: 'interim',
     remainingPct: 50,
+    config: cfg,
   });
   assert.match(text, /В БУДУЩЕМ ВРЕМЕНИ/);
   assert.match(text, /как случившееся, в прошедшем времени/);
   assert.match(text, /забьёт водосборный сток/, 'предсказание отдаём как есть');
-  assert.match(text, /ещё 50% до плохой концовки/);
   assert.match(text, /История не закрыта/);
+  assert.match(text, /GRAVITY: SITUATION/);
+  assert.match(text, /Статус-кво города вследствие этой истории не меняется/);
+  assert.match(text, /Тяжесть случившегося для города держи на этом уровне/);
+  assert.doesNotMatch(text, /GRAVITY: CRISIS/);
+  assert.doesNotMatch(text, /ещё 50%/);
   assert.doesNotMatch(text, /длиннее обычной/);
   assert.doesNotMatch(text, /УЩЕРБ|ТРЕВОГА|КАТАСТРОФА/);
+});
+
+test('последняя беда расшифровывается gravity истории, а не ранней стадии', () => {
+  const cfg = loadConfig();
+  const text = formatFinalePrompt({
+    plot: plot({ gravity: 'CRISIS', cause: 'хищник на склоне' }),
+    ending: { kind: 'BAD_ENDING', text: '' },
+    triggerLines: threatTriggerLines({ text: 'Зверь гибнет у стены' }),
+    config: cfg,
+    scale: 'CRISIS',
+  });
+  assert.match(text, /GRAVITY: CRISIS/);
+  assert.match(text, /На кону жизни заметной части жителей/);
+  assert.match(text, /Нападение чудовищ на город/);
+  assert.match(text, /Тяжесть случившегося для города держи на этом уровне/);
 });
 
 test('финальная запись несёт и случившееся, и всю тройку концовки', () => {
@@ -305,11 +313,9 @@ test('финальная запись несёт и случившееся, и �
   });
   assert.match(text, /этим история кончается/i);
   assert.match(text, /Северное крыло рухнет на мостки/);
-  assert.match(text, /марш обвалился вместе с людьми/);
-  assert.match(text, /спорить о лестнице больше не о чем/);
-  assert.match(text, /Срединный пояс отрезан/);
   assert.match(text, /марш держится на одной осевшей опоре/);
   assert.match(text, /утратой, а не решением/);
+  assert.doesNotMatch(text, /GRAVITY:/);
   assert.match(text, new RegExp(`до ${CHRONICLE_FINALE_MAX} символов`));
   assert.equal(chronicleEntryLimit(CHRONICLE_FINALE_MAX), CHRONICLE_FINALE_MAX);
   assert.equal(chronicleEntryLimit(10), CHRONICLE_ENTRY_MAX);
@@ -324,8 +330,8 @@ test('развязка берётся из заготовленных концо
     ],
   });
   const ending = { kind: 'GOOD_ENDING', text: '', endingId: 'e_good', processId: 'proc1' };
-  assert.equal(endingText(p, ending), 'ход расчистили, лестница смолкла');
-  assert.equal(endingText(p, { kind: 'GOOD_ENDING', text: '', endingId: null }), null);
+  assert.equal(endingText(p, ending), null);
+  assert.equal(endingText(p, { kind: 'GOOD_ENDING', text: 'ход расчистили', endingId: null }), 'ход расчистили');
 
   const text = formatFinalePrompt({
     plot: p,
@@ -336,7 +342,6 @@ test('развязка берётся из заготовленных концо
       applied: { alignment: 'DIRECT', finish: 'crit' },
     }),
   });
-  assert.match(text, /лестница смолкла/);
   assert.match(text, /Канцлер Жален/);
   assert.match(text, /\[КРИТИЧЕСКИЙ УСПЕХ\]/);
   assert.match(text, /что-то приобрёл/);

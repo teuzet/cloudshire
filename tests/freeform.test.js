@@ -2780,7 +2780,11 @@ test('живой посев без флага и без выпавшего ша�
   assert.match(planted.plot.seed, /мосток у межи/);
   assert.match(planted.plot.synopsis, /мосток/);
   assert.doesNotMatch(planted.plot.synopsis, /На самом деле/i);
-  assert.ok(extras.some((e) => e.agentId === 'freeformEndings'));
+  assert.equal(
+    extras.some((e) => e.agentId === 'freeformEndings'),
+    false,
+    'живой посев больше не пишет концовки заранее',
+  );
   assert.ok(extras.some((e) => e.agentId === 'freeformUrgency'));
   assert.ok(extras.every((e) => e.domainId === 'domain_1'));
 });

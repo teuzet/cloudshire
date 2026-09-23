@@ -31,19 +31,24 @@ export const ALIGNMENT_WARNING = {
 };
 
 export const ALIGNMENT_LADDER = [
-  'DIRECT — успех сам ставит одну из концовок карточки. Укажи endingId.',
-  'RELEVANT — успех снимает одну из перечисленных угроз. Укажи threatId.',
-  'DANGEROUS — успех сам вызывает угрозу или плохую концовку. Укажи threatId, который сработает.',
+  'DIRECT — успех работает по первопричине истории.',
+  'RELEVANT — успех снимает одну или несколько бед. Укажи threatIds.',
+  'DANGEROUS — успех сам вызывает одну беду. Укажи её id.',
   'UNRELATED — даже полный успех историю не двигает.',
 ];
 
-export function applyAlignment(process, alignment, { endingId = '', threatId = '' } = {}) {
+export function applyAlignment(process, alignment, { threatId = '', threatIds = [] } = {}) {
   const value = parseAlignment(alignment);
+  const ids = [...(Array.isArray(threatIds) ? threatIds : []), threatId]
+    .map((id) => String(id || '').trim())
+    .filter(Boolean);
+  const unique = [...new Set(ids)];
   if (process) {
     process.plotEngagement = value;
     process.plotAligned = value === 'DIRECT';
-    process.endingId = value === 'DIRECT' ? String(endingId || '') : '';
-    process.threatId = value === 'RELEVANT' || value === 'DANGEROUS' ? String(threatId || '') : '';
+    process.endingId = '';
+    process.threatIds = value === 'RELEVANT' ? unique : value === 'DANGEROUS' ? unique.slice(0, 1) : [];
+    process.threatId = process.threatIds[0] || '';
   }
   return value;
 }

@@ -23,7 +23,7 @@ import {
   chronicleSince,
   seedQueue,
 } from '../src/game/seedSchedule.js';
-import { createThreat, attachThreat, defendThreat } from '../src/game/threats.js';
+import { createThreat, attachThreat, avertThreats } from '../src/game/threats.js';
 
 /** Хроника домена — записи с тегом chronicle в lore. */
 function domain({ chronicle = [], ...extra } = {}) {
@@ -77,7 +77,7 @@ test('живые угрозы считаются по всем городски�
   const d = domain({ plotlines: [stakedPlot('p1', 2), stakedPlot('p2', 1)] });
   assert.equal(countLiveThreats(d), 3);
   const [first] = d.plotlines[0].threats;
-  defendThreat(d.plotlines[0], first, { day: 1 });
+  avertThreats(d.plotlines[0], [first.id], { day: 1 });
   assert.equal(countLiveThreats(d), 2);
 });
 
@@ -94,8 +94,10 @@ test('насыщенность гасит посев и разгоняет ег�
   assert.equal(saturationFactor(THREAT_TARGET_MAX + 1), 0, 'выше нормы не сеем вовсе');
 });
 
-test('перенасыщенный город не сеет', () => {
-  const d = domain({ plotlines: [stakedPlot('p1', 3), stakedPlot('p2', 3)] });
+test('перенасыщенный историями город не сеет', () => {
+  const d = domain({
+    plotlines: ['p1', 'p2', 'p3', 'p4', 'p5'].map((id) => stakedPlot(id, 0)),
+  });
   const res = decideSeedAttempt(d, { day: 0, rng: () => 0 });
   assert.equal(res.seed, false);
   assert.equal(res.reason, 'saturated');
@@ -137,7 +139,7 @@ test('насыщенная доска сбивает шанс, не обнуля
   const cold = { chronicle: 5, void: 5, errand: 5 };
   const empty = domain();
   empty.state.seedTemp = { ...cold };
-  const busy = domain({ plotlines: [stakedPlot('p1', 3)] });
+  const busy = domain({ plotlines: [stakedPlot('p1'), stakedPlot('p2'), stakedPlot('p3')] });
   busy.state.seedTemp = { ...cold };
   const a = decideSeedAttempt(empty, { day: 0, rng: () => 0.999 });
   const b = decideSeedAttempt(busy, { day: 0, rng: () => 0.999 });

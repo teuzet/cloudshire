@@ -503,6 +503,39 @@ function plotFactsBlock(p) {
   };
 }
 
+/** id беды → карточка из открытых и закрытых нитей города и сопряжения. */
+function threatById(d) {
+  const map = new Map();
+  const lists = [d?.plotlines, d?.closedPlotlines, d?.conflux?.plotlines, d?.conflux?.closedPlotlines];
+  for (const plots of lists) {
+    for (const plot of plots || []) {
+      for (const t of plot.threats || []) {
+        if (t?.id) map.set(String(t.id), t);
+      }
+    }
+  }
+  return map;
+}
+
+/** Какие беды снимает успех RELEVANT-дела. Тексты берутся с нитей, id — с самого дела. */
+function relevantClosures(p, threats) {
+  if (p.plotEngagement !== 'RELEVANT') return '';
+  const ids = [];
+  if (Array.isArray(p.threatIds)) ids.push(...p.threatIds);
+  if (p.threatId) ids.push(p.threatId);
+  const unique = [...new Set(ids.map((id) => String(id || '').trim()).filter(Boolean))];
+  if (!unique.length) return '<p class="small muted">закрывает: не указаны</p>';
+  const rows = unique
+    .map((id) => {
+      const t = threats?.get(id);
+      const text = t?.text ? String(t.text) : id;
+      const mark = t?.status && t.status !== 'live' ? ` <span class="muted">${esc(t.status)}</span>` : '';
+      return `<li>${esc(text)}${mark}</li>`;
+    })
+    .join('');
+  return `<p class="small muted">закрывает:</p><ul class="small">${rows}</ul>`;
+}
+
 /** Что дело выясняет, если сработает: саму разгадку, подступ, или ничего. */
 function deedSecretAim(p) {
   const bits = [
@@ -585,6 +618,19 @@ function plotChroniclesBlock(p) {
   return `<p class="small muted">хроника нити (${list.length}):</p><ul class="small plot-chron">${rows}</ul>`;
 }
 
+function pressureBar(p) {
+  if (!canDev || p.type !== 'story' || p.status === 'closed' || p.closeReason) return '';
+  const value = Math.max(0, Math.min(100, Math.round(Number(p.pressure?.value) || 0)));
+  return (
+    `<form class="pressure" data-pressure-form="1" data-plot="${esc(p.id)}">` +
+    `<div class="pressure-bar" aria-hidden="true"><span style="width:${value}%"></span></div>` +
+    `<span class="pressure-label">${value}/100</span>` +
+    `<input name="value" type="number" min="0" max="100" step="1" value="${value}" inputmode="numeric" title="Выставить шкалу" />` +
+    `<button type="submit" class="force-btn">выставить</button>` +
+    `</form>`
+  );
+}
+
 function plotCard(p, names = {}) {
   const concerns = (p.concernsDomainIds || [])
     .map((id) => names[id] || id)
@@ -615,19 +661,11 @@ function plotCard(p, names = {}) {
   ]
     .filter(Boolean)
     .join(' · ');
-  // Нависшее целиком: городу оно не показывается, а отлаживать сроки надо здесь.
+  // Живой пул стадии. Сработавшие, снятые и отменённые прошлых стадий здесь не нужны.
   const threats = (p.threats || [])
+    .filter((t) => !t.status || t.status === 'live')
     .map((t) => {
-      const bits = [
-        t.outcome === 'neutral'
-          ? 'разрешение'
-          : t.stage === 'finale'
-            ? 'исход'
-            : t.remainingPct != null
-              ? `${t.remainingPct}%`
-              : 'угроза',
-        `${t.remainingDays ?? '?'} из ${t.totalDays ?? '?'} дн.`,
-      ]
+      const bits = [t.status || 'live', t.final ? 'последняя стадия' : `стадия ${t.stage ?? 0}`]
         .filter(Boolean)
         .join(' · ');
       const fire =
@@ -650,6 +688,7 @@ function plotCard(p, names = {}) {
   return (
     `<article class="ins-card"><h4>${esc(p.title)}</h4>` +
     `<div class="muted small">${esc(meta)}</div>` +
+    pressureBar(p) +
     (p.synopsis ? `<p class="pre">${esc(p.synopsis)}</p>` : '') +
     (p.seed ? `<p class="small muted">завязка:</p><p class="pre">${esc(p.seed)}</p>` : '') +
     (p.cause ? `<p class="small muted">первопричина: ${esc(p.cause)}</p>` : '') +
@@ -813,16 +852,16 @@ function renderConfluxTab(d) {
 
   const active = procs.filter((p) => !p.status || p.status === 'active' || p.status === 'paused');
   const done = procs.filter((p) => p.status && p.status !== 'active' && p.status !== 'paused');
+  const threats = threatById(d);
+  const card = (p) => processCard(p, { viewerId: d.id, mana: d.mana, threats });
   out.push(
     block(
       `Дела сопряжения (${active.length})`,
-      active.length ? active.map((p) => processCard(p, { viewerId: d.id, mana: d.mana })).join('') : '<p class="muted">дел на сопряжении нет</p>',
+      active.length ? active.map(card).join('') : '<p class="muted">дел на сопряжении нет</p>',
     ),
   );
   if (done.length) {
-    out.push(
-      block(`Закрытые дела сопряжения (${done.length})`, done.map((p) => processCard(p, { viewerId: d.id, mana: d.mana })).join('')),
-    );
+    out.push(block(`Закрытые дела сопряжения (${done.length})`, done.map(card).join('')));
   }
 
   if (c.lore?.length) {
@@ -940,6 +979,7 @@ function processCard(p, opts = {}) {
   return (
     `<article class="ins-card${active ? '' : ' dim'}"><h4>${esc(p.summary || p.title || p.id)}</h4>` +
     `<div class="muted small">${esc(meta)}</div>` +
+    relevantClosures(p, opts.threats) +
     (p.goal ? `<p class="muted small">цель: ${esc(p.goal)}</p>` : '') +
     (p.detail ? `<p class="pre">${esc(p.detail)}</p>` : '') +
     deedSecretAim(p) +
@@ -951,18 +991,18 @@ function processCard(p, opts = {}) {
 
 function renderProcessesTab(d) {
   const list = d.processes || [];
+  const threats = threatById(d);
   const note = d.conflux?.processes?.length
     ? '<p class="muted small">Дела сопряжения — во вкладке «сопряжение». Здесь остаются городские.</p>'
     : '';
   const active = list.filter((p) => !p.status || p.status === 'active' || p.status === 'paused');
   const done = list.filter((p) => p.status && p.status !== 'active' && p.status !== 'paused');
+  const card = (p) => processCard(p, { viewerId: d.id, mana: d.mana, threats });
   const activeBlock = block(
     `Дела (${active.length})`,
-    active.length ? active.map((p) => processCard(p, { viewerId: d.id, mana: d.mana })).join('') : '<p class="muted">активных дел нет</p>',
+    active.length ? active.map(card).join('') : '<p class="muted">активных дел нет</p>',
   );
-  const doneBlock = done.length
-    ? block(`Закрытые дела (${done.length})`, done.map((p) => processCard(p, { viewerId: d.id, mana: d.mana })).join(''))
-    : '';
+  const doneBlock = done.length ? block(`Закрытые дела (${done.length})`, done.map(card).join('')) : '';
   return note + activeBlock + doneBlock + renderOrdersBlocks(d);
 }
 
@@ -1227,6 +1267,43 @@ $('inspectBody').addEventListener('click', async (e) => {
 });
 
 $('inspectBody').addEventListener('submit', async (e) => {
+  const pressure = e.target.closest('[data-pressure-form]');
+  if (pressure) {
+    e.preventDefault();
+    const plotId = pressure.getAttribute('data-plot');
+    const value = Math.round(Number(pressure.querySelector('input[name="value"]')?.value));
+    const btn = pressure.querySelector('button[type="submit"]');
+    if (!Number.isFinite(value) || value < 0 || value > 100) {
+      setBanner('Шкала: целое от 0 до 100.');
+      return;
+    }
+    if (btn) btn.disabled = true;
+    setBanner(value >= 100 ? 'Шкала полная — срабатывает беда…' : 'Выставляю шкалу…');
+    try {
+      const result = await api('/api/play/pressure', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, plotId, value }),
+      });
+      if (result.fired) {
+        setBanner(
+          result.closed
+            ? `Шкала на 100 — нить «${result.title || ''}» закрылась.`
+            : `Шкала на 100, беда сработала${result.title ? `: «${result.title}»` : ''}.`,
+        );
+      } else if (result.empty) {
+        setBanner('Шкала на 100, но живых бед нет — ничего не случилось.');
+      } else {
+        setBanner(`Шкала выставлена: ${result.value}/100.`);
+      }
+      await refresh({ force: true });
+      await refreshInspector();
+    } catch (err) {
+      if (btn) btn.disabled = false;
+      setBanner(err.message);
+    }
+    return;
+  }
   const form = e.target.closest('[data-seed-form]');
   if (!form) return;
   e.preventDefault();

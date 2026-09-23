@@ -10,7 +10,6 @@ import {
   clipPlotText,
   isStakedStory,
   formatCloseWhen,
-  formatFreeformEndings,
   defaultFreeformMaxDepth,
   maxFailsForGravity,
   PLOT_SUMMARY_MAX,
@@ -20,7 +19,6 @@ import { brainstormFreeformPack, shouldRequireSeedMystery } from './freeformBrai
 import { assembleFreeformLabStory } from './freeformAssemble.js';
 import { writePlotSeedDump } from './seedDump.js';
 import { createFreeformPlot, appendChronicle, openStoryTitlesLine, chronicleBudget } from './freeform.js';
-import { refreshFreeformEndings } from './freeformEndings.js';
 import { setFreeformUrgency } from './freeformUrgency.js';
 import { voidGrainPack } from './seedChannels.js';
 import { getLogger } from '../log.js';
@@ -103,7 +101,6 @@ export async function plantStakedStory({
           maxChars: chronicleBudget(config, 'seed'),
         })
       : null;
-    await refreshFreeformEndings({ runtime, domain, plot, config, log });
     await setFreeformUrgency({ runtime, domain, plot, log });
     await writePlotSeedDump(
       {
@@ -174,10 +171,6 @@ export function formatKeepPlotBlock(plot, freshLines = []) {
   const lines = [`id ${plot.id} — «${plot.title}»`, `Сейчас: ${plot.synopsis || 'только началась'}`];
 
   if (staked) {
-    const endings = formatFreeformEndings(plot);
-    if (endings) {
-      lines.push('ВОЗМОЖНЫЕ ИСХОДЫ (варианты будущего, ни один ещё не наступил):', endings);
-    }
     const depth = Math.round((Number(plot.depth) || 0) * 100) / 100;
     const maxDepth = Number(plot.maxDepth) || defaultFreeformMaxDepth(plot.gravity);
     const fails = Math.max(0, Math.round(Number(plot.failCount) || 0));

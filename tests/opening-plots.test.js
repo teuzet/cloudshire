@@ -59,8 +59,8 @@ function openingRuntime(calls) {
         });
         return;
       }
-      if (opts.agentId === 'freeformEndings') {
-        await tool.handler({ keep: false, endings: ENDINGS });
+      if (opts.agentId === 'threatSmith') {
+        await tool.handler({ threats: ['Опора мостков сядет'] });
         return;
       }
       if (opts.agentId === 'freeformUrgency') {
@@ -141,8 +141,8 @@ test('появление стартовой нити рассказываетс�
   assert.equal(res.fact.sourcePlotId, res.plot.id);
   assert.ok(liveThreats(res.plot).length >= 1, 'нить без угрозы событий не производит');
   assert.ok(
-    jobList(world).some((j) => j.kind === 'threat_fire'),
-    'угроза стартовой нити встала в очередь',
+    jobList(world).some((j) => j.kind === 'pressure_fire'),
+    'шкала стартовой нити встала в очередь',
   );
   assert.equal(seedQueue(domain).length, 1, 'вторая заявка ещё ждёт своего дня');
 

@@ -6,13 +6,13 @@
  * казнь возможна, но обстановка другая: пауза и вопрос покровителю.
  *
  * Словари вердиктов закрыты и различаются по типу: у дела есть пауза и
- * перенацеливание, у угрозы — только отмена и отсрочка.
+ * перенацеливание, у беды — только продолжение и отмена.
  */
 
-import { cancelThreat, delayThreat, findThreat, liveThreats } from './threats.js';
+import { cancelThreat, findThreat, liveThreats } from './threats.js';
 
 export const DEED_VERDICTS = ['CONTINUE', 'PAUSE', 'CANCEL', 'RETARGET'];
-export const THREAT_VERDICTS = ['CONTINUE', 'CANCEL', 'DELAY'];
+export const THREAT_VERDICTS = ['CONTINUE', 'CANCEL'];
 
 export const DEED_VERDICT_GUIDANCE = {
   CONTINUE: 'Дело всё ещё имеет смысл в том же виде.',
@@ -22,9 +22,8 @@ export const DEED_VERDICT_GUIDANCE = {
 };
 
 export const THREAT_VERDICT_GUIDANCE = {
-  CONTINUE: 'Беда идёт своим ходом.',
+  CONTINUE: 'Беда всё ещё может случиться.',
   CANCEL: 'Беда больше не может случиться — её предмет исчез.',
-  DELAY: 'Беда осталась, но отодвинулась.',
 };
 
 /** Молча удаляем брошенную паузу только после этого срока. */
@@ -90,8 +89,7 @@ export function applyThreatVerdict(plot, threatId, verdict, { day = 0, reason = 
   const threat = findThreat(plot, threatId);
   if (!threat) return { ok: false, verdict: v };
   if (v === 'CANCEL') return { ...cancelThreat(plot, threat, { day, reason }), verdict: v };
-  if (v === 'DELAY') return { ...delayThreat(threat, { day }), verdict: v };
-  return { ok: true, verdict: v };
+  return { ok: true, verdict: 'CONTINUE' };
 }
 
 /**

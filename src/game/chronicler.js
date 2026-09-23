@@ -21,8 +21,8 @@ import { getLogger, truncate } from '../log.js';
 import { chronicleEntries } from './models.js';
 import { FINISH_LABELS } from './rolls.js';
 import { findOfficer, officerGender } from './officers.js';
-import { findPlotEnding } from './freeform.js';
-import { livesLeft } from './threats.js';
+import { livesLeft, firedThreatScale } from './threats.js';
+import { formatFreeformGravityForPrompt } from './freeform.js';
 import { toolFail } from '../agents/toolResult.js';
 
 export const CHRONICLE_ENTRY_MAX = 400;
@@ -159,10 +159,11 @@ export function deedActorPrompt(domain, process) {
  * ничего не починил, а только выяснил. Без этой строки агент домысливает
  * благополучный ремонт, и синопсис уезжает в развязку на первом же деле.
  */
-export function deedConsequenceLines({ plot, applied, threat = null, closed = false }) {
+export function deedConsequenceLines({ plot, applied, threat = null, averted = [], closed = false }) {
   const lines = [];
   const alignment = applied?.alignment || 'UNRELATED';
   const finish = applied?.finish || 'ok';
+  const linked = Boolean(threat?.text);
 
   if (!plot) {
     lines.push('Эта работа ни с какой городской историей не связана: просто исполненное поручение.');
@@ -170,8 +171,12 @@ export function deedConsequenceLines({ plot, applied, threat = null, closed = fa
   }
 
   if (alignment === 'DIRECT') {
-    if (finish === 'fail') {
-      lines.push('Работа била прямо в суть истории и не вышла. Вопрос остался неразрешённым, и цена промаха уже видна.');
+    if (finish === 'fail' && linked) {
+      lines.push('Работа била прямо в суть истории и не вышла.');
+      lines.push(`Из этого провала выросла беда, и она случилась: ${threat.text}`);
+      lines.push('Свяжи провал и беду одной причиной. Пиши как одно событие, не как два.');
+    } else if (finish === 'fail') {
+      lines.push('Работа била прямо в суть истории и не вышла. Вопрос остался неразрешённым.');
     } else if (closed) {
       lines.push('Это и есть развязка истории: суть вопроса решена.');
     } else {
@@ -181,22 +186,28 @@ export function deedConsequenceLines({ plot, applied, threat = null, closed = fa
       );
     }
   } else if (alignment === 'RELEVANT') {
-    if (finish === 'fail') {
+    const gone = (averted || []).map((t) => t?.text).filter(Boolean);
+    if (finish === 'fail' && linked) {
+      lines.push('Работа должна была снять нависшее, но не справилась.');
+      lines.push(`Из этого провала выросла беда, и она случилась: ${threat.text}`);
+      lines.push('Свяжи провал и беду одной причиной.');
+    } else if (finish === 'fail') {
       lines.push('Работа должна была снять нависшее, но не справилась: нависшее осталось.');
-    } else if (threat?.text) {
-      // До срока беда городу не видна. В хронике отведённого её текст не цитируем.
-      lines.push('Работа отвела беду, которой город не видел и теперь уже не увидит.');
-      lines.push('Пиши только сделанную работу. Что именно отвели — не пиши: город этого не знает.');
+    } else if (gone.length) {
+      lines.push('Работа отвела беду, которой город не ждал. Теперь он знает, чего избежал:');
+      for (const text of gone) lines.push(`- ${text}`);
+      lines.push('Напиши, что именно заметили и отвели. Это и есть событие записи.');
     } else {
       lines.push('Работа сняла одну нависшую над городом беду.');
     }
   } else if (alignment === 'DANGEROUS') {
-    if (applied?.fired && threat?.text) {
-      lines.push(`Работа своей цели достигла, но ценой беды, и беда случилась: ${threat.text}`);
+    if (linked && finish !== 'fail') {
+      lines.push(`Работа своей цели достигла и тем вызвала беду: ${threat.text}`);
+      lines.push('Свяжи работу и беду: одно вышло из другого.');
     } else if (finish === 'fail') {
       lines.push('Опасная работа не вышла — и тем город уберёгся.');
     } else {
-      lines.push('Работа достигла цели, но подточила и без того шаткое: нависшее стало ближе.');
+      lines.push('Работа достигла цели.');
     }
   } else {
     lines.push(
@@ -241,9 +252,8 @@ export function deedConsequenceLines({ plot, applied, threat = null, closed = fa
  * на заготовленную концовку. Сам текст лежит в `plot.endings`.
  */
 export function endingText(plot, ending) {
-  const own = String(ending?.text || '').trim();
-  if (own) return own;
-  return String(findPlotEnding(plot, ending?.endingId)?.text || '').trim() || null;
+  void plot;
+  return String(ending?.text || '').trim() || null;
 }
 
 function plotBlock(plot, chronicleTail = []) {
@@ -309,6 +319,7 @@ export function formatDeedPrompt({
   process,
   applied,
   threat = null,
+  averted = [],
   closed = false,
   chronicleTail = [],
   dateLabel = '',
@@ -327,7 +338,7 @@ export function formatDeedPrompt({
     deedActorPrompt(domain, process),
     `ИСХОД: ${finishForPrompt(applied?.finish)}`,
     '',
-    ...deedConsequenceLines({ plot, applied, threat, closed }),
+    ...deedConsequenceLines({ plot, applied, threat, averted, closed }),
     '',
     ...plotBlock(plot, chronicleTail),
     '',
@@ -349,34 +360,31 @@ export function formatDeedPrompt({
  * держал до срока. В хронику оно должно попасть уже случившимся, иначе
  * летопись начинает пророчествовать.
  */
+function threatGravityLines(scale, config) {
+  return [
+    formatFreeformGravityForPrompt(scale, config),
+    'Тяжесть случившегося для города держи на этом уровне. Событие то же, причину не подменяй.',
+  ].join('\n');
+}
+
 export function formatThreatPrompt({
   plot,
   threat,
-  stage = null,
-  remainingPct = null,
   chronicleTail = [],
   dateLabel = '',
+  config = null,
 }) {
   void dateLabel;
-  const wound =
-    stage === 'finale'
-      ? 'исход истории'
-      : remainingPct != null
-        ? `ещё ${remainingPct}% до плохой концовки`
-        : threat?.stage === 'finale'
-          ? 'исход истории'
-          : threat?.remainingPct != null
-            ? `ещё ${threat.remainingPct}% до плохой концовки`
-            : null;
   return [
-    'ПОВОД: город не успел, и то, чего боялись, случилось.',
+    'ПОВОД: напряжение истории дошло до края, и одна из бед случилась.',
     '',
     'ЭТО БЫЛО НАПИСАНО ЗАРАНЕЕ, В БУДУЩЕМ ВРЕМЕНИ. Теперь оно произошло:',
     threat?.text || '—',
     'Перепиши это как случившееся, в прошедшем времени, со своими подробностями места и людей.',
     'Не пиши, что это ещё только случится или что этого можно избежать.',
-    wound ? `Насколько тяжело (в запись не выноси): ${wound}.` : null,
-    'История не закрыта: беда случилась, но вопрос остался. Не пиши итог и мораль.',
+    'История не закрыта: беда случилась, но первопричина осталась. Не пиши итог и мораль.',
+    '',
+    threatGravityLines(firedThreatScale(plot, threat), config),
     '',
     ...plotBlock(plot, chronicleTail),
     '',
@@ -442,11 +450,11 @@ export function formatFinalePrompt({
   chronicleTail = [],
   dateLabel = '',
   entryMax = CHRONICLE_FINALE_MAX,
+  config = null,
+  scale = null,
 }) {
   void dateLabel;
-  const resolved = findPlotEnding(plot, ending?.endingId) || null;
-  const kind = ending?.kind || resolved?.kind || 'NEUTRAL_ENDING';
-  const text = endingText(plot, ending);
+  const kind = ending?.kind || 'NEUTRAL_ENDING';
   const limit = chronicleEntryLimit(entryMax);
   return [
     'ПОВОД: этим история кончается. Это последняя запись о ней.',
@@ -454,13 +462,13 @@ export function formatFinalePrompt({
     'ЧТО ПРИВЕЛО К РАЗВЯЗКЕ:',
     ...triggerLines,
     '',
-    'РАЗВЯЗКА (что должно стать правдой; дословно не копируй):',
-    text || '—',
-    resolved?.questionGone ? `Почему вопрос больше не стоит: ${resolved.questionGone}` : null,
-    resolved?.nowDifferent ? `Что в городе теперь по-другому: ${resolved.nowDifferent}` : null,
     plot?.cause ? `Первопричина, из-за которой всё это стояло: ${plot.cause}` : null,
+    ending?.text ? `Уже намеченная развязка: ${ending.text}` : null,
     '',
+    scale ? threatGravityLines(scale, config) : null,
+    scale ? '' : null,
     ENDING_KIND_LINE[kind] || ENDING_KIND_LINE.NEUTRAL_ENDING,
+    'Покажи, почему вопрос больше не стоит и что в городе теперь иначе.',
     '',
     ...plotBlock(plot, chronicleTail),
     '',

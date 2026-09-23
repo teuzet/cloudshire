@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { draftThreatText, formatThreatRequest, replenishPlotThreats } from '../src/game/threatSmith.js';
+import { formatThreatStageRequest, fillStageThreats } from '../src/game/threatSmith.js';
 import { judgeDeed } from '../src/game/deedJudge.js';
 import { reconcilePlot, formatReconcilePrompt } from '../src/game/reconciler.js';
-import { nextObligationRequest, createThreat, attachThreat, liveThreats, findThreat } from '../src/game/threats.js';
+import { stagePoolRequest, createThreat, attachThreat, liveThreats, findThreat } from '../src/game/threats.js';
 import { reconcileRequest, reconcileScope } from '../src/game/reconcile.js';
 import { MIN_OFFICER_DAYS, DURATION_SPEC } from '../src/game/bands.js';
 import { loadConfig } from '../src/config.js';
@@ -47,123 +47,115 @@ const domain = { id: 'd1', state: { pendingActions: [] } };
 
 // ───────────────────────────── автор беды ─────────────────────────────
 
-test('заявка на беду несёт долю пути и анти-таргет, но не срок', () => {
-  const p = plot({ failCount: 1 });
-  const text = formatThreatRequest(nextObligationRequest(p, { rng: () => 0.5 }), p);
-  assert.match(text, /УДАР: промежуточный/);
-  assert.match(text, /50%/);
-  assert.match(text, /АНТИ-ТАРГЕТ/);
-  assert.match(text, /Северное крыло рушится вместе с людьми/);
+test('заявка на стадию называет масштаб и число, но не срок', () => {
+  const p = plot({ failCount: 0, maxFails: 2, stage: 0, cause: 'столб трескается' });
+  const text = formatThreatStageRequest(stagePoolRequest(p, { rng: () => 0 }), p, loadConfig());
+  assert.match(text, /МАСШТАБ СТАДИИ: SITUATION/);
+  assert.match(text, /GRAVITY: SITUATION/);
+  assert.match(text, /Статус-кво города вследствие этой истории не меняется/);
+  assert.match(text, /Вред каждой беды для города держи на этом уровне/);
+  assert.doesNotMatch(text, /GRAVITY: CRISIS/);
+  assert.match(text, /НУЖНО БЕД/);
+  assert.match(text, /не последняя стадия/);
   assert.match(text, /Срок не называй/);
-  assert.match(text, /ИЗВЕСТНОЕ И НЕИЗВЕСТНОЕ/);
-  assert.ok(!/дней/.test(text));
-  assert.doesNotMatch(text, /ПОЛОСА ТЯЖЕСТИ|ТРЕВОГА|УЩЕРБ|УТРАТА|КАТАСТРОФА|dread/i);
+  assert.match(text, /ИЗВЕСТНОЕ/);
+  assert.doesNotMatch(text, /АНТИ-ТАРГЕТ|УДАР:|дней/);
 });
 
-test('на исчерпанных ранах автор пишет событие утраты, а не ещё одно ухудшение', () => {
-  const p = plot({
-    cause: 'опорный столб держит всё северное крыло и трескается сам по себе',
-    failCount: 2,
-    endings: [
-      {
-        id: 'e1',
-        kind: 'BAD_ENDING',
-        text: 'Северное крыло рушится вместе с людьми',
-        questionGone: 'крыла больше нет, спорить не о чем',
-        nowDifferent: 'город потерял четверть жилых дворов',
-      },
-    ],
+test('последняя стадия требует снять первопричину', () => {
+  const p = plot({ failCount: 2, maxFails: 2, stage: 2, cause: 'столб трескается' });
+  const req = stagePoolRequest(p, { rng: () => 0 });
+  const text = formatThreatStageRequest(req, p, loadConfig());
+  assert.equal(req.final, true);
+  assert.match(text, /ПОСЛЕДНЯЯ СТАДИЯ/);
+  assert.match(text, /снимает первопричину/);
+  assert.match(text, /двумя или тремя предложениями/);
+  assert.match(text, /следствие того же события/);
+  assert.match(text, /почему она не вернётся долгий срок/);
+  assert.match(text, /Срок, на который причина снята, назвать можно/);
+  assert.match(text, /в этом списке разные/);
+  assert.match(text, /в следующей не повторяется/);
+  assert.match(text, /не подсказывают, чем именно кончается причина/);
+  assert.doesNotMatch(text, /Срок не называй/);
+  assert.match(text, /столб трескается/);
+  assert.match(text, /GRAVITY: CRISIS/);
+  assert.match(text, /На кону жизни заметной части жителей/);
+});
+
+test('автор бед пишет пул одним вызовом', async () => {
+  const p = plot({ gravity: 'SITUATION', maxFails: 0, failCount: 0 });
+  const runtime = fakeRuntime({
+    submit_threats: { threats: ['Пыль забьёт водосборный сток', 'Лестница обвалится на мостки'] },
   });
-  const req = nextObligationRequest(p, { rng: () => 0.5 });
-  const text = formatThreatRequest(req, p);
-  assert.equal(req.finale, true);
-  assert.match(text, /ЭТИМ ИСТОРИЯ КОНЧАЕТСЯ/);
-  assert.match(text, /необратимо лишается/);
-  assert.match(text, /Северное крыло рушится вместе с людьми/);
-  assert.match(text, /крыла больше нет/);
-  assert.match(text, /четверть жилых дворов/);
-  assert.match(text, /опорный столб держит всё северное крыло/);
-  assert.match(text, /Никаких «к зиме»/, 'горизонт последствий запрещён прямо');
-  assert.doesNotMatch(text, /АНТИ-ТАРГЕТ/);
-});
-
-test('заявка на разрешение просит нейтральный конец', () => {
-  const p = plot({ depth: 3, maxDepth: 3, defenseCount: 3 });
-  const req = nextObligationRequest(p, { rng: () => 0.5 });
-  const text = formatThreatRequest(req, p);
-  assert.equal(req.outcome, 'neutral');
-  assert.match(text, /НУЖНО РАЗРЕШЕНИЕ/);
-  assert.doesNotMatch(text, /УДАР:|ПОЛОСА ТЯЖЕСТИ/);
-});
-
-test('автор беды получает правило независимых параллельных часов', () => {
-  const ins = loadConfig().agents.threatSmith.instructions;
-  assert.match(ins, /независим/);
-  assert.match(ins, /параллельные часы/);
-  assert.match(ins, /даже если остальные/);
-  assert.match(ins, /ещё 50%/);
-  assert.match(ins, /скрытый слой не сливай/);
-  assert.doesNotMatch(ins, /known=/);
-  assert.doesNotMatch(ins, /ТРЕВОГА|УЩЕРБ|КАТАСТРОФА|dread/i);
-});
-
-test('автор видит уже висящие беды, чтобы не повторяться', () => {
-  const p = plot({ gravity: 'RUPTURE' });
-  attachThreat(p, createThreat({ plot: p, text: 'фундамент садится', band: 'SEASON', rng: () => 0.5 }));
-  const text = formatThreatRequest(nextObligationRequest(p, { rng: () => 0.5 }), p);
-  assert.match(text, /УЖЕ ВИСИТ/);
-  assert.match(text, /независим/);
-  assert.match(text, /фундамент садится/);
-});
-
-test('текст беды приходит от агента и обрезается', async () => {
-  const p = plot();
-  const runtime = fakeRuntime({ submit_threat: { text: 'Осевшая опора уронит лестницу северного крыла' } });
-  const res = await draftThreatText({
+  const created = await fillStageThreats({
     runtime,
-    domain,
+    domain: {
+      ...domain,
+      lore: [
+        {
+          tags: ['chronicle'],
+          text: 'Дорогу к воротам перерезали.',
+          sourcePlotId: p.id,
+          relatedPlotlineIds: [p.id],
+        },
+      ],
+    },
     plot: p,
-    request: nextObligationRequest(p, { rng: () => 0.5 }),
+    day: 10,
+    config: { tick: { plot: { threats: { perStage: { SITUATION: [2, 2] } } } } },
+    rng: () => 0,
   });
-  assert.equal(res.text, 'Осевшая опора уронит лестницу северного крыла');
+  assert.match(runtime.calls[0].prompt, /Дорогу к воротам перерезали/);
+  assert.equal(created.length, 2);
+  assert.equal(created[0].text, 'Пыль забьёт водосборный сток');
+  assert.equal(created[0].final, true);
+  assert.equal(liveThreats(p).length, 2);
   assert.equal(runtime.calls[0].agentId, 'threatSmith');
 });
 
-test('автор не задаёт видимость беды', async () => {
-  const p = plot({ gravity: 'EPISODE' });
-  const runtime = fakeRuntime({
-    submit_threat: { text: 'Пыль забьёт водосборный сток', known: false },
-  });
-  const created = await replenishPlotThreats({ runtime, domain, plot: p, day: 10, rng: () => 0.5 });
-  assert.equal(created.length, 1);
-  assert.equal(created[0].known, undefined);
-  assert.equal(created[0].text, 'Пыль забьёт водосборный сток');
-  assert.doesNotMatch(runtime.calls[0].prompt, /Верни known|\[скрыта\]|\[видна\]/);
-});
-
-test('дозаполнение с агентом ставит обязательства с его текстом', async () => {
-  const p = plot({ gravity: 'CRISIS' });
-  const runtime = fakeRuntime({ submit_threat: { text: 'Лестница северного крыла обвалится' } });
-  const created = await replenishPlotThreats({ runtime, domain, plot: p, day: 10, rng: () => 0.5 });
-  assert.equal(created.length, 2, 'у кризиса два слота');
-  assert.ok(created.every((t) => t.text === 'Лестница северного крыла обвалится'));
-  assert.ok(created.every((t) => t.dueDay > 10));
-  assert.equal(liveThreats(p).length, 2);
-});
-
-test('молчание агента не оставляет историю без счётчика', async () => {
-  const p = plot({ gravity: 'EPISODE' });
+test('молчание агента оставляет пул пустым', async () => {
+  const p = plot({ gravity: 'SITUATION', maxFails: 0 });
   const runtime = fakeRuntime({}, { throwOn: 'threatSmith' });
-  const created = await replenishPlotThreats({ runtime, domain, plot: p, day: 0, rng: () => 0.5 });
-  assert.equal(created.length, 1);
-  assert.equal(created[0].status, 'live');
-  assert.ok(created[0].text.length > 0, 'падаем на анти-таргет, а не на пустоту');
+  const created = await fillStageThreats({ runtime, domain, plot: p, day: 0, rng: () => 0 });
+  assert.equal(created.length, 0);
 });
 
-test('дозаполнение без рантайма работает вовсе без модели', async () => {
-  const p = plot({ gravity: 'EPISODE' });
-  const created = await replenishPlotThreats({ domain, plot: p, day: 0, rng: () => 0.5 });
-  assert.equal(created.length, 1);
+test('без рантайма пул не выдумывается', async () => {
+  const p = plot({ gravity: 'EPISODE', maxFails: 1 });
+  const created = await fillStageThreats({ domain, plot: p, day: 0, rng: () => 0 });
+  assert.equal(created.length, 0);
+});
+
+test('автор не получает отдельный список прошлых бед', () => {
+  const p = plot({ gravity: 'RUPTURE', maxFails: 3 });
+  attachThreat(p, createThreat(p, { text: 'фундамент садится' }));
+  p.threats[0].status = 'fired';
+  const text = formatThreatStageRequest(stagePoolRequest(p, { rng: () => 0 }), p);
+  assert.doesNotMatch(text, /УЖЕ СЛУЧИЛОСЬ/);
+  assert.doesNotMatch(text, /фундамент садится/);
+});
+
+test('автор бед видит хронику, которая уже случилась', () => {
+  const p = plot({ failCount: 0, maxFails: 2, stage: 0 });
+  const text = formatThreatStageRequest(stagePoolRequest(p, { rng: () => 0 }), p, loadConfig(), {
+    chronicle: ['Стая перерезала дорогу между деревушкой и воротами.'],
+  });
+  const chronicleAt = text.indexOf('ХРОНИКА');
+  const orderAt = text.indexOf('ЗАКАЗ');
+  assert.ok(chronicleAt >= 0 && orderAt > chronicleAt);
+  assert.match(text, /Стая перерезала дорогу между деревушкой и воротами/);
+  assert.match(text, /пиши беды после этих записей/);
+});
+
+test('инструкция автора бед больше не говорит про часы и анти-таргет', () => {
+  const agent = loadConfig().agents.threatSmith;
+  assert.match(agent.instructions, /submit_threats/);
+  assert.match(agent.instructions, /Хроника в заказе уже случилась/);
+  assert.doesNotMatch(agent.instructions, /анти-таргет|ещё 50%|параллельные часы/i);
+  assert.match(agent.prompts.wound, /не последняя стадия/);
+  assert.match(agent.prompts.wound, /Срок не называй/);
+  assert.match(agent.prompts.finale, /двумя или тремя предложениями/);
+  assert.match(agent.prompts.finale, /следствие того же события/);
 });
 
 // ───────────────────────────── оценщик дела ─────────────────────────────
@@ -313,7 +305,7 @@ test('CONTINUE ничего не трогает и в отчёт не попад
 
 test('вердикт по беде отменяет её без начисления обороны', async () => {
   const p = plot();
-  const t = attachThreat(p, createThreat({ plot: p, text: 'уйдёт с острова', band: 'SEASON', rng: () => 0.5 }));
+  const t = attachThreat(p, createThreat(p, { text: 'уйдёт с острова' }));
   const runtime = fakeRuntime({
     submit_reconcile: { deeds: [], threats: [{ id: t.id, verdict: 'CANCEL', why: 'ловить некого' }] },
   });
@@ -330,7 +322,7 @@ test('вердикт по беде отменяет её без начислен
 
 test('вердикт по чужому делу или несуществующей беде игнорируется', async () => {
   const p = plot();
-  attachThreat(p, createThreat({ plot: p, text: 'беда', band: 'SEASON', rng: () => 0.5 }));
+  attachThreat(p, createThreat(p, { text: 'беда' }));
   const foreign = { id: 'procX', plotlineId: 'other', status: 'active', summary: 'чужое' };
   const runtime = fakeRuntime({
     submit_reconcile: {
@@ -364,7 +356,7 @@ test('сбой разбора оставляет всё как было', async 
 
 test('промпт разбора не отдаёт агенту чисел механики', () => {
   const p = plot();
-  const t = attachThreat(p, createThreat({ plot: p, text: 'уйдёт с острова', band: 'SEASON', rng: () => 0.5 }));
+  const t = attachThreat(p, createThreat(p, { text: 'уйдёт с острова' }));
   const scope = reconcileScope({
     plot: p,
     processes: [{ id: 'proc2', plotlineId: 'p1', status: 'active', summary: 'арестовать', officerName: 'Малуша' }],

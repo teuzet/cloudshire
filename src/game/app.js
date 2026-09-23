@@ -66,13 +66,20 @@ import {
   holdClock,
   releaseClock,
   clockIsHeld,
-  cancelJobsForThreat,
   mergeWorldJobs,
 } from './scheduler.js';
 import { syncWorldClock } from './gameClock.js';
-import { findPlotline, findClosedPlotline } from './plotlines.js';
+import { findPlotline, findClosedPlotline, isStoryPlot } from './plotlines.js';
 import { plantStakedStory } from './storyteller.js';
-import { ensurePlotObligations, fireThreatEvent, resolveDeedEvent, cancelDeedJobs } from './worldLoop.js';
+import {
+  ensurePlotObligations,
+  fireThreatEvent,
+  firePressureEvent,
+  resolveDeedEvent,
+  cancelDeedJobs,
+  schedulePressureJob,
+} from './worldLoop.js';
+import { ensurePressure } from './pressure.js';
 import { deliverEvent, settleEvents } from './dayLoop.js';
 import { findThreat } from './threats.js';
 import {
@@ -1565,6 +1572,77 @@ export class GameApp {
     }
   }
 
+  /** Тестовый клиент: выставить шкалу. На ста срабатывает беда из пула. */
+  async setPlayPressure(userId, { plotId, value } = {}) {
+    const pid = String(plotId || '').trim();
+    const next = Math.round(Number(value));
+    if (!pid) return { ok: false, error: 'not_found', message: 'не указана нить' };
+    if (!Number.isFinite(next) || next < 0 || next > 100) {
+      return { ok: false, error: 'bad_value', message: 'значение от 0 до 100' };
+    }
+    return this.runPlayForce(userId, async ({ world, domain, conflux, partner, day, log }) => {
+      const plot =
+        findPlotline(domain, pid) ||
+        (partner ? findPlotline(partner, pid) : null) ||
+        (conflux?.plotlines || []).find((p) => String(p.id) === pid) ||
+        null;
+      if (!plot) return { ok: false, error: 'not_found', message: 'такой нити нет' };
+      if (plot.status === 'closed' || !isStoryPlot(plot)) {
+        return { ok: false, error: 'not_story', message: 'шкала есть только у открытой истории' };
+      }
+      ensurePressure(plot, day, this.config);
+      plot.pressure.value = next;
+      plot.pressure.day = day;
+      if (next < 100) {
+        schedulePressureJob(world, domain, plot);
+        if (partner && (partner.plotlines || []).some((p) => p.id === plot.id)) {
+          await this.storage.saveDomain(partner);
+        }
+        log.info('play.pressure_set', { plotId: plot.id, value: next });
+        return { ok: true, plotId: plot.id, value: next, fired: false, settle: false };
+      }
+      const event = await firePressureEvent({
+        runtime: this.runtime,
+        domain,
+        world,
+        day,
+        plotId: plot.id,
+        plot,
+        conflux,
+        partner,
+        storage: this.storage,
+        config: this.config,
+        log,
+      });
+      if (event?.skipped === 'empty_pool') {
+        log.info('play.pressure_empty', { plotId: plot.id });
+        return {
+          ok: true,
+          plotId: plot.id,
+          value: 0,
+          fired: false,
+          empty: true,
+          title: plot.title,
+          settle: false,
+        };
+      }
+      if (event?.skipped) {
+        return { ok: false, error: event.skipped, message: 'шкала не сработала' };
+      }
+      log.info('play.pressure_fired', { plotId: plot.id, closed: Boolean(event.closed) });
+      return {
+        ok: true,
+        plotId: plot.id,
+        value: 100,
+        fired: true,
+        empty: false,
+        title: plot.title,
+        closed: Boolean(event.closed),
+        event,
+      };
+    });
+  }
+
   /** Тестовый клиент: сработать живую угрозу сейчас, не дожидаясь срока. */
   async forcePlayThreat(userId, { plotId, threatId } = {}) {
     const pid = String(plotId || '').trim();
@@ -1581,7 +1659,6 @@ export class GameApp {
       if (!threat || threat.status !== 'live') {
         return { ok: false, error: 'not_live', message: 'эта угроза уже не жива' };
       }
-      cancelJobsForThreat(world, threat.id);
       const event = await fireThreatEvent({
         runtime: this.runtime,
         domain,

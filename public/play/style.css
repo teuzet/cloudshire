@@ -405,6 +405,42 @@ button.danger:hover { border-color: #d98080; }
 .bless-btn:hover { background: rgba(201, 169, 97, 0.2); }
 .bless-btn:disabled { opacity: 0.5; cursor: default; }
 
+.pressure {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.45rem 0 0.2rem;
+}
+.pressure-bar {
+  flex: 1;
+  height: 0.45rem;
+  background: #2a2418;
+  border: 1px solid #6d5a32;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.pressure-bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.pressure-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 3.2rem;
+}
+.pressure input {
+  width: 4.2rem;
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.15rem 0.35rem;
+}
+
 .force-btn {
   font: inherit;
   font-size: 0.72rem;

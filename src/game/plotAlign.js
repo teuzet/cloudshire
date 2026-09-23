@@ -26,14 +26,22 @@ export function engagementAttends(engagement) {
 export function applyEngagement(
   process,
   engagement,
-  { endingId = '', threatId = '', premiseText = '', reachesAnswer = false } = {},
+  { threatId = '', threatIds = [], premiseText = '', reachesAnswer = false } = {},
 ) {
   const value = PLOT_ENGAGEMENTS.includes(engagement) ? engagement : 'UNRELATED';
+  const ids = [
+    ...(Array.isArray(threatIds) ? threatIds : []),
+    threatId,
+  ]
+    .map((id) => String(id || '').trim())
+    .filter(Boolean);
+  const unique = [...new Set(ids)];
   if (process) {
     process.plotEngagement = value;
     process.plotAligned = value === 'DIRECT';
-    process.endingId = value === 'DIRECT' ? String(endingId || '') : '';
-    process.threatId = value === 'RELEVANT' || value === 'DANGEROUS' ? String(threatId || '') : '';
+    process.endingId = '';
+    process.threatIds = value === 'RELEVANT' ? unique : value === 'DANGEROUS' ? unique.slice(0, 1) : [];
+    process.threatId = process.threatIds[0] || '';
     // Что узнает город, если дело выйдет. Пусто у большинства дел: DIRECT решает
     // задачу и не расследуя её.
     process.premiseText = value === 'DIRECT' ? String(premiseText || '') : '';
@@ -50,10 +58,8 @@ export function applyEngagement(
  * На финише вызывается снова: closeWhen и цель могли измениться.
  * Ошибка агента → UNRELATED, иначе сломанный align заморозит сюжет.
  */
-/** Беды показываем формулировкой и полосой остатка: дней агенту знать не нужно. */
 function threatsBrief(plot) {
   return liveThreats(plot)
-    .filter((t) => t.outcome !== 'neutral')
     .map((t) => `- [${t.id}] ${t.text}`)
     .join('\n');
 }
@@ -68,23 +74,12 @@ function premisesBrief(plot) {
     .join('\n');
 }
 
-function endingsBrief(plot) {
-  const rows = Array.isArray(plot?.endings) ? plot.endings : [];
-  if (!rows.length) return '';
-  return rows
-    .slice(0, 6)
-    .map((e) => `- ${e.kind || e.type || ''}: ${e.text || e.summary || e.title || ''}`)
-    .filter((line) => line.replace(/^-\s*/, '').trim())
-    .join('\n');
-}
-
 export async function judgeProcessAlignment({ runtime, domain, process, plot, log: parentLog }) {
   if (!process || !isStakedStory(plot)) return null;
   const log = (parentLog || getLogger()).child({ scope: 'plot.align', plotId: plot.id });
   const draft = {
     engagement: null,
-    endingId: '',
-    threatId: '',
+    threatIds: [],
     premiseText: '',
     reachesAnswer: false,
   };
@@ -104,16 +99,14 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
                 type: 'string',
                 enum: PLOT_ENGAGEMENTS,
                 description:
-                  'DIRECT — успех работает по первопричине истории. RELEVANT — успех снимает нависшую беду. ' +
-                  'DANGEROUS — успех сам вызывает беду или плохую концовку. UNRELATED — сюжет не двигает.',
+                  'DIRECT — успех работает по первопричине истории. RELEVANT — успех снимает одну или несколько бед. ' +
+                  'DANGEROUS — успех сам вызывает одну беду. UNRELATED — сюжет не двигает.',
               },
-              endingId: {
-                type: 'string',
-                description: 'id концовки, к которой ведёт дело, если relation=DIRECT. Можно не указывать.',
-              },
-              threatId: {
-                type: 'string',
-                description: 'id беды, если relation=RELEVANT (снимает) или DANGEROUS (вызывает).',
+              threatIds: {
+                type: 'array',
+                items: { type: 'string' },
+                description:
+                  'RELEVANT — id бед, которые успех снимает. DANGEROUS — ровно одна беда, которую успех вызывает.',
               },
               uncoversPremise: {
                 type: 'integer',
@@ -132,8 +125,9 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
           handler: async (args) => {
             const rel = String(args?.relation || '').toUpperCase();
             draft.engagement = PLOT_ENGAGEMENTS.includes(rel) ? rel : 'UNRELATED';
-            draft.endingId = String(args?.endingId || '').trim();
-            draft.threatId = String(args?.threatId || '').trim();
+            draft.threatIds = (Array.isArray(args?.threatIds) ? args.threatIds : [])
+              .map((id) => String(id || '').trim())
+              .filter(Boolean);
             draft.premiseText = premiseAtIndex(plot, args?.uncoversPremise) || '';
             draft.reachesAnswer = Boolean(args?.reachesAnswer);
             return { ok: true };
@@ -151,9 +145,6 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
           content: [
             `История (${plot.type || ''}).`,
             plot.cause ? `Первопричина: ${plot.cause}` : '',
-            plot.closeWhen ? `Закрывается, когда: ${plot.closeWhen}` : '',
-            endingsBrief(plot) ? `Концовки карточки:\n${endingsBrief(plot)}` : '',
-            plot.mootWhen ? `История теряет смысл, когда: ${plot.mootWhen}` : '',
             threatsBrief(plot) ? `Нависшие беды:\n${threatsBrief(plot)}` : 'Нависших бед в карточке нет.',
             hiddenAnswer(plot) ? `Разгадка, которой город не знает: ${hiddenAnswer(plot)}` : '',
             premisesBrief(plot)
@@ -164,10 +155,10 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
             process.goal ? `Цель дела: ${process.goal}` : '',
             process.detail ? `Поручение: ${process.detail}` : '',
             'Верни один вердикт по цели process, не по броску.',
-            'DIRECT: успех работает по первопричине — выясняет её, устраняет или делает то, ' +
-              'что прямо ведёт к одной из концовок. Одно дело закрывать историю не обязано.',
-            'RELEVANT: успех делает одну из перечисленных бед невозможной — укажи threatId.',
-            'DANGEROUS: успех сам вызывает одну из бед или плохую концовку — укажи threatId.',
+            'DIRECT: успех работает по первопричине — выясняет её или устраняет. ' +
+              'Одно дело закрывать историю не обязано.',
+            'RELEVANT: успех делает одну или несколько перечисленных бед невозможными — укажи threatIds.',
+            'DANGEROUS: успех сам вызывает одну из бед — укажи её id в threatIds.',
             'UNRELATED: даже полный успех историю не двигает. Не ставь RELEVANT за случайную улику.',
           ]
             .filter(Boolean)
@@ -184,8 +175,7 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
     return null;
   }
   const engagement = applyEngagement(process, draft.engagement, {
-    endingId: draft.endingId,
-    threatId: draft.threatId,
+    threatIds: draft.threatIds,
     premiseText: draft.premiseText,
     reachesAnswer: draft.reachesAnswer,
   });

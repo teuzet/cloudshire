@@ -8,8 +8,8 @@ import {
   applyAlignment,
   alignmentOf,
 } from '../src/game/deedAlign.js';
-import { applyDeedToPlot, critCascade } from '../src/game/deedResolve.js';
-import { createThreat, attachThreat, liveThreats, livesLeft, findThreat } from '../src/game/threats.js';
+import { applyDeedToPlot } from '../src/game/deedResolve.js';
+import { createThreat, attachThreat, liveThreats, findThreat } from '../src/game/threats.js';
 
 function plot(extra = {}) {
   return {
@@ -29,7 +29,10 @@ function plot(extra = {}) {
 
 function deed(alignment, extra = {}) {
   const p = { id: 'proc1', summary: 'укрепить опору', durationBand: 'WEEKS', difficulty: 'HARD', ...extra };
-  applyAlignment(p, alignment, { endingId: extra.endingId || 'e1', threatId: extra.threatId || '' });
+  applyAlignment(p, alignment, {
+    threatId: extra.threatId || '',
+    threatIds: extra.threatIds || [],
+  });
   return p;
 }
 
@@ -79,11 +82,12 @@ test('жрец переспрашивает на опасном и на пост
 
 test('выравнивание чистит поля, которые к нему не относятся', () => {
   const p = {};
-  applyAlignment(p, 'DIRECT', { endingId: 'e1', threatId: 't1' });
-  assert.equal(p.endingId, 'e1');
-  assert.equal(p.threatId, '');
-  applyAlignment(p, 'RELEVANT', { endingId: 'e1', threatId: 't1' });
+  applyAlignment(p, 'DIRECT', { threatIds: ['t1'] });
   assert.equal(p.endingId, '');
+  assert.deepEqual(p.threatIds, []);
+  applyAlignment(p, 'RELEVANT', { threatIds: ['t1'] });
+  assert.equal(p.endingId, '');
+  assert.deepEqual(p.threatIds, ['t1']);
   assert.equal(p.threatId, 't1');
   assert.equal(p.plotAligned, false);
 });
@@ -137,7 +141,7 @@ test('DIRECT закрывает историю, когда работа набр
   const res = applyDeedToPlot({ plot: p, process: deed('DIRECT'), finish: 'ok', rng: () => 0.5 });
   assert.equal(res.closes, true);
   assert.equal(res.endingKind, 'GOOD_ENDING');
-  assert.equal(p.ending.endingId, 'e1');
+  assert.equal(p.ending.kind, 'GOOD_ENDING');
 });
 
 test('DIRECT с малой глубиной успех не закрывает историю', () => {
@@ -148,24 +152,25 @@ test('DIRECT с малой глубиной успех не закрывает �
   assert.ok(p.depth > 0, 'но цель стала достижимее');
 });
 
-test('DIRECT-провал стоит жизни, а не глубины', () => {
+test('DIRECT-провал давит на шкалу и не тратит жизнь', () => {
   const p = plot();
-  const res = applyDeedToPlot({ plot: p, process: deed('DIRECT'), finish: 'fail' });
+  p.pressure = { value: 0, day: 0, fillDays: 100 };
+  const res = applyDeedToPlot({ plot: p, process: deed('DIRECT'), finish: 'fail', day: 0 });
   assert.equal(res.depthGain, 0);
   assert.equal(p.depth, 0);
-  assert.equal(p.failCount, 1);
-  assert.equal(res.livesLeft, 1);
-  assert.equal(res.stage, 'interim');
-  assert.equal(res.remainingPct, 50);
+  assert.equal(p.failCount, 0);
+  assert.equal(res.pressureFilled, false);
+  assert.equal(p.pressure.value, 25);
   assert.equal(res.closes, false);
 });
 
-test('DIRECT-провал на последней ране не закрывает — только копит провал', () => {
+test('DIRECT-провал на полной шкале помечает, что беда должна сработать', () => {
   const p = plot({ failCount: 2 });
-  const res = applyDeedToPlot({ plot: p, process: deed('DIRECT'), finish: 'fail' });
+  p.pressure = { value: 80, day: 0, fillDays: 100 };
+  const res = applyDeedToPlot({ plot: p, process: deed('DIRECT'), finish: 'fail', day: 0 });
   assert.equal(res.closes, false);
-  assert.equal(p.ending, undefined);
-  assert.equal(p.failCount, 3);
+  assert.equal(res.pressureFilled, true);
+  assert.equal(p.failCount, 2);
 });
 
 // ─────────────────────── раскрытие на DIRECT ───────────────────────
@@ -304,162 +309,92 @@ test('RELEVANT ничего не выясняет, даже если пункт 
 
 // ──────────────────────────── RELEVANT ────────────────────────────
 
-test('RELEVANT-успех снимает названную угрозу', () => {
+test('RELEVANT-успех снимает названную угрозу и чуть двигает глубину', () => {
   const p = plot();
+  p.pressure = { value: 40, day: 0, fillDays: 100 };
   const t = threat(p);
   const res = applyDeedToPlot({
     plot: p,
     process: deed('RELEVANT', { threatId: t.id }),
     finish: 'ok',
-    day: 30,
+    day: 0,
   });
   assert.equal(res.threatId, t.id);
   assert.equal(t.status, 'averted');
-  assert.equal(p.defenseCount, 1);
-  assert.equal(res.depthGain, 0, 'оборона глубины не даёт');
+  assert.ok(res.depthGain > 0 && res.depthGain < 0.2);
+  assert.ok(p.pressure.value < 40);
 });
 
-test('RELEVANT-провал угрозу не трогает', () => {
+test('RELEVANT-провал угрозу не трогает и давит на шкалу', () => {
   const p = plot();
-  const t = threat(p, { total: 100 });
-  applyDeedToPlot({ plot: p, process: deed('RELEVANT', { threatId: t.id }), finish: 'fail', day: 10 });
+  p.pressure = { value: 0, day: 0, fillDays: 100 };
+  const t = threat(p);
+  const res = applyDeedToPlot({ plot: p, process: deed('RELEVANT', { threatId: t.id }), finish: 'fail', day: 0 });
   assert.equal(t.status, 'live');
-  assert.equal(t.dueDay, 100);
-  assert.equal(p.defenseCount, 0);
+  assert.equal(p.pressure.value, 20);
+  assert.equal(res.pressureFilled, false);
 });
 
-test('без threatId берётся первая живая вредная угроза', () => {
+test('без threatId RELEVANT ничего не снимает', () => {
   const p = plot();
   const t = threat(p);
-  threat(p, { outcome: 'neutral' });
   const res = applyDeedToPlot({ plot: p, process: deed('RELEVANT'), finish: 'ok' });
-  assert.equal(res.threatId, t.id, 'разрешение не является целью обороны');
+  assert.equal(res.threatId, null);
+  assert.equal(t.status, 'live');
 });
 
 test('RELEVANT без угрозы вовсе не падает', () => {
   const p = plot();
   const res = applyDeedToPlot({ plot: p, process: deed('RELEVANT'), finish: 'ok' });
   assert.equal(res.threatId, null);
-  assert.equal(p.defenseCount, 0);
+  assert.equal(res.averted.length, 0);
 });
 
-// ──────────────────── каскад крита на RELEVANT ────────────────────
-
-test('крит даёт передышку другой угрозе и не открывает её', () => {
-  const p = plot({ gravity: 'RUPTURE' });
+test('крит RELEVANT снимает сильнее и даёт чуть больше глубины', () => {
+  const p = plot();
+  p.pressure = { value: 40, day: 0, fillDays: 100 };
   const target = threat(p);
   const other = threat(p, { text: 'фундамент садится' });
   const res = applyDeedToPlot({
     plot: p,
-    process: deed('RELEVANT', { threatId: target.id }),
+    process: deed('RELEVANT', { threatIds: [target.id] }),
     finish: 'crit',
     day: 5,
   });
-  assert.equal(res.cascade.step, 'reprieve');
-  assert.equal(res.cascade.threatId, other.id);
-  assert.equal(other.known, undefined);
+  assert.equal(target.status, 'averted');
+  assert.equal(other.status, 'live');
+  assert.ok(res.depthGain > 0.02);
+  assert.ok(p.pressure.value < 32);
 });
 
-test('если скрытых нет — другая угроза получает передышку', () => {
-  const p = plot({ gravity: 'RUPTURE' });
-  const target = threat(p);
-  const other = threat(p, { day: 0, total: 80, known: true });
-  const res = applyDeedToPlot({
-    plot: p,
-    process: deed('RELEVANT', { threatId: target.id }),
-    finish: 'crit',
-    day: 10,
-  });
-  assert.equal(res.cascade.step, 'reprieve');
-  assert.equal(res.cascade.bonusDays, 40);
-  assert.equal(other.dueDay, 120);
-});
-
-test('если больше угроз нет — возвращается потерянная жизнь', () => {
-  const p = plot({ failCount: 1 });
-  const target = threat(p);
-  const res = applyDeedToPlot({
-    plot: p,
-    process: deed('RELEVANT', { threatId: target.id }),
-    finish: 'crit',
-  });
-  assert.equal(res.cascade.step, 'restore_life');
-  assert.equal(p.failCount, 0);
-  assert.equal(livesLeft(p), 2);
-});
-
-test('когда дать нечего — крит добавляет немного глубины', () => {
+test('DANGEROUS-провал беду не вызывает', () => {
   const p = plot();
-  const target = threat(p);
-  const res = applyDeedToPlot({
-    plot: p,
-    process: deed('RELEVANT', { threatId: target.id }),
-    finish: 'crit',
-  });
-  assert.equal(res.cascade.step, 'depth');
-  assert.equal(p.depth, 0.5);
-});
-
-test('каскад срабатывает ровно один раз', () => {
-  const p = plot({ gravity: 'RUPTURE', failCount: 1 });
-  const target = threat(p);
-  const first = threat(p, { day: 0, total: 80 });
-  const other = threat(p, { day: 0, total: 60 });
-  const res = critCascade(p, target, { day: 0 });
-  assert.equal(res.step, 'reprieve');
-  assert.equal(res.threatId, first.id);
-  assert.equal(first.dueDay, 120);
-  assert.equal(other.dueDay, 60, 'второй беде передышки не было');
-  assert.equal(p.failCount, 1, 'жизнь не вернулась');
-  assert.equal(p.depth, 0);
-});
-
-// ──────────────────────────── DANGEROUS ────────────────────────────
-
-test('DANGEROUS-провал ничего не портит', () => {
-  const p = plot();
-  const t = threat(p, { day: 0, total: 100 });
+  const t = threat(p);
   const res = applyDeedToPlot({
     plot: p,
     process: deed('DANGEROUS', { threatId: t.id }),
     finish: 'fail',
     day: 20,
   });
-  assert.equal(t.dueDay, 100);
-  assert.equal(res.hastenedDays, undefined);
+  assert.equal(t.status, 'live');
+  assert.equal(res.triggerThreat, null);
 });
 
-test('DANGEROUS-успех приближает беду вдвое от её срока', () => {
+test('DANGEROUS-успех помечает беду к исполнению и сам её не сжигает', () => {
   const p = plot();
-  const t = threat(p, { day: 0, total: 100 });
+  const t = threat(p);
   const res = applyDeedToPlot({
     plot: p,
     process: deed('DANGEROUS', { threatId: t.id }),
     finish: 'ok',
     day: 20,
   });
-  assert.equal(res.hastenedDays, 50);
-  assert.equal(t.dueDay, 50);
+  assert.equal(res.triggerThreat.id, t.id);
   assert.equal(t.status, 'live');
-});
-
-test('DANGEROUS-крит роняет беду немедленно', () => {
-  const p = plot();
-  const t = threat(p, { day: 0, total: 100 });
-  const res = applyDeedToPlot({
-    plot: p,
-    process: deed('DANGEROUS', { threatId: t.id }),
-    finish: 'crit',
-    day: 20,
-  });
-  assert.equal(t.status, 'fired');
-  assert.equal(t.firedBy, 'proc1');
-  assert.equal(p.failCount, 1);
-  assert.equal(res.fired.ok, true);
   assert.equal(res.closes, false);
 });
 
-test('DANGEROUS-крит обычной угрозы на краю не хоронит историю', () => {
+test('DANGEROUS-крит тоже только помечает беду', () => {
   const p = plot({ failCount: 2 });
   const t = threat(p);
   const res = applyDeedToPlot({
@@ -467,34 +402,19 @@ test('DANGEROUS-крит обычной угрозы на краю не хоро
     process: deed('DANGEROUS', { threatId: t.id }),
     finish: 'crit',
   });
+  assert.equal(res.triggerThreat.id, t.id);
   assert.equal(res.closes, false);
-  assert.equal(p.failCount, 3);
+  assert.equal(p.failCount, 2);
 });
-
-test('DANGEROUS-крит финальной угрозы ставит названную концовку', () => {
-  const p = plot({ failCount: 2 });
-  const t = threat(p);
-  t.endingId = 'e1';
-  const res = applyDeedToPlot({
-    plot: p,
-    process: deed('DANGEROUS', { threatId: t.id }),
-    finish: 'crit',
-  });
-  assert.equal(res.closes, true);
-  assert.equal(res.endingKind, 'BAD_ENDING');
-  assert.equal(p.ending.endingId, 'e1');
-});
-
-// ──────────────────────────── UNRELATED ────────────────────────────
 
 test('UNRELATED нить не двигает вовсе', () => {
   const p = plot();
-  const t = threat(p, { day: 0, total: 90 });
+  const t = threat(p);
   const res = applyDeedToPlot({ plot: p, process: deed('UNRELATED'), finish: 'crit' });
   assert.equal(res.depthGain, 0);
   assert.equal(p.depth, 0);
   assert.equal(p.failCount, 0);
-  assert.equal(findThreat(p, t.id).dueDay, 90);
+  assert.equal(findThreat(p, t.id).status, 'live');
   assert.equal(liveThreats(p).length, 1);
 });
 

@@ -2,12 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   appendEventFact,
-  scheduleThreatJob,
-  resyncThreatJobs,
+  schedulePressureJob,
   ensurePlotObligations,
   closePlotWithJobs,
   resolveDeedEvent,
   fireThreatEvent,
+  firePressureEvent,
   seedAttemptEvent,
   seedAppearEvent,
   attachReport,
@@ -16,6 +16,7 @@ import {
   scheduleDeedJob,
   cancelDeedJobs,
 } from '../src/game/worldLoop.js';
+import { resetPressure } from '../src/game/pressure.js';
 import { createThreat, attachThreat, liveThreats, findThreat } from '../src/game/threats.js';
 import { startDeed } from '../src/game/deeds.js';
 import { cityRules, markRuleDeed } from '../src/game/cityRules.js';
@@ -138,42 +139,33 @@ test('запись события помечена игровым днём и н
 
 // ───────────────────────────── очередь угроз ─────────────────────────────
 
-test('угроза встаёт в очередь на свой день', () => {
+test('шкала встаёт в очередь на день заполнения', () => {
   const plot = makePlot();
   const domain = makeDomain({ plots: [plot] });
   const world = makeWorld();
-  const t = attachThreat(plot, createThreat({ plot, text: 'обвал', band: 'WEEKS', day: 120, rng: () => 0.5 }));
-  const job = scheduleThreatJob(world, domain, t);
-  assert.equal(job.kind, 'threat_fire');
-  assert.equal(job.dueDay, t.dueDay);
-  assert.equal(job.payload.threatId, t.id);
+  resetPressure(plot, 120, null, () => 0);
+  plot.pressure.fillDays = 40;
+  const job = schedulePressureJob(world, domain, plot);
+  assert.equal(job.kind, 'pressure_fire');
+  assert.equal(job.dueDay, 160);
+  assert.equal(job.payload.plotId, plot.id);
 });
 
-test('сдвиг срока угрозы переставляет её задание, а не плодит второе', () => {
+test('повторная постановка шкалы не плодит второе задание', () => {
   const plot = makePlot();
   const domain = makeDomain({ plots: [plot] });
   const world = makeWorld();
-  const t = attachThreat(plot, createThreat({ plot, text: 'обвал', band: 'WEEKS', day: 120, rng: () => 0.5 }));
-  scheduleThreatJob(world, domain, t);
-  t.dueDay += 40;
-  resyncThreatJobs(world, domain, plot);
-  const pending = jobList(world).filter((j) => j.state === 'pending' && j.kind === 'threat_fire');
+  resetPressure(plot, 120, null, () => 0);
+  plot.pressure.fillDays = 40;
+  schedulePressureJob(world, domain, plot);
+  plot.pressure.fillDays = 80;
+  schedulePressureJob(world, domain, plot);
+  const pending = jobList(world).filter((j) => j.state === 'pending' && j.kind === 'pressure_fire');
   assert.equal(pending.length, 1);
-  assert.equal(pending[0].dueDay, t.dueDay);
+  assert.equal(pending[0].dueDay, 200);
 });
 
-test('снятая угроза уходит из очереди', () => {
-  const plot = makePlot();
-  const domain = makeDomain({ plots: [plot] });
-  const world = makeWorld();
-  const t = attachThreat(plot, createThreat({ plot, text: 'обвал', band: 'WEEKS', day: 120, rng: () => 0.5 }));
-  scheduleThreatJob(world, domain, t);
-  t.status = 'averted';
-  resyncThreatJobs(world, domain, plot);
-  assert.equal(dueJobs(world, 9999).length, 0);
-});
-
-test('живая история без обязательств получает их и задания', async () => {
+test('живая история без пула получает шкалу, но не выдумывает беды', async () => {
   const plot = makePlot();
   const domain = makeDomain({ plots: [plot] });
   const world = makeWorld();
@@ -186,16 +178,17 @@ test('живая история без обязательств получает
     rng: () => 0.5,
     log: silentLog,
   });
-  assert.equal(created.length, 2, 'у кризиса два слота');
-  assert.equal(jobList(world).filter((j) => j.kind === 'threat_fire').length, 2);
+  assert.equal(created.length, 0);
+  assert.equal(jobList(world).filter((j) => j.kind === 'pressure_fire').length, 1);
 });
 
-test('закрытие нити гасит её угрозы и задания', () => {
+test('закрытие нити гасит её беды и задания', () => {
   const plot = makePlot();
   const domain = makeDomain({ plots: [plot] });
   const world = makeWorld();
   const t = attachThreat(plot, createThreat({ plot, text: 'обвал', band: 'WEEKS', day: 120, rng: () => 0.5 }));
-  scheduleThreatJob(world, domain, t);
+  resetPressure(plot, 120, null, () => 0);
+  schedulePressureJob(world, domain, plot);
   const fact = appendEventFact(domain, world, { text: 'кончилось', plotId: plot.id, day: 140 });
   closePlotWithJobs(domain, world, plot, { day: 140, reason: 'depth', fact });
   assert.equal(domain.plotlines.length, 0);
@@ -267,10 +260,10 @@ test('DIRECT-провал стоит жизни, а не глубины', async 
   });
   assert.equal(res.outcome.finish, 'fail');
   assert.equal(plot.depth, 0);
-  assert.equal(plot.failCount, 1);
+  assert.equal(plot.failCount, 0);
 });
 
-test('RELEVANT-успех снимает беду, считает оборону и заводит новую', async () => {
+test('RELEVANT-успех снимает беду и оставляет шкалу', async () => {
   const plot = makePlot();
   const domain = makeDomain({ plots: [plot] });
   const world = makeWorld();
@@ -278,7 +271,8 @@ test('RELEVANT-успех снимает беду, считает оборону
     plot,
     createThreat({ plot, text: 'обвал лестницы', band: 'SEASON', day: 100, rng: () => 0.5 }),
   );
-  scheduleThreatJob(world, domain, threat);
+  resetPressure(plot, 100, null, () => 0);
+  schedulePressureJob(world, domain, plot);
   attachDeed(domain, plot, { plotEngagement: 'RELEVANT', threatId: threat.id, difficulty: 'PLAIN' });
   await resolveDeedEvent({
     config,
@@ -291,10 +285,8 @@ test('RELEVANT-успех снимает беду, считает оборону
     log: silentLog,
   });
   assert.equal(findThreat(plot, threat.id).status, 'averted');
-  assert.equal(plot.defenseCount, 1);
-  assert.ok(liveThreats(plot).length >= 1, 'история не осталась без счётчика');
-  const pending = jobList(world).filter((j) => j.state === 'pending' && j.kind === 'threat_fire');
-  assert.equal(pending.length, liveThreats(plot).length);
+  assert.equal(liveThreats(plot).length, 0);
+  assert.equal(jobList(world).filter((j) => j.state === 'pending' && j.kind === 'pressure_fire').length, 1);
 });
 
 test('DANGEROUS-крит роняет беду немедленно', async () => {
@@ -417,7 +409,7 @@ test('принудительный исход ставится как сказа
     log: silentLog,
   });
   assert.equal(res.outcome.finish, 'fail');
-  assert.equal(plot.failCount, 1);
+  assert.equal(plot.failCount, 0);
   assert.equal(plot.depth, 0);
   assert.equal(domain.state.pendingActions[0].status, 'failed');
 });
@@ -542,12 +534,11 @@ test('последняя жизнь кончилась — история зак
   assert.equal(domain.plotlines.length, 0);
   assert.deepEqual(agentIds, ['chronicleFinale'], 'развязку пишет финальный агент, не хронист');
   assert.match(calls[0], /Северное крыло рухнет на мостки/);
-  assert.match(calls[0], /Северное крыло рушится вместе с людьми/);
-  assert.match(calls[0], /дословно не копируй/);
+  assert.match(calls[0], /утратой/);
   assert.match(calls[0], /до 900 символов/);
 });
 
-test('сработавшая беда отодвигает выжившие, а не глушит их совсем', async () => {
+test('сработавшая беда снимает остальные беды стадии', async () => {
   const plot = makePlot({ gravity: 'RUPTURE', maxFails: 3 });
   const domain = makeDomain({ plots: [plot] });
   const world = makeWorld();
@@ -559,7 +550,6 @@ test('сработавшая беда отодвигает выжившие, а 
     plot,
     createThreat({ plot, text: 'фундамент', band: 'SEASON', day: 100, rng: () => 0.5 }),
   );
-  const before = survivor.dueDay;
   await fireThreatEvent({
     runtime: noRuntime,
     domain,
@@ -570,17 +560,17 @@ test('сработавшая беда отодвигает выжившие, а 
     rng: () => 0.5,
     log: silentLog,
   });
-  assert.ok(survivor.dueDay > before, 'город разгребает одну беду, остальные ждут');
-  assert.ok(survivor.dueDay <= 140 + survivor.totalDays, 'отсрочка не выходит за исходный срок');
+  assert.equal(survivor.status, 'cancelled');
+  assert.equal(plot.stage, 1);
 });
 
-test('разрешение закрывает историю нейтрально', async () => {
+test('непоследняя беда историю не закрывает', async () => {
   const plot = makePlot();
   const domain = makeDomain({ plots: [plot] });
   const world = makeWorld();
   const resolution = attachThreat(
     plot,
-    createThreat({ plot, text: 'Трещина перестала расти сама', band: 'SEASON', day: 100, outcome: 'neutral', rng: () => 0.5 }),
+    createThreat({ plot, text: 'Трещина перестала расти сама', day: 100 }),
   );
   const res = await fireThreatEvent({
     runtime: noRuntime,
@@ -592,9 +582,8 @@ test('разрешение закрывает историю нейтральн�
     rng: () => 0.5,
     log: silentLog,
   });
-  assert.equal(res.occasion, 'развязка');
-  assert.equal(plot.ending.kind, 'NEUTRAL_ENDING');
-  assert.equal(plot.failCount, 0, 'нейтральный конец не стоит жизни');
+  assert.equal(res.closed, false);
+  assert.equal(plot.failCount, 1);
 });
 
 test('беда закрытой или пропавшей нити не срабатывает', async () => {
@@ -632,14 +621,8 @@ test('удачная попытка ставит появление и уход�
   assert.ok(domain.state.seedCooldownUntilDay > 120);
 });
 
-test('насыщенный угрозами домен не сеет', () => {
-  const plots = [1, 2, 3].map((i) => {
-    const p = makePlot({ id: `p${i}`, gravity: 'RUPTURE', maxFails: 3 });
-    for (const n of [1, 2]) {
-      attachThreat(p, createThreat({ plot: p, text: `беда ${n}`, band: 'SEASON', day: 100, rng: () => 0.5 }));
-    }
-    return p;
-  });
+test('насыщенный историями домен не сеет', () => {
+  const plots = [1, 2, 3, 4, 5].map((i) => makePlot({ id: `p${i}`, gravity: 'RUPTURE', maxFails: 3 }));
   const domain = makeDomain({ plots });
   const world = makeWorld();
   const decision = seedAttemptEvent({ config, domain, world, day: 120, rng: () => 0, log: silentLog });
@@ -725,9 +708,11 @@ test('слив разбирает просроченное и не трогае�
   scheduleDeedJob(world, domain, process);
   const later = attachThreat(
     plot,
-    createThreat({ plot, text: 'потом', band: 'YEAR', day: 120, rng: () => 0.9 }),
+    createThreat({ plot, text: 'потом', day: 120 }),
   );
-  scheduleThreatJob(world, domain, later);
+  resetPressure(plot, 120, null, () => 0);
+  plot.pressure.fillDays = 100;
+  schedulePressureJob(world, domain, plot);
 
   const events = await drainDomainJobs({
     config,
@@ -743,26 +728,25 @@ test('слив разбирает просроченное и не трогае�
   assert.equal(findThreat(plot, later.id).status, 'live');
 });
 
-test('беда до срока не всплывает', async () => {
+test('шкала до срока не всплывает', async () => {
   const plot = makePlot();
   const domain = makeDomain({ plots: [plot] });
   const world = makeWorld();
-  const hidden = attachThreat(
-    plot,
-    createThreat({ plot, text: 'просадка', band: 'SEASON', day: 100, rng: () => 0.5 }),
-  );
+  const hidden = attachThreat(plot, createThreat(plot, { text: 'просадка', day: 100 }));
+  resetPressure(plot, 100, null, () => 0);
+  plot.pressure.fillDays = 80;
+  schedulePressureJob(world, domain, plot);
   const events = await drainDomainJobs({
     config,
     runtime: noRuntime,
     domain,
     world,
-    day: hidden.dueDay - 5,
+    day: 140,
     rng: () => 0.5,
     log: silentLog,
   });
   assert.equal(hidden.status, 'live');
-  assert.equal(hidden.known, undefined);
-  assert.equal(events.some((e) => e.surfaced || e.occasion === 'угроза'), false);
+  assert.equal(events.some((e) => e.occasion === 'угроза'), false);
 });
 
 test('слив начисляет ману за прошедшие дни', async () => {
@@ -804,18 +788,16 @@ test('слив не зацикливается на задании, которо
       throw new Error('модель отвалилась');
     },
   };
-  const threat = attachThreat(
-    plot,
-    createThreat({ plot, text: 'обвал', band: 'WEEKS', day: 100, rng: () => 0.5 }),
-  );
-  scheduleThreatJob(world, domain, threat);
-  // Заваленное задание вернётся в очередь, но слив ограничен и не крутится вечно.
+  const threat = attachThreat(plot, createThreat(plot, { text: 'обвал', day: 100 }));
+  resetPressure(plot, 100, null, () => 0);
+  plot.pressure.fillDays = 10;
+  schedulePressureJob(world, domain, plot);
   const events = await drainDomainJobs({
     config,
     runtime: boom,
     domain,
     world,
-    day: threat.dueDay,
+    day: 120,
     rng: () => 0.5,
     limit: 3,
     log: silentLog,
@@ -832,7 +814,8 @@ test('заводка ставит попытку посева и обязате�
   const world = makeWorld();
   await armDomainSchedule({ runtime: noRuntime, domain, world, day: 120, rng: () => 0.5, log: silentLog });
   assert.equal(jobList(world).filter((j) => j.kind === 'seed_attempt').length, 1);
-  assert.equal(liveThreats(plot).length, 2);
+  assert.equal(liveThreats(plot).length, 0);
+  assert.equal(jobList(world).filter((j) => j.kind === 'pressure_fire').length, 1);
   assert.equal(domain.plotlines.some((p) => p.id === 'p2'), false, 'поручение не карточка');
 });
 

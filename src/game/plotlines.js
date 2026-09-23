@@ -401,6 +401,11 @@ function storyActState(p = {}) {
       depth,
       maxDepth,
       failCount: Number.isFinite(failRaw) ? failRaw : 0,
+      stage: Number.isFinite(Number(p.stage))
+        ? Math.max(0, Math.round(Number(p.stage)))
+        : Number.isFinite(failRaw)
+          ? Math.max(0, failRaw)
+          : 0,
       maxFails:
         p.maxFails == null || p.maxFails === ''
           ? maxFailsForGravity(gravity)

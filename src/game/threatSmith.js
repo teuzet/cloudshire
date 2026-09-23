@@ -1,103 +1,114 @@
 /**
- * Автор нависшей беды.
+ * Автор бед стадии.
  *
- * Движок решает, нужна беда или разрешение и какой у неё срок.
- * Автор даёт только формулировку. До срока город эту беду не видит.
- * Плохая концовка уходит как анти-таргет, чтобы не написать её раньше времени.
+ * Движок решает, сколько бед и какого масштаба. Автор пишет их разом,
+ * не зная, какая сработает. На последней стадии каждая беда обязана
+ * снять первопричину.
  */
 
 import { getLogger } from '../log.js';
 import { captureAgentPrompt } from './agentPrompt.js';
-import { nextObligationRequest, createThreat, attachThreat } from './threats.js';
-import { THREAT_SPEC } from './bands.js';
+import { plotChronicleTail } from './chronicler.js';
+import { formatFreeformGravityForPrompt } from './freeform.js';
+import { attachThreat, createThreat, formatKnownUnknown, stagePoolRequest } from './threats.js';
 
 const THREAT_TEXT_MAX = 240;
-const THREAT_FINALE_TEXT_MAX = 420;
+const THREAT_FINALE_MAX = 600;
 
-export function formatThreatRequest(req, plot) {
-  const lines = [
-    `История: ${plot?.title || ''}`,
-    plot?.synopsis ? `Сейчас: ${plot.synopsis}` : '',
-    plot?.cause ? `Первопричина: ${plot.cause}` : '',
-  ];
-  if (req.outcome === 'neutral') {
-    lines.push(
-      '',
-      'НУЖНО РАЗРЕШЕНИЕ, а не беда: город привыкает, вопрос перестаёт быть вопросом.',
-      'Не победа покровителя и не поражение. Одно предложение с предметом.',
-    );
-  } else if (req.finale) {
-    lines.push(
-      '',
-      'ЭТИМ ИСТОРИЯ КОНЧАЕТСЯ. Не очередное ухудшение, а событие, которым город',
-      'необратимо лишается того, из-за чего вопрос стоял.',
-      req.endingText ? `Концовка, к которой это ведёт: «${req.endingText}».` : '',
-      req.endingQuestionGone ? `После неё вопрос снят так: ${req.endingQuestionGone}` : '',
-      req.endingNowDifferent ? `И в городе навсегда иначе: ${req.endingNowDifferent}` : '',
-      req.woundGuidance || '',
-      '',
-      'Напиши событие, которое к этому приводит. Саму концовку не переписывай.',
-      'Проверь себя: после этого события спорить уже не о чем — предмета спора нет.',
-      'Если получилось «стало хуже», «работать тяжелее», «доверие подорвано» — это не то.',
-      'Событие происходит сейчас и целиком. Никаких «к зиме», «со временем», «постепенно».',
-    );
-  } else {
-    lines.push(
-      '',
-      `УДАР: промежуточный. До плохой концовки ещё ${req.remainingPct ?? '—'}%.`,
-      req.woundGuidance || '',
-      req.antiTarget
-        ? `АНТИ-ТАРГЕТ (плохая концовка, до неё доходить НЕЛЬЗЯ): «${req.antiTarget}».`
-        : '',
-    );
-  }
-  if (req.outcome !== 'neutral') {
-    lines.push('', req.knownUnknown || '');
-  }
-  if (req.existingThreats?.length) {
-    lines.push('', 'УЖЕ ВИСИТ — независимые параллельные часы, не цепочка. Не повторяй и не продолжай:');
-    for (const t of req.existingThreats) lines.push(`- ${t.text}`);
-  }
-  lines.push(
-    '',
-    req.outcome === 'neutral' || !req.finale
-      ? 'Одно предложение. Срок не называй.'
-      : 'Одно-два предложения. Срок не называй.',
-  );
-  return lines.filter(Boolean).join('\n');
+function threatStageBrief(config, final) {
+  const prompts = config?.agents?.threatSmith?.prompts || {};
+  const text = String(final ? prompts.finale : prompts.wound || '').trim();
+  return text;
 }
 
-/** Придумать текст одного обязательства. Возвращает `{ text }` или failed. */
-export async function draftThreatText({ runtime, domain, plot, request, log: parentLog }) {
+function chronicleBlock(entries) {
+  const list = (entries || []).map((text) => String(text || '').trim()).filter(Boolean);
+  if (!list.length) return 'ХРОНИКА\nЗаписей этой истории ещё нет.';
+  return [
+    'ХРОНИКА',
+    'От старых к новым. Это уже случилось: пиши беды после этих записей.',
+    ...list.map((text) => `- ${text}`),
+  ].join('\n');
+}
+
+/**
+ * Заказ одной стадии.
+ *
+ * Сначала история и её хроника, потом масштаб и правила стадии.
+ * Хроника должна уже лежать на домене: пул пишется после записи, которая
+ * открыла эту стадию.
+ */
+export function formatThreatStageRequest(req, plot, config = null, { chronicle = [] } = {}) {
+  const stage = threatStageBrief(config, req.final);
+  const story = [
+    'ИСТОРИЯ',
+    `Название: ${plot?.title || ''}`,
+    plot?.synopsis ? `Сейчас: ${plot.synopsis}` : '',
+    plot?.cause ? `Первопричина: ${plot.cause}` : '',
+  ].filter(Boolean);
+  const order = [
+    'ЗАКАЗ',
+    `МАСШТАБ СТАДИИ: ${req.scale}.`,
+    formatFreeformGravityForPrompt(req.scale, config),
+    'Вред каждой беды для города держи на этом уровне.',
+    `НУЖНО БЕД: ${req.count}.`,
+    stage,
+  ].filter(Boolean);
+  const sections = [story.join('\n'), chronicleBlock(chronicle), order.join('\n'), formatKnownUnknown(plot)];
+  return sections.filter(Boolean).join('\n\n');
+}
+
+/** Один вызов на стадию. Возвращает список формулировок. */
+export async function draftStageThreats({ runtime, domain, plot, request, config = null, log: parentLog }) {
   const log = (parentLog || getLogger()).child({ scope: 'threat.smith', plotId: plot?.id });
-  const draft = { text: '' };
+  const draft = { texts: [] };
   const runOpts = {
     agentId: 'threatSmith',
     tools: [
       {
-        name: 'submit_threat',
-        description: 'Одно предложение: что случится, если покровитель не вмешается.',
+        name: 'submit_threats',
+        description: 'Список бед этой стадии. Ровно столько, сколько заказано.',
         parameters: {
           type: 'object',
           additionalProperties: false,
-          required: ['text'],
+          required: ['threats'],
           properties: {
-            text: { type: 'string', description: 'Конкретное событие с предметом и людьми.' },
+            threats: {
+              type: 'array',
+              items: { type: 'string' },
+              description: request.final
+                ? 'Каждая беда — два или три предложения. Снятие первопричины вытекает из того же события.'
+                : 'Каждая беда — одно предложение с предметом и людьми.',
+            },
           },
         },
         handler: async (args) => {
-          const max = request.finale ? THREAT_FINALE_TEXT_MAX : THREAT_TEXT_MAX;
-          draft.text = String(args?.text || '').trim().slice(0, max);
+          const list = Array.isArray(args?.threats) ? args.threats : [];
+          draft.texts = list
+            .map((text) =>
+              String(text || '')
+                .trim()
+                .slice(0, request.final ? THREAT_FINALE_MAX : THREAT_TEXT_MAX),
+            )
+            .filter(Boolean)
+            .slice(0, request.count);
           return { ok: true };
         },
       },
     ],
     maxTurns: 2,
-    toolChoice: { type: 'function', function: { name: 'submit_threat' } },
+    toolChoice: { type: 'function', function: { name: 'submit_threats' } },
     log,
-    scene: request.outcome === 'neutral' ? 'threat_resolution' : 'threat_harm',
+    scene: request.final ? 'threat_finale' : 'threat_stage',
     domainId: domain?.id,
-    userMessages: [{ role: 'user', content: formatThreatRequest(request, plot) }],
+    userMessages: [
+      {
+        role: 'user',
+        content: formatThreatStageRequest(request, plot, config, {
+          chronicle: plotChronicleTail(domain, plot?.id),
+        }),
+      },
+    ],
   };
   const prompt = captureAgentPrompt(runtime, runOpts);
   try {
@@ -105,41 +116,24 @@ export async function draftThreatText({ runtime, domain, plot, request, log: par
   } catch (err) {
     log.warn('threat.smith_failed', { error: err.message });
   }
-  if (!draft.text) return { text: '', prompt, failed: true };
-  return { text: draft.text, prompt };
+  if (!draft.texts.length) return { texts: [], prompt, failed: true };
+  return { texts: draft.texts, prompt };
 }
 
 /**
- * Дозаполнить обязательства истории, спрашивая текст у агента.
- *
- * Без текста обязательство всё равно ставится: история без счётчика перестаёт
- * производить события, а это хуже безымянной беды.
+ * Наполнить пул текущей стадии. Без рантайма и при молчании агента пул
+ * остаётся пустым: шкала тогда некому вредить.
  */
-export async function replenishPlotThreats({ runtime, domain, plot, day = 0, rng = Math.random, log } = {}) {
+export async function fillStageThreats({ runtime, domain, plot, day = 0, config = null, rng = Math.random, log } = {}) {
+  const request = stagePoolRequest(plot, { config, rng });
+  if (!request) return [];
+  const drafted = runtime ? await draftStageThreats({ runtime, domain, plot, request, config, log }) : null;
+  const texts = drafted?.texts || [];
   const created = [];
-  let guard = 0;
-  while (guard < 4) {
-    guard += 1;
-    const request = nextObligationRequest(plot, { day, rng });
-    if (!request) break;
-    const drafted = runtime ? await draftThreatText({ runtime, domain, plot, request, log }) : null;
-    const threat = createThreat({
-      plot,
-      text: drafted?.text || request.antiTarget || request.endingText || plot?.title || '',
-      band: request.band,
-      outcome: request.outcome,
-      slowdown: request.slowdown,
-      endingId: request.endingId || null,
-      valence: request.finale ? 'bad' : request.outcome === 'neutral' ? 'neutral' : 'bad',
-      stage: request.stage,
-      remainingPct: request.remainingPct,
-      day,
-      rng,
-    });
+  for (const text of texts) {
+    const threat = createThreat(plot, { text, stage: request.stage, final: request.final, day });
     attachThreat(plot, threat);
     created.push(threat);
   }
   return created;
 }
-
-export { THREAT_SPEC };

@@ -497,6 +497,7 @@ function plotCard(p) {
       ? `глубина ${Math.round((Number(p.depth) || 0) * 10) / 10}/${p.maxDepth}`
       : null,
     p.maxFails != null ? `провалов ${p.failCount ?? 0}/${p.maxFails}` : null,
+    p.pressure ? `напряжение ${Math.round(p.pressure.value ?? 0)}` : null,
     p.beatCount != null ? `битов ${p.beatCount}` : null,
   ]
     .filter(Boolean)
@@ -507,16 +508,7 @@ function plotCard(p) {
     .map(
       (t) =>
         `<li>${esc(t.text || '')} <span class="muted small">${esc(
-          [
-            t.outcome === 'neutral'
-              ? 'разрешение'
-              : t.stage === 'finale'
-                ? 'исход'
-                : t.remainingPct != null
-                  ? `${t.remainingPct}%`
-                  : 'угроза',
-            `${t.totalDays ?? '?'} дн.`,
-          ]
+          [t.status || 'live', t.final ? 'последняя стадия' : `стадия ${t.stage ?? 0}`]
             .filter(Boolean)
             .join(' · '),
         )}</span></li>`,

@@ -2,71 +2,23 @@
  * Что делает с историей завершившееся дело.
  *
  * Возвращает описание последствий; писать хронику и говорить с игроком —
- * не здесь. Единственный источник правды о том, как исход дела двигает нить.
+ * не здесь. Сработавшую беду здесь не исполняют: это делает цикл мира,
+ * чтобы хроника связала дело и беду одним текстом.
  */
 
 import { depthGain, closesPlot } from './deedMath.js';
 import { alignmentOf } from './deedAlign.js';
 import { revealPremise, revealAnswer, answerOpen } from './premises.js';
-import {
-  findThreat,
-  liveThreats,
-  liveHarmThreats,
-  defendThreat,
-  hastenThreat,
-  reprieveThreat,
-  fireThreat,
-  livesLeft,
-  remainingToBadEndingPct,
-  threatStageForPlot,
-} from './threats.js';
+import { findThreat, avertThreats, livesLeft } from './threats.js';
+import { shiftPressure, threatConfig } from './pressure.js';
 
-export const CRIT_CASCADE_STEPS = ['reprieve', 'restore_life', 'depth'];
-
-/**
- * Каскад крита на RELEVANT-деле. Детерминированный, срабатывает ровно один пункт.
- * Сначала время другой беде, потом жизнь, и только если нечего дать — чуть глубины.
- */
-export function critCascade(plot, threat) {
-  const others = liveThreats(plot).filter((t) => t.id !== threat?.id);
-
-  const other = others[0];
-  if (other) {
-    const res = reprieveThreat(other);
-    if (res.ok) return { step: 'reprieve', threatId: other.id, bonusDays: res.bonus };
-  }
-
-  if (Math.max(0, Math.round(Number(plot?.failCount) || 0)) > 0) {
-    plot.failCount -= 1;
-    return { step: 'restore_life', livesLeft: livesLeft(plot) };
-  }
-
-  plot.depth = Math.round((Number(plot.depth) || 0) * 100 + 50) / 100;
-  return { step: 'depth', depthGain: 0.5 };
+function threatIdsOf(process) {
+  const ids = [];
+  if (Array.isArray(process?.threatIds)) ids.push(...process.threatIds);
+  if (process?.threatId) ids.push(process.threatId);
+  return [...new Set(ids.map((id) => String(id || '').trim()).filter(Boolean))];
 }
 
-/**
- * Какая именно хорошая концовка сыграла.
- *
- * Дело не обязано целиться в конкретную концовку: глубину набирают чем угодно.
- * Но без ссылки на концовку финальную запись не к чему привязать — она не знает
- * ни чем снят вопрос, ни что в городе теперь иначе.
- */
-function pickGoodEndingId(plot, process) {
-  const aimed = String(process?.endingId || '').trim();
-  if (aimed) return aimed;
-  const good = (plot?.endings || []).find((e) => e.kind === 'GOOD_ENDING');
-  return good?.id || null;
-}
-
-/**
- * Что город узнал из удавшегося дела.
- *
- * Дело, которое целилось в саму разгадку, получает её — но только если
- * сердцевина уже открыта. Закрыта — и то же дело приносит подступ, который
- * назвал судья: пустых успехов у расследования не бывает ни в одной ветке.
- * Дело, которое ничего не выясняло, не приносит ничего.
- */
 function revealForDeed(plot, process, finish) {
   if (process?.reachesAnswer && answerOpen(plot, { finish })) {
     const answer = revealAnswer(plot);
@@ -76,23 +28,28 @@ function revealForDeed(plot, process, finish) {
   return { premises: aimed ? [aimed] : [], answer: null };
 }
 
-function pickThreatForDeed(plot, process) {
-  const byId = findThreat(plot, process?.threatId);
-  if (byId && byId.status === 'live') return byId;
-  return liveHarmThreats(plot)[0] || null;
+function relevantDepthGain(plot, count, finish, config) {
+  if (!count) return 0;
+  const cfg = threatConfig(config);
+  const factor = finish === 'crit' ? cfg.relevantCritDepthFactor : 1;
+  const raw = cfg.relevantDepthPerThreat * count * factor;
+  const room = Math.max(0, (Number(plot.maxDepth) || 1) - 0.01 - (Number(plot.depth) || 0));
+  return Math.round(Math.min(room, Math.max(0, raw)) * 100) / 100;
 }
 
 /**
  * Применить завершившееся дело к нити.
  *
  * `finish` — уже брошенный исход: `fail` | `ok` | `crit`.
- * Возвращает `{ alignment, finish, depthGain, closes, endingKind, threat, cascade, fired }`.
+ * `pressureFilled` — шкала этим делом перешла через ста.
+ * `triggerThreat` — беда, которую успех опасного дела приводит в исполнение.
  */
 export function applyDeedToPlot({
   plot,
   process,
   finish = 'ok',
   day = 0,
+  config = null,
   rng = Math.random,
 } = {}) {
   const alignment = alignmentOf(process) || 'UNRELATED';
@@ -103,22 +60,22 @@ export function applyDeedToPlot({
     closes: false,
     endingKind: null,
     threatId: null,
-    cascade: null,
-    fired: null,
-    livesLeft: livesLeft(plot),
-    stage: null,
-    remainingPct: null,
+    threatIds: [],
+    averted: [],
+    triggerThreat: null,
+    pressure: null,
+    pressureFilled: false,
     revealed: [],
     answer: null,
+    livesLeft: livesLeft(plot),
   };
   if (!plot) return out;
 
   if (alignment === 'DIRECT') {
     if (finish === 'fail') {
-      plot.failCount = Math.max(0, Math.round(Number(plot.failCount) || 0)) + 1;
+      out.pressure = shiftPressure(plot, day, threatConfig(config).directFail);
+      out.pressureFilled = out.pressure.filled;
       out.livesLeft = livesLeft(plot);
-      out.stage = threatStageForPlot(plot);
-      out.remainingPct = remainingToBadEndingPct(plot);
       return out;
     }
     const gain = depthGain({
@@ -130,8 +87,9 @@ export function applyDeedToPlot({
     });
     out.depthGain = gain;
     plot.depth = Math.round(((Number(plot.depth) || 0) + gain) * 100) / 100;
-    // Глубину прибавляем до проверки сердцевины: иначе крупное расследование,
-    // само перевалившее порог, отдавало бы разгадку только следующим делом.
+    if (finish === 'crit') {
+      out.pressure = shiftPressure(plot, day, threatConfig(config).directCrit);
+    }
     const found = revealForDeed(plot, process, finish);
     out.revealed = found.premises;
     out.answer = found.answer;
@@ -141,7 +99,8 @@ export function applyDeedToPlot({
       plot.ending = {
         kind: 'GOOD_ENDING',
         text: '',
-        endingId: pickGoodEndingId(plot, process),
+        questionGone: '',
+        nowDifferent: '',
         processId: process?.id || null,
       };
     }
@@ -149,30 +108,31 @@ export function applyDeedToPlot({
   }
 
   if (alignment === 'RELEVANT') {
-    const threat = pickThreatForDeed(plot, process);
-    out.threatId = threat?.id || null;
-    if (!threat || finish === 'fail') return out;
-    defendThreat(plot, threat, { day, by: process?.id || null });
-    if (finish === 'crit') out.cascade = critCascade(plot, threat, { day });
+    const ids = threatIdsOf(process);
+    out.threatIds = ids;
+    out.threatId = ids[0] || null;
+    if (finish === 'fail') {
+      out.pressure = shiftPressure(plot, day, threatConfig(config).relevantFail);
+      out.pressureFilled = out.pressure.filled;
+      return out;
+    }
+    out.averted = avertThreats(plot, ids, { day, by: process?.id || null });
+    const cfg = threatConfig(config);
+    const factor = finish === 'crit' ? cfg.relevantCritFactor : 1;
+    out.pressure = shiftPressure(plot, day, cfg.relevantPerThreat * out.averted.length * factor);
+    const depth = relevantDepthGain(plot, out.averted.length, finish, config);
+    if (depth) {
+      out.depthGain = depth;
+      plot.depth = Math.round(((Number(plot.depth) || 0) + depth) * 100) / 100;
+    }
     return out;
   }
 
   if (alignment === 'DANGEROUS') {
-    const threat = pickThreatForDeed(plot, process);
+    const id = threatIdsOf(process)[0] || '';
+    const threat = findThreat(plot, id);
     out.threatId = threat?.id || null;
-    if (!threat || finish === 'fail') return out;
-    if (finish === 'crit') {
-      out.fired = fireThreat(plot, threat, { day, firedBy: process?.id || null });
-      out.closes = !!out.fired?.closes;
-      out.endingKind = out.fired?.endingKind || null;
-      out.stage = out.fired?.stage || null;
-      out.remainingPct = out.fired?.remainingPct ?? null;
-      out.livesLeft = livesLeft(plot);
-      return out;
-    }
-    const res = hastenThreat(threat, { day });
-    out.hastenedDays = res.cut;
-    out.dueNow = !!res.dueNow;
+    if (threat && threat.status === 'live' && finish !== 'fail') out.triggerThreat = threat;
     return out;
   }
 
