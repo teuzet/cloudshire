@@ -4,6 +4,7 @@ import {
   stageScale,
   firedThreatScale,
   isFinalStage,
+  neutralEndingDue,
   stageThreatCount,
   stagePoolRequest,
   createThreat,
@@ -91,6 +92,9 @@ test('последняя беда закрывает плохо, если глу
   const other = attachThreat(ok, createThreat(ok, { text: 'крыло падает', final: true }));
   const okRes = fireThreat(ok, other, { day: 4 });
   assert.equal(okRes.endingKind, 'NEUTRAL_ENDING');
+  assert.equal(neutralEndingDue(ok, null), true);
+  assert.equal(neutralEndingDue(bad, null), false);
+  assert.equal(neutralEndingDue(plot(), null), false);
 });
 
 test('снятые беды уходят из живых', () => {

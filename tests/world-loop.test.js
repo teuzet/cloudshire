@@ -182,6 +182,31 @@ test('живая история без пула получает шкалу, н�
   assert.equal(jobList(world).filter((j) => j.kind === 'pressure_fire').length, 1);
 });
 
+test('закрытие нити отменяет привязанные дела и освобождает сановника', () => {
+  const plot = makePlot();
+  const domain = makeDomain({ plots: [plot] });
+  domain.officers = [{ id: 'off1', office: 'marshal', name: 'Орена', processId: 'proc-live' }];
+  const world = makeWorld();
+  const live = attachDeed(domain, plot, { id: 'proc-live', summary: 'охота на склоне', officerId: 'off1' });
+  const paused = attachDeed(domain, plot, { id: 'proc-pause', summary: 'вывоз деревушки', status: 'paused' });
+  const done = attachDeed(domain, plot, { id: 'proc-done', summary: 'уже кончилось', status: 'resolved' });
+  const other = startDeed(
+    { id: 'proc-other', summary: 'чинить свою стену', status: 'active', plotlineId: 'другая' },
+    { day: 100, judged: { durationBand: 'WEEKS', difficulty: 'PLAIN', objectiveDays: 20 } },
+  );
+  domain.state.pendingActions.push(other);
+  scheduleDeedJob(world, domain, live);
+  scheduleDeedJob(world, domain, paused);
+  closePlotWithJobs(domain, world, plot, { day: 140, reason: 'depth' });
+  assert.equal(live.status, 'cancelled');
+  assert.equal(live.cancelReason, 'история закрыта');
+  assert.equal(paused.status, 'cancelled');
+  assert.equal(done.status, 'resolved');
+  assert.equal(other.status, 'active');
+  assert.equal(domain.officers[0].processId, null);
+  assert.equal(jobList(world).filter((j) => j.state === 'pending' && j.kind === 'process_finish').length, 0);
+});
+
 test('закрытие нити гасит её беды и задания', () => {
   const plot = makePlot();
   const domain = makeDomain({ plots: [plot] });
@@ -365,6 +390,198 @@ test('запись о деле не называет дело по имени, �
   assert.doesNotMatch(text, /Свести спорящих о воде/, 'название дела — метагейм');
   assert.doesNotMatch(text, /«|»/);
   assert.match(text, /помирить гряд-ников/);
+});
+
+test('провал, переполнивший шкалу, пишет беду и называет дело причиной', async () => {
+  const plot = makePlot();
+  const domain = makeDomain({ plots: [plot] });
+  const world = makeWorld();
+  const threat = attachThreat(
+    plot,
+    createThreat({ plot, text: 'Пыль забьёт водосборный сток', stage: 0, final: false, day: 100 }),
+  );
+  resetPressure(plot, 130, null, () => 0);
+  plot.pressure.value = 80;
+  attachDeed(domain, plot, {
+    plotEngagement: 'DIRECT',
+    summary: 'укрепить опору',
+    goal: 'удержать северное крыло',
+  });
+  const calls = [];
+  const agentIds = [];
+  await resolveDeedEvent({
+    config,
+    runtime: chronicleRuntime('Водосбор забило пылью после неудачного ремонта.', calls, agentIds),
+    domain,
+    world,
+    day: 130,
+    processId: 'proc1',
+    forcedFinish: 'fail',
+    log: silentLog,
+  });
+  assert.equal(findThreat(plot, threat.id).status, 'fired');
+  assert.equal(plot.failCount, 1);
+  assert.equal(domain.plotlines.length, 1);
+  assert.deepEqual(agentIds, ['chronicleThreat']);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /укрепить опору/);
+  assert.match(calls[0], /Пыль забьёт водосборный сток/);
+  assert.match(calls[0], /ПРИВЕЛО К СОБЫТИЮ/);
+  assert.match(calls[0], /История не закрыта/);
+  assert.ok(calls[0].indexOf('укрепить опору') < calls[0].indexOf('Пыль забьёт'));
+});
+
+test('провал, сорвавший концовку, пишет её текст, а не другую развязку', async () => {
+  const plot = makePlot({ failCount: 2, maxFails: 2, depth: 0 });
+  const domain = makeDomain({ plots: [plot] });
+  const world = makeWorld();
+  const threat = attachThreat(
+    plot,
+    createThreat({ plot, text: 'Ночной выход обрушит лавовый склон', final: true, day: 100 }),
+  );
+  resetPressure(plot, 130, null, () => 0);
+  plot.pressure.value = 90;
+  attachDeed(domain, plot, {
+    plotEngagement: 'DIRECT',
+    summary: 'подготовить ночной выход',
+    goal: 'дойти до логова',
+  });
+  const calls = [];
+  const agentIds = [];
+  const res = await resolveDeedEvent({
+    config,
+    runtime: chronicleRuntime('Ночной выход не дошёл, и склон обрушился.', calls, agentIds),
+    domain,
+    world,
+    day: 130,
+    processId: 'proc1',
+    forcedFinish: 'fail',
+    log: silentLog,
+  });
+  assert.equal(res.closed, true);
+  assert.equal(plot.ending.kind, 'BAD_ENDING');
+  assert.equal(findThreat(plot, threat.id).status, 'fired');
+  assert.deepEqual(agentIds, ['chronicleFinale']);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /подготовить ночной выход/);
+  assert.match(calls[0], /Ночной выход обрушит лавовый склон/);
+  assert.match(calls[0], /ПРИВЕЛО К СОБЫТИЮ/);
+  assert.match(calls[0], /GRAVITY: CRISIS/);
+  assert.ok(calls[0].indexOf('подготовить ночной выход') < calls[0].indexOf('Ночной выход обрушит'));
+});
+
+function pickingRuntime({ neutralId, chronicle, calls = [], agentIds = [] }) {
+  return {
+    run: async (opts) => {
+      agentIds.push(opts.agentId);
+      calls.push(opts.userMessages[0].content);
+      if (opts.agentId === 'neutralPick') {
+        await opts.tools[0].handler({ threatId: neutralId });
+        return {};
+      }
+      if (
+        opts.agentId === 'chronicleFinale' ||
+        opts.agentId === 'chronicleThreat' ||
+        opts.agentId === 'chronicleDeed' ||
+        opts.agentId === 'chronicler' ||
+        opts.agentId === 'errandChronicler'
+      ) {
+        await opts.tools[0].handler({ entry: chronicle });
+        return {};
+      }
+      return {};
+    },
+  };
+}
+
+test('нейтральная концовка — та плохая, которую выбрал агент, и хронист об этом знает', async () => {
+  const plot = makePlot({ failCount: 2, maxFails: 2, depth: 1.6 });
+  const domain = makeDomain({ plots: [plot] });
+  const world = makeWorld();
+  const harsh = attachThreat(
+    plot,
+    createThreat({ plot, text: 'Склон хоронит квартал вместе с людьми', final: true, day: 100 }),
+  );
+  const milder = attachThreat(
+    plot,
+    createThreat({ plot, text: 'Зверя уводят за стену, и северные дворы пустеют', final: true, day: 100 }),
+  );
+  resetPressure(plot, 130, null, () => 0);
+  plot.pressure.value = 90;
+  attachDeed(domain, plot, {
+    plotEngagement: 'DIRECT',
+    summary: 'удержать северные ворота',
+    goal: 'не выпустить колонну',
+  });
+  const calls = [];
+  const agentIds = [];
+  const res = await resolveDeedEvent({
+    config,
+    runtime: pickingRuntime({
+      neutralId: milder.id,
+      chronicle: 'Зверя увели за стену, и северные дворы опустели.',
+      calls,
+      agentIds,
+    }),
+    domain,
+    world,
+    day: 130,
+    processId: 'proc1',
+    forcedFinish: 'fail',
+    log: silentLog,
+  });
+  assert.equal(res.closed, true);
+  assert.equal(plot.ending.kind, 'NEUTRAL_ENDING');
+  assert.equal(milder.status, 'fired');
+  assert.equal(harsh.status, 'cancelled');
+  assert.deepEqual(agentIds, ['neutralPick', 'chronicleFinale']);
+  assert.match(calls[0], /Склон хоронит квартал/);
+  assert.match(calls[0], /Зверя уводят за стену/);
+  assert.match(calls[0], /самую хорошую из плохих/);
+  const finale = calls[1];
+  assert.match(finale, /Это нейтральная концовка/);
+  assert.match(finale, /Зверя уводят за стену/);
+  assert.match(finale, /удержать северные ворота/);
+  assert.doesNotMatch(finale, /Склон хоронит квартал/);
+});
+
+test('шкала на нейтральной концовке зовёт того же агента, а не жребий', async () => {
+  const plot = makePlot({ failCount: 2, maxFails: 2, depth: 2 });
+  const domain = makeDomain({ plots: [plot] });
+  const world = makeWorld();
+  const harsh = attachThreat(
+    plot,
+    createThreat({ plot, text: 'Обвал засыпает террасы', final: true, day: 100 }),
+  );
+  const milder = attachThreat(
+    plot,
+    createThreat({ plot, text: 'Стадо уводят и больше не пасут у склона', final: true, day: 100 }),
+  );
+  resetPressure(plot, 130, null, () => 0);
+  plot.pressure.value = 100;
+  const calls = [];
+  const agentIds = [];
+  const res = await firePressureEvent({
+    runtime: pickingRuntime({
+      neutralId: milder.id,
+      chronicle: 'Стадо увели, и у склона больше не пасли.',
+      calls,
+      agentIds,
+    }),
+    domain,
+    world,
+    day: 130,
+    plot,
+    rng: () => 0,
+    log: silentLog,
+  });
+  assert.equal(res.closed, true);
+  assert.equal(res.endingKind, 'NEUTRAL_ENDING');
+  assert.equal(milder.status, 'fired');
+  assert.equal(harsh.status, 'cancelled');
+  assert.deepEqual(agentIds, ['neutralPick', 'chronicleFinale']);
+  assert.match(calls[1], /Это нейтральная концовка/);
+  assert.match(calls[1], /Стадо уводят/);
 });
 
 test('сработавшая беда ложится в хронику прошедшим временем', async () => {

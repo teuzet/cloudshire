@@ -373,11 +373,13 @@ export function formatThreatPrompt({
   chronicleTail = [],
   dateLabel = '',
   config = null,
+  causeLines = [],
 }) {
   void dateLabel;
   return [
     'ПОВОД: напряжение истории дошло до края, и одна из бед случилась.',
     '',
+    ...causeBlock(causeLines),
     'ЭТО БЫЛО НАПИСАНО ЗАРАНЕЕ, В БУДУЩЕМ ВРЕМЕНИ. Теперь оно произошло:',
     threat?.text || '—',
     'Перепиши это как случившееся, в прошедшем времени, со своими подробностями места и людей.',
@@ -400,12 +402,40 @@ const ENDING_KIND_LINE = {
     'Вопрос снят, и город на этом что-то приобрёл. Приобретение назови прямо, ' +
     'но не превращай запись в триумф: цена тоже была.',
   NEUTRAL_ENDING:
-    'Вопрос снят, но город за это заплатил или он просто исчерпал себя. ' +
+    'Это нейтральная концовка. Вопрос снят, но город за это заплатил или он просто исчерпал себя. ' +
     'Ни победы, ни крушения: напиши, чем всё улеглось и во что это обошлось.',
   BAD_ENDING:
     'Вопрос закрыт утратой, а не решением: города лишился того, из-за чего всё это стояло. ' +
     'Не пиши «стало хуже» — пиши, чего больше нет.',
 };
+
+/**
+ * Провальное дело, из которого выросла беда.
+ *
+ * Один и тот же блок и для промежуточной угрозы, и для концовки: событие
+ * остаётся тем, что выбрал движок, а дело только объясняет, откуда оно взялось.
+ */
+export function failedDeedCauseLines({ domain, process, applied }) {
+  const actor = deedActor(domain, process);
+  const officer = findDeedOfficer(domain, process);
+  const v = actorVoice(officer);
+  return [
+    'ПРОВАЛЬНОЕ ДЕЛО ПРИВЕЛО К СОБЫТИЮ НИЖЕ.',
+    `Город вёл работу: ${process?.detail || process?.summary || '—'}`,
+    process?.goal ? `Чего добивались: ${process.goal}` : null,
+    actor
+      ? `Кто вёл: ${actor}${officer ? ` (${v.word})` : ''}. Согласуй род (${v.did}). Пол в скобках в текст не пиши.`
+      : 'Кто вёл: город сам, без названного лица.',
+    `ИСХОД: ${finishForPrompt(applied?.finish || 'fail')}`,
+    'Дело не вышло, и из этого провала случилось событие, которое написано следом.',
+    'Пиши их одной причиной: сначала провал, потом событие. Событие не подменяй другим.',
+  ].filter(Boolean);
+}
+
+function causeBlock(causeLines) {
+  const lines = (causeLines || []).filter((line) => line != null && String(line).trim());
+  return lines.length ? [...lines, ''] : [];
+}
 
 /** Ввод финальной записи, когда историю закрыло дело города. */
 export function deedTriggerLines({ domain, process, applied }) {
@@ -442,11 +472,14 @@ export function threatTriggerLines(threat) {
  * брифе сводил событие и развязку в одну сухую строчку.
  *
  * `triggerLines` даёт вызывающий: у дела и у сработавшей беды это разные вводы.
+ * `causeLines` — провальное дело, если именно оно сорвало беду: событие ниже
+ * от этого не меняется.
  */
 export function formatFinalePrompt({
   plot,
   ending = null,
   triggerLines = [],
+  causeLines = [],
   chronicleTail = [],
   dateLabel = '',
   entryMax = CHRONICLE_FINALE_MAX,
@@ -459,6 +492,7 @@ export function formatFinalePrompt({
   return [
     'ПОВОД: этим история кончается. Это последняя запись о ней.',
     '',
+    ...causeBlock(causeLines),
     'ЧТО ПРИВЕЛО К РАЗВЯЗКЕ:',
     ...triggerLines,
     '',

@@ -6,6 +6,7 @@ import {
   chronicleEntryLimit,
   deedConsequenceLines,
   deedTriggerLines,
+  failedDeedCauseLines,
   fallbackDeedEntry,
   formatDeedPrompt,
   formatFinalePrompt,
@@ -275,6 +276,52 @@ test('промпт беды требует прошедшего времени',
   assert.doesNotMatch(text, /ещё 50%/);
   assert.doesNotMatch(text, /длиннее обычной/);
   assert.doesNotMatch(text, /УЩЕРБ|ТРЕВОГА|КАТАСТРОФА/);
+  assert.doesNotMatch(text, /ПРОВАЛЬНОЕ ДЕЛО/);
+});
+
+test('провал, сорвавший беду, стоит в промпте перед событием', () => {
+  const cause = failedDeedCauseLines({
+    domain: domain(),
+    process: deed,
+    applied: { finish: 'fail' },
+  });
+  const event = 'Ночной выход к логову обрушит склон';
+  const text = formatThreatPrompt({
+    plot: plot(),
+    threat: { text: event, stage: 0 },
+    causeLines: cause,
+    config: loadConfig(),
+  });
+  assert.match(text, /ПРОВАЛЬНОЕ ДЕЛО ПРИВЕЛО К СОБЫТИЮ НИЖЕ/);
+  assert.match(text, /Вскрыть ступени в Срединном поясе/);
+  assert.match(text, /\[ПРОВАЛ\]/);
+  assert.match(text, /одной причиной/);
+  assert.match(text, /Событие не подменяй другим/);
+  assert.match(text, /История не закрыта/);
+  assert.ok(text.indexOf('Вскрыть ступени') < text.indexOf(event));
+});
+
+test('концовка от провала держит и дело, и выбранное событие', () => {
+  const cause = failedDeedCauseLines({
+    domain: domain(),
+    process: deed,
+    applied: { finish: 'fail' },
+  });
+  const event = 'Порох обрушит лавовый склон';
+  const text = formatFinalePrompt({
+    plot: plot({ gravity: 'CRISIS', cause: 'хищник на склоне' }),
+    ending: { kind: 'BAD_ENDING', text: '' },
+    triggerLines: threatTriggerLines({ text: event }),
+    causeLines: cause,
+    config: loadConfig(),
+    scale: 'CRISIS',
+  });
+  assert.match(text, /ПРОВАЛЬНОЕ ДЕЛО ПРИВЕЛО К СОБЫТИЮ НИЖЕ/);
+  assert.match(text, /Вскрыть ступени в Срединном поясе/);
+  assert.match(text, new RegExp(event));
+  assert.match(text, /этим история кончается/i);
+  assert.match(text, /GRAVITY: CRISIS/);
+  assert.ok(text.indexOf('Вскрыть ступени') < text.indexOf(event));
 });
 
 test('последняя беда расшифровывается gravity истории, а не ранней стадии', () => {
@@ -315,7 +362,9 @@ test('финальная запись несёт и случившееся, и �
   assert.match(text, /Северное крыло рухнет на мостки/);
   assert.match(text, /марш держится на одной осевшей опоре/);
   assert.match(text, /утратой, а не решением/);
+  assert.doesNotMatch(text, /Это нейтральная концовка/);
   assert.doesNotMatch(text, /GRAVITY:/);
+  assert.doesNotMatch(text, /ПРОВАЛЬНОЕ ДЕЛО/);
   assert.match(text, new RegExp(`до ${CHRONICLE_FINALE_MAX} символов`));
   assert.equal(chronicleEntryLimit(CHRONICLE_FINALE_MAX), CHRONICLE_FINALE_MAX);
   assert.equal(chronicleEntryLimit(10), CHRONICLE_ENTRY_MAX);
@@ -367,6 +416,7 @@ test('нейтральная развязка — не победа и не кр
     ending: { kind: 'NEUTRAL_ENDING', text: '', endingId: 'e_n' },
     triggerLines: threatTriggerLines({ text: 'Осевшее крыло огородят и забудут о нём' }),
   });
+  assert.match(text, /Это нейтральная концовка/);
   assert.match(text, /Ни победы, ни крушения/);
   assert.match(text, /заплатил|исчерпал/);
 });

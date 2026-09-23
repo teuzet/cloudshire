@@ -34,7 +34,7 @@ import {
   normalizePlotlines,
 } from './plotlines.js';
 import { plotHostId } from './confluxBoard.js';
-import { normalizeDomainProcesses } from './processes.js';
+import { normalizeDomainProcesses, processIsLive } from './processes.js';
 import { releaseOfficerProcess } from './officers.js';
 import { normalizeDeed, rollDeedFinish, finishDeed, deedOutcome } from './deeds.js';
 import { applyDeedToPlot } from './deedResolve.js';
@@ -44,13 +44,16 @@ import {
   findThreat,
   fireThreat,
   firedThreatScale,
+  neutralEndingDue,
   normalizePlotThreats,
 } from './threats.js';
 import { fillStageThreats } from './threatSmith.js';
 import { pickConsequenceThreat } from './threatPick.js';
+import { pickNeutralThreat } from './neutralPick.js';
 import { ensurePressure, fillDay, pressureAt, resetPressure } from './pressure.js';
 import {
   deedTriggerLines,
+  failedDeedCauseLines,
   fallbackDeedEntry,
   formatDeedPrompt,
   formatFinalePrompt,
@@ -213,14 +216,47 @@ export async function ensurePlotObligations({
   return created;
 }
 
+/**
+ * Живые и поставленные на паузу дела этой истории отменяются вместе с ней.
+ * Уже завершённое дело, которым история закрылась, не трогаем.
+ * Дело может лежать на домене истории или на соседнем, если шло через проход.
+ */
+function cancelDeedsForClosedPlot(domains, world, plot, day) {
+  const plotId = String(plot?.id || '');
+  const related = new Set((plot?.relatedProcessIds || []).map(String));
+  const seen = new Set();
+  for (const board of domains) {
+    if (!board) continue;
+    for (const process of board.state?.pendingActions || []) {
+      if (!process || seen.has(process.id)) continue;
+      const linked =
+        String(process.plotlineId || '') === plotId || related.has(String(process.id));
+      if (!linked) continue;
+      seen.add(process.id);
+      if (!processIsLive(process)) continue;
+      process.status = 'cancelled';
+      process.cancelledDay = Math.round(Number(day) || 0);
+      process.cancelReason = 'история закрыта';
+      releaseOfficerProcess(board, process);
+      if (world) cancelDeedJobs(world, process.id);
+    }
+  }
+}
+
 /** Закрыть нить и снять с очереди всё, что на неё было заведено. */
-export function closePlotWithJobs(domain, world, plot, { day = 0, reason = '', fact = null } = {}) {
+export function closePlotWithJobs(
+  domain,
+  world,
+  plot,
+  { day = 0, reason = '', fact = null, alsoDomains = [] } = {},
+) {
   if (!plot) return null;
   for (const threat of liveThreats(plot)) {
     threat.status = 'cancelled';
     threat.cancelledDay = day;
     threat.cancelReason = 'история закрыта';
   }
+  cancelDeedsForClosedPlot([domain, ...alsoDomains], world, plot, day);
   if (world) cancelJobsForPlot(world, plot.id);
   const closed = closePlotline(domain, plot.id, { tick: world?.tickIndex ?? null, reason });
   if (fact) markChroniclePlotClosed(fact, { reason });
@@ -319,13 +355,20 @@ export async function resolveDeedEvent({
     fireRes = fireThreat(plot, applied.triggerThreat, { day, firedBy: process.id, config });
     if (fireRes.ok) firedThreat = applied.triggerThreat;
   } else if (plot && applied.pressureFilled) {
-    const picked = await pickConsequenceThreat({
-      runtime,
-      domain: plotHost || domain,
-      plot,
-      deed: process,
-      log,
-    });
+    const picked = neutralEndingDue(plot, config)
+      ? await pickNeutralThreat({
+          runtime,
+          domain: plotHost || domain,
+          plot,
+          log,
+        })
+      : await pickConsequenceThreat({
+          runtime,
+          domain: plotHost || domain,
+          plot,
+          deed: process,
+          log,
+        });
     if (picked) {
       fireRes = fireThreat(plot, picked, { day, firedBy: process.id, config });
       if (fireRes.ok) firedThreat = picked;
@@ -363,36 +406,68 @@ export async function resolveDeedEvent({
     text = pairNarration?.fact?.text || null;
   }
   if (!text) {
+    const tail = plotChronicleTail(plotHost || domain, plot?.id);
+    // Провал, переполнивший шкалу, не пишет отдельную хронику дела.
+    // Событие — выбранная беда, провал только причина, которая к ней привела.
+    const failLed = Boolean(firedThreat) && rolled.finish === 'fail';
+    let occasion = 'дело';
+    let agentId = deedChronicleAgent({ closesStory, plot });
+    let prompt;
+    if (failLed && closesStory) {
+      occasion = 'развязка';
+      agentId = 'chronicleFinale';
+      prompt = formatFinalePrompt({
+        plot,
+        ending: plot.ending || null,
+        triggerLines: threatTriggerLines(firedThreat),
+        causeLines: failedDeedCauseLines({ domain, process, applied }),
+        chronicleTail: tail,
+        config,
+        scale: firedThreatScale(plot, firedThreat),
+      });
+    } else if (failLed) {
+      occasion = 'угроза';
+      agentId = 'chronicleThreat';
+      prompt = formatThreatPrompt({
+        plot,
+        threat: firedThreat,
+        causeLines: failedDeedCauseLines({ domain, process, applied }),
+        chronicleTail: tail,
+        config,
+      });
+    } else if (closesStory) {
+      prompt = formatFinalePrompt({
+        plot,
+        ending: plot.ending || null,
+        triggerLines: deedTriggerLines({ domain, process, applied }),
+        chronicleTail: tail,
+      });
+    } else {
+      prompt = formatDeedPrompt({
+        domain,
+        plot,
+        process,
+        applied,
+        threat: firedThreat || (plot ? findThreat(plot, applied.threatId) : null),
+        averted: applied.averted || [],
+        linked: Boolean(firedThreat),
+        closed: false,
+        chronicleTail: tail,
+        partnerName: process.crossIsland ? partner?.name || '' : '',
+        passage: process.crossIsland && conflux ? formatPassageForPrompt(conflux) : '',
+        pairArchive:
+          process.crossIsland && conflux
+            ? formatPairArchive(conflux, [domain, partner].filter(Boolean))
+            : '',
+      });
+    }
     const written = await writeChronicle({
       runtime,
       domain,
-      occasion: 'дело',
-      agentId: deedChronicleAgent({ closesStory, plot }),
+      occasion,
+      agentId,
       maxChars: closesStory || Boolean(process.crossIsland) ? CHRONICLE_FINALE_MAX : undefined,
-      prompt: closesStory
-        ? formatFinalePrompt({
-            plot,
-            ending: plot.ending || null,
-            triggerLines: deedTriggerLines({ domain, process, applied }),
-            chronicleTail: plotChronicleTail(plotHost || domain, plot.id),
-          })
-        : formatDeedPrompt({
-            domain,
-            plot,
-            process,
-            applied,
-            threat: firedThreat || (plot ? findThreat(plot, applied.threatId) : null),
-            averted: applied.averted || [],
-            linked: Boolean(firedThreat),
-            closed: false,
-            chronicleTail: plotChronicleTail(plotHost || domain, plot?.id),
-            partnerName: process.crossIsland ? partner?.name || '' : '',
-            passage: process.crossIsland && conflux ? formatPassageForPrompt(conflux) : '',
-            pairArchive:
-              process.crossIsland && conflux
-                ? formatPairArchive(conflux, [domain, partner].filter(Boolean))
-                : '',
-          }),
+      prompt,
       log,
     });
     text = written?.text || fallbackDeedEntry(process, rolled.finish, {
@@ -480,6 +555,7 @@ export async function resolveDeedEvent({
       day,
       reason: endingKind === 'GOOD_ENDING' ? 'depth' : endingKind === 'NEUTRAL_ENDING' ? 'neutral' : 'lives',
       fact,
+      alsoDomains: [domain, partner],
     });
     if (storage && host !== domain) await storage.saveDomain(host);
   } else if (plot) {
@@ -620,6 +696,7 @@ export async function fireThreatEvent({
       day,
       reason: res.endingKind === 'NEUTRAL_ENDING' ? 'neutral' : 'lives',
       fact,
+      alsoDomains: [partner],
     });
   } else {
     resetPressure(plot, day, config, rng);
@@ -649,7 +726,11 @@ export async function fireThreatEvent({
   };
 }
 
-/** Шкала сама дошла до ста. Беда берётся из пула жребием. */
+/**
+ * Шкала сама дошла до ста.
+ * Обычная беда берётся из пула жребием. Нейтральную концовку выбирает агент:
+ * самую хорошую из плохих.
+ */
 export async function firePressureEvent(ctx) {
   const { domain, world, day = 0, plotId, config = null, rng = Math.random, plot: givenPlot = null } = ctx;
   const plot = givenPlot || findPlotline(domain, plotId);
@@ -665,7 +746,19 @@ export async function firePressureEvent(ctx) {
     schedulePressureJob(world, domain, plot);
     return { skipped: 'empty_pool' };
   }
-  const threat = live[Math.floor(rng() * live.length)];
+  const threat = neutralEndingDue(plot, config)
+    ? await pickNeutralThreat({
+        runtime: ctx.runtime,
+        domain,
+        plot,
+        log: ctx.log,
+      })
+    : live[Math.floor(rng() * live.length)];
+  if (!threat) {
+    resetPressure(plot, day, config, rng);
+    schedulePressureJob(world, domain, plot);
+    return { skipped: 'empty_pool' };
+  }
   return fireThreatEvent({ ...ctx, plot, threatId: threat.id });
 }
 

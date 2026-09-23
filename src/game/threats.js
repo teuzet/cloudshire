@@ -76,6 +76,17 @@ export function isFinalStage(plot) {
   return woundsExhausted(plot);
 }
 
+/**
+ * Последняя стадия и глубины хватает на порог: сработавшая беда закроет историю
+ * нейтрально. Какую из плохих взять, решает отдельный агент.
+ */
+export function neutralEndingDue(plot, config) {
+  if (!plot || !isFinalStage(plot)) return false;
+  const share = threatConfig(config).neutralDepthShare;
+  const maxDepth = Math.max(1, Number(plot.maxDepth) || 1);
+  return (Number(plot.depth) || 0) >= share * maxDepth;
+}
+
 /** Масштаб бед текущей стадии. Последняя стадия пишется масштабом самой истории. */
 export function stageScale(plot) {
   const gravity = parseFreeformGravity(plot?.gravity);
@@ -187,9 +198,7 @@ export function fireThreat(plot, threat, { day = null, firedBy = null, config = 
     }
     return { ok: true, closes: false, livesLeft: livesLeft(plot), stage: plot.stage };
   }
-  const share = threatConfig(config).neutralDepthShare;
-  const maxDepth = Math.max(1, Number(plot.maxDepth) || 1);
-  const neutral = (Number(plot.depth) || 0) >= share * maxDepth;
+  const neutral = neutralEndingDue(plot, config);
   plot.ending = {
     kind: neutral ? 'NEUTRAL_ENDING' : 'BAD_ENDING',
     threatId: threat.id,
