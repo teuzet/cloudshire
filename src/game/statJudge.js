@@ -3,7 +3,14 @@
  * записи хроники и ставит, какие стороны города задеты. Величину считает движок.
  */
 
-import { findPlotline, plotStatForce, plotConfig, isStoryPlot } from './plotlines.js';
+import {
+  findPlotline,
+  plotConfig,
+  isStoryPlot,
+  seedStatBudget,
+  depthStatPoints,
+  endingStatPoints,
+} from './plotlines.js';
 import { deedValue, CRIT_DEPTH_MULTIPLIER } from './deedMath.js';
 import { worldDateLabel } from './gameClock.js';
 import { resolveStatDeltas, scaleTaggedAffects } from './plotEngine.js';
@@ -119,30 +126,41 @@ function polarityOf(fact) {
   return 'any';
 }
 
-export function absBudgetForFact(domain, fact, config) {
-  if (fact?.statsSettled) return 0;
-  if (fact?.author === 'storyteller:quiet') return 0;
-  if (fact?.author === 'engine:rule') return 0;
+/**
+ * Две стороны одной хроники.
+ * down — завязка или беда. up — глубина и закрытие истории.
+ * deed — цена дела без истории: знак по-прежнему берёт исход.
+ */
+export function statPartsForFact(domain, fact, config) {
+  const empty = { up: 0, down: 0, deed: 0 };
+  if (fact?.statsSettled) return empty;
+  if (fact?.author === 'storyteller:quiet') return empty;
+  if (fact?.author === 'engine:rule') return empty;
+
   const pocket = String(fact?.statPocket || '');
+  const author = String(fact?.author || '');
   const plot = plotForFact(domain, fact) || closedPlotForFact(domain, fact);
-  if (pocket === 'seed') return plotStatForce(plot, { opening: true, config });
-  if (pocket === 'threat') return plotStatForce(plot, { threat: true, config });
-  if (pocket === 'ending') {
-    const ending = plotStatForce(plot, { ending: true, config });
-    if (fact?.processFinish) {
-      const proc = (domain.state?.pendingActions || []).find((a) => a.id === fact.relatedPendingId) || {
-        durationBand: fact.pairImpact?.durationBand,
-        difficulty: fact.pairImpact?.difficulty,
-        crossIsland: Boolean(fact.pairImpact?.crossIsland),
-        finishKind: fact.processFinish,
-      };
-      return ending + deedStatBudget(proc, config, { finish: fact.processFinish });
-    }
-    return ending;
-  }
+  let up = 0;
+  let down = 0;
+
+  const isSeed = pocket === 'seed' || /seed/i.test(author);
+  if (isSeed && plot && isStoryPlot(plot)) down += seedStatBudget(plot, config);
+
+  const wound = Number(fact?.woundBudget);
+  if (Number.isFinite(wound) && wound > 0) down += Math.round(wound);
+
+  const finish = String(fact?.processFinish || '');
+  const gain = Number(fact?.depthGain);
+  const depthAdvanced = Number.isFinite(gain) && gain > 0 && finish !== 'fail';
+  if (depthAdvanced) up += depthStatPoints(gain, config);
+
+  const closed = Boolean(fact?.plotClosed) || pocket === 'ending';
+  if (closed && plot && isStoryPlot(plot)) up += endingStatPoints(plot, config);
+
   const impact = fact?.pairImpact;
+  let deedMagnitude = 0;
   if (impact?.crossIsland) {
-    return deedStatBudget(
+    deedMagnitude = deedStatBudget(
       {
         crossIsland: true,
         durationBand: impact.durationBand,
@@ -152,25 +170,79 @@ export function absBudgetForFact(domain, fact, config) {
       config,
       { finish: impact.finish },
     );
+  } else if (fact?.processFinish && !depthAdvanced) {
+    const proc = (domain.state?.pendingActions || []).find((a) => a.id === fact.relatedPendingId) || {
+      durationBand: impact?.durationBand,
+      difficulty: impact?.difficulty,
+      crossIsland: Boolean(impact?.crossIsland),
+      finishKind: fact.processFinish,
+    };
+    deedMagnitude = deedStatBudget(proc, config, { finish: fact.processFinish });
   }
-  if (fact?.processFinish) {
-    const proc = (domain.state?.pendingActions || []).find((a) => a.id === fact.relatedPendingId);
-    let n = deedStatBudget(proc, config, { finish: fact.processFinish });
-    if (fact.plotClosed && plot && isStoryPlot(plot)) {
-      n += plotStatForce(plot, { ending: true, config });
-    }
-    return n;
+
+  if (deedMagnitude > 0 && !depthAdvanced) {
+    const alongside = up > 0 || down > 0;
+    if (!alongside) return { up: 0, down: 0, deed: deedMagnitude };
+    if (finishForFact(fact) === 'fail') down += deedMagnitude;
+    else up += deedMagnitude;
   }
-  if (/start|seed/i.test(String(fact?.author || ''))) {
-    return plotStatForce(plot, { opening: true, config });
+
+  return { up, down, deed: 0 };
+}
+
+export function absBudgetForFact(domain, fact, config) {
+  const parts = statPartsForFact(domain, fact, config);
+  return parts.up + parts.down + parts.deed;
+}
+
+function statTraceNote(parts) {
+  if (parts.up > 0 && parts.down > 0) return 'и потери, и отдельный плюс';
+  if (parts.down > 0 && parts.deed === 0 && parts.up === 0) return 'только потери';
+  if (parts.up > 0 && parts.deed === 0 && parts.down === 0) return 'только плюс';
+  return '';
+}
+
+function deltasForParts(domain, fact, affects, parts, { config, note }) {
+  const source = sourceForFact(fact);
+  const catastrophe = Boolean(note);
+  if (parts.up > 0 && parts.down > 0) {
+    return resolveStatDeltas(domain, affects, {
+      source,
+      config,
+      catastrophe,
+      polarity: 'split',
+      upBudget: parts.up,
+      downBudget: parts.down,
+    });
   }
-  if (String(fact?.author || '').includes('threat')) {
-    return fact.plotClosed
-      ? plotStatForce(plot, { ending: true, config })
-      : plotStatForce(plot, { threat: true, config });
+  if (parts.deed > 0) {
+    return enforceFinishPolarity(
+      resolveStatDeltas(domain, affects, {
+        source,
+        config,
+        catastrophe,
+        absBudget: parts.deed,
+        polarity: polarityOf(fact),
+      }),
+      finishForFact(fact),
+    );
   }
-  if (fact?.plotClosed) return plotStatForce(plot, { ending: true, config });
-  return 0;
+  if (parts.down > 0) {
+    return resolveStatDeltas(domain, affects, {
+      source,
+      config,
+      catastrophe,
+      absBudget: parts.down,
+      polarity: 'nonpos',
+    });
+  }
+  return resolveStatDeltas(domain, affects, {
+    source,
+    config,
+    catastrophe,
+    absBudget: parts.up,
+    polarity: 'nonneg',
+  });
 }
 
 function statsBrief(domain, config) {
@@ -283,7 +355,9 @@ export async function scoreChronicleStats({
       const finish = finishForFact(f);
       const hit = f.pairImpact?.hostile ? ' удар с чужого берега' : '';
       const finishNote = finish ? ` исход: ${finish}` : '';
-      return `${i + 1}. id ${f.id} [${kind}]${hit}${finishNote}\n${f.text}`;
+      const trace = statTraceNote(statPartsForFact(domain, f, config));
+      const traceNote = trace ? ` (${trace})` : '';
+      return `${i + 1}. id ${f.id} [${kind}]${hit}${finishNote}${traceNote}\n${f.text}`;
     })
     .join('\n\n');
   const hitUs = toScore.some((f) => f?.pairImpact?.hostile);
@@ -310,6 +384,7 @@ export async function scoreChronicleStats({
           'Если исход записи crit / [КРИТИЧЕСКИЙ УСПЕХ] — только плюсы, без down.',
           'Если fail / [ПРОВАЛ] — без плюсов, город теряет.',
           'Если ok / [УСПЕХ] — плюсы есть, небольшая негативная побочка обязательна.',
+          'Если у записи в скобках сказано «и потери, и отдельный плюс» — поставь и down, и up, даже при провале или критическом успехе.',
           hitUs
             ? 'Удар с чужого берега: этот город — пострадавший. Ставь потери (down), не добычу нападавших.'
             : '',
@@ -340,7 +415,8 @@ export async function scoreChronicleStats({
     seen.add(id);
 
     const note = String(mark.catastrophe || '').trim();
-    const absBudget = absBudgetForFact(domain, fact, config);
+    const parts = statPartsForFact(domain, fact, config);
+    const absBudget = parts.up + parts.down + parts.deed;
     if (!absBudget) {
       if (note) {
         fact.importance = 'critical';
@@ -348,16 +424,7 @@ export async function scoreChronicleStats({
       }
       continue;
     }
-    const deltas = enforceFinishPolarity(
-      resolveStatDeltas(domain, mark.affects || [], {
-        source: sourceForFact(fact),
-        config,
-        catastrophe: Boolean(note),
-        absBudget,
-        polarity: polarityOf(fact),
-      }),
-      finishForFact(fact),
-    );
+    const deltas = deltasForParts(domain, fact, mark.affects || [], parts, { config, note });
     if (!deltas || !Object.keys(deltas).length) {
       if (note) {
         fact.importance = 'critical';

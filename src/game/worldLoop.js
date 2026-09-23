@@ -32,6 +32,7 @@ import {
   plotConfig,
   countOpen,
   normalizePlotlines,
+  rollWoundStatBudget,
 } from './plotlines.js';
 import { plotHostId } from './confluxBoard.js';
 import { normalizeDomainProcesses, processIsLive } from './processes.js';
@@ -126,6 +127,10 @@ export function appendEventFact(
   if (extra.statPocket) fact.statPocket = extra.statPocket;
   if (extra.endingKind) fact.endingKind = extra.endingKind;
   if (extra.plotClosed) fact.plotClosed = true;
+  const wound = Number(extra.woundBudget);
+  if (Number.isFinite(wound) && wound > 0) fact.woundBudget = Math.round(wound);
+  const gain = Number(extra.depthGain);
+  if (Number.isFinite(gain) && gain > 0) fact.depthGain = gain;
   domain.lore = Array.isArray(domain.lore) ? domain.lore : [];
   domain.lore.push(fact);
   if (plotId) attachChronicleToPlotlines(domain, fact.id, [plotId]);
@@ -291,6 +296,15 @@ function isPairCrossingDeed(process, plot, partner) {
   return false;
 }
 
+/** Минус беды кидается один раз и остаётся на самой беде. */
+function rememberWoundBudget(threat, plot, config, rng) {
+  const have = Number(threat?.statBudget);
+  if (Number.isFinite(have) && have > 0) return Math.round(have);
+  const n = rollWoundStatBudget(firedThreatScale(plot, threat), config, rng);
+  threat.statBudget = n;
+  return n;
+}
+
 function deedChronicleAgent({ closesStory, plot }) {
   if (closesStory) return 'chronicleFinale';
   if (plot) return 'chronicleDeed';
@@ -376,6 +390,7 @@ export async function resolveDeedEvent({
       resetPressure(plot, day, config, rng);
     }
   }
+  const woundBudget = firedThreat ? rememberWoundBudget(firedThreat, plot, config, rng) : 0;
 
   // Постоянный порядок — тоже обычное дело, только его след ложится не в
   // глубину истории, а в постоянные изменения города.
@@ -488,14 +503,19 @@ export async function resolveDeedEvent({
         secret: Boolean(process.secret),
         secretForDomainId: process.secret ? domain.id : null,
         extra: {
-          statPocket: closesStory ? 'ending' : 'deed',
+          statPocket: closesStory ? 'ending' : firedThreat ? 'threat' : 'deed',
           endingKind: plot?.ending?.kind || fireRes?.endingKind || applied.endingKind || null,
           plotClosed: closesStory,
+          woundBudget,
+          depthGain: applied.depthGain,
         },
       });
-  if (!pairNarration?.fact && fact) {
-    fact.statPocket = closesStory ? 'ending' : 'deed';
+  if (fact) {
+    fact.statPocket = closesStory ? 'ending' : firedThreat ? 'threat' : 'deed';
     if (closesStory) fact.endingKind = plot?.ending?.kind || fireRes?.endingKind || applied.endingKind || null;
+    if (closesStory) fact.plotClosed = true;
+    if (woundBudget > 0) fact.woundBudget = woundBudget;
+    if (Number(applied.depthGain) > 0) fact.depthGain = Number(applied.depthGain);
   }
 
   const pairSpread =
@@ -632,6 +652,7 @@ export async function fireThreatEvent({
   const tail = plotChronicleTail(domain, plot.id);
   const res = fireThreat(plot, threat, { day, config });
   if (!res.ok) return { skipped: res.reason };
+  const woundBudget = rememberWoundBudget(threat, plot, config, rng);
 
   const closesStory = Boolean(res.closes);
   const occasion = closesStory ? 'развязка' : 'угроза';
@@ -673,6 +694,7 @@ export async function fireThreatEvent({
       statPocket: closesStory ? 'ending' : 'threat',
       endingKind: plot.ending?.kind || (closesStory ? 'BAD_ENDING' : null),
       plotClosed: closesStory,
+      woundBudget,
     },
   });
 

@@ -319,7 +319,7 @@ test('конфиг freeform читается из YAML', () => {
   const cfg = freeformConfig(loadConfig());
   assert.equal(cfg.variantsMin, 3);
   assert.equal(cfg.variantsMax, 3);
-  assert.deepEqual(cfg.chronicleMaxChars, { seed: 1800, beat: 1200, ending: 1800 });
+  assert.deepEqual(cfg.chronicleMaxChars, { seed: 3600, beat: 1200, ending: 1800 });
   assert.equal(cfg.seedMysteryChance, 0.25);
   assert.equal(cfg.lunaRepairRounds, 2);
   assert.deepEqual(Object.keys(cfg.axes), [

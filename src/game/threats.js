@@ -38,6 +38,10 @@ export function normalizeThreat(raw, plotId) {
     avertedBy: raw.avertedBy ? String(raw.avertedBy) : null,
     cancelledDay: raw.cancelledDay == null ? null : Math.round(Number(raw.cancelledDay) || 0),
     cancelReason: raw.cancelReason ? String(raw.cancelReason) : '',
+    statBudget:
+      Number.isFinite(Number(raw.statBudget)) && Number(raw.statBudget) > 0
+        ? Math.round(Number(raw.statBudget))
+        : null,
   };
 }
 

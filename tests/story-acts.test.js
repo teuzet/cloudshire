@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createPlotline,
+  PLOT_SEED_MAX,
   plotTypeOf,
   plotBeatAgentId,
   pickStoryType,
@@ -12,6 +13,17 @@ import {
   normalizePlotlines,
 } from '../src/game/plotlines.js';
 import { engagementOf, applyEngagement } from '../src/game/plotAlign.js';
+
+test('завязка вмещает hiddenLayer целиком, синопсис остаётся короче', () => {
+  const hidden = 'Старшина подменил проверку материалов правилом верной руки, и цех это скрыл.';
+  const seed = `${'На подъёме оборвался канат. '.repeat(80)}\n\nhiddenLayer:\n${hidden}`;
+  const plot = createPlotline({ title: 'Обрыв', type: 'story', seed, synopsis: 'коротко' });
+  assert.ok(seed.length > 1800);
+  assert.ok(seed.length < PLOT_SEED_MAX);
+  assert.match(plot.seed, /hiddenLayer:/);
+  assert.match(plot.seed, /верной руки/);
+  assert.doesNotMatch(plot.seed, /…$/);
+});
 
 test('посев городской истории — всегда story', () => {
   assert.equal(pickStoryType(), 'story');

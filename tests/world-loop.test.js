@@ -244,6 +244,8 @@ test('DIRECT-успех добавляет глубину и пишет одну
   assert.ok(plot.depth > 0, 'работа вложена');
   assert.equal(domain.lore.length, 1);
   assert.equal(domain.lore[0].day, 130);
+  assert.equal(domain.lore[0].depthGain, plot.depth);
+  assert.equal(domain.lore[0].woundBudget, undefined);
   assert.equal(domain.state.pendingActions[0].status, 'resolved');
 });
 
@@ -340,6 +342,9 @@ test('DANGEROUS-крит роняет беду немедленно', async () =
   });
   assert.equal(res.outcome.finish, 'crit');
   assert.equal(findThreat(plot, threat.id).status, 'fired');
+  assert.equal(domain.lore[0].woundBudget, 2);
+  assert.equal(threat.statBudget, 2);
+  assert.equal(domain.lore[0].depthGain, undefined);
   assert.equal(plot.failCount, 1);
 });
 
@@ -716,6 +721,8 @@ test('срабатывание беды пишет её текст и трати
   assert.equal(plot.failCount, 1);
   assert.equal(domain.lore[0].text, 'Лестница северного крыла обвалилась');
   assert.equal(domain.lore[0].day, 140);
+  assert.equal(domain.lore[0].woundBudget, 2);
+  assert.equal(domain.lore[0].statPocket, 'threat');
 });
 
 test('последняя жизнь кончилась — история закрыта плохой концовкой', async () => {
@@ -748,11 +755,37 @@ test('последняя жизнь кончилась — история зак
   assert.equal(res.closed, true);
   assert.equal(res.occasion, 'развязка');
   assert.equal(plot.ending.kind, 'BAD_ENDING');
+  assert.equal(domain.lore[0].woundBudget, 2);
+  assert.equal(domain.lore[0].plotClosed, true);
+  assert.equal(domain.lore[0].statPocket, 'ending');
   assert.equal(domain.plotlines.length, 0);
   assert.deepEqual(agentIds, ['chronicleFinale'], 'развязку пишет финальный агент, не хронист');
   assert.match(calls[0], /Северное крыло рухнет на мостки/);
   assert.match(calls[0], /утратой/);
   assert.match(calls[0], /до 900 символов/);
+});
+
+test('концовочная беда берёт минус масштаба истории', async () => {
+  const plot = makePlot({ failCount: 2, maxFails: 2 });
+  const domain = makeDomain({ plots: [plot] });
+  const world = makeWorld();
+  const threat = attachThreat(
+    plot,
+    createThreat(plot, { text: 'Северное крыло рухнет на мостки', final: true, day: 100 }),
+  );
+  const res = await fireThreatEvent({
+    runtime: noRuntime,
+    domain,
+    world,
+    day: 140,
+    plotId: plot.id,
+    threatId: threat.id,
+    rng: () => 0,
+    log: silentLog,
+  });
+  assert.equal(res.closed, true);
+  assert.equal(domain.lore[0].woundBudget, 4);
+  assert.equal(threat.statBudget, 4);
 });
 
 test('сработавшая беда снимает остальные беды стадии', async () => {

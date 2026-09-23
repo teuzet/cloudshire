@@ -8,8 +8,10 @@ import {
   finishForFact,
   deedStatBudget,
   absBudgetForFact,
+  statPartsForFact,
   confluxStatRate,
 } from '../src/game/statJudge.js';
+import { createPlotline } from '../src/game/plotlines.js';
 
 const STAT_CONFIG = {
   stats: [
@@ -126,4 +128,51 @@ test('нападавший берёт цену со своего дела, вк�
   const lost = absBudgetForFact(domain, { processFinish: 'fail', relatedPendingId: 'act_raid' }, CFG);
   assert.equal(lost, 8);
   assert.deepEqual(enforceFinishPolarity({ security: 2, prosperity: -2 }, 'fail'), { prosperity: -2 });
+});
+
+test('дело, продвинувшее глубину, получает очки глубины, а не цену дела', () => {
+  const plot = createPlotline({ title: 'Гул', type: 'story', gravity: 'CRISIS', depth: 1.2 });
+  const domain = {
+    plotlines: [plot],
+    state: { pendingActions: [{ id: 'act_1', durationBand: 'WEEKS', difficulty: 'HARD' }] },
+  };
+  const parts = statPartsForFact(domain, {
+    author: 'engine:deed',
+    processFinish: 'ok',
+    relatedPlotlineIds: [plot.id],
+    relatedPendingId: 'act_1',
+    depthGain: 1.2,
+    statPocket: 'deed',
+  }, CFG);
+  assert.equal(parts.up, 5);
+  assert.equal(parts.down, 0);
+  assert.equal(parts.deed, 0);
+});
+
+test('провал, закрывший историю, держит минус беды и плюс четверти глубины', () => {
+  const plot = createPlotline({ title: 'Обрыв', type: 'story', gravity: 'CRISIS', depth: 2 });
+  const domain = { plotlines: [], closedPlotlines: [plot] };
+  const parts = statPartsForFact(domain, {
+    author: 'engine:deed',
+    processFinish: 'fail',
+    relatedPlotlineIds: [plot.id],
+    statPocket: 'ending',
+    plotClosed: true,
+    woundBudget: 6,
+    endingKind: 'BAD_ENDING',
+  }, CFG);
+  assert.equal(parts.down, 6);
+  assert.equal(parts.up, 2);
+  assert.equal(parts.deed, 0);
+});
+
+test('завязка — только минус масштаба истории', () => {
+  const plot = createPlotline({ title: 'Разлом', type: 'story', gravity: 'RUPTURE' });
+  const domain = { plotlines: [plot] };
+  const parts = statPartsForFact(domain, {
+    author: 'freeform:seed',
+    statPocket: 'seed',
+    relatedPlotlineIds: [plot.id],
+  }, CFG);
+  assert.deepEqual(parts, { up: 0, down: 3, deed: 0 });
 });

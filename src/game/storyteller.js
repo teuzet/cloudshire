@@ -101,6 +101,7 @@ export async function plantStakedStory({
           maxChars: chronicleBudget(config, 'seed'),
         })
       : null;
+    if (fact) fact.statPocket = 'seed';
     await setFreeformUrgency({ runtime, domain, plot, log });
     await writePlotSeedDump(
       {

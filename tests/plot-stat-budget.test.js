@@ -1,41 +1,87 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createPlotline, ensurePlotStatBudget, plotStatForce, boardHasRoom, countOpen, storyStatPockets } from '../src/game/plotlines.js';
+import {
+  createPlotline,
+  ensurePlotStatBudget,
+  boardHasRoom,
+  countOpen,
+  seedStatBudget,
+  woundBudgetRange,
+  rollWoundStatBudget,
+  depthStatPoints,
+  endingStatPoints,
+} from '../src/game/plotlines.js';
 import { scaleAffectsToBudget } from '../src/game/plotEngine.js';
 import { enforceFinishPolarity } from '../src/game/statJudge.js';
 
-const cfg = { tick: { plot: { stats: { storyStatBudget: {
-  SITUATION: { seed: 1, threat: 2, ending: 4 },
-  EPISODE: { seed: 2, threat: 2, ending: 6 },
-  CRISIS: { seed: 3, threat: 3, ending: 8 },
-  RUPTURE: { seed: 4, threat: 4, ending: 10 },
-} } } } };
+const cfg = { tick: { plot: { stats: {
+  pointsPerDepth: 4,
+  endingDepthShare: 0.25,
+  seedBudget: { SITUATION: 1, EPISODE: 1, CRISIS: 2, RUPTURE: 3 },
+  woundBudget: {
+    SITUATION: [1, 2],
+    EPISODE: [2, 4],
+    CRISIS: [4, 8],
+    RUPTURE: [8, 12],
+  },
+} } } };
 
-test('RUPTURE: карманы seed/threat/ending, угроза не сумма', () => {
-  const plot = createPlotline({ title: 'Гул', type: 'story', gravity: 'RUPTURE' });
-  ensurePlotStatBudget(plot, cfg);
-  assert.deepEqual(storyStatPockets(plot, cfg), { seed: 4, threat: 4, ending: 10 });
-  assert.equal(plotStatForce(plot, { opening: true, config: cfg }), 4);
-  assert.equal(plotStatForce(plot, { threat: true, config: cfg }), 4);
-  assert.equal(plotStatForce(plot, { ending: true, config: cfg }), 10);
-  assert.equal(plotStatForce(plot, { config: cfg }), 0, 'без кармана — ноль');
-});
-
-test('концовка 2–3× одной угрозы; мусорный gravity → EPISODE', () => {
+test('завязка — минус масштаба истории: 1, 1, 2, 3', () => {
   const levels = [
-    ['SITUATION', 2, 4],
-    ['EPISODE', 2, 6],
-    ['CRISIS', 3, 8],
-    ['RUPTURE', 4, 10],
+    ['SITUATION', 1],
+    ['EPISODE', 1],
+    ['CRISIS', 2],
+    ['RUPTURE', 3],
   ];
-  for (const [gravity, threat, ending] of levels) {
+  for (const [gravity, seed] of levels) {
     const plot = createPlotline({ title: gravity, type: 'story', gravity });
-    assert.equal(plotStatForce(plot, { threat: true, config: cfg }), threat, gravity);
-    assert.equal(plotStatForce(plot, { ending: true, config: cfg }), ending, gravity);
-    assert.ok(ending >= threat * 2 && ending <= threat * 3, gravity);
+    ensurePlotStatBudget(plot, cfg);
+    assert.equal(seedStatBudget(plot, cfg), seed, gravity);
+    assert.equal(plot.stats.seed, seed, gravity);
+    assert.equal(plot.stats.pointsPerDepth, 4);
+    assert.equal(plot.stats.endingDepthShare, 0.25);
   }
   const garbage = createPlotline({ title: 'Мусор', type: 'story', gravity: 80 });
-  assert.deepEqual(storyStatPockets(garbage, cfg), { seed: 2, threat: 2, ending: 6 });
+  assert.equal(seedStatBudget(garbage, cfg), 1);
+});
+
+test('беда кидает свой масштаб, границы включительно', () => {
+  const levels = [
+    ['SITUATION', 1, 2],
+    ['EPISODE', 2, 4],
+    ['CRISIS', 4, 8],
+    ['RUPTURE', 8, 12],
+  ];
+  for (const [scale, min, max] of levels) {
+    assert.deepEqual(woundBudgetRange(scale, cfg), [min, max], scale);
+    assert.equal(rollWoundStatBudget(scale, cfg, () => 0), min, scale);
+    assert.equal(rollWoundStatBudget(scale, cfg, () => 0.999999), max, scale);
+  }
+});
+
+test('глубина даёт очки шагу, закрытие — четверть уже набранной', () => {
+  assert.equal(depthStatPoints(1.2, cfg), 5);
+  assert.equal(depthStatPoints(0.02, cfg), 0);
+  assert.equal(depthStatPoints(0, cfg), 0);
+  const plot = createPlotline({ title: 'Гул', type: 'story', gravity: 'RUPTURE', depth: 2 });
+  assert.equal(endingStatPoints(plot, cfg), 2);
+  plot.depth = 0;
+  assert.equal(endingStatPoints(plot, cfg), 0);
+});
+
+test('плюс и минус одной хроники не делятся пополам и не гасят друг друга на разных сторонах', () => {
+  const deltas = scaleAffectsToBudget(
+    [
+      { stat: 'prosperity', direction: 'up', force: 'notable' },
+      { stat: 'security', direction: 'down', force: 'slight' },
+    ],
+    0,
+    { polarity: 'split', upBudget: 2, downBudget: 6 },
+  );
+  assert.equal(deltas.prosperity, 2);
+  assert.equal(deltas.security, -6);
+  const abs = Object.values(deltas).reduce((s, n) => s + Math.abs(n), 0);
+  assert.equal(abs, 8);
 });
 
 test('финиш дела: сумма модулей = бюджет; crit без минусов', () => {

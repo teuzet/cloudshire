@@ -10,7 +10,8 @@ import { normalizeHiddenPremises, normalizeRevealedPremises } from './premises.j
  *
  * Механика (см. docs/PLOTS.md):
  *   gravity     — enum масштаба (SITUATION / EPISODE / CRISIS / RUPTURE);
- *                 бюджет статов с него: 5 / 10 / 15 / 20; вес доски = бюджет × 5
+ *                 вес доски = 25 / 50 / 75 / 100. Статы истории считаются отдельно:
+ *                 минус завязки, минус каждой беды, плюс за глубину.
  *
  *   temperature — поле карточки оставляем, не ведём
  *   closeWhen — успешный исход; mootWhen — когда задача потеряла смысл
@@ -23,54 +24,81 @@ function clamp100(n, fallback = 0) {
   return Math.max(0, Math.min(100, Math.round(v)));
 }
 
-/**
- * Доля бюджета, которую промежуточным событиям не отдают ни при каких условиях:
- * иначе история успевает раздать всё по дороге, и концовка ничего не решает.
- */
-export const PLOT_ENDING_FLOOR_SHARE = 0.25;
+/** Сколько очков хроники даёт одна единица глубины, если в конфиге числа нет. */
+export const DEFAULT_POINTS_PER_DEPTH = 4;
+/** Доля уже набранной глубины, которую закрытие истории даёт отдельно. */
+export const DEFAULT_ENDING_DEPTH_SHARE = 0.25;
 
-export const DEFAULT_STORY_STAT_BUDGET = {
-  SITUATION: { seed: 1, threat: 2, ending: 4 },
-  EPISODE: { seed: 2, threat: 2, ending: 6 },
-  CRISIS: { seed: 3, threat: 3, ending: 8 },
-  RUPTURE: { seed: 4, threat: 4, ending: 10 },
+/** Минус завязки по масштабу истории. */
+export const DEFAULT_SEED_STAT_BUDGET = {
+  SITUATION: 1,
+  EPISODE: 1,
+  CRISIS: 2,
+  RUPTURE: 3,
 };
 
-export function storyStatPockets(plot, config = null) {
+/** Минус беды по её собственному масштабу. Границы включительно. */
+export const DEFAULT_WOUND_STAT_BUDGET = {
+  SITUATION: [1, 2],
+  EPISODE: [2, 4],
+  CRISIS: [4, 8],
+  RUPTURE: [8, 12],
+};
+
+export function seedStatBudget(plot, config = null) {
   const g = parseFreeformGravity(plot?.gravity);
-  const table = plotConfig(config).stats?.storyStatBudget || DEFAULT_STORY_STAT_BUDGET;
-  const row = table[g] || DEFAULT_STORY_STAT_BUDGET[g] || DEFAULT_STORY_STAT_BUDGET.EPISODE;
-  return {
-    seed: Math.max(0, Math.round(Number(row.seed) || 0)),
-    threat: Math.max(0, Math.round(Number(row.threat) || 0)),
-    ending: Math.max(0, Math.round(Number(row.ending) || 0)),
-  };
+  const table = plotConfig(config).stats?.seedBudget || DEFAULT_SEED_STAT_BUDGET;
+  const n = table[g] ?? DEFAULT_SEED_STAT_BUDGET[g] ?? DEFAULT_SEED_STAT_BUDGET.EPISODE;
+  return Math.max(0, Math.round(Number(n) || 0));
+}
+
+export function woundBudgetRange(scale, config = null) {
+  const g = parseFreeformGravity(scale);
+  const table = plotConfig(config).stats?.woundBudget || DEFAULT_WOUND_STAT_BUDGET;
+  const row = table[g] || DEFAULT_WOUND_STAT_BUDGET[g] || DEFAULT_WOUND_STAT_BUDGET.EPISODE;
+  const min = Math.max(0, Math.round(Number(row?.[0]) || 0));
+  const max = Math.max(min, Math.round(Number(row?.[1] ?? min) || min));
+  return [min, max];
+}
+
+/** Один бросок минуса беды. Повторно не кидается: число лежит на самой беде. */
+export function rollWoundStatBudget(scale, config = null, rng = Math.random) {
+  const [min, max] = woundBudgetRange(scale, config);
+  if (max <= min) return min;
+  return min + Math.floor(rng() * (max - min + 1));
+}
+
+export function pointsPerDepth(config = null) {
+  const n = Number(plotConfig(config).stats?.pointsPerDepth);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_POINTS_PER_DEPTH;
+}
+
+export function endingDepthShare(config = null) {
+  const n = Number(plotConfig(config).stats?.endingDepthShare);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_ENDING_DEPTH_SHARE;
+}
+
+/** Очки хроники за продвинутую глубину. Ноль допустим: пыль вроде 0.02 не обязана двигать стат. */
+export function depthStatPoints(gain, config = null) {
+  const g = Math.abs(Number(gain) || 0);
+  if (g <= 0) return 0;
+  return Math.max(0, Math.round(g * pointsPerDepth(config)));
+}
+
+/** Отдельный плюс за закрытие: доля уже набранной глубины. */
+export function endingStatPoints(plot, config = null) {
+  const depth = Math.max(0, Number(plot?.depth) || 0);
+  if (depth <= 0) return 0;
+  return Math.max(0, Math.round(depth * pointsPerDepth(config) * endingDepthShare(config)));
 }
 
 export function ensurePlotStatBudget(plot, config = null) {
   if (!plot || !isStoryPlot(plot)) return plot;
-  const pockets = storyStatPockets(plot, config);
   if (!plot.stats || typeof plot.stats !== 'object') plot.stats = {};
-  plot.stats.seed = pockets.seed;
-  plot.stats.threat = pockets.threat;
-  plot.stats.ending = pockets.ending;
-  plot.stats.budget = pockets.seed + pockets.ending;
-  if (!Number.isFinite(Number(plot.stats.remaining))) plot.stats.remaining = plot.stats.ending;
-  if (!Number.isFinite(Number(plot.stats.interimSpent))) plot.stats.interimSpent = 0;
+  plot.stats.seed = seedStatBudget(plot, config);
+  plot.stats.pointsPerDepth = pointsPerDepth(config);
+  plot.stats.endingDepthShare = endingDepthShare(config);
   return plot;
-}
-
-/**
- * Карман статов истории: затравка, одно срабатывание угрозы или концовка.
- * Дела на нити этот карман не едят — у них своя ценность действия.
- */
-export function plotStatForce(plot, { opening = false, ending = false, threat = false, config = null } = {}) {
-  if (!plot || !isStoryPlot(plot)) return 0;
-  const pockets = storyStatPockets(plot, config);
-  if (opening) return pockets.seed;
-  if (ending) return pockets.ending;
-  if (threat) return pockets.threat;
-  return 0;
 }
 
 /** Обрезка по границе слова: обрубки в середине слова копятся из тика в тик. */
@@ -84,6 +112,8 @@ function clipText(s, max) {
 }
 
 export const PLOT_SUMMARY_MAX = 1800;
+/** Завязка хранит наблюдаемый текст и hiddenLayer вместе, поэтому лимит шире синопсиса. */
+export const PLOT_SEED_MAX = 8000;
 export const PLOT_HOOK_MAX = 160;
 export const PLOT_ENDING_MAX = 600;
 export const PLOT_TITLE_MAX = 120;
@@ -393,7 +423,7 @@ function storyActState(p = {}) {
       gravity,
       countdown: parseStoryCountdown(p.countdown),
       // Исходная завязка: полный текст посева. Не синопсис и не хроника.
-      seed: clipText(p.seed, PLOT_SUMMARY_MAX),
+      seed: clipText(p.seed, PLOT_SEED_MAX),
       // Первопричина живёт столько же, сколько нить: концовки обязаны снять
       // именно её, а не спор сторон вокруг неё.
       cause: clipText(p.cause, PLOT_SUMMARY_MAX),
@@ -460,23 +490,27 @@ function normalizePlotAwarenessMap(plot) {
   return next;
 }
 
-function pocketRow(raw, fallback) {
+function normalizeSeedBudget(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
-  return {
-    seed: Math.max(0, Math.round(Number(src.seed ?? fallback.seed) || 0)),
-    threat: Math.max(0, Math.round(Number(src.threat ?? fallback.threat) || 0)),
-    ending: Math.max(0, Math.round(Number(src.ending ?? fallback.ending) || 0)),
-  };
+  const out = {};
+  for (const g of FREEFORM_GRAVITY) {
+    const n = src[g] ?? DEFAULT_SEED_STAT_BUDGET[g];
+    out[g] = Math.max(0, Math.round(Number(n) || 0));
+  }
+  return out;
 }
 
-function normalizeStoryStatBudget(raw) {
+function normalizeWoundBudget(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
-  return {
-    SITUATION: pocketRow(src.SITUATION, DEFAULT_STORY_STAT_BUDGET.SITUATION),
-    EPISODE: pocketRow(src.EPISODE, DEFAULT_STORY_STAT_BUDGET.EPISODE),
-    CRISIS: pocketRow(src.CRISIS, DEFAULT_STORY_STAT_BUDGET.CRISIS),
-    RUPTURE: pocketRow(src.RUPTURE, DEFAULT_STORY_STAT_BUDGET.RUPTURE),
-  };
+  const out = {};
+  for (const g of FREEFORM_GRAVITY) {
+    const row = src[g] ?? DEFAULT_WOUND_STAT_BUDGET[g];
+    const min = Math.max(0, Math.round(Number(Array.isArray(row) ? row[0] : row?.min) || 0));
+    const maxRaw = Array.isArray(row) ? row[1] : row?.max;
+    const max = Math.max(min, Math.round(Number(maxRaw ?? min) || min));
+    out[g] = [min, max];
+  }
+  return out;
 }
 
 export function plotConfig(config) {
@@ -525,7 +559,6 @@ export function plotConfig(config) {
     stats: {
       openingShare: Number(stats.openingShare ?? 0.25),
       beatShare: Number(stats.beatShare ?? 0.25),
-      endingFloorShare: Number(stats.endingFloorShare ?? PLOT_ENDING_FLOOR_SHARE),
       playerBudget: Math.max(1, Number(stats.playerBudget ?? 6)),
       worldBudget: Math.max(1, Number(stats.worldBudget ?? 8)),
       finaleFactor: Number(stats.finaleFactor ?? 2),
@@ -534,7 +567,10 @@ export function plotConfig(config) {
       confluxStatGainModifier: Math.max(0, Number(
         stats.confluxStatGainModifier ?? config?.tick?.confluxStatGainModifier ?? 1.5,
       )),
-      storyStatBudget: normalizeStoryStatBudget(stats.storyStatBudget),
+      pointsPerDepth: Math.max(0, Number(stats.pointsPerDepth ?? DEFAULT_POINTS_PER_DEPTH)),
+      endingDepthShare: Math.max(0, Number(stats.endingDepthShare ?? DEFAULT_ENDING_DEPTH_SHARE)),
+      seedBudget: normalizeSeedBudget(stats.seedBudget),
+      woundBudget: normalizeWoundBudget(stats.woundBudget),
     },
     log: {
       influenceChance: Number(log.influenceChance ?? 0.35),

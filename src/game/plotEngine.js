@@ -372,12 +372,25 @@ export function createStatBudget(config) {
 
 const FORCE_BASE = { slight: 1, notable: 2, heavy: 4 };
 
+function mergeDeltas(a, b) {
+  const out = { ...(a || {}) };
+  for (const [k, v] of Object.entries(b || {})) {
+    const n = (out[k] || 0) + v;
+    if (n) out[k] = n;
+    else delete out[k];
+  }
+  return out;
+}
+
 /**
  * Раскладка целых дельт: сумма модулей === budget.
+ * polarity split держит плюс и минус отдельными бюджетами и складывает их, не деля пополам.
  */
-export function scaleAffectsToBudget(affects, budget, { polarity = 'any', allowed = null } = {}) {
-  const B = Math.max(0, Math.round(Number(budget) || 0));
-  if (!B) return {};
+export function scaleAffectsToBudget(
+  affects,
+  budget,
+  { polarity = 'any', allowed = null, upBudget = null, downBudget = null } = {},
+) {
   let rows = (affects || [])
     .map((a) => ({
       stat: String(a?.stat || ''),
@@ -385,6 +398,21 @@ export function scaleAffectsToBudget(affects, budget, { polarity = 'any', allowe
       weight: Math.max(1, FORCE_BASE[a?.force] ?? 2),
     }))
     .filter((a) => a.stat && (!allowed || allowed.has(a.stat)));
+  if (polarity === 'split') {
+    const upB = Math.max(0, Math.round(Number(upBudget) || 0));
+    const downB = Math.max(0, Math.round(Number(downBudget) || 0));
+    let up = rows.filter((r) => r.dir > 0);
+    let down = rows.filter((r) => r.dir < 0);
+    if (!up.length && down.length && upB) up = down.map((r) => ({ ...r, dir: 1 }));
+    if (!down.length && up.length && downB) down = up.map((r) => ({ ...r, dir: -1 }));
+    const asAffect = (r) => ({ stat: r.stat, direction: r.dir > 0 ? 'up' : 'down', force: 'notable' });
+    return mergeDeltas(
+      upB ? scaleAffectsToBudget(up.map(asAffect), upB, { polarity: 'nonneg', allowed }) : {},
+      downB ? scaleAffectsToBudget(down.map(asAffect), downB, { polarity: 'nonpos', allowed }) : {},
+    );
+  }
+  const B = Math.max(0, Math.round(Number(budget) || 0));
+  if (!B) return {};
   if (polarity === 'nonneg') rows = rows.filter((r) => r.dir > 0);
   if (polarity === 'nonpos') rows = rows.filter((r) => r.dir < 0);
   if (polarity === 'mixed') {
@@ -442,11 +470,20 @@ export function scaleAffectsToBudget(affects, budget, { polarity = 'any', allowe
 export function resolveStatDeltas(
   domain,
   affects = [],
-  { source = 'world', budget = null, config = null, catastrophe = false, absBudget = null, polarity = 'any' } = {},
+  {
+    source = 'world',
+    budget = null,
+    config = null,
+    catastrophe = false,
+    absBudget = null,
+    polarity = 'any',
+    upBudget = null,
+    downBudget = null,
+  } = {},
 ) {
   const allowed = new Set((config?.stats || []).map((s) => s.id));
-  if (absBudget != null) {
-    return scaleAffectsToBudget(affects, absBudget, { polarity, allowed });
+  if (polarity === 'split' || absBudget != null) {
+    return scaleAffectsToBudget(affects, absBudget, { polarity, allowed, upBudget, downBudget });
   }
   const deltas = {};
   for (const a of affects) {
