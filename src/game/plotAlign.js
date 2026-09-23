@@ -23,24 +23,46 @@ export function engagementAttends(engagement) {
   return engagement === 'DIRECT' || engagement === 'RELEVANT' || engagement === 'DANGEROUS';
 }
 
+const THREAT_WHY_MAX = 240;
+
+/** Ответ судьи по одной беде: блокирует ли успех дела и почему. Чужие id отбрасываются. */
+export function normalizeThreatVerdicts(plot, raw) {
+  const live = new Set(liveThreats(plot).map((t) => t.id));
+  const out = [];
+  const seen = new Set();
+  for (const item of Array.isArray(raw) ? raw : []) {
+    const id = String(item?.id || '').trim();
+    if (!id || !live.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push({
+      id,
+      blocked: Boolean(item?.blocked),
+      why: String(item?.why || '').trim().slice(0, THREAT_WHY_MAX),
+    });
+  }
+  return out;
+}
+
 export function applyEngagement(
   process,
   engagement,
-  { threatId = '', threatIds = [], premiseText = '', reachesAnswer = false } = {},
+  { threatId = '', threatIds = [], threatVerdicts = [], premiseText = '', reachesAnswer = false } = {},
 ) {
   const value = PLOT_ENGAGEMENTS.includes(engagement) ? engagement : 'UNRELATED';
-  const ids = [
-    ...(Array.isArray(threatIds) ? threatIds : []),
-    threatId,
-  ]
+  const verdicts = Array.isArray(threatVerdicts) ? threatVerdicts : [];
+  const blockedIds = verdicts.filter((v) => v.blocked).map((v) => v.id);
+  const listedIds = [...(Array.isArray(threatIds) ? threatIds : []), threatId]
     .map((id) => String(id || '').trim())
     .filter(Boolean);
-  const unique = [...new Set(ids)];
+  const relevantIds = verdicts.length ? blockedIds : listedIds;
+  const causedIds = [...new Set(listedIds)];
   if (process) {
     process.plotEngagement = value;
     process.plotAligned = value === 'DIRECT';
     process.endingId = '';
-    process.threatIds = value === 'RELEVANT' ? unique : value === 'DANGEROUS' ? unique.slice(0, 1) : [];
+    process.threatVerdicts = verdicts;
+    process.threatIds =
+      value === 'RELEVANT' ? [...new Set(relevantIds)] : value === 'DANGEROUS' ? causedIds.slice(0, 1) : [];
     process.threatId = process.threatIds[0] || '';
     // Что узнает город, если дело выйдет. Пусто у большинства дел: DIRECT решает
     // задачу и не расследуя её.
@@ -80,6 +102,7 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
   const draft = {
     engagement: null,
     threatIds: [],
+    threatVerdicts: [],
     premiseText: '',
     reachesAnswer: false,
   };
@@ -102,11 +125,30 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
                   'DIRECT — успех работает по первопричине истории. RELEVANT — успех снимает одну или несколько бед. ' +
                   'DANGEROUS — успех сам вызывает одну беду. UNRELATED — сюжет не двигает.',
               },
-              threatIds: {
+              threats: {
                 type: 'array',
-                items: { type: 'string' },
                 description:
-                  'RELEVANT — id бед, которые успех снимает. DANGEROUS — ровно одна беда, которую успех вызывает.',
+                  'По одной записи на каждую беду из списка. Пропущенная беда считается не блокированной.',
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['id', 'blocked', 'why'],
+                  properties: {
+                    id: { type: 'string', description: 'id беды из списка.' },
+                    blocked: {
+                      type: 'boolean',
+                      description: 'true, если полный успех дела делает эту беду невозможной.',
+                    },
+                    why: {
+                      type: 'string',
+                      description: 'Одно короткое предложение: почему блокируется или почему нет.',
+                    },
+                  },
+                },
+              },
+              causesThreatId: {
+                type: 'string',
+                description: 'Только для DANGEROUS: id одной беды, которую успех сам вызывает.',
               },
               uncoversPremise: {
                 type: 'integer',
@@ -125,9 +167,8 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
           handler: async (args) => {
             const rel = String(args?.relation || '').toUpperCase();
             draft.engagement = PLOT_ENGAGEMENTS.includes(rel) ? rel : 'UNRELATED';
-            draft.threatIds = (Array.isArray(args?.threatIds) ? args.threatIds : [])
-              .map((id) => String(id || '').trim())
-              .filter(Boolean);
+            draft.threatVerdicts = normalizeThreatVerdicts(plot, args?.threats);
+            draft.threatIds = [String(args?.causesThreatId || '').trim()].filter(Boolean);
             draft.premiseText = premiseAtIndex(plot, args?.uncoversPremise) || '';
             draft.reachesAnswer = Boolean(args?.reachesAnswer);
             return { ok: true };
@@ -157,8 +198,9 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
             'Верни один вердикт по цели process, не по броску.',
             'DIRECT: успех работает по первопричине — выясняет её или устраняет. ' +
               'Одно дело закрывать историю не обязано.',
-            'RELEVANT: успех делает одну или несколько перечисленных бед невозможными — укажи threatIds.',
-            'DANGEROUS: успех сам вызывает одну из бед — укажи её id в threatIds.',
+            'По каждой беде из списка верни threats: id, blocked и why в одно предложение.',
+            'RELEVANT: полный успех делает хотя бы одну беду невозможной. blocked=true только у таких.',
+            'DANGEROUS: успех сам вызывает одну беду — её id в causesThreatId. У неё blocked=false.',
             'UNRELATED: даже полный успех историю не двигает. Не ставь RELEVANT за случайную улику.',
           ]
             .filter(Boolean)
@@ -175,7 +217,8 @@ export async function judgeProcessAlignment({ runtime, domain, process, plot, lo
     return null;
   }
   const engagement = applyEngagement(process, draft.engagement, {
-    threatIds: draft.threatIds,
+    threatIds: draft.engagement === 'DANGEROUS' ? draft.threatIds : [],
+    threatVerdicts: draft.threatVerdicts,
     premiseText: draft.premiseText,
     reachesAnswer: draft.reachesAnswer,
   });

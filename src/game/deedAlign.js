@@ -32,8 +32,8 @@ export const ALIGNMENT_WARNING = {
 
 export const ALIGNMENT_LADDER = [
   'DIRECT — успех работает по первопричине истории.',
-  'RELEVANT — успех снимает одну или несколько бед. Укажи threatIds.',
-  'DANGEROUS — успех сам вызывает одну беду. Укажи её id.',
+  'RELEVANT — успех снимает одну или несколько бед. По каждой беде: blocked и why.',
+  'DANGEROUS — успех сам вызывает одну беду. Укажи её id в causesThreatId.',
   'UNRELATED — даже полный успех историю не двигает.',
 ];
 

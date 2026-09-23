@@ -519,6 +519,19 @@ function threatById(d) {
 
 /** Какие беды снимает успех RELEVANT-дела. Тексты берутся с нитей, id — с самого дела. */
 function relevantClosures(p, threats) {
+  const verdicts = Array.isArray(p.threatVerdicts) ? p.threatVerdicts : [];
+  if (verdicts.length) {
+    const rows = verdicts
+      .map((v) => {
+        const t = threats?.get(String(v.id));
+        const text = t?.text ? String(t.text) : String(v.id || '');
+        const head = v.blocked ? 'блокирует' : 'не блокирует';
+        const why = v.why ? ` — ${esc(v.why)}` : '';
+        return `<li><span class="muted">${head}:</span> ${esc(text)}${why}</li>`;
+      })
+      .join('');
+    return `<p class="small muted">угрозы:</p><ul class="small">${rows}</ul>`;
+  }
   if (p.plotEngagement !== 'RELEVANT') return '';
   const ids = [];
   if (Array.isArray(p.threatIds)) ids.push(...p.threatIds);

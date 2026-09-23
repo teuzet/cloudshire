@@ -12,7 +12,7 @@ import {
   speechHintsHidden,
 } from '../src/game/premises.js';
 import { createPlotline, normalizePlotlines } from '../src/game/plotlines.js';
-import { applyEngagement } from '../src/game/plotAlign.js';
+import { applyEngagement, judgeProcessAlignment } from '../src/game/plotAlign.js';
 import { plotCardForPrompt } from '../src/game/freeform.js';
 import { formatFocusedStoryForLoremaster } from '../src/game/loremaster.js';
 import { threadCard, formatHeraldPrompt, buildHeraldContext } from '../src/game/herald.js';
@@ -257,6 +257,41 @@ test('первая ступень лестницы спрашивает про �
   assert.match(ins, /Достаточно ШАГА/);
   assert.match(ins, /Расследование первопричины — это DIRECT/);
   assert.doesNotMatch(ins, /сам поставить одну из концовок/, 'старый неисполнимый критерий убран');
+});
+
+test('судья по каждой беде возвращает blocked и why', async () => {
+  const plot = createPlotline({ title: 'Зов', type: 'story', cause: 'хищник на склоне' });
+  plot.threats = [
+    { id: 't1', text: 'Беженцы открывают северные ворота', status: 'live' },
+    { id: 't2', text: 'Вылазка к логову с порохом', status: 'live' },
+    { id: 't-gone', text: 'Старая беда', status: 'cancelled' },
+  ];
+  const process = { id: 'd1', summary: 'Впустить людей и запереть северные ворота' };
+  const runtime = {
+    async run(opts) {
+      await opts.tools[0].handler({
+        relation: 'RELEVANT',
+        threats: [
+          { id: 't1', blocked: true, why: 'Толпы у створов больше нет.' },
+          { id: 't2', blocked: false, why: 'Вылазка к логову этим делом не отменена.' },
+          { id: 'чужой', blocked: true, why: 'Этой беды нет.' },
+        ],
+        causesThreatId: 't2',
+      });
+    },
+  };
+  const engagement = await judgeProcessAlignment({
+    runtime,
+    domain: { id: 'd' },
+    process,
+    plot,
+  });
+  assert.equal(engagement, 'RELEVANT');
+  assert.deepEqual(process.threatIds, ['t1']);
+  assert.deepEqual(process.threatVerdicts, [
+    { id: 't1', blocked: true, why: 'Толпы у створов больше нет.' },
+    { id: 't2', blocked: false, why: 'Вылазка к логову этим делом не отменена.' },
+  ]);
 });
 
 test('судье сказано, что раскрытие необязательно и что подступы независимы', async () => {
