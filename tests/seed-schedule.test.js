@@ -14,6 +14,8 @@ import {
   countLiveThreats,
   saturationFactor,
   decideSeedAttempt,
+  offerErrandSeed,
+  initSeedLogRecording,
   enqueueSeedRequest,
   dueSeedRequests,
   dropSeedRequest,
@@ -133,6 +135,44 @@ test('горячий пустой город сеет сразу и остыва
   assert.equal(res.chance, 1);
   assert.equal(d.state.seedTemp.city, 4);
   assert.ok(['genesis', 'void', 'chronicle'].includes(res.source));
+});
+
+test('решение температуры пишется отдельным документом города', async () => {
+  const docs = [];
+  initSeedLogRecording({
+    appendSeedLog: async (doc) => {
+      docs.push(doc);
+    },
+  });
+  try {
+    const d = domain();
+    d.id = 'domain_hot';
+    d.name = 'Тихая Гряда';
+    d.state.seedTemp = { city: 10, errand: 10 };
+    decideSeedAttempt(d, { day: 40, rng: () => 0 });
+    offerErrandSeed(
+      d,
+      { processId: 'p1', summary: 'обелиск', objectiveMonths: 1 },
+      { day: 40, rng: () => 0.99 },
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(docs.length, 2);
+    assert.equal(docs[0].kind, 'city');
+    assert.equal(docs[0].domainId, 'domain_hot');
+    assert.equal(docs[0].domainName, 'Тихая Гряда');
+    assert.equal(docs[0].seed, true);
+    assert.equal(docs[0].tempBefore, 10);
+    assert.equal(docs[0].tempAfter, 4);
+    assert.equal(docs[0].day, 40);
+    assert.equal(docs[1].kind, 'errand');
+    assert.equal(docs[1].seed, false);
+    assert.equal(docs[1].reason, 'roll');
+    assert.equal(docs[1].months, 1);
+    assert.equal(docs[1].summary, 'обелиск');
+    assert.equal(docs[1].domainId, 'domain_hot');
+  } finally {
+    initSeedLogRecording(null);
+  }
 });
 
 test('четыре слота ещё позволяют посев, масштаб уже стоящей истории легче', () => {

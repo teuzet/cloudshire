@@ -31,6 +31,7 @@ export class MongoStorage {
     await this.db.collection('agent_logs').createIndex({ worldId: 1, ts: -1 });
     await this.db.collection('agent_logs').createIndex({ agentId: 1, ts: -1 });
     await this.db.collection('agent_logs').createIndex({ domainIds: 1, ts: -1 });
+    await this.db.collection('seed_logs').createIndex({ worldId: 1, domainId: 1, ts: -1 });
 
     const world = await this.getWorld();
     if (!world) {
@@ -211,6 +212,11 @@ export class MongoStorage {
     await this.col('agent_logs').insertOne({ ...doc });
   }
 
+  async appendSeedLog(doc) {
+    if (!doc || typeof doc !== 'object') return;
+    await this.col('seed_logs').insertOne({ ...doc });
+  }
+
   async listUsage({ worldId = null, limit = 5000 } = {}) {
     const filter = {};
     if (worldId) filter.worldId = String(worldId);
@@ -301,6 +307,7 @@ export class MongoStorage {
       if (world?.id) {
         await this.col('usage').deleteMany({ worldId: world.id });
         await this.col('agent_logs').deleteMany({ worldId: world.id });
+        await this.col('seed_logs').deleteMany({ worldId: world.id });
       }
 
       const next = createWorldFromConfig(this.config);

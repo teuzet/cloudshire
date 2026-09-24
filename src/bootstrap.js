@@ -6,6 +6,7 @@ import { GameApp } from './game/app.js';
 import { initLogger, setLoggerWorldId } from './log.js';
 import { initUsageRecording } from './llm/usage.js';
 import { initCityAgentLogRecording } from './game/cityAgentLog.js';
+import { initSeedLogRecording } from './game/seedSchedule.js';
 
 /**
  * @param {string | { configPath?: string, dataDir?: string }} [opts]
@@ -32,6 +33,7 @@ export async function createAppContext(opts) {
     setLoggerWorldId(world.id);
     initUsageRecording(config, world.id, storage);
     initCityAgentLogRecording(storage);
+    initSeedLogRecording(storage);
     log.info('world.active', {
       worldId: world.id,
       seasonKey: world.seasonKey || null,
@@ -42,6 +44,7 @@ export async function createAppContext(opts) {
   } else {
     initUsageRecording(config, null, storage);
     initCityAgentLogRecording(storage);
+    initSeedLogRecording(storage);
   }
   const runtime = new AgentRuntime(config);
   const app = new GameApp({ config, storage, runtime });

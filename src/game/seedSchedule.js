@@ -9,6 +9,8 @@
  * и город, у которого историй уже много, новую не получает.
  */
 
+import { getLogger } from '../log.js';
+import { getCurrentWorldId } from '../llm/usage.js';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, realMsToGameDays } from './gameClock.js';
 import { chronicleEntries } from './models.js';
 import { SEED_SOURCES, seedConfig, readCityTemp, touchCityTemp, errandSeedChance } from './seedTemp.js';
@@ -118,6 +120,27 @@ export function saturationFactor(liveCount) {
 export const ERRAND_SEED_DELAY_DAYS = [20, 40];
 export const CITY_SLOT_GATE = 4;
 
+/** @type {null | { appendSeedLog?: Function }} */
+let seedLogStorage = null;
+
+/** Журнал решений посева. Пишем в Mongo, только если хранилище умеет appendSeedLog. */
+export function initSeedLogRecording(storage = null) {
+  seedLogStorage = storage && typeof storage.appendSeedLog === 'function' ? storage : null;
+  return seedLogStorage;
+}
+
+function noteSeedDecision(row) {
+  if (!seedLogStorage) return;
+  const doc = {
+    ts: new Date().toISOString(),
+    worldId: getCurrentWorldId() || null,
+    ...row,
+  };
+  void seedLogStorage.appendSeedLog(doc).catch((err) => {
+    getLogger().warn('seed.decision_log_failed', { error: err.message, domainId: row.domainId || null });
+  });
+}
+
 /**
  * Городской посев. Пока занято больше четырёх слотов сановников, броска нет.
  * Температура одна на хронику, описание города и пустоту.
@@ -126,14 +149,33 @@ export function decideCitySeed(domain, { day = 0, world = null, config = null, r
   const cfg = seedConfig(config);
   const temp = readCityTemp(domain, cfg);
   const occupied = occupiedOfficerSlots(domain);
+  const finish = (decision) => {
+    noteSeedDecision({
+      kind: 'city',
+      domainId: domain?.id || null,
+      domainName: domain?.name || null,
+      day: Math.round(Number(day) || 0),
+      tempBefore: temp,
+      tempAfter: readCityTemp(domain, cfg),
+      occupied,
+      chance: decision.chance ?? null,
+      seed: Boolean(decision.seed),
+      reason: decision.reason || null,
+      source: decision.source || null,
+      gravity: decision.gravity || null,
+      chronicleEntries: decision.chronicleEntries ?? null,
+      streak: domain.state?.citySeedStreak || null,
+    });
+    return decision;
+  };
   if (occupied > CITY_SLOT_GATE) {
     touchCityTemp(domain, 'idle', cfg);
-    return { seed: false, reason: 'full', temp, occupied };
+    return finish({ seed: false, reason: 'full', temp, occupied });
   }
   const chance = Math.min(1, temp / cfg.max);
   if (rng() >= chance) {
     touchCityTemp(domain, 'miss', cfg);
-    return { seed: false, reason: 'roll', temp, chance, occupied };
+    return finish({ seed: false, reason: 'roll', temp, chance, occupied });
   }
   const entries = yearChronicleGrain(domain, world, { day }).length;
   const picked = pickCitySource({
@@ -147,7 +189,15 @@ export function decideCitySeed(domain, { day = 0, world = null, config = null, r
   const open = (domain.plotlines || []).filter((p) => isStakedStory(p) && p.status !== 'closed');
   const gravity = pickCityGravity(open, rng, cfg.gravityWeights);
   touchCityTemp(domain, 'seed', cfg);
-  return { seed: true, source: picked.source, gravity, temp, chance, occupied };
+  return finish({
+    seed: true,
+    source: picked.source,
+    gravity,
+    temp,
+    chance,
+    occupied,
+    chronicleEntries: entries,
+  });
 }
 
 /**
@@ -168,14 +218,31 @@ export function offerErrandSeed(domain, outcome, { day = 0, config = null, rng =
     domain.state.seedTemp = { ...(domain.state.seedTemp || {}), errand: next };
     return next;
   };
+  const logErrand = (seeded, extra = {}) => {
+    noteSeedDecision({
+      kind: 'errand',
+      domainId: domain?.id || null,
+      domainName: domain?.name || null,
+      day: Math.round(Number(day) || 0),
+      tempBefore: temp,
+      tempAfter: Number(domain.state?.seedTemp?.errand),
+      months,
+      chance,
+      seed: Boolean(seeded),
+      processId: outcome?.processId || null,
+      summary: outcome?.summary || null,
+      ...extra,
+    });
+  };
   if (rng() >= chance) {
     touch('miss');
+    logErrand(false, { reason: 'roll' });
     return null;
   }
   touch('seed');
   const gravity = pickErrandGravity(months, rng);
   const delay = rollRange(cfg.errandDelayDays || ERRAND_SEED_DELAY_DAYS, rng);
-  return enqueueSeedRequest(domain, {
+  const request = enqueueSeedRequest(domain, {
     source: 'errand',
     grain: 'errand',
     gravity,
@@ -185,6 +252,8 @@ export function offerErrandSeed(domain, outcome, { day = 0, config = null, rng =
     delayDays: delay,
     rng,
   });
+  logErrand(true, { reason: 'seed', gravity, delayDays: delay, appearDay: request.appearDay });
+  return request;
 }
 
 export function decideSeedAttempt(domain, opts = {}) {
