@@ -120,11 +120,11 @@ test('блок для промпта отделяет цитату от ныне
     plotId: 'p1',
     processId: 'proc2',
   });
-  assert.match(text, /ПОКРОВИТЕЛЬ ОТВЕЧАЕТ НА ТВОИ СЛОВА/);
-  assert.match(text, /«Северная опора треснула\.»/);
+  assert.match(text, /Цитата:/);
+  assert.match(text, /> Северная опора треснула\./);
   assert.match(text, /бери этот plotId/);
   assert.match(text, /Речь о деле proc2/);
-  assert.match(text, /Это цитата, а не новая просьба/);
+  assert.match(text, /Цитата — не новая просьба/);
 });
 
 test('без реплая блок пустой', () => {

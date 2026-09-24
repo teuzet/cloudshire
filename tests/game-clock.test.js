@@ -15,6 +15,7 @@ import {
   worldDateLabel,
   spanBandLabel,
   humanSpan,
+  speakGameSpan,
   realWaitLabel,
   skipGameDays,
   parseSkipDays,
@@ -208,4 +209,11 @@ test('humanSpan говорит человеческим языком', () => {
   assert.equal(humanSpan(120), 'около 4 мес.');
   assert.equal(humanSpan(370), 'около года');
   assert.equal(humanSpan(1080), 'около 3 лет');
+});
+
+test('срок дела для жреца звучит по-человечески', () => {
+  assert.equal(speakGameSpan(21), 'три недели');
+  assert.equal(speakGameSpan(45), 'полтора месяца');
+  assert.equal(speakGameSpan(180), 'полгода');
+  assert.equal(speakGameSpan(300), 'почти год');
 });

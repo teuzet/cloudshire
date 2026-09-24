@@ -159,6 +159,21 @@ export function buildHeraldContext({
   };
 }
 
+const GRAVITY_NAME = {
+  SITUATION: 'ситуация',
+  EPISODE: 'проблема',
+  CRISIS: 'кризис',
+  RUPTURE: 'катастрофа',
+};
+
+const FIRST_STORY_NEWS = [
+  'Ты рассказываешь о первом событии этой истории.',
+  'Даже если она уходит корнями в прошлое, заметили это только сейчас или важным стало только сейчас.',
+  'Это первый раз, когда твой собеседник слышит об этой истории: рассказывай как новость.',
+  'Следи, чтобы было понятно тому, кто слышит это впервые.',
+  'Не обязательно упоминать всё, что было в истории. Твоя задача — привлечь внимание бога-покровителя к проблеме.',
+].join(' ');
+
 const CLOSING_KIND_LINE = {
   GOOD_ENDING: 'Кончилась хорошо: вопрос снят, и город на этом что-то приобрёл. Но и цена была.',
   NEUTRAL_ENDING: 'Кончилась без победы и без крушения: вопрос снят, город за это заплатил.',
@@ -186,6 +201,9 @@ export function formatHeraldPrompt(ctx) {
   }
   if (ctx.thread) {
     lines.push('', `ИСТОРИЯ: «${ctx.thread.title}»`);
+    const scale = GRAVITY_NAME[ctx.thread.gravity];
+    if (scale) lines.push(`Масштаб: ${scale}.`);
+    if (ctx.occasion === 'новая история') lines.push(FIRST_STORY_NEWS);
     if (ctx.thread.synopsis) lines.push(`Сейчас: ${ctx.thread.synopsis}`);
     if (ctx.thread.established?.length) {
       lines.push('Город это уже выяснил, и об этом ты говоришь как об установленном:');

@@ -213,6 +213,30 @@ export function realWaitLabel(days, config = null) {
   return `~${String(realDays).replace('.', ',')} сут`;
 }
 
+/** Приблизительный срок дела для речи жреца: без числа дней. */
+export function speakGameSpan(days) {
+  const d = Math.max(0, Math.round(Number(days) || 0));
+  if (d <= 1) return 'день';
+  if (d <= 4) return 'несколько дней';
+  if (d <= 10) return 'около недели';
+  if (d <= 18) return 'две недели';
+  if (d <= 25) return 'три недели';
+  if (d <= 38) return 'месяц';
+  if (d <= 52) return 'полтора месяца';
+  if (d <= 75) return 'два месяца';
+  if (d <= 105) return 'три месяца';
+  if (d <= 135) return 'четыре месяца';
+  if (d <= 200) return 'полгода';
+  if (d <= 240) return 'больше полугода';
+  if (d <= 330) return 'почти год';
+  if (d <= 420) return 'год';
+  if (d <= 540) return 'полтора года';
+  const years = Math.max(2, Math.round(d / DAYS_PER_YEAR));
+  if (years % 10 === 1 && years % 100 !== 11) return `${years} год`;
+  if (years % 10 >= 2 && years % 10 <= 4 && (years % 100 < 12 || years % 100 > 14)) return `${years} года`;
+  return `${years} лет`;
+}
+
 /** Приблизительный человеческий срок для речи жреца. */
 export function humanSpan(days) {
   const d = Math.max(0, Math.round(Number(days) || 0));

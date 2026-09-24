@@ -222,6 +222,10 @@ test('мини-аппка: свои истории и участие в сопр
     ['Гул колодца', 'Общая драка'].sort(),
   );
   assert.equal(view.events.some((e) => e.title === 'Чужой храм'), false);
+  const gul = view.events.find((e) => e.title === 'Гул колодца');
+  assert.equal(gul.scale, 'кризис');
+  assert.equal(gul.marks, 3);
+  assert.equal(gul.marksTotal, 4);
   const fight = view.events.find((e) => e.title === 'Общая драка');
   assert.equal(fight.processes[0].summary, 'Сторожить проход');
   assert.equal(view.processes.length, 4);

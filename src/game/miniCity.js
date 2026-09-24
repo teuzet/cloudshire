@@ -1,6 +1,6 @@
 import { statEpithet } from './stats.js';
 import { plotConcerns } from './confluxBoard.js';
-import { isStoryPlot } from './plotlines.js';
+import { isStoryPlot, parseFreeformGravity, storyOfficerSlots } from './plotlines.js';
 import { activeProcesses, pausedProcesses, processOwnedBy, processStatAverage, processPaceRatio } from './processes.js';
 import { finishChancePercents } from './rolls.js';
 import { blessManaCost, currentMana } from './mana.js';
@@ -272,6 +272,13 @@ function slimOfficerSlot(officer, process, config, mana, domain, day = 0) {
   };
 }
 
+const GRAVITY_RU = {
+  SITUATION: 'ситуация',
+  EPISODE: 'проблема',
+  CRISIS: 'кризис',
+  RUPTURE: 'катастрофа',
+};
+
 function collectEvents(domain, conflux, config, mana = 0, day = 0) {
   const id = String(domain.id);
   const byId = new Map();
@@ -290,6 +297,10 @@ function collectEvents(domain, conflux, config, mana = 0, day = 0) {
     return {
       title: clip(plot.title || 'История', 80),
       synopsis: clip(plot.synopsis || '', 600),
+      gravity: plot.gravity || null,
+      scale: GRAVITY_RU[parseFreeformGravity(plot.gravity)] || null,
+      marks: storyOfficerSlots(plot),
+      marksTotal: 4,
       processes: procs
         .filter((pr) => related.has(String(pr.id)))
         .map((pr) => slimProcess(pr, config, { mana, domain, day })),

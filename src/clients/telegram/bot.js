@@ -317,9 +317,18 @@ export function startTelegramBot({ config, app, storage, runTick }) {
       }
       if (message) {
         const messageId = await sendChunks(bot, chatId, message, { html });
-        if (messageId && domainId && (chronicleId || plotId)) {
+        if (messageId && domainId) {
           await app
-            .recordPushMessage(domainId, { messageId, chatId, chronicleId, plotId, threatId, processId, kind })
+            .recordPushMessage(domainId, {
+              messageId,
+              chatId,
+              chronicleId,
+              plotId,
+              threatId,
+              processId,
+              kind,
+              text: message,
+            })
             .catch((err) => console.warn('[telegram] push map failed:', err.message));
         }
       }
@@ -465,7 +474,17 @@ export function startTelegramBot({ config, app, storage, runTick }) {
       });
       await deleteRememberedHolds(bot, holds, userId);
       if (result.reply) {
-        await sendChunks(bot, msg.chat.id, result.reply, { html: result.agent === 'onboarding' });
+        const messageId = await sendChunks(bot, msg.chat.id, result.reply, { html: result.agent === 'onboarding' });
+        if (messageId && result.domainId && result.agent === 'ruler') {
+          await app
+            .recordPushMessage(result.domainId, {
+              messageId,
+              chatId: msg.chat.id,
+              kind: 'ruler',
+              text: result.reply,
+            })
+            .catch((err) => console.warn('[telegram] reply map failed:', err.message));
+        }
       }
     } catch (err) {
       console.error('[telegram] handler error:', err);

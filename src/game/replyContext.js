@@ -20,7 +20,7 @@ export function pushMap(domain) {
 
 export function rememberPush(
   domain,
-  { messageId, chatId = null, chronicleId = null, plotId = null, threatId = null, processId = null, kind = null } = {},
+  { messageId, chatId = null, chronicleId = null, plotId = null, threatId = null, processId = null, kind = null, text = null } = {},
 ) {
   const id = Number(messageId);
   if (!Number.isFinite(id)) return null;
@@ -33,6 +33,7 @@ export function rememberPush(
     threatId: threatId || null,
     processId: processId || null,
     kind: kind || null,
+    text: text ? String(text).slice(0, 1500) : null,
   };
   const existing = map.findIndex((e) => e.messageId === id);
   if (existing >= 0) map.splice(existing, 1);
@@ -72,7 +73,7 @@ export function resolveReply(domain, reply) {
   if (!reply?.text && !reply?.messageId) return null;
   const push = reply.fromPriest ? findPush(domain, reply.messageId) : null;
   return {
-    text: reply.text || '',
+    text: reply.text || push?.text || '',
     fromPriest: !!reply.fromPriest,
     chronicleId: push?.chronicleId || null,
     plotId: push?.plotId || null,
@@ -88,9 +89,12 @@ export function resolveReply(domain, reply) {
  */
 export function formatReplyForPrompt(resolved) {
   if (!resolved?.text && !resolved?.plotId) return '';
-  const lines = ['ПОКРОВИТЕЛЬ ОТВЕЧАЕТ НА ТВОИ СЛОВА:', `«${resolved.text}»`];
+  const lines = ['Покровитель отвечает на это сообщение. Цитата:'];
+  if (resolved.text) {
+    for (const line of String(resolved.text).split('\n')) lines.push(`> ${line}`);
+  }
   if (resolved.plotId) lines.push(`Речь об истории ${resolved.plotId}. Ставя дело, бери этот plotId.`);
   if (resolved.processId) lines.push(`Речь о деле ${resolved.processId}.`);
-  lines.push('Это цитата, а не новая просьба. Отвечай на то, что покровитель написал сейчас.');
+  lines.push('Цитата — не новая просьба. Отвечай на то, что покровитель написал сейчас, держа в уме процитированное.');
   return lines.join('\n');
 }

@@ -3,10 +3,11 @@
  * Состояние города собирает readDomainBrief и кладётся в блок хода, отдельного тула нет.
  * Вызываются из GameApp.runRuler; submit_reply собирается отдельно.
  *
- * Месяцев здесь нет. Дело живёт в игровых днях, а наружу отдаются полосы:
- * жрец не знает точного срока и потому не может его пообещать.
+ * Месяцев здесь нет. Дело живёт в игровых днях. Жрецу после постановки
+ * известен точный срок, но вслух он говорит его по-человечески.
  */
 
+import { speakGameSpan } from './gameClock.js';
 import { formatCastForPrompt, chronicleEntries, formatChroniclePriestMark } from './models.js';
 import {
   qualitativePopulation,
@@ -155,11 +156,17 @@ function difficultyWord(band) {
  * Подсказка о темпе. Чисел не даём: спешка и обстоятельность — это разница
  * в риске, а не в календаре, и жрец должен говорить именно о риске.
  */
+function spokenSpan(action) {
+  const days = Math.round(Number(action?.scheduledDays || action?.objectiveDays) || 0);
+  if (days > 0) return speakGameSpan(days);
+  return bandWord(action?.durationBand);
+}
+
 function paceHint(action, note = null) {
   const shift = normalizePaceShift(action?.paceShift);
   const why = String(note || action?.durationNote || '').trim();
   const reason = why ? ` ${why.replace(/\.*$/, '.')}` : '';
-  const span = `Работы примерно на ${bandWord(action?.durationBand)}, дело ${difficultyWord(action?.difficulty)}.`;
+  const span = `Работы на ${spokenSpan(action)}, дело ${difficultyWord(action?.difficulty)}.`;
   const tail = 'Итог придёт, когда работа кончится, — не рапортуй его сейчас.';
   if (shift < 0) {
     return (
@@ -1124,7 +1131,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
         return {
           ok: true,
           process: action,
-          duration: bandWord(action.durationBand),
+          duration: spokenSpan(action),
           difficulty: difficultyWord(action.difficulty),
           rule: ruleKind,
           rehomed,

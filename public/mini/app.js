@@ -245,6 +245,16 @@ function openOfficerSheet(officerId, { focus = true } = {}) {
   if (focus) sheet.querySelector('.sheet-close')?.focus();
 }
 
+function scaleMarks(event) {
+  const total = Math.max(1, Math.round(Number(event.marksTotal) || 4));
+  const lit = Math.max(0, Math.min(total, Math.round(Number(event.marks) || 0)));
+  const label = event.scale ? esc(event.scale) : '';
+  const marks = Array.from({ length: total }, (_, i) =>
+    `<span class="shard${i < lit ? ' lit' : ''}" aria-hidden="true">!</span>`,
+  ).join('');
+  return `<p class="scale">${label ? `<span class="scale-name">${label}</span>` : ''}<span class="shards" aria-label="${lit} из ${total}">${marks}</span></p>`;
+}
+
 function renderEvents(events) {
   if (!events?.length) return empty('Сейчас нет открытых историй.');
   return events
@@ -265,6 +275,7 @@ function renderEvents(events) {
       return `
         <article class="card">
           <h2>${esc(e.title)}</h2>
+          ${scaleMarks(e)}
           <p>${esc(e.synopsis)}</p>
           ${deeds}
         </article>`;

@@ -296,6 +296,19 @@ test('карточка закрытой нити не отдаёт ни жизн
   assert.equal(card.dread, undefined);
 });
 
+test('первая весть истории звучит как новость и называет масштаб', () => {
+  const p = plot({ gravity: 'EPISODE' });
+  const text = formatHeraldPrompt(buildHeraldContext({
+    domain: domain(),
+    plot: p,
+    occasion: 'новая история',
+    fact: { text: 'в порту нашли мёртвого досмотрщика' },
+  }));
+  assert.match(text, /Масштаб: проблема/);
+  assert.match(text, /первом событии этой истории/);
+  assert.match(text, /слышит об этой истории/);
+});
+
 test('без нити промпт всё равно собирается', () => {
   const ctx = buildHeraldContext({
     domain: domain(),
