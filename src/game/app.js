@@ -112,6 +112,7 @@ import { resolveReply, formatReplyForPrompt, rememberPush } from './replyContext
 import { clearPatronPresenceAsked } from './steward.js';
 import { getLogger, truncate, setLoggerWorldId } from '../log.js';
 import { initUsageRecording } from '../llm/usage.js';
+import { initCityAgentLogRecording } from './cityAgentLog.js';
 import { purgeDomainMedia } from '../storage/r2.js';
 import { buildRulerTools, submitReplyTool, formatPriestTurn } from './rulerTools.js';
 export { rulerReplyCommitError } from './rulerTools.js';
@@ -1855,6 +1856,7 @@ export class GameApp {
       if (worldId) {
         setLoggerWorldId(worldId);
         initUsageRecording(this.config, worldId, this.storage);
+        initCityAgentLogRecording(this.storage);
       }
     }
     return result;
@@ -1876,6 +1878,7 @@ export class GameApp {
     if (newWorldId) {
       setLoggerWorldId(newWorldId);
       initUsageRecording(this.config, newWorldId, this.storage);
+      initCityAgentLogRecording(this.storage);
     }
     getLogger().info('world.rotated', {
       archivedWorldId: result.archivedWorldId || null,

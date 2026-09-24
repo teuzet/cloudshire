@@ -7,7 +7,6 @@ import {
   findPlotline,
   plotConfig,
   isStoryPlot,
-  seedStatBudget,
   depthStatPoints,
   endingStatPoints,
 } from './plotlines.js';
@@ -138,13 +137,9 @@ export function statPartsForFact(domain, fact, config) {
   if (fact?.author === 'engine:rule') return empty;
 
   const pocket = String(fact?.statPocket || '');
-  const author = String(fact?.author || '');
   const plot = plotForFact(domain, fact) || closedPlotForFact(domain, fact);
   let up = 0;
   let down = 0;
-
-  const isSeed = pocket === 'seed' || /seed/i.test(author);
-  if (isSeed && plot && isStoryPlot(plot)) down += seedStatBudget(plot, config);
 
   const wound = Number(fact?.woundBudget);
   if (Number.isFinite(wound) && wound > 0) down += Math.round(wound);
@@ -154,8 +149,13 @@ export function statPartsForFact(domain, fact, config) {
   const depthAdvanced = Number.isFinite(gain) && gain > 0 && finish !== 'fail';
   if (depthAdvanced) up += depthStatPoints(gain, config);
 
+  const completion = Number(fact?.completionBudget);
+  if (Number.isFinite(completion) && completion > 0) up += Math.round(completion);
   const closed = Boolean(fact?.plotClosed) || pocket === 'ending';
-  if (closed && plot && isStoryPlot(plot)) up += endingStatPoints(plot, config);
+  const goodEnd = String(fact?.endingKind || '') === 'GOOD_ENDING';
+  if (closed && goodEnd && !(Number.isFinite(completion) && completion > 0) && plot && isStoryPlot(plot)) {
+    up += endingStatPoints(plot, config);
+  }
 
   const impact = fact?.pairImpact;
   let deedMagnitude = 0;

@@ -36,11 +36,32 @@ const GENESIS_SCENES = new Set([
 
 const writeLocks = new Map();
 
+/** @type {null | { appendAgentLog?: Function }} */
+let agentLogStorage = null;
+
+/**
+ * Привязать лог агентов к хранилищу. Пишем в Mongo, только если у него есть appendAgentLog.
+ */
+export function initCityAgentLogRecording(storage = null) {
+  agentLogStorage = storage && typeof storage.appendAgentLog === 'function' ? storage : null;
+  return agentLogStorage;
+}
+
 export function cityAgentLogEnabled(config) {
   if (config?.logging?.cityAgent === false) return false;
   if (config?.logging?.file === false) return false;
   if (process.env.DYNO || process.env.RAILWAY_ENVIRONMENT) return false;
   return true;
+}
+
+/** Сервер с Mongo пишет каждый прогон любого агента, даже когда файлов нет. */
+export function shouldLogAgentToMongo({ config } = {}) {
+  if (config?.logging?.cityAgent === false) return false;
+  return Boolean(agentLogStorage);
+}
+
+export function shouldCaptureAgentLog(payload = {}) {
+  return shouldLogLiveCityAgent(payload) || shouldLogAgentToMongo(payload);
 }
 
 export function shouldLogLiveCityAgent({ config, domainId, agentId, scene } = {}) {
@@ -214,12 +235,42 @@ function withLock(filePath, fn) {
   return next;
 }
 
-export async function appendCityAgentTranscript(payload) {
-  if (!shouldLogLiveCityAgent(payload)) return null;
-  const worldId = payload.worldId || getCurrentWorldId() || null;
+function agentLogDocument(payload, text, worldId) {
   const ids = cityLogDomainIds(payload.domainId);
-  if (!ids.length) return null;
+  const started = payload.startedAt ? new Date(payload.startedAt) : null;
+  return {
+    ts: new Date().toISOString(),
+    worldId: worldId || null,
+    domainId: payload.domainId ? String(payload.domainId) : null,
+    domainIds: ids,
+    domainName: payload.domainName || null,
+    agentId: payload.agentId || null,
+    scene: payload.scene || null,
+    provider: payload.provider || null,
+    model: payload.model || null,
+    runId: payload.runId || null,
+    startedAt: started && !Number.isNaN(started.getTime()) ? started.toISOString() : null,
+    ms: Number.isFinite(Number(payload.ms)) ? Number(payload.ms) : null,
+    turns: Number.isFinite(Number(payload.turns)) ? Number(payload.turns) : null,
+    truncated: Boolean(payload.truncated),
+    failed: Boolean(payload.failed),
+    error: payload.error ? String(payload.error) : null,
+    toolsUsed: Array.isArray(payload.toolsUsed) ? payload.toolsUsed.map(String) : [],
+    text,
+  };
+}
+
+export async function appendCityAgentTranscript(payload) {
+  const fileOn = shouldLogLiveCityAgent(payload);
+  const mongoOn = shouldLogAgentToMongo(payload);
+  if (!fileOn && !mongoOn) return null;
+  const worldId = payload.worldId || getCurrentWorldId() || null;
   const text = formatCityAgentTranscript({ ...payload, worldId });
+  if (mongoOn) {
+    await agentLogStorage.appendAgentLog(agentLogDocument(payload, text, worldId));
+  }
+  const ids = cityLogDomainIds(payload.domainId);
+  if (!fileOn || !ids.length) return [];
   const paths = [];
   for (const domainId of ids) {
     const filePath = cityAgentLogPath(payload.config, { domainId, worldId });

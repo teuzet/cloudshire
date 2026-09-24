@@ -33,6 +33,7 @@ import {
   countOpen,
   normalizePlotlines,
   rollWoundStatBudget,
+  rollStoryCompletionBudget,
 } from './plotlines.js';
 import { plotHostId } from './confluxBoard.js';
 import { normalizeDomainProcesses, processIsLive } from './processes.js';
@@ -73,12 +74,13 @@ import {
   scheduleNextAttempt,
   applySeedCooldown,
   enqueueSeedRequest,
+  offerErrandSeed,
   dueSeedRequests,
   dropSeedRequest,
   checkSeedFreshness,
   postponeSeedRequest,
 } from './seedSchedule.js';
-import { applyMonthSeedTemps, grainForSource, openingGrain, openingVoidGrain } from './seedChannels.js';
+import { grainForSource, openingGrain, openingVoidGrain, yearChronicleGrain, formatChronicleGrain } from './seedChannels.js';
 import { applyRuleDeed } from './cityRules.js';
 import { plantStakedStory } from './storyteller.js';
 import { accrueMana } from './mana.js';
@@ -124,6 +126,8 @@ export function appendEventFact(
     secret: Boolean(secret),
     secretForDomainId: secretForDomainId || null,
   });
+  const completion = Number(extra.completionBudget);
+  if (Number.isFinite(completion) && completion > 0) fact.completionBudget = Math.round(completion);
   if (extra.statPocket) fact.statPocket = extra.statPocket;
   if (extra.endingKind) fact.endingKind = extra.endingKind;
   if (extra.plotClosed) fact.plotClosed = true;
@@ -402,6 +406,9 @@ export async function resolveDeedEvent({
   let text = rule?.text || null;
   let pairNarration = null;
   const closesStory = Boolean(applied.closes || fireRes?.closes) && Boolean(plot);
+  const completionBudget = closesStory && (plot?.ending?.kind || applied.endingKind) === 'GOOD_ENDING'
+    ? rollStoryCompletionBudget(plot, config, rng)
+    : 0;
   const pairDeed = !rule && conflux?.status === 'docked' && isPairCrossingDeed(process, plot, partner);
   if (!text && pairDeed) {
     pairNarration = await narratePairDeed({
@@ -508,6 +515,7 @@ export async function resolveDeedEvent({
           plotClosed: closesStory,
           woundBudget,
           depthGain: applied.depthGain,
+          completionBudget,
         },
       });
   if (fact) {
@@ -516,6 +524,7 @@ export async function resolveDeedEvent({
     if (closesStory) fact.plotClosed = true;
     if (woundBudget > 0) fact.woundBudget = woundBudget;
     if (Number(applied.depthGain) > 0) fact.depthGain = Number(applied.depthGain);
+    if (completionBudget > 0) fact.completionBudget = completionBudget;
   }
 
   const pairSpread =
@@ -595,6 +604,25 @@ export async function resolveDeedEvent({
       log,
     });
     if (storage && host !== domain) await storage.saveDomain(host);
+  }
+
+  if (!plot && !rule && !process.intel) {
+    const seeded = offerErrandSeed(domain, {
+      processId: process.id,
+      summary: process.summary,
+      goal: process.goal,
+      detail: process.detail,
+      objectiveMonths: process.objectiveMonths || process.expectedMonths,
+      finish: rolled.finish,
+    }, { day, config, rng });
+    if (seeded) {
+      scheduleJob(world, {
+        domainId: domain.id,
+        kind: 'seed_appear',
+        dueDay: seeded.appearDay,
+        payload: { requestId: seeded.id, source: 'errand' },
+      });
+    }
   }
 
   log.info('loop.deed_resolved', {
@@ -792,20 +820,26 @@ export async function firePressureEvent(ctx) {
  */
 export function seedAttemptEvent({ config, domain, world, day = 0, rng = Math.random, log: parentLog } = {}) {
   const log = (parentLog || getLogger()).child({ scope: 'loop.seed', domainId: domain?.id });
-  const decision = decideSeedAttempt(domain, { day, config, rng });
+  const decision = decideSeedAttempt(domain, { day, world, config, rng });
 
   if (decision.seed) {
-    const request = enqueueSeedRequest(domain, { source: decision.source, day, rng });
+    const chronicle = yearChronicleGrain(domain, world, { day });
+    const seedText = decision.source === 'chronicle' ? formatChronicleGrain(chronicle) : '';
+    const request = enqueueSeedRequest(domain, {
+      source: decision.source === 'chronicle' ? 'chronicle' : 'void',
+      grain: decision.source,
+      gravity: decision.gravity,
+      seedText,
+      day,
+      delayDays: 0,
+      rng,
+    });
     scheduleJob(world, {
       domainId: domain.id,
       kind: 'seed_appear',
       dueDay: request.appearDay,
       payload: { requestId: request.id, source: request.source },
     });
-    applySeedCooldown(domain, day, rng);
-    applyMonthSeedTemps(domain, { [decision.source]: 'seed' }, config);
-  } else if (decision.reason === 'roll' || decision.reason === 'cold') {
-    applyMonthSeedTemps(domain, { chronicle: 'idle', void: 'idle', errand: 'idle' }, config);
   }
 
   const nextDay = scheduleNextAttempt(domain, day, rng);
@@ -864,10 +898,23 @@ export async function seedAppearEvent({
 
   // Текст зерна собирается сейчас, а не в момент постановки заявки:
   // за задержку мир успел измениться, и старый текст противоречил бы хронике.
-  const grain =
-    (request.grain === 'genesis' && openingGrain(domain, { gravity: request.gravity, rng })) ||
-    (request.grain === 'void' && openingVoidGrain({ gravity: request.gravity })) ||
-    grainForSource({ domain, world, config, source: request.source, rng });
+  const grain = request.grain === 'errand'
+    ? { seedText: request.seedText || '', gravity: request.gravity, fromVoid: false, fromGenesis: false }
+    : request.grain === 'genesis'
+      ? (openingGrain(domain, { gravity: request.gravity }) || openingVoidGrain({ gravity: request.gravity }))
+      : request.grain === 'void'
+        ? openingVoidGrain({ gravity: request.gravity })
+        : request.grain === 'chronicle'
+          ? {
+              seedText: request.seedText || formatChronicleGrain(yearChronicleGrain(domain, world, { day })),
+              gravity: request.gravity,
+              fromVoid: false,
+              fromGenesis: false,
+            }
+          : (
+            (request.grain === 'genesis' && openingGrain(domain, { gravity: request.gravity, rng })) ||
+            grainForSource({ domain, world, config, source: request.source, rng })
+          );
   const planted = await plantStakedStory({
     config,
     runtime,

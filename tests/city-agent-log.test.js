@@ -9,6 +9,7 @@ import {
   cityLogDomainIds,
   formatCityAgentTranscript,
   formatCityLogStamp,
+  initCityAgentLogRecording,
   shouldLogLiveCityAgent,
 } from '../src/game/cityAgentLog.js';
 import { AgentRuntime } from '../src/agents/runtime.js';
@@ -257,5 +258,50 @@ test('runtime пишет лог живого города и молчит на �
     assert.doesNotMatch(after, /этого в логе быть не должно/i);
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('mongo хранит каждый прогон отдельным документом, включая генезис', async () => {
+  const docs = [];
+  initCityAgentLogRecording({
+    appendAgentLog: async (doc) => {
+      docs.push(doc);
+    },
+  });
+  const config = { logging: { file: false, cityAgent: true } };
+  try {
+    await appendCityAgentTranscript({
+      config,
+      domainId: 'domain_a+domain_b',
+      domainName: 'Пара',
+      worldId: 'world_srv',
+      agentId: 'genesis',
+      scene: 'genesis_core',
+      provider: 'openai',
+      model: 'gpt-4o-mini',
+      runId: 'run1',
+      packed: packedPrompt(),
+      events: [],
+      turns: 1,
+      ms: 12,
+    });
+    await appendCityAgentTranscript({
+      config,
+      domainId: null,
+      agentId: 'onboarding',
+      scene: 'onboarding',
+      worldId: 'world_srv',
+      packed: packedPrompt(),
+      events: [],
+    });
+    assert.equal(docs.length, 2);
+    assert.equal(docs[0].agentId, 'genesis');
+    assert.deepEqual(docs[0].domainIds, ['domain_a', 'domain_b']);
+    assert.equal(docs[0].worldId, 'world_srv');
+    assert.match(docs[0].text, /Ты хронист города/);
+    assert.equal(docs[1].agentId, 'onboarding');
+    assert.equal(docs[1].domainId, null);
+  } finally {
+    initCityAgentLogRecording(null);
   }
 });

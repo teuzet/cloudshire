@@ -10,6 +10,9 @@ import {
   rollWoundStatBudget,
   depthStatPoints,
   endingStatPoints,
+  storyWoundUpper,
+  storyCompletionCeiling,
+  rollStoryCompletionBudget,
 } from '../src/game/plotlines.js';
 import { scaleAffectsToBudget } from '../src/game/plotEngine.js';
 import { enforceFinishPolarity } from '../src/game/statJudge.js';
@@ -43,6 +46,18 @@ test('завязка — минус масштаба истории: 1, 1, 2, 3'
   }
   const garbage = createPlotline({ title: 'Мусор', type: 'story', gravity: 80 });
   assert.equal(seedStatBudget(garbage, cfg), 1);
+});
+
+test('чистое завершение бросает от 1 до четверти верхних границ ран', () => {
+  const rupture = createPlotline({ title: 'Разрыв', type: 'story', gravity: 'RUPTURE' });
+  assert.equal(storyWoundUpper(rupture, cfg), 26);
+  assert.equal(storyCompletionCeiling(rupture, cfg), 7);
+  assert.equal(rollStoryCompletionBudget(rupture, cfg, () => 0), 1);
+  assert.equal(rollStoryCompletionBudget(rupture, cfg, () => 0.999), 7);
+
+  const situation = createPlotline({ title: 'Ситуация', type: 'story', gravity: 'SITUATION' });
+  assert.equal(storyCompletionCeiling(situation, cfg), 1);
+  assert.equal(rollStoryCompletionBudget(situation, cfg, () => 0.5), 1);
 });
 
 test('беда кидает свой масштаб, границы включительно', () => {

@@ -48,6 +48,19 @@ export function parseSeedConfig(raw = {}) {
     worldLiveBelow: Math.max(0, num(raw.worldLiveBelow, DEFAULT_SEED.worldLiveBelow)),
     errandDurationDiv: Math.max(0.001, num(raw.errandDurationDiv, DEFAULT_SEED.errandDurationDiv)),
     voidGenesisChance: clamp(num(raw.voidGenesisChance, DEFAULT_SEED.voidGenesisChance), 0, 1),
+    slotGate: Math.max(1, Math.round(num(raw.slotGate, 4))),
+    errandDelayDays: Array.isArray(raw.errandDelayDays) ? raw.errandDelayDays : [20, 40],
+    gravityWeights: {
+      SITUATION: num(raw.gravityWeights?.SITUATION, 4),
+      EPISODE: num(raw.gravityWeights?.EPISODE, 3),
+      CRISIS: num(raw.gravityWeights?.CRISIS, 2),
+      RUPTURE: num(raw.gravityWeights?.RUPTURE, 1),
+    },
+    sourceWeights: {
+      chronicle: num(raw.sourceWeights?.chronicle, 1),
+      genesis: num(raw.sourceWeights?.genesis, 1),
+      void: num(raw.sourceWeights?.void, 1),
+    },
     chronicle: parseDeltas(raw.chronicle, DEFAULT_SEED.chronicle),
     void: parseDeltas(raw.void, DEFAULT_SEED.void),
     errand: parseDeltas(raw.errand, DEFAULT_SEED.errand),
@@ -125,6 +138,30 @@ export function errandSeedChance(temp, durationMonths, cfg = DEFAULT_SEED) {
   const months = Math.max(0, num(durationMonths, 0));
   const p = worldSeedChance(temp, parsed) * (months / parsed.errandDurationDiv);
   return clamp(p, 0, 1);
+}
+
+/** Температура городского посева. Старый сейв хранил её в канале хроники. */
+export function readCityTemp(domain, cfg = DEFAULT_SEED) {
+  const parsed = seedConfig(cfg);
+  const raw = domain?.state?.seedTemp;
+  if (raw && raw.city != null && raw.city !== '') return clampSeedTemp(raw.city, parsed);
+  const temps = normalizeSeedTemp(raw, parsed);
+  return temps.chronicle;
+}
+
+export function writeCityTemp(domain, value, cfg = DEFAULT_SEED) {
+  if (!domain.state) domain.state = {};
+  const parsed = seedConfig(cfg);
+  domain.state.seedTemp = normalizeSeedTemp(domain.state.seedTemp, parsed);
+  domain.state.seedTemp.city = clampSeedTemp(value, parsed);
+  return domain.state.seedTemp.city;
+}
+
+export function touchCityTemp(domain, event, cfg = DEFAULT_SEED) {
+  const parsed = seedConfig(cfg);
+  const deltas = parsed.chronicle || DEFAULT_DELTAS;
+  const kind = event === 'seed' || event === 'miss' || event === 'idle' ? event : 'idle';
+  return writeCityTemp(domain, readCityTemp(domain, parsed) + deltas[kind], parsed);
 }
 
 /** Пустой канал: 'genesis' — описание города, 'void' — без зерна. */

@@ -94,76 +94,53 @@ test('насыщенность гасит посев и разгоняет ег�
   assert.equal(saturationFactor(THREAT_TARGET_MAX + 1), 0, 'выше нормы не сеем вовсе');
 });
 
-test('перенасыщенный историями город не сеет', () => {
+test('пять слотов сановников — городской посев молчит и греется', () => {
   const d = domain({
-    plotlines: ['p1', 'p2', 'p3', 'p4', 'p5'].map((id) => stakedPlot(id, 0)),
+    plotlines: [stakedPlot('p1', 0)],
   });
+  d.plotlines[0].gravity = 'RUPTURE';
+  d.plotlines.push({ ...stakedPlot('p2', 0), gravity: 'SITUATION' });
+  d.state.seedTemp = { city: 5, errand: 10 };
   const res = decideSeedAttempt(d, { day: 0, rng: () => 0 });
   assert.equal(res.seed, false);
-  assert.equal(res.reason, 'saturated');
+  assert.equal(res.reason, 'full');
+  assert.equal(d.state.seedTemp.city, 6);
 });
 
-test('в холодном периоде попытка не сеет', () => {
+test('нулевая городская температура не сеет', () => {
   const d = domain();
-  applySeedCooldown(d, 0, () => 0);
-  const res = decideSeedAttempt(d, { day: 5, rng: () => 0 });
-  assert.equal(res.seed, false);
-  assert.equal(res.reason, 'cooldown');
-});
-
-test('холодные каналы не сеют', () => {
-  const d = domain();
-  d.state.seedTemp = { chronicle: 0, void: 0, errand: 0 };
+  d.state.seedTemp = { city: 0, errand: 10 };
   const res = decideSeedAttempt(d, { day: 0, rng: () => 0 });
   assert.equal(res.seed, false);
-  assert.equal(res.reason, 'cold');
+  assert.equal(res.reason, 'roll');
 });
 
-test('высокий жребий не сеет на прохладных каналах', () => {
+test('прохладный город не сеет на высоком жребии', () => {
   const d = domain();
-  d.state.seedTemp = { chronicle: 3, void: 3, errand: 3 };
+  d.state.seedTemp = { city: 3, errand: 10 };
   const res = decideSeedAttempt(d, { day: 0, rng: () => 0.999 });
   assert.equal(res.seed, false);
   assert.equal(res.reason, 'roll');
   assert.ok(res.chance > 0 && res.chance < 1);
+  assert.equal(d.state.seedTemp.city, 5);
 });
 
-test('пустой город с горячим поручением сеет наверняка', () => {
+test('горячий пустой город сеет сразу и остывает', () => {
   const d = domain();
-  const res = decideSeedAttempt(d, { day: 0, rng: () => 0.999 });
-  assert.equal(res.seed, true);
-  assert.equal(res.chance, 1);
-});
-
-test('насыщенная доска сбивает шанс, не обнуляя его', () => {
-  const cold = { chronicle: 5, void: 5, errand: 5 };
-  const empty = domain();
-  empty.state.seedTemp = { ...cold };
-  const busy = domain({ plotlines: [stakedPlot('p1'), stakedPlot('p2'), stakedPlot('p3')] });
-  busy.state.seedTemp = { ...cold };
-  const a = decideSeedAttempt(empty, { day: 0, rng: () => 0.999 });
-  const b = decideSeedAttempt(busy, { day: 0, rng: () => 0.999 });
-  assert.ok(b.chance < a.chance);
-  assert.ok(b.chance > 0);
-});
-
-test('канал выбирается взвешенно по температуре, а не по порогу', () => {
-  const d = domain();
-  d.state.seedTemp = { chronicle: 10, void: 0.0001, errand: 0.0001 };
+  d.state.seedTemp = { city: 10, errand: 10 };
   const res = decideSeedAttempt(d, { day: 0, rng: () => 0 });
   assert.equal(res.seed, true);
-  assert.equal(res.source, 'chronicle');
+  assert.equal(res.chance, 1);
+  assert.equal(d.state.seedTemp.city, 4);
+  assert.ok(['genesis', 'void', 'chronicle'].includes(res.source));
 });
 
-test('холодный канал всё же может выпасть', () => {
-  const d = domain();
-  d.state.seedTemp = { chronicle: 5, void: 5, errand: 5 };
-  let i = 0;
-  // Первый жребий — сеять; второй — почти в конец распределения.
-  const rng = () => (i++ === 0 ? 0 : 0.99);
-  const res = decideSeedAttempt(d, { day: 0, rng });
+test('четыре слота ещё позволяют посев, масштаб уже стоящей истории легче', () => {
+  const d = domain({ plotlines: [{ ...stakedPlot('p1'), gravity: 'RUPTURE' }] });
+  d.state.seedTemp = { city: 10, errand: 10 };
+  const res = decideSeedAttempt(d, { day: 0, rng: () => 0 });
   assert.equal(res.seed, true);
-  assert.equal(res.source, 'errand', 'последний канал по порядку весов');
+  assert.equal(res.occupied, 4);
 });
 
 // ────────────────────── очередь отложенных посевов ──────────────────────

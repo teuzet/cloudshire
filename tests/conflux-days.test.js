@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createConfluxRecord, beginConfluxOwnership, dockConfluxNow, schedulePairJobs, monthsUntilDock, abortCrossIslandDeeds, undockConfluxNow, confluxSummary } from '../src/game/conflux.js';
+import { createConfluxRecord, beginConfluxOwnership, dockConfluxNow, schedulePairJobs, monthsUntilDock, abortCrossIslandDeeds, undockConfluxNow, confluxSummary, maybeMatchmakeConfluxes } from '../src/game/conflux.js';
+import { loadConfig } from '../src/config.js';
 import { hoursToGameDays, pickPrepDelayHours, confluxConfig, remainingDockDays, rollConfluxSpan, stampGenesisConfluxBan, confluxDue } from '../src/game/confluxTime.js';
 import { seedPartingClock, findPartingThreat, PARTING_EVENT } from '../src/game/confluxBoard.js';
 import { hourInTimeZone, noteRulerActivity, emptyActivity } from '../src/game/activity.js';
@@ -540,6 +541,20 @@ test('секретное дело скрыто от соседа до разре
   assert.match(texts.victim, /следстви/i);
   const fail = secretRevealTexts(process, 'fail');
   assert.match(fail.victim, /поймали/i);
+});
+
+test('выключенный флаг не начинает сопряжение', async () => {
+  assert.equal(confluxConfig(loadConfig()).enabled, false);
+  const res = await maybeMatchmakeConfluxes({
+    config: loadConfig(),
+    storage: {
+      listConfluxes() {
+        throw new Error('матчмейкинг не должен спрашивать пары');
+      },
+    },
+    world: world(400),
+  });
+  assert.deepEqual(res, { notes: [], created: [] });
 });
 
 void monthsUntilDock;

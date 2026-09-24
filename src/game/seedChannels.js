@@ -4,7 +4,7 @@
  */
 
 import { chronicleEntries } from './models.js';
-import { countOpen, plotConfig, isStoryPlot } from './plotlines.js';
+import { countOpen, plotConfig, isStoryPlot, parseFreeformGravity } from './plotlines.js';
 import { FINISH_SHORT } from './rolls.js';
 import {
   SEED_SOURCES,
@@ -51,6 +51,52 @@ export function pickWorldGravity(domain, world, rng = Math.random) {
 }
 
 /** Gravity поручения — только от длительности дела. */
+export const CITY_GRAVITY_WEIGHTS = {
+  SITUATION: 4,
+  EPISODE: 3,
+  CRISIS: 2,
+  RUPTURE: 1,
+};
+
+/** Масштаб городского посева. Уже стоящий на доске масштаб весит вдвое меньше. */
+export function pickCityGravity(openPlots, rng = Math.random, weights = CITY_GRAVITY_WEIGHTS) {
+  const present = new Set((openPlots || []).map((p) => parseFreeformGravity(p?.gravity)));
+  const pairs = Object.entries(weights).map(([scale, weight]) => [
+    scale,
+    present.has(scale) ? Number(weight) / 2 : Number(weight),
+  ]);
+  return weightedPick(pairs, rng);
+}
+
+/**
+ * Источник городского зерна. Хроника входит в пул, только если за год
+ * накопилось больше двух записей. Два одинаковых выбора подряд выкидывают
+ * источник из следующего броска, один подряд режет вес пополам.
+ */
+export function pickCitySource({ entries = 0, weights = {}, streak = null, rng = Math.random } = {}) {
+  const base = {
+    chronicle: Number(weights.chronicle ?? 1),
+    genesis: Number(weights.genesis ?? 1),
+    void: Number(weights.void ?? 1),
+  };
+  const pool = [
+    ['genesis', base.genesis],
+    ['void', base.void],
+  ];
+  if (entries > 2) pool.push(['chronicle', base.chronicle]);
+  const adjusted = pool.map(([id, weight]) => {
+    if (!streak || streak.source !== id) return [id, weight];
+    if (Number(streak.count) >= 2) return [id, 0];
+    if (Number(streak.count) === 1) return [id, weight / 2];
+    return [id, weight];
+  }).filter(([, weight]) => weight > 0);
+  const source = weightedPick(adjusted.length ? adjusted : pool, rng);
+  const next = streak && streak.source === source
+    ? { source, count: Number(streak.count) + 1 }
+    : { source, count: 1 };
+  return { source, streak: next };
+}
+
 export function pickErrandGravity(objectiveMonths, rng = Math.random) {
   const months = Math.max(1, Number(objectiveMonths) || 1);
   if (months <= 2) return weightedPick([['SITUATION', 80], ['EPISODE', 20]], rng);
@@ -85,13 +131,16 @@ export function pickErrandGravity(objectiveMonths, rng = Math.random) {
 }
 
 /** Год хроники без записей ещё открытых историй. */
-export function yearChronicleGrain(domain, world, { yearTicks = YEAR_TICKS } = {}) {
+export function yearChronicleGrain(domain, world, { yearTicks = YEAR_TICKS, day = null } = {}) {
   const now = Number(world?.tickIndex) || 0;
+  const sinceDay = day == null ? null : Math.round(Number(day) || 0) - 360;
   const live = new Set(
     (domain?.plotlines || []).filter((p) => isStoryPlot(p)).map((p) => String(p.id)),
   );
   return chronicleEntries(domain?.lore).filter((fact) => {
-    if (Number.isFinite(Number(fact.tick)) && now - Number(fact.tick) >= yearTicks) return false;
+    if (sinceDay != null && Number.isFinite(Number(fact.day))) {
+      if (Number(fact.day) < sinceDay) return false;
+    } else if (Number.isFinite(Number(fact.tick)) && now - Number(fact.tick) >= yearTicks) return false;
     const refs = [...(fact.relatedPlotlineIds || []), fact.sourcePlotId]
       .map((id) => String(id || ''))
       .filter((id) => id && id !== 'null' && id !== 'undefined');

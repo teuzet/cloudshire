@@ -11,7 +11,9 @@
 
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, realMsToGameDays } from './gameClock.js';
 import { chronicleEntries } from './models.js';
-import { SEED_SOURCES, seedConfig, normalizeSeedTemp, worldSeedChance } from './seedTemp.js';
+import { SEED_SOURCES, seedConfig, readCityTemp, touchCityTemp, errandSeedChance } from './seedTemp.js';
+import { pickCityGravity, pickCitySource, yearChronicleGrain, pickErrandGravity, formatErrandGrain } from './seedChannels.js';
+import { occupiedOfficerSlots } from './plotlines.js';
 import { liveThreats } from './threats.js';
 import { isStakedStory } from './plotlines.js';
 
@@ -113,35 +115,80 @@ export function saturationFactor(liveCount) {
  * Выбор канала — взвешенный по температурам, а не «первый прошедший порог»:
  * иначе холодный канал не сеет никогда.
  */
-export function decideSeedAttempt(domain, { day = 0, config = null, rng = Math.random } = {}) {
+export const ERRAND_SEED_DELAY_DAYS = [20, 40];
+export const CITY_SLOT_GATE = 4;
+
+/**
+ * Городской посев. Пока занято больше четырёх слотов сановников, броска нет.
+ * Температура одна на хронику, описание города и пустоту.
+ */
+export function decideCitySeed(domain, { day = 0, world = null, config = null, rng = Math.random } = {}) {
   const cfg = seedConfig(config);
-  const temps = normalizeSeedTemp(domain?.state?.seedTemp, cfg);
-  const factor = saturationFactor(countOpenStories(domain));
-
-  if (inSeedCooldown(domain, day) || factor <= 0) {
-    return { seed: false, reason: factor <= 0 ? 'saturated' : 'cooldown', temps };
+  const temp = readCityTemp(domain, cfg);
+  const occupied = occupiedOfficerSlots(domain);
+  if (occupied > CITY_SLOT_GATE) {
+    touchCityTemp(domain, 'idle', cfg);
+    return { seed: false, reason: 'full', temp, occupied };
   }
-
-  const weights = SEED_SOURCES.map((source) => ({
-    source,
-    weight: Math.max(0, worldSeedChance(temps[source], cfg)),
-  }));
-  const total = weights.reduce((sum, w) => sum + w.weight, 0);
-  if (total <= 0) return { seed: false, reason: 'cold', temps };
-
-  const chance = Math.min(1, (total / SEED_SOURCES.length) * factor);
-  if (rng() >= chance) return { seed: false, reason: 'roll', temps, chance };
-
-  let r = rng() * total;
-  let picked = weights[weights.length - 1].source;
-  for (const w of weights) {
-    r -= w.weight;
-    if (r <= 0) {
-      picked = w.source;
-      break;
-    }
+  const chance = Math.min(1, temp / cfg.max);
+  if (rng() >= chance) {
+    touchCityTemp(domain, 'miss', cfg);
+    return { seed: false, reason: 'roll', temp, chance, occupied };
   }
-  return { seed: true, source: picked, temps, chance };
+  const entries = yearChronicleGrain(domain, world, { day }).length;
+  const picked = pickCitySource({
+    entries,
+    weights: cfg.sourceWeights,
+    streak: domain.state?.citySeedStreak || null,
+    rng,
+  });
+  if (!domain.state) domain.state = {};
+  domain.state.citySeedStreak = picked.streak;
+  const open = (domain.plotlines || []).filter((p) => isStakedStory(p) && p.status !== 'closed');
+  const gravity = pickCityGravity(open, rng, cfg.gravityWeights);
+  touchCityTemp(domain, 'seed', cfg);
+  return { seed: true, source: picked.source, gravity, temp, chance, occupied };
+}
+
+/**
+ * Завершённое поручение бросает свой канал. Попадание появляется через месяц.
+ * Возвращает заявку или null.
+ */
+export function offerErrandSeed(domain, outcome, { day = 0, config = null, rng = Math.random } = {}) {
+  const cfg = seedConfig(config);
+  if (!domain.state) domain.state = {};
+  const temps = domain.state.seedTemp;
+  const errandTemp = Number(temps?.errand);
+  const temp = Number.isFinite(errandTemp) ? errandTemp : cfg.errandStart;
+  const months = Number(outcome?.objectiveMonths || outcome?.expectedMonths) || 0;
+  const chance = errandSeedChance(temp, months, cfg);
+  const touch = (event) => {
+    const deltas = cfg.errand || { seed: -6, miss: 2, idle: 1 };
+    const next = Math.max(0, Math.min(cfg.max, temp + (deltas[event] || 0)));
+    domain.state.seedTemp = { ...(domain.state.seedTemp || {}), errand: next };
+    return next;
+  };
+  if (rng() >= chance) {
+    touch('miss');
+    return null;
+  }
+  touch('seed');
+  const gravity = pickErrandGravity(months, rng);
+  const delay = rollRange(cfg.errandDelayDays || ERRAND_SEED_DELAY_DAYS, rng);
+  return enqueueSeedRequest(domain, {
+    source: 'errand',
+    grain: 'errand',
+    gravity,
+    seedText: formatErrandGrain(outcome),
+    sourceProcessId: outcome?.processId || null,
+    day,
+    delayDays: delay,
+    rng,
+  });
+}
+
+export function decideSeedAttempt(domain, opts = {}) {
+  return decideCitySeed(domain, opts);
 }
 
 // ──────────────────────── очередь отложенных посевов ────────────────────────
@@ -172,6 +219,7 @@ export function enqueueSeedRequest(
     sourceOrderId = null,
     grain = null,
     gravity = null,
+    seedText = null,
     day = 0,
     delayDays = null,
     rng = Math.random,
@@ -186,6 +234,7 @@ export function enqueueSeedRequest(
     sourceOrderId: sourceOrderId || null,
     grain: grain || null,
     gravity: gravity || null,
+    seedText: seedText ? String(seedText) : null,
     requestedDay: Math.round(Number(day) || 0),
     appearDay: Math.round(Number(day) || 0) + delay,
     postponed: 0,

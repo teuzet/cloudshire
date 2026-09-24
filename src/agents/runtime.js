@@ -14,7 +14,7 @@ import {
   appendCityAgentTranscript,
   recordCityLlmEvent,
   recordCityToolEvent,
-  shouldLogLiveCityAgent,
+  shouldCaptureAgentLog,
 } from '../game/cityAgentLog.js';
 
 const deadlineStore = new AsyncLocalStorage();
@@ -238,7 +238,7 @@ export class AgentRuntime {
     });
 
     const cityLog = {
-      on: shouldLogLiveCityAgent({
+      on: shouldCaptureAgentLog({
         config: this.config,
         domainId,
         agentId,

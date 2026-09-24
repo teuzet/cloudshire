@@ -8,6 +8,8 @@ import {
   decideMonthSeed,
   applyMonthSeedTemps,
   pickWorldGravity,
+  pickCitySource,
+  pickCityGravity,
 } from '../src/game/seedChannels.js';
 
 const config = loadConfig();
@@ -137,6 +139,46 @@ test('после посева температура канала падает, 
   assert.equal(d.state.seedTemp.chronicle, 6);
   assert.equal(d.state.seedTemp.void, 0);
   assert.equal(d.state.seedTemp.errand, 10);
+});
+
+test('два одинаковых источника подряд выкидывают третий, один подряд режет вес', () => {
+  const first = pickCitySource({ entries: 0, rng: () => 0 });
+  assert.equal(first.source, 'genesis');
+  assert.deepEqual(first.streak, { source: 'genesis', count: 1 });
+
+  const halved = pickCitySource({ entries: 0, streak: first.streak, rng: () => 0.4 });
+  assert.equal(halved.source, 'void');
+
+  const second = pickCitySource({ entries: 0, streak: first.streak, rng: () => 0 });
+  assert.equal(second.source, 'genesis');
+  assert.equal(second.streak.count, 2);
+
+  const third = pickCitySource({ entries: 0, streak: second.streak, rng: () => 0 });
+  assert.equal(third.source, 'void');
+  assert.deepEqual(third.streak, { source: 'void', count: 1 });
+});
+
+test('хроника входит в пул только после двух записей за год', () => {
+  const thin = pickCitySource({
+    entries: 2,
+    streak: { source: 'genesis', count: 2 },
+    rng: () => 0.99,
+  });
+  assert.equal(thin.source, 'void');
+  const thick = pickCitySource({
+    entries: 3,
+    streak: { source: 'void', count: 2 },
+    rng: () => 0.99,
+  });
+  assert.equal(thick.source, 'chronicle');
+});
+
+test('стоящий на доске масштаб весит вдвое меньше', () => {
+  const open = [{ gravity: 'SITUATION' }];
+  const bare = pickCityGravity([], () => 0.35);
+  const crowded = pickCityGravity(open, () => 0.35);
+  assert.equal(bare, 'SITUATION');
+  assert.equal(crowded, 'EPISODE');
 });
 
 test('gravity мира в день 0 не застревает на ситуации', () => {

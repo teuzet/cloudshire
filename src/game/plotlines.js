@@ -211,6 +211,51 @@ export function formatCloseWhen(plot) {
   return String(plot?.closeWhen || '').trim() || '—';
 }
 
+/** Сколько сановников история занимает своим масштабом. */
+export const STORY_OFFICER_SLOTS = {
+  SITUATION: 1,
+  EPISODE: 2,
+  CRISIS: 3,
+  RUPTURE: 4,
+};
+
+export function storyOfficerSlots(plot) {
+  return STORY_OFFICER_SLOTS[parseFreeformGravity(plot?.gravity)] ?? STORY_OFFICER_SLOTS.EPISODE;
+}
+
+export function occupiedOfficerSlots(domain) {
+  let n = 0;
+  for (const plot of domain?.plotlines || []) {
+    if (!isStoryPlot(plot) || plot.status === 'closed') continue;
+    n += storyOfficerSlots(plot);
+  }
+  return n;
+}
+
+/**
+ * Верх бюджета бед истории: сумма верхних границ всех её стадий, включая концовку.
+ * Чистое завершение бросает от 1 до четверти этого числа.
+ */
+export function storyWoundUpper(plot, config = null) {
+  const g = parseFreeformGravity(plot?.gravity);
+  const stages = {
+    SITUATION: ['SITUATION'],
+    EPISODE: ['SITUATION', 'EPISODE'],
+    CRISIS: ['SITUATION', 'EPISODE', 'CRISIS'],
+    RUPTURE: ['SITUATION', 'EPISODE', 'CRISIS', 'RUPTURE'],
+  }[g] || ['SITUATION', 'EPISODE'];
+  return stages.reduce((sum, scale) => sum + woundBudgetRange(scale, config)[1], 0);
+}
+
+export function storyCompletionCeiling(plot, config = null) {
+  return Math.max(1, Math.round(storyWoundUpper(plot, config) / 4));
+}
+
+export function rollStoryCompletionBudget(plot, config = null, rng = Math.random) {
+  const max = storyCompletionCeiling(plot, config);
+  return 1 + Math.floor(rng() * max);
+}
+
 export const GRAVITY_STAT_BUDGET = {
   SITUATION: 5,
   EPISODE: 10,

@@ -28,6 +28,9 @@ export class MongoStorage {
     await this.db.collection('users').createIndex({ userId: 1 }, { unique: true });
     await this.db.collection('world_archives').createIndex({ worldId: 1 }, { unique: true });
     await this.db.collection('usage').createIndex({ worldId: 1, ts: -1 });
+    await this.db.collection('agent_logs').createIndex({ worldId: 1, ts: -1 });
+    await this.db.collection('agent_logs').createIndex({ agentId: 1, ts: -1 });
+    await this.db.collection('agent_logs').createIndex({ domainIds: 1, ts: -1 });
 
     const world = await this.getWorld();
     if (!world) {
@@ -203,6 +206,11 @@ export class MongoStorage {
     await this.col('usage').insertOne({ ...row });
   }
 
+  async appendAgentLog(doc) {
+    if (!doc || typeof doc !== 'object') return;
+    await this.col('agent_logs').insertOne({ ...doc });
+  }
+
   async listUsage({ worldId = null, limit = 5000 } = {}) {
     const filter = {};
     if (worldId) filter.worldId = String(worldId);
@@ -292,6 +300,7 @@ export class MongoStorage {
       await this.col('world').deleteMany({});
       if (world?.id) {
         await this.col('usage').deleteMany({ worldId: world.id });
+        await this.col('agent_logs').deleteMany({ worldId: world.id });
       }
 
       const next = createWorldFromConfig(this.config);

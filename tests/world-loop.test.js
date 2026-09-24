@@ -267,6 +267,8 @@ test('DIRECT-успех при набранной глубине закрыва�
   assert.equal(res.closed, true);
   assert.equal(plot.ending.kind, 'GOOD_ENDING');
   assert.equal(domain.plotlines.length, 0);
+  assert.ok(domain.lore[0].completionBudget >= 1 && domain.lore[0].completionBudget <= 4);
+  assert.equal(seedQueue(domain).length, 0);
 });
 
 test('DIRECT-провал стоит жизни, а не глубины', async () => {
@@ -697,6 +699,46 @@ test('дело о постоянном порядке кладёт след в �
   assert.equal(domain.lore[0].author, 'engine:rule');
 });
 
+test('длинное поручение сеет историю через двадцать–сорок дней', async () => {
+  const domain = makeDomain();
+  const world = makeWorld();
+  domain.state.seedTemp = { city: 5, errand: 10 };
+  const process = startDeed(
+    {
+      id: 'err1',
+      summary: 'белый обелиск',
+      goal: 'поставить камень',
+      detail: 'на площади',
+      status: 'active',
+    },
+    { day: 100, judged: { durationBand: 'YEARS', difficulty: 'SEVERE', objectiveDays: 360 } },
+  );
+  domain.state.pendingActions.push(process);
+  await resolveDeedEvent({
+    config,
+    runtime: noRuntime,
+    domain,
+    world,
+    day: 130,
+    processId: 'err1',
+    forcedFinish: 'crit',
+    rng: () => 0,
+    log: silentLog,
+  });
+  const req = seedQueue(domain)[0];
+  assert.equal(seedQueue(domain).length, 1);
+  assert.equal(req.source, 'errand');
+  assert.equal(req.grain, 'errand');
+  assert.equal(req.gravity, 'CRISIS');
+  assert.equal(req.appearDay, 150);
+  assert.match(req.seedText, /белый обелиск/);
+  assert.match(req.seedText, /12 мес/);
+  assert.equal(domain.state.seedTemp.errand, 4);
+  const appear = jobList(world).filter((j) => j.kind === 'seed_appear');
+  assert.equal(appear.length, 1);
+  assert.equal(appear[0].dueDay, 150);
+});
+
 // ───────────────────────────── угроза сработала ─────────────────────────────
 
 test('срабатывание беды пишет её текст и тратит жизнь', async () => {
@@ -861,24 +903,30 @@ test('попытка посева всегда ставит следующую �
   assert.ok(attempts[0].dueDay > 120);
 });
 
-test('удачная попытка ставит появление и уходит в холодный период', () => {
+test('удачная попытка ставит появление в тот же день и остужает город', () => {
   const domain = makeDomain();
   const world = makeWorld();
   const decision = seedAttemptEvent({ config, domain, world, day: 120, rng: () => 0, log: silentLog });
   assert.equal(decision.seed, true);
+  assert.equal(decision.source, 'genesis');
   assert.equal(seedQueue(domain).length, 1);
-  assert.equal(jobList(world).filter((j) => j.kind === 'seed_appear').length, 1);
-  assert.ok(domain.state.seedCooldownUntilDay > 120);
+  assert.equal(seedQueue(domain)[0].appearDay, 120);
+  const appear = jobList(world).filter((j) => j.kind === 'seed_appear');
+  assert.equal(appear.length, 1);
+  assert.equal(appear[0].dueDay, 120);
+  assert.equal(domain.state.seedTemp.city, 0);
+  assert.equal(domain.state.seedCooldownUntilDay, undefined);
 });
 
-test('насыщенный историями домен не сеет', () => {
+test('слоты сановников сверх четырёх глушат посев и греют город', () => {
   const plots = [1, 2, 3, 4, 5].map((i) => makePlot({ id: `p${i}`, gravity: 'RUPTURE', maxFails: 3 }));
   const domain = makeDomain({ plots });
   const world = makeWorld();
   const decision = seedAttemptEvent({ config, domain, world, day: 120, rng: () => 0, log: silentLog });
   assert.equal(decision.seed, false);
-  assert.equal(decision.reason, 'saturated');
+  assert.equal(decision.reason, 'full');
   assert.equal(seedQueue(domain).length, 0);
+  assert.equal(domain.state.seedTemp.city, 6);
 });
 
 test('полная доска переносит появление, а не выбрасывает заявку', async () => {

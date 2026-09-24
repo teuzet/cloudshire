@@ -162,17 +162,27 @@ test('провал, закрывший историю, держит минус �
     endingKind: 'BAD_ENDING',
   }, CFG);
   assert.equal(parts.down, 6);
-  assert.equal(parts.up, 2);
+  assert.equal(parts.up, 0);
   assert.equal(parts.deed, 0);
 });
 
-test('завязка — только минус масштаба истории', () => {
+test('завязка статы не двигает, чистое завершение бросает четверть верхней границы', () => {
   const plot = createPlotline({ title: 'Разлом', type: 'story', gravity: 'RUPTURE' });
   const domain = { plotlines: [plot] };
-  const parts = statPartsForFact(domain, {
+  const seed = statPartsForFact(domain, {
     author: 'freeform:seed',
     statPocket: 'seed',
     relatedPlotlineIds: [plot.id],
   }, CFG);
-  assert.deepEqual(parts, { up: 0, down: 3, deed: 0 });
+  assert.deepEqual(seed, { up: 0, down: 0, deed: 0 });
+  const done = statPartsForFact(domain, {
+    author: 'engine:deed',
+    relatedPlotlineIds: [plot.id],
+    statPocket: 'ending',
+    plotClosed: true,
+    endingKind: 'GOOD_ENDING',
+    completionBudget: 7,
+  }, CFG);
+  assert.equal(done.up, 7);
+  assert.equal(done.down, 0);
 });

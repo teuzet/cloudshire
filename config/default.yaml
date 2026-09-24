@@ -17,7 +17,8 @@ logging:
   dir: ./logs
   file: true
   seedDump: true
-  # Один файл на живой город: полный промпт, tools, результаты. После генезиса.
+  # Локально — один файл на живой город после генезиса.
+  # На сервере с mongo каждый прогон любого агента — документ в agent_logs.
   cityAgent: true
 
 telegram:
@@ -66,8 +67,9 @@ tick:
   maxActiveProcesses: 4
   # Conflux: матчмейкинг и геометрия сопряжения — только код (не LLM).
   # Темп: одно сопряжение на домен примерно в двое суток. Доля времени — замер.
+  # enabled: false — новые сопряжения не начинаются. Уже идущие и логика пары остаются.
   conflux:
-    enabled: true
+    enabled: false
     cadenceHours: 48
     cadenceJitterHours: 6
     scheduleSlackHours: 12
@@ -355,9 +357,20 @@ tick:
       errandStart: 10
       worldLiveBelow: 3
       errandDurationDiv: 3
+      # Город сеет, пока истории занимают не больше стольких слотов сановников.
+      slotGate: 4
+      errandDelayDays: [20, 40]
+      gravityWeights:
+        SITUATION: 4
+        EPISODE: 3
+        CRISIS: 2
+        RUPTURE: 1
+      sourceWeights:
+        chronicle: 1
+        genesis: 1
+        void: 1
       chronicle: { seed: -6, miss: 2, idle: 1 }
       void: { seed: -6, miss: 2, idle: 1 }
-      # Пустой канал: доля посевов из описания города, иначе настоящая пустота.
       voidGenesisChance: 0.5
       errand: { seed: -6, miss: 2, idle: 1 }
     beats:
