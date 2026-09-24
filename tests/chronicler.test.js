@@ -407,6 +407,45 @@ test('обычная запись о деле развязку не тянет �
   assert.doesNotMatch(text, /Развязка истории|лестница смолкла/);
 });
 
+test('хроника истории получает факты, которые лормастер к ней привязал', () => {
+  const p = plot({ factIds: ['lore_linked'] });
+  const city = domain();
+  city.lore = [
+    { id: 'lore_linked', tags: ['fact'], text: 'Ступени гудят от пустоты под ними.', sourcePlotId: 'p1' },
+    { id: 'lore_other', tags: ['fact'], text: 'На рынке торгуют солью.', sourcePlotId: 'p9' },
+    {
+      id: 'lore_chron',
+      tags: ['chronicle'],
+      text: 'Вчера ступени снова гудели.',
+      sourcePlotId: 'p1',
+      relatedPlotlineIds: ['p1'],
+    },
+  ];
+  const deedText = formatDeedPrompt({
+    domain: city,
+    plot: p,
+    process: deed,
+    applied: { alignment: 'DIRECT', finish: 'ok' },
+  });
+  const threatText = formatThreatPrompt({
+    domain: city,
+    plot: p,
+    threat: { text: 'Пустота под ступенями просядет' },
+  });
+  const finaleText = formatFinalePrompt({
+    domain: city,
+    plot: p,
+    ending: { kind: 'BAD_ENDING', text: 'Лестница провалилась' },
+    triggerLines: ['Беда случилась.'],
+  });
+  for (const text of [deedText, threatText, finaleText]) {
+    assert.match(text, /ФАКТЫ ЭТОЙ ИСТОРИИ/);
+    assert.match(text, /Ступени гудят от пустоты под ними/);
+    assert.doesNotMatch(text, /На рынке торгуют солью/);
+    assert.doesNotMatch(text, /Вчера ступени снова гудели/);
+  }
+});
+
 test('нейтральная развязка — не победа и не крушение', () => {
   const p = plot({
     endings: [{ id: 'e_n', kind: 'NEUTRAL_ENDING', text: 'осевшее крыло огородили и забыли' }],

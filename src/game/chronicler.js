@@ -23,6 +23,7 @@ import { FINISH_LABELS } from './rolls.js';
 import { findOfficer, officerGender } from './officers.js';
 import { livesLeft, firedThreatScale } from './threats.js';
 import { formatFreeformGravityForPrompt } from './freeform.js';
+import { formatStoryFactsBlock, storyLinkedFacts } from './memory.js';
 import { toolFail } from '../agents/toolResult.js';
 
 export const CHRONICLE_ENTRY_MAX = 400;
@@ -256,7 +257,7 @@ export function endingText(plot, ending) {
   return String(ending?.text || '').trim() || null;
 }
 
-function plotBlock(plot, chronicleTail = []) {
+function plotBlock(plot, chronicleTail = [], storyFacts = []) {
   if (!plot) return [];
   const lines = [`ЧАСТЬ ИСТОРИИ (название — служебное, в запись не выноси): ${plot.title || '—'}`];
   if (plot.synopsis) lines.push(`Как обстояло до сего дня: ${plot.synopsis}`);
@@ -264,6 +265,8 @@ function plotBlock(plot, chronicleTail = []) {
     lines.push('Уже записано по этой истории (не отменяй и не повторяй):');
     for (const t of chronicleTail) lines.push(`- ${t}`);
   }
+  const facts = formatStoryFactsBlock(storyFacts);
+  if (facts) lines.push(facts);
   return lines;
 }
 
@@ -322,6 +325,7 @@ export function formatDeedPrompt({
   averted = [],
   closed = false,
   chronicleTail = [],
+  storyFacts = null,
   dateLabel = '',
   partnerName = '',
   passage = '',
@@ -340,7 +344,7 @@ export function formatDeedPrompt({
     '',
     ...deedConsequenceLines({ plot, applied, threat, averted, closed }),
     '',
-    ...plotBlock(plot, chronicleTail),
+    ...plotBlock(plot, chronicleTail, storyFacts ?? storyLinkedFacts(domain, plot)),
     '',
     ...(cross ? neighbourBlock({ partnerName, passage, pairArchive }) : []),
     'Календарную дату в текст не пиши: она стоит на записи отдельно.',
@@ -368,9 +372,11 @@ function threatGravityLines(scale, config) {
 }
 
 export function formatThreatPrompt({
+  domain = null,
   plot,
   threat,
   chronicleTail = [],
+  storyFacts = null,
   dateLabel = '',
   config = null,
   causeLines = [],
@@ -388,7 +394,7 @@ export function formatThreatPrompt({
     '',
     threatGravityLines(firedThreatScale(plot, threat), config),
     '',
-    ...plotBlock(plot, chronicleTail),
+    ...plotBlock(plot, chronicleTail, storyFacts ?? storyLinkedFacts(domain, plot)),
     '',
     'Календарную дату в текст не пиши: она стоит на записи отдельно.',
     'Напиши одну запись хроники. Вызови submit_chronicle.',
@@ -476,11 +482,13 @@ export function threatTriggerLines(threat) {
  * от этого не меняется.
  */
 export function formatFinalePrompt({
+  domain = null,
   plot,
   ending = null,
   triggerLines = [],
   causeLines = [],
   chronicleTail = [],
+  storyFacts = null,
   dateLabel = '',
   entryMax = CHRONICLE_FINALE_MAX,
   config = null,
@@ -504,7 +512,7 @@ export function formatFinalePrompt({
     ENDING_KIND_LINE[kind] || ENDING_KIND_LINE.NEUTRAL_ENDING,
     'Покажи, почему вопрос больше не стоит и что в городе теперь иначе.',
     '',
-    ...plotBlock(plot, chronicleTail),
+    ...plotBlock(plot, chronicleTail, storyFacts ?? storyLinkedFacts(domain, plot)),
     '',
     'Календарную дату в текст не пиши: она стоит на записи отдельно.',
     `Одна связная запись до ${limit} символов. Вызови submit_chronicle.`,

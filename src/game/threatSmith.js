@@ -8,6 +8,7 @@
 
 import { getLogger } from '../log.js';
 import { captureAgentPrompt } from './agentPrompt.js';
+import { formatStoryFactsBlock, storyLinkedFacts } from './memory.js';
 import { plotChronicleTail } from './chronicler.js';
 import { formatFreeformGravityForPrompt } from './freeform.js';
 import { attachThreat, createThreat, formatKnownUnknown, stagePoolRequest } from './threats.js';
@@ -38,7 +39,7 @@ function chronicleBlock(entries) {
  * Хроника должна уже лежать на домене: пул пишется после записи, которая
  * открыла эту стадию.
  */
-export function formatThreatStageRequest(req, plot, config = null, { chronicle = [] } = {}) {
+export function formatThreatStageRequest(req, plot, config = null, { chronicle = [], storyFacts = [] } = {}) {
   const stage = threatStageBrief(config, req.final);
   const story = [
     'ИСТОРИЯ',
@@ -54,7 +55,13 @@ export function formatThreatStageRequest(req, plot, config = null, { chronicle =
     `НУЖНО БЕД: ${req.count}.`,
     stage,
   ].filter(Boolean);
-  const sections = [story.join('\n'), chronicleBlock(chronicle), order.join('\n'), formatKnownUnknown(plot)];
+  const sections = [
+    story.join('\n'),
+    chronicleBlock(chronicle),
+    formatStoryFactsBlock(storyFacts),
+    order.join('\n'),
+    formatKnownUnknown(plot),
+  ];
   return sections.filter(Boolean).join('\n\n');
 }
 
@@ -106,6 +113,7 @@ export async function draftStageThreats({ runtime, domain, plot, request, config
         role: 'user',
         content: formatThreatStageRequest(request, plot, config, {
           chronicle: plotChronicleTail(domain, plot?.id),
+          storyFacts: storyLinkedFacts(domain, plot),
         }),
       },
     ],

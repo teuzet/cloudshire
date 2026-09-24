@@ -9,6 +9,7 @@ import {
   parseFreeformEndingKind,
 } from './plotlines.js';
 import { formatFreeformGravityForPrompt, plotCardForPrompt, plotChronicleForPrompt } from './freeform.js';
+import { formatStoryFactsBlock, storyLinkedFacts } from './memory.js';
 import { formatCityForAgents } from './cityContext.js';
 
 function formatEndingsBrief(domain) {
@@ -147,6 +148,8 @@ async function askEndings({ runtime, domain, plot, repair = '', log, config }) {
           formatFreeformGravityForPrompt(plot?.gravity, config),
           '',
           plotChronicleForPrompt(domain, plot),
+          '',
+          formatStoryFactsBlock(storyLinkedFacts(domain, plot)),
           '',
           'Скрытое учти как «На самом деле», в формулировку концовки его не пиши.',
           repair

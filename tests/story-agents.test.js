@@ -135,6 +135,37 @@ test('автор не получает отдельный список прош�
   assert.doesNotMatch(text, /фундамент садится/);
 });
 
+test('автор бед видит факты, привязанные к этой истории', async () => {
+  const p = plot({ gravity: 'SITUATION', maxFails: 0, failCount: 0, factIds: ['lore_linked'] });
+  const runtime = fakeRuntime({
+    submit_threats: { threats: ['Пыль забьёт водосборный сток'] },
+  });
+  await fillStageThreats({
+    runtime,
+    domain: {
+      ...domain,
+      lore: [
+        { id: 'lore_linked', tags: ['fact'], text: 'Под лестницей пустота на два роста.', sourcePlotId: p.id },
+        { id: 'lore_other', tags: ['fact'], text: 'Этот факт в список не клали.', sourcePlotId: 'p9' },
+        { id: 'lore_chron', tags: ['chronicle'], text: 'Дорогу уже перерезали.', sourcePlotId: p.id },
+      ],
+    },
+    plot: p,
+    day: 10,
+    config: { tick: { plot: { threats: { perStage: { SITUATION: [1, 1] } } } } },
+    rng: () => 0,
+  });
+  const text = runtime.calls[0].prompt;
+  const factsAt = text.indexOf('ФАКТЫ ЭТОЙ ИСТОРИИ');
+  const orderAt = text.indexOf('ЗАКАЗ');
+  assert.ok(factsAt >= 0 && orderAt > factsAt);
+  assert.match(text, /Под лестницей пустота на два роста/);
+  assert.match(text, /не отменяй и не выдавай за новую новость/);
+  assert.doesNotMatch(text, /Этот факт в список не клали/);
+  const facts = text.slice(factsAt, orderAt);
+  assert.doesNotMatch(facts, /Дорогу уже перерезали/);
+});
+
 test('автор бед видит хронику, которая уже случилась', () => {
   const p = plot({ failCount: 0, maxFails: 2, stage: 0 });
   const text = formatThreatStageRequest(stagePoolRequest(p, { rng: () => 0 }), p, loadConfig(), {

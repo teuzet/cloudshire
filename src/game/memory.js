@@ -134,6 +134,30 @@ export function formatFactsForPrompt(lore = [], { limit = 40 } = {}) {
     .join('\n');
 }
 
+/** Устойчивые факты, которые лормастер или движок привязали к этой истории. */
+export function storyLinkedFacts(domain, plot) {
+  const id = String(plot?.id || '');
+  if (!id) return [];
+  const ids = new Set((plot?.factIds || []).map(String));
+  return (domain?.lore || []).filter((fact) => {
+    if (!fact || fact.retiredAt) return false;
+    const tags = fact.tags || [];
+    if (!tags.includes('fact') || tags.includes('retired') || tags.includes('chronicle')) return false;
+    if (ids.has(String(fact.id))) return true;
+    if (String(fact.sourcePlotId || '') === id) return true;
+    return (fact.relatedPlotlineIds || []).map(String).includes(id);
+  });
+}
+
+export function formatStoryFactsBlock(facts) {
+  const lines = (facts || []).map((fact) => String(fact?.text || fact || '').trim()).filter(Boolean);
+  if (!lines.length) return '';
+  return [
+    'ФАКТЫ ЭТОЙ ИСТОРИИ (уже установлено; не отменяй и не выдавай за новую новость):',
+    ...lines.map((text) => `- ${text}`),
+  ].join('\n');
+}
+
 /**
  * Служебные строки старта: остров, календарь, перечень сановников.
  * Игроку их можно показать один раз, но это не речь жреца и не лог чата.

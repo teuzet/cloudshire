@@ -165,6 +165,27 @@ test('FAIL судьи даёт ровно один круг починки', asy
   assert.match(res.endings[0].text, /Гнездовье перенесли/);
 });
 
+test('автор концовок получает факты этой истории', async () => {
+  const runtime = endingsRuntime();
+  const p = plot({ factIds: ['lore_linked'] });
+  const city = {
+    ...domain,
+    lore: [
+      {
+        id: 'lore_linked',
+        tags: ['fact'],
+        text: 'Гон идёт, пока в карьере тепло.',
+        relatedPlotlineIds: ['p1'],
+      },
+      { id: 'lore_other', tags: ['fact'], text: 'Соль везут с южного берега.', sourcePlotId: 'p9' },
+    ],
+  };
+  await refreshFreeformEndings({ runtime, domain: city, plot: p, log: silentLog });
+  assert.match(runtime.calls[0].user, /ФАКТЫ ЭТОЙ ИСТОРИИ/);
+  assert.match(runtime.calls[0].user, /Гон идёт, пока в карьере тепло/);
+  assert.doesNotMatch(runtime.calls[0].user, /Соль везут с южного берега/);
+});
+
 test('судья видит первопричину и обе новые строки', () => {
   const text = formatEndingsJudgeCase(plot(), normalizeFreeformEndings([GOOD]));
   assert.match(text, /Первопричина: гон костоломов — сезонный цикл карьерных птиц/);

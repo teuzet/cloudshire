@@ -13,6 +13,7 @@
 
 import { newId } from './ids.js';
 import { createLoreFact, markChroniclePlotClosed } from './models.js';
+import { storyLinkedFacts } from './memory.js';
 import { gameDateFromDay } from './gameClock.js';
 import {
   scheduleJob,
@@ -429,6 +430,10 @@ export async function resolveDeedEvent({
   }
   if (!text) {
     const tail = plotChronicleTail(plotHost || domain, plot?.id);
+    const storyFacts = [
+      ...storyLinkedFacts(domain, plot),
+      ...(plotHost && plotHost !== domain ? storyLinkedFacts(plotHost, plot) : []),
+    ];
     // Провал, переполнивший шкалу, не пишет отдельную хронику дела.
     // Событие — выбранная беда, провал только причина, которая к ней привела.
     const failLed = Boolean(firedThreat) && rolled.finish === 'fail';
@@ -439,11 +444,13 @@ export async function resolveDeedEvent({
       occasion = 'развязка';
       agentId = 'chronicleFinale';
       prompt = formatFinalePrompt({
+        domain: plotHost || domain,
         plot,
         ending: plot.ending || null,
         triggerLines: threatTriggerLines(firedThreat),
         causeLines: failedDeedCauseLines({ domain, process, applied }),
         chronicleTail: tail,
+        storyFacts,
         config,
         scale: firedThreatScale(plot, firedThreat),
       });
@@ -451,18 +458,22 @@ export async function resolveDeedEvent({
       occasion = 'угроза';
       agentId = 'chronicleThreat';
       prompt = formatThreatPrompt({
+        domain: plotHost || domain,
         plot,
         threat: firedThreat,
         causeLines: failedDeedCauseLines({ domain, process, applied }),
         chronicleTail: tail,
+        storyFacts,
         config,
       });
     } else if (closesStory) {
       prompt = formatFinalePrompt({
+        domain: plotHost || domain,
         plot,
         ending: plot.ending || null,
         triggerLines: deedTriggerLines({ domain, process, applied }),
         chronicleTail: tail,
+        storyFacts,
       });
     } else {
       prompt = formatDeedPrompt({
@@ -475,6 +486,7 @@ export async function resolveDeedEvent({
         linked: Boolean(firedThreat),
         closed: false,
         chronicleTail: tail,
+        storyFacts,
         partnerName: process.crossIsland ? partner?.name || '' : '',
         passage: process.crossIsland && conflux ? formatPassageForPrompt(conflux) : '',
         pairArchive:
@@ -692,6 +704,7 @@ export async function fireThreatEvent({
     maxChars: closesStory ? CHRONICLE_FINALE_MAX : undefined,
     prompt: closesStory
       ? formatFinalePrompt({
+          domain,
           plot,
           ending: plot.ending || null,
           triggerLines: threatTriggerLines(threat),
@@ -701,6 +714,7 @@ export async function fireThreatEvent({
           scale: firedThreatScale(plot, threat),
         })
       : formatThreatPrompt({
+          domain,
           plot,
           threat,
           closed: false,
