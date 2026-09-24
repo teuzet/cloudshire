@@ -8,6 +8,7 @@ import { countOpen, plotConfig, isStoryPlot, parseFreeformGravity } from './plot
 import { FINISH_SHORT } from './rolls.js';
 import {
   SEED_SOURCES,
+  GRAIN_BASE_WEIGHTS,
   seedConfig,
   normalizeSeedTemp,
   touchSeedTemp,
@@ -350,6 +351,135 @@ export function grainForSource({
   if (decision.source === 'errand' && !errand) decision.source = 'void';
   if (decision.source === 'chronicle' && !chronicle.length) decision.source = 'void';
   return attachGrain(decision, { domain, world, config, chronicle, errand, chronicleAdds, rng });
+}
+
+/** Доли расписания на 50 историй: ситуация и эпизод поровну, вместе около 55%. */
+export const GRAVITY_SCHEDULE_COUNTS = {
+  SITUATION: 14,
+  EPISODE: 14,
+  CRISIS: 17,
+  RUPTURE: 5,
+};
+
+/**
+ * Расписание масштабов без двух одинаковых подряд.
+ * Из оставшихся, кроме предыдущего, берётся самый частый; ничья — жребий.
+ */
+export function buildGravitySchedule(rng = Math.random, { prev = null, counts = GRAVITY_SCHEDULE_COUNTS } = {}) {
+  const left = { ...counts };
+  const out = [];
+  let last = prev;
+  const total = Object.values(left).reduce((sum, n) => sum + n, 0);
+  for (let i = 0; i < total; i += 1) {
+    const options = Object.keys(left).filter((key) => left[key] > 0 && key !== last);
+    const pool = options.length ? options : Object.keys(left).filter((key) => left[key] > 0);
+    const max = Math.max(...pool.map((key) => left[key]));
+    const tied = pool.filter((key) => left[key] === max);
+    const pick = tied[Math.floor(rng() * tied.length)] || pool[0];
+    out.push(pick);
+    left[pick] -= 1;
+    last = pick;
+  }
+  return out;
+}
+
+export function ensureGravitySchedule(domain, rng = Math.random) {
+  if (!domain.state) domain.state = {};
+  if (!Array.isArray(domain.state.gravitySchedule) || !domain.state.gravitySchedule.length) {
+    domain.state.gravitySchedule = buildGravitySchedule(rng);
+    domain.state.gravityScheduleAt = 0;
+  }
+  if (!Number.isInteger(domain.state.gravityScheduleAt)) domain.state.gravityScheduleAt = 0;
+  if (domain.state.gravityScheduleAt >= domain.state.gravitySchedule.length) {
+    const prev = domain.state.gravitySchedule[domain.state.gravitySchedule.length - 1] || null;
+    domain.state.gravitySchedule.push(...buildGravitySchedule(rng, { prev }));
+  }
+  return domain.state.gravitySchedule[domain.state.gravityScheduleAt];
+}
+
+export function advanceGravitySchedule(domain, rng = Math.random) {
+  if (!domain.state) domain.state = {};
+  domain.state.gravityScheduleAt = Math.max(0, Math.round(Number(domain.state.gravityScheduleAt) || 0)) + 1;
+  ensureGravitySchedule(domain, rng);
+  return domain.state.gravityScheduleAt;
+}
+
+function factInLastYear(fact, day) {
+  if (!Number.isFinite(Number(fact?.day))) return false;
+  return Number(fact.day) >= Math.round(Number(day) || 0) - 360;
+}
+
+function closedPlotIds(domain) {
+  const ids = new Set();
+  for (const plot of domain?.closedPlotlines || []) {
+    if (plot?.id) ids.add(String(plot.id));
+  }
+  for (const plot of domain?.plotlines || []) {
+    if (plot?.status === 'closed' && plot.id) ids.add(String(plot.id));
+  }
+  return ids;
+}
+
+/** Хроника последнего года, привязанная к уже закрытым историям. */
+export function closedStoryChronicle(domain, { day = 0 } = {}) {
+  const closed = closedPlotIds(domain);
+  return chronicleEntries(domain?.lore).filter((fact) => {
+    if (!factInLastYear(fact, day)) return false;
+    const refs = [...(fact.relatedPlotlineIds || []), fact.sourcePlotId]
+      .map((id) => String(id || ''))
+      .filter((id) => id && id !== 'null' && id !== 'undefined');
+    return refs.some((id) => closed.has(id));
+  });
+}
+
+/** Хроника завершённых поручений за последний год. */
+export function finishedErrandChronicle(domain, { day = 0 } = {}) {
+  return chronicleEntries(domain?.lore).filter((fact) => {
+    if (!factInLastYear(fact, day)) return false;
+    return Boolean(fact.relatedPendingId) && Boolean(fact.processFinish);
+  });
+}
+
+/**
+ * Зерно следующей истории. Вес = температура × базовый вес.
+ * Хроника и поручение входят в пул только когда для них есть материал.
+ */
+export function pickScheduledGrain(domain, { day = 0, config = null, rng = Math.random } = {}) {
+  const temps = normalizeSeedTemp(domain?.state?.seedTemp, seedConfig(config));
+  const chronicle = closedStoryChronicle(domain, { day });
+  const errands = finishedErrandChronicle(domain, { day });
+  const pairs = [
+    ['genesis', GRAIN_BASE_WEIGHTS.genesis * temps.genesis],
+    ['void', GRAIN_BASE_WEIGHTS.void * temps.void],
+  ];
+  if (chronicle.length >= 5) pairs.push(['chronicle', GRAIN_BASE_WEIGHTS.chronicle * temps.chronicle]);
+  if (errands.length) pairs.push(['errand', GRAIN_BASE_WEIGHTS.errand * temps.errand]);
+  const live = pairs.filter(([, weight]) => weight > 0);
+  const source = weightedPick(live.length ? live : [['void', 1]], rng);
+  if (source === 'chronicle') {
+    return {
+      source,
+      seedText: formatChronicleGrain(chronicle),
+      chronicleEntries: chronicle.length,
+    };
+  }
+  if (source === 'errand') {
+    const fact = errands[Math.floor(rng() * errands.length)] || errands[0];
+    return {
+      source,
+      seedText: String(fact?.text || '').trim(),
+      seedFactId: fact?.id || null,
+      chronicleEntries: chronicle.length,
+    };
+  }
+  if (source === 'genesis') {
+    return {
+      source,
+      seedText: cityGenesisGrainText(domain),
+      chronicleEntries: chronicle.length,
+    };
+  }
+  return { source: 'void', seedText: '', chronicleEntries: chronicle.length };
 }
 
 export function applyMonthSeedTemps(domain, events, config) {

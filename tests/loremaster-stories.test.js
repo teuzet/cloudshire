@@ -28,15 +28,15 @@ test('без фокуса лормастер видит только кратк�
   assert.equal(formatStoriesForLoremaster([story]).includes('Цистерну перестали чистить'), false);
 });
 
-test('фокус на идущей истории не выдаёт скрытую разгадку', () => {
+test('фокус на своей истории показывает скрытый слой и велит говорить только косвенно', () => {
   const focused = formatFocusedStoryForLoremaster(story, { viewerId: 'city_a' });
-  assert.match(focused, /история/);
-  assert.doesNotMatch(focused, /Цистерну перестали чистить/);
-  assert.match(focused, /не заводят новое направление/);
+  assert.match(focused, /НЕРАСКРЫТО/);
+  assert.match(focused, /только косвенное/);
+  assert.match(focused, /Цистерну перестали чистить/);
   assert.equal(focused.includes('«Гул в цистерне»'), false);
 });
 
-test('скрытая разгадка не торчит в «успешном исходе» фокуса', () => {
+test('скрытая разгадка лежит в нераскрытом блоке, не в успешном исходе', () => {
   const focused = formatFocusedStoryForLoremaster(
     {
       id: 'plot_sap',
@@ -49,8 +49,10 @@ test('скрытая разгадка не торчит в «успешном и
     },
     { viewerId: 'city_a' },
   );
-  assert.doesNotMatch(focused, /насеком/i);
-  assert.doesNotMatch(focused, /Успешный исход/);
+  assert.match(focused, /НЕРАСКРЫТО/);
+  assert.match(focused, /насеком/i);
+  assert.doesNotMatch(focused, /^Успешный исход/m);
+  assert.match(focused, /успешный исход \(тоже нераскрыт\)/i);
   assert.match(focused, /густая тёмная смола/);
 });
 

@@ -466,17 +466,15 @@ export class GameApp {
           : `${domain.characters[0].name}: ${domain._greeting}`;
 
         await pushProgress(4, 'рисую вид острова…');
-        generateOfficerPortraits({
-          config: this.config,
-          domain,
-          log,
-        })
-          .then(async () => {
-            await this.storage.saveDomain(domain);
-          })
-          .catch((err) => {
-            log.warn('officer_portraits.failed', { error: String(err?.message || err) });
+        try {
+          await generateOfficerPortraits({
+            config: this.config,
+            domain,
+            log,
           });
+        } catch (err) {
+          log.warn('officer_portraits.failed', { error: String(err?.message || err) });
+        }
         const picture = await generateIslandImage({
           config: this.config,
           domain,
@@ -489,8 +487,8 @@ export class GameApp {
           domain.imageUrl = picture.url || null;
           domain.imageKey = picture.key || null;
           domain.imageBase64 = picture.url ? null : picture.base64 || null;
-          await this.storage.saveDomain(domain);
         }
+        await this.storage.saveDomain(domain);
 
         await pushProgress(5, 'остров готов');
         const reveal = formatIslandReveal(domain);
@@ -516,6 +514,8 @@ export class GameApp {
           domainId: domain.id,
           kind: 'game_start',
         });
+        if (domain.state) domain.state.genesisPending = false;
+        await this.storage.saveDomain(domain);
         log.info('genesis.done', {
           domainId: domain.id,
           name: domain.name,
@@ -584,6 +584,13 @@ export class GameApp {
       binding.onboarding.phase = deriveOnboardingPhase(binding.onboarding, { generating: false });
       binding.updatedAt = new Date().toISOString();
       await this.storage.saveUserBinding(binding);
+      if (binding.domainId) {
+        const fresh = await this.storage.getDomain(binding.domainId);
+        if (fresh?.state?.genesisPending) {
+          fresh.state.genesisPending = false;
+          await this.storage.saveDomain(fresh);
+        }
+      }
     } catch (err) {
       getLogger().warn('genesis.reset_draft_failed', { error: err.message });
     }

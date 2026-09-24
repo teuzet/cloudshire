@@ -376,6 +376,24 @@ test('проход мира считает день от часов и разб�
   assert.ok(storage.saved.includes('d1'));
 });
 
+test('город в генезисе не шагает, пока стартовое слово не отдано', async () => {
+  const pending = makeDomain();
+  pending.state.genesisPending = true;
+  const storage = storageOf([pending, makeDomain({ id: 'd2' })], makeWorld());
+  const res = await runDayLoop({
+    config,
+    runtime: heraldRuntime(),
+    storage,
+    app: fakeApp(),
+    now: Date.now(),
+    log: silentLog,
+  });
+  const byId = new Map(res.results.map((r) => [r.domainId, r]));
+  assert.equal(byId.get('d1').skipped, 'genesis');
+  assert.equal(byId.get('d2').skipped, undefined);
+  assert.equal(storage.saved.includes('d1'), false);
+});
+
 test('ход правителя останавливает проход только своего города', async () => {
   const world = makeWorld();
   beginRulerTurn(world, Date.now(), { domainId: 'd1' });

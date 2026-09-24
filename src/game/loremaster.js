@@ -6,7 +6,7 @@ import { daysUntilDock } from './confluxTime.js';
 import { attachFactToPlotlines, plotsForPriest, isStoryPlot } from './plotlines.js';
 import { cityRules } from './cityRules.js';
 import { overlayConfluxView, stampNewBoardItems, stripConfluxView } from './confluxBoard.js';
-import { revealedPremises, revealedAnswer, hiddenAnswer } from './premises.js';
+import { revealedPremises, revealedAnswer, hiddenAnswer, hiddenPremises } from './premises.js';
 import { formatCityForAgents, parseCityBrief, formatCanonicalUnknownsForPrompt } from './cityContext.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
@@ -74,15 +74,15 @@ export function formatFocusedStoryForLoremaster(p, { viewerId = null } = {}) {
   const own = !viewerId || !host || String(host) === String(viewerId);
   const kind = p.shared ? 'общая история' : 'история';
   const secret = hiddenAnswer(p);
+  const hidden = hiddenPremises(p);
   const lines = [
     `ФОКУС: нить ${p.id} (${kind}). Это идущая история — не закрытая.`,
     p.synopsis ? `Как сейчас: ${p.synopsis}` : null,
-    // Пока разгадка скрыта, closeWhen часто её и называет. Не даём копировать в ответы.
+    // Пока разгадка скрыта, closeWhen часто её и называет. Он живёт в нераскрытом блоке.
     !secret && p.closeWhen ? `Успешный исход: ${p.closeWhen}` : null,
     p.mootWhen ? `Теряет смысл, когда: ${p.mootWhen}` : null,
     'Можно дописать мелкие детали места, обычая, материала, имени фона — если они не заводят новое направление сюжета и не ломают повествование.',
-    'Нельзя: раскрывать скрытое, ставить исход, виновника, мотив, причину странности; заводить новую интригу, конфликт или расследование.',
-    'Неизвестно городу — не называй даже отрицанием. «Причина не установлена» — можно. «Не знаем, не такое ли» с перечислением кандидатов — нельзя: это тоже слив. Опиши только уже видимое.',
+    'Нельзя: назвать разгадку, подступ, виновника, мотив или причину; ставить исход; заводить новую интригу, конфликт или расследование.',
   ];
   if (!own) {
     lines.push(
@@ -90,18 +90,23 @@ export function formatFocusedStoryForLoremaster(p, { viewerId = null } = {}) {
     );
     return lines.filter(Boolean).join('\n');
   }
-  // Город это выяснил своей работой, значит это уже знание, а не тайна: об этом
-  // можно отвечать прямо. Без этого жрец спрашивает про то, что сам объявил,
-  // получает «город не знает» и отрекается от собственной вести.
   const solved = revealedAnswer(p);
   const known = revealedPremises(p);
   if (solved || known.length) {
     lines.push('ГОРОД ЭТО УЖЕ ВЫЯСНИЛ (можно отвечать прямо, это установлено):');
     if (solved) lines.push(`- разгадка: ${solved}`);
     for (const text of known) lines.push(`- ${text}`);
-  } else {
+  }
+  if (secret || hidden.length || (secret && p.closeWhen)) {
     lines.push(
-      'Не выдумывай исход, виновника, скрытый мотив или причину нерешённого в этой истории.',
+      'НЕРАСКРЫТО (знаешь ты, город нет). В ответ и в fact — только косвенное: куда смотреть, что уже странно, какой обычай или место рядом. Не называй механизм, виновника, улику и разгадку. Не перечисляй кандидатов и не отрицай их поимённо.',
+    );
+    if (secret) lines.push(`- разгадка: ${secret}`);
+    for (const text of hidden) lines.push(`- подступ: ${text}`);
+    if (secret && p.closeWhen) lines.push(`- успешный исход (тоже нераскрыт): ${p.closeWhen}`);
+  } else if (!solved && !known.length) {
+    lines.push(
+      'Скрытого слоя нет. Не выдумывай исход, виновника, скрытый мотив или причину нерешённого в этой истории.',
     );
   }
   return lines.filter(Boolean).join('\n');
@@ -194,8 +199,8 @@ export async function askLoremaster({
           reminder: focusPlot
             ? 'Перед тобой хроника и факты. Если ответ из них выводится целиком — ничего не записывай, отвечай. ' +
               'Придумал новое: уточнение старого факта — update_fact, иначе add_fact. ' +
-              'focusStory — идущая история, о которой спросили: дано, чтобы не противоречить. ' +
-              'Не заводи новое направление. Скрытое не раскрывай и не пиши в факт. ' +
+              'focusStory — идущая история, о которой спросили. Нераскрытый слой там дан тебе, городу он неизвестен. ' +
+              'Из него в ответ и в fact — только косвенное: направление, странность, место рядом. Разгадку и подступы не называй. ' +
               'Новый факт по этой истории система сама привяжет.' +
               unknownsLock
             : 'Перед тобой хроника и факты. Если ответ из них выводится целиком — ничего не записывай, отвечай. ' +
@@ -443,7 +448,7 @@ export async function askLoremaster({
           qText || '(нет вопросов)',
           '',
           focusPlot
-            ? `Фокус — идущая история ${focusPlot.id}. Канон и инструкция — в read_lore.focusStory. Детали фона можно дописать; новое направление сюжета — нельзя. Скрытое не раскрывай.`
+            ? `Фокус — идущая история ${focusPlot.id}. Нераскрытый слой — в read_lore.focusStory: из него только косвенное, разгадку и подступы не называй и в fact не пиши. Детали фона можно дописать; новое направление сюжета — нельзя.`
             : 'Фокуса на идущей истории нет: канон тайн нити не дан. Сыгранное читай только по хронике. Не решай открытые истории.',
           'Канонические неизвестности — в read_lore.canonicalUnknowns. Их не раскрывай. Остальное, чего нет в списке, можно установить.',
           'Порядок: read_lore → если ответ целиком выводится из хроники и фактов, сразу submit_answers. ' +

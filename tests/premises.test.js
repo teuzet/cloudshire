@@ -194,7 +194,9 @@ test('хранитель знаний отвечает по раскрытому
   assert.match(text, /ГОРОД ЭТО УЖЕ ВЫЯСНИЛ/);
   assert.match(text, new RegExp(`- разгадка: ${ANSWER}`));
   assert.match(text, new RegExp(TRACKS));
-  assert.doesNotMatch(text, /старейшина/, 'ещё скрытое хранителю не показывают вовсе');
+  assert.match(text, /старейшина/);
+  assert.match(text, /НЕРАСКРЫТО/);
+  assert.match(text, /только косвенное/);
 });
 
 test('жрец получает раскрытое как установленное', () => {

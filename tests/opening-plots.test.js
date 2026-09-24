@@ -8,8 +8,8 @@ import {
   OPENING_STORY_GRAINS,
   OPENING_SEED_REAL_MINUTES,
   openingSeedDelays,
-  openingPairGrains,
   enqueueOpeningSeeds,
+  enqueueSeedRequest,
   seedQueue,
 } from '../src/game/seedSchedule.js';
 import { seedAppearEvent } from '../src/game/worldLoop.js';
@@ -94,27 +94,17 @@ test('стартовые нити появляются в окне 5–10 мин
   }
 });
 
-test('генезис ставит заявки, а не сажает нити на месте', () => {
+test('генезис ставит одну заявку кризиса из брифа, а не сажает нить на месте', () => {
   const domain = makeDomain();
   const requests = enqueueOpeningSeeds(domain, { day: 223, rng: () => 0.5 });
 
-  assert.deepEqual(OPENING_STORY_GRAVITIES, ['SITUATION', 'EPISODE']);
-  assert.deepEqual(OPENING_STORY_GRAINS, ['genesis', 'void']);
-  assert.equal(domain.plotlines.length, 0, 'на месте не сажаем: иначе рассказать о них некому');
-  assert.equal(seedQueue(domain).length, 2);
-  assert.deepEqual(
-    requests.map((r) => r.gravity),
-    ['SITUATION', 'EPISODE'],
-  );
-  assert.deepEqual(
-    requests.map((r) => r.grain),
-    ['genesis', 'void'],
-    'rng 0.5: ситуация из генезиса, эпизод из пустоты',
-  );
-  assert.deepEqual(openingPairGrains(() => 0), ['void', 'genesis']);
-  assert.deepEqual(openingPairGrains(() => 0.5), ['genesis', 'void']);
-  assert.ok(requests.every((r) => r.appearDay > 223));
-  assert.ok(requests[1].appearDay > requests[0].appearDay);
+  assert.deepEqual(OPENING_STORY_GRAVITIES, ['CRISIS']);
+  assert.deepEqual(OPENING_STORY_GRAINS, ['genesis']);
+  assert.equal(domain.plotlines.length, 0, 'на месте не сажаем: иначе рассказать о ней некому');
+  assert.equal(seedQueue(domain).length, 1);
+  assert.equal(requests[0].gravity, 'CRISIS');
+  assert.equal(requests[0].grain, 'genesis');
+  assert.ok(requests[0].appearDay > 223);
 });
 
 test('появление стартовой нити рассказывается как новая история', async () => {
@@ -135,7 +125,7 @@ test('появление стартовой нити рассказываетс�
   });
 
   assert.equal(res.occasion, 'новая история', 'иначе глашатай про нить промолчит');
-  assert.equal(res.plot.gravity, 'SITUATION', 'тяжесть берётся из заявки, а не из броска');
+  assert.equal(res.plot.gravity, 'CRISIS', 'тяжесть берётся из заявки, а не из броска');
   assert.ok(isStakedStory(res.plot));
   assert.equal(res.fact.day, request.appearDay, 'запись хроники датирована днём появления');
   assert.equal(res.fact.sourcePlotId, res.plot.id);
@@ -144,7 +134,7 @@ test('появление стартовой нити рассказываетс�
     jobList(world).some((j) => j.kind === 'pressure_fire'),
     'шкала стартовой нити встала в очередь',
   );
-  assert.equal(seedQueue(domain).length, 1, 'вторая заявка ещё ждёт своего дня');
+  assert.equal(seedQueue(domain).length, 0, 'стартовая заявка одна и уже разобрана');
 
   assert.equal(calls.length, 1);
   assert.match(calls[0].extra, /БРИФ ГОРОДА/);
@@ -153,11 +143,16 @@ test('появление стартовой нити рассказываетс�
   assert.doesNotMatch(calls[0].user, /cityBrief|Срез каталога/i);
 });
 
-test('появление стартовой нити из пустоты не берёт бриф', async () => {
+test('появление нити из пустоты не берёт бриф', async () => {
   const domain = makeDomain();
   const world = { id: 'w1', tickIndex: 0, dayIndex: 223, jobs: [] };
-  const requests = enqueueOpeningSeeds(domain, { day: 223, rng: () => 0.5 });
-  const request = requests.find((r) => r.grain === 'void');
+  const request = enqueueSeedRequest(domain, {
+    source: 'void',
+    grain: 'void',
+    gravity: 'EPISODE',
+    day: 223,
+    delayDays: 1,
+  });
   const calls = [];
 
   const res = await seedAppearEvent({

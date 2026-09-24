@@ -3,7 +3,15 @@
  * Общий потолок max; сдвиги seed / miss / idle — у каждого источника свои.
  */
 
-export const SEED_SOURCES = ['chronicle', 'void', 'errand'];
+export const SEED_SOURCES = ['genesis', 'void', 'chronicle', 'errand'];
+
+/** Базовый вес зерна. Итоговый вес = температура × этот вес. */
+export const GRAIN_BASE_WEIGHTS = {
+  genesis: 4,
+  void: 5,
+  chronicle: 2,
+  errand: 5,
+};
 
 const DEFAULT_DELTAS = { seed: -6, miss: 2, idle: 1 };
 
@@ -82,28 +90,40 @@ export function clampSeedTemp(value, cfg = DEFAULT_SEED) {
 
 export function emptySeedTemp(cfg = DEFAULT_SEED) {
   const parsed = seedConfig(cfg);
-  return { chronicle: parsed.start, void: parsed.start, errand: parsed.errandStart };
+  return {
+    genesis: 1,
+    void: 1,
+    chronicle: 1,
+    errand: parsed.errandStart,
+  };
 }
 
 export function normalizeSeedTemp(raw, cfg = DEFAULT_SEED) {
   const parsed = seedConfig(cfg);
   const base = emptySeedTemp(parsed);
   const src = raw && typeof raw === 'object' ? raw : {};
+  // Старый документ без зерна «описание города» — это прежняя шкала. Берём новые старты.
+  if (src.genesis == null || src.genesis === '') return base;
   const out = { ...base };
   for (const key of SEED_SOURCES) {
     if (src[key] == null || src[key] === '') continue;
     out[key] = clampSeedTemp(src[key], parsed);
   }
-  // Старые сейвы держали поручение на start (5). Не трогали каналы — все три на start.
-  if (
-    Number(src.errand) === parsed.start &&
-    Number(out.chronicle) === parsed.start &&
-    Number(out.void) === parsed.start &&
-    parsed.errandStart !== parsed.start
-  ) {
-    out.errand = parsed.errandStart;
-  }
   return out;
+}
+
+/** Выбранное зерно теряет 3, остальные получают по 1. Потолок 0–10. */
+export function touchGrainTemps(domain, chosen, cfg = DEFAULT_SEED) {
+  if (!domain || typeof domain !== 'object') return null;
+  if (!domain.state || typeof domain.state !== 'object') domain.state = {};
+  const parsed = seedConfig(cfg);
+  const temps = normalizeSeedTemp(domain.state.seedTemp, parsed);
+  for (const key of SEED_SOURCES) {
+    const delta = key === chosen ? -3 : 1;
+    temps[key] = clampSeedTemp(temps[key] + delta, parsed);
+  }
+  domain.state.seedTemp = temps;
+  return temps;
 }
 
 export function seedDeltas(source, cfg = DEFAULT_SEED) {

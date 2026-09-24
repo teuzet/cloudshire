@@ -10,6 +10,7 @@ import {
   pickWorldGravity,
   pickCitySource,
   pickCityGravity,
+  buildGravitySchedule,
 } from '../src/game/seedChannels.js';
 
 const config = loadConfig();
@@ -31,9 +32,22 @@ function domain(stories, extra = {}) {
   });
 }
 
-test('старый сейв 5/5/5 поднимает поручение до 10', () => {
+test('расписание на 50 держит доли и не ставит один масштаб дважды подряд', () => {
+  const schedule = buildGravitySchedule(() => 0.3);
+  assert.equal(schedule.length, 50);
+  const count = (name) => schedule.filter((item) => item === name).length;
+  assert.equal(count('SITUATION'), 14);
+  assert.equal(count('EPISODE'), 14);
+  assert.equal(count('CRISIS'), 17);
+  assert.equal(count('RUPTURE'), 5);
+  for (let i = 1; i < schedule.length; i += 1) {
+    assert.notEqual(schedule[i], schedule[i - 1]);
+  }
+});
+
+test('старый документ без зерна города получает новые стартовые температуры', () => {
   const d = domain(['Смола', 'Закалка'], { seedTemp: { chronicle: 5, void: 5, errand: 5 } });
-  assert.deepEqual(d.state.seedTemp, { chronicle: 5, void: 5, errand: 10 });
+  assert.deepEqual(d.state.seedTemp, { genesis: 1, void: 1, chronicle: 1, errand: 10 });
 });
 
 test('хроника года выкидывает записи живых историй', () => {
@@ -136,7 +150,7 @@ test('после посева температура канала падает, 
   const d = domain(['А', 'Б']);
   assert.equal(d.state.seedTemp.errand, 10);
   applyMonthSeedTemps(d, { chronicle: 'idle', void: 'seed', errand: 'idle' }, config);
-  assert.equal(d.state.seedTemp.chronicle, 6);
+  assert.equal(d.state.seedTemp.chronicle, 2);
   assert.equal(d.state.seedTemp.void, 0);
   assert.equal(d.state.seedTemp.errand, 10);
 });

@@ -64,18 +64,25 @@ test('пустой канал: половина — генезис города,
 });
 
 test('домен нормализует дробную температуру в общий потолок', () => {
-  const domain = { state: { seedTemp: { chronicle: 4.2, void: 99 } } };
+  const domain = { state: { seedTemp: { genesis: 1, chronicle: 4.2, void: 99, errand: 3 } } };
   normalizeDomain(domain);
   assert.equal(domain.state.seedTemp.chronicle, 4.2);
   assert.equal(domain.state.seedTemp.void, 10);
-  assert.equal(domain.state.seedTemp.errand, 10);
+  assert.equal(domain.state.seedTemp.errand, 3);
   const fresh = { state: emptyState() };
   normalizeDomain(fresh);
-  assert.deepEqual(fresh.state.seedTemp, { chronicle: 5, void: 5, errand: 10 });
+  assert.deepEqual(fresh.state.seedTemp, { genesis: 1, void: 1, chronicle: 1, errand: 10 });
   assert.equal(normalizeSeedTemp(null).errand, 10);
-  assert.deepEqual(normalizeSeedTemp({ chronicle: 5, void: 5, errand: 5 }), {
-    chronicle: 5,
+  assert.deepEqual(normalizeSeedTemp({ genesis: 1, chronicle: 4, void: 5, errand: 5 }), {
+    genesis: 1,
+    chronicle: 4,
     void: 5,
+    errand: 5,
+  });
+  assert.deepEqual(normalizeSeedTemp({ chronicle: 5, void: 5, errand: 5 }), {
+    genesis: 1,
+    void: 1,
+    chronicle: 1,
     errand: 10,
   });
 });

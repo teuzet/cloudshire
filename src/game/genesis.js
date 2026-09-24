@@ -771,6 +771,8 @@ export async function generateDomain({
   await onProgress?.('бриф города');
   domain.cityBrief = await generateCityBrief({ runtime, domain, log });
 
+  // День города стоит, пока картинка, портреты и первое слово жреца не уйдут игроку.
+  domain.state.genesisPending = true;
   await storage.saveDomain(domain);
   const prev = await storage.getUserBinding(String(ownerUserId));
   await storage.saveUserBinding(

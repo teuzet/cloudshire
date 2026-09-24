@@ -13,9 +13,13 @@ import { getLogger } from '../log.js';
 import { getCurrentWorldId } from '../llm/usage.js';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, realMsToGameDays } from './gameClock.js';
 import { chronicleEntries } from './models.js';
-import { SEED_SOURCES, seedConfig, readCityTemp, touchCityTemp, errandSeedChance } from './seedTemp.js';
-import { pickCityGravity, pickCitySource, yearChronicleGrain, pickErrandGravity, formatErrandGrain } from './seedChannels.js';
-import { occupiedOfficerSlots } from './plotlines.js';
+import { SEED_SOURCES, seedConfig, normalizeSeedTemp, touchGrainTemps } from './seedTemp.js';
+import {
+  ensureGravitySchedule,
+  advanceGravitySchedule,
+  pickScheduledGrain,
+} from './seedChannels.js';
+import { occupiedOfficerSlots, STORY_OFFICER_SLOTS } from './plotlines.js';
 import { liveThreats } from './threats.js';
 import { isStakedStory } from './plotlines.js';
 
@@ -23,8 +27,8 @@ import { isStakedStory } from './plotlines.js';
 export const THREAT_TARGET_MIN = 3;
 export const THREAT_TARGET_MAX = 4;
 
-/** Попытка посева — часто; сам посев после этого уходит в холодный период. */
-export const ATTEMPT_INTERVAL_DAYS = [8, 15];
+/** Попытка посева — только по таймеру, раз в 15–20 игровых дней. */
+export const ATTEMPT_INTERVAL_DAYS = [15, 20];
 
 /** Минимальный зазор между двумя посевами: 1.5–2.5 реальных часа. */
 export const SEED_COOLDOWN_DAYS = [22, 37];
@@ -142,118 +146,59 @@ function noteSeedDecision(row) {
 }
 
 /**
- * Городской посев. Пока занято больше четырёх слотов сановников, броска нет.
- * Температура одна на хронику, описание города и пустоту.
+ * Городской посев. Масштаб берётся из расписания.
+ * Таймер только проверяет, хватает ли свободных слотов на следующий масштаб.
  */
 export function decideCitySeed(domain, { day = 0, world = null, config = null, rng = Math.random } = {}) {
   const cfg = seedConfig(config);
-  const temp = readCityTemp(domain, cfg);
+  const gate = cfg.slotGate || CITY_SLOT_GATE;
+  if (!domain.state) domain.state = {};
+  domain.state.seedTemp = normalizeSeedTemp(domain.state.seedTemp, cfg);
+  const gravity = ensureGravitySchedule(domain, rng);
   const occupied = occupiedOfficerSlots(domain);
+  const need = STORY_OFFICER_SLOTS[gravity] ?? STORY_OFFICER_SLOTS.EPISODE;
+  const tempsBefore = { ...(domain.state?.seedTemp || {}) };
   const finish = (decision) => {
     noteSeedDecision({
       kind: 'city',
       domainId: domain?.id || null,
       domainName: domain?.name || null,
       day: Math.round(Number(day) || 0),
-      tempBefore: temp,
-      tempAfter: readCityTemp(domain, cfg),
+      tempBefore: tempsBefore,
+      tempAfter: domain.state?.seedTemp || null,
       occupied,
-      chance: decision.chance ?? null,
       seed: Boolean(decision.seed),
       reason: decision.reason || null,
       source: decision.source || null,
-      gravity: decision.gravity || null,
+      gravity: decision.gravity || gravity,
       chronicleEntries: decision.chronicleEntries ?? null,
-      streak: domain.state?.citySeedStreak || null,
     });
     return decision;
   };
-  if (occupied > CITY_SLOT_GATE) {
-    touchCityTemp(domain, 'idle', cfg);
-    return finish({ seed: false, reason: 'full', temp, occupied });
+  if (occupied + need > gate) {
+    return finish({ seed: false, reason: 'slots', gravity, occupied, need });
   }
-  const chance = Math.min(1, temp / cfg.max);
-  if (rng() >= chance) {
-    touchCityTemp(domain, 'miss', cfg);
-    return finish({ seed: false, reason: 'roll', temp, chance, occupied });
-  }
-  const entries = yearChronicleGrain(domain, world, { day }).length;
-  const picked = pickCitySource({
-    entries,
-    weights: cfg.sourceWeights,
-    streak: domain.state?.citySeedStreak || null,
-    rng,
-  });
-  if (!domain.state) domain.state = {};
-  domain.state.citySeedStreak = picked.streak;
-  const open = (domain.plotlines || []).filter((p) => isStakedStory(p) && p.status !== 'closed');
-  const gravity = pickCityGravity(open, rng, cfg.gravityWeights);
-  touchCityTemp(domain, 'seed', cfg);
+  const grain = pickScheduledGrain(domain, { day, world, config, rng });
+  touchGrainTemps(domain, grain.source, cfg);
+  advanceGravitySchedule(domain, rng);
   return finish({
     seed: true,
-    source: picked.source,
+    source: grain.source,
     gravity,
-    temp,
-    chance,
+    seedText: grain.seedText,
+    seedFactId: grain.seedFactId || null,
     occupied,
-    chronicleEntries: entries,
+    need,
+    chronicleEntries: grain.chronicleEntries,
   });
 }
 
 /**
- * Завершённое поручение бросает свой канал. Попадание появляется через месяц.
- * Возвращает заявку или null.
+ * Поручение больше не сеет само. Его хроника становится зерном,
+ * когда таймер дойдёт и это зерно выиграет вес.
  */
-export function offerErrandSeed(domain, outcome, { day = 0, config = null, rng = Math.random } = {}) {
-  const cfg = seedConfig(config);
-  if (!domain.state) domain.state = {};
-  const temps = domain.state.seedTemp;
-  const errandTemp = Number(temps?.errand);
-  const temp = Number.isFinite(errandTemp) ? errandTemp : cfg.errandStart;
-  const months = Number(outcome?.objectiveMonths || outcome?.expectedMonths) || 0;
-  const chance = errandSeedChance(temp, months, cfg);
-  const touch = (event) => {
-    const deltas = cfg.errand || { seed: -6, miss: 2, idle: 1 };
-    const next = Math.max(0, Math.min(cfg.max, temp + (deltas[event] || 0)));
-    domain.state.seedTemp = { ...(domain.state.seedTemp || {}), errand: next };
-    return next;
-  };
-  const logErrand = (seeded, extra = {}) => {
-    noteSeedDecision({
-      kind: 'errand',
-      domainId: domain?.id || null,
-      domainName: domain?.name || null,
-      day: Math.round(Number(day) || 0),
-      tempBefore: temp,
-      tempAfter: Number(domain.state?.seedTemp?.errand),
-      months,
-      chance,
-      seed: Boolean(seeded),
-      processId: outcome?.processId || null,
-      summary: outcome?.summary || null,
-      ...extra,
-    });
-  };
-  if (rng() >= chance) {
-    touch('miss');
-    logErrand(false, { reason: 'roll' });
-    return null;
-  }
-  touch('seed');
-  const gravity = pickErrandGravity(months, rng);
-  const delay = rollRange(cfg.errandDelayDays || ERRAND_SEED_DELAY_DAYS, rng);
-  const request = enqueueSeedRequest(domain, {
-    source: 'errand',
-    grain: 'errand',
-    gravity,
-    seedText: formatErrandGrain(outcome),
-    sourceProcessId: outcome?.processId || null,
-    day,
-    delayDays: delay,
-    rng,
-  });
-  logErrand(true, { reason: 'seed', gravity, delayDays: delay, appearDay: request.appearDay });
-  return request;
+export function offerErrandSeed() {
+  return null;
 }
 
 export function decideSeedAttempt(domain, opts = {}) {
@@ -314,17 +259,11 @@ export function enqueueSeedRequest(
 
 // ──────────────────────────── стартовые нити ────────────────────────────
 
-/** Стартовый посев: ситуация, затем эпизод. Зёрна — одно из генезиса, одно из пустоты. */
-export const OPENING_STORY_GRAVITIES = ['SITUATION', 'EPISODE'];
-export const OPENING_STORY_GRAINS = ['genesis', 'void'];
+/** Стартовый посев: один кризис из брифа города. */
+export const OPENING_STORY_GRAVITIES = ['CRISIS'];
+export const OPENING_STORY_GRAINS = ['genesis'];
 
-export function openingPairGrains(rng = Math.random) {
-  const pair = [...OPENING_STORY_GRAINS];
-  if (rng() < 0.5) pair.reverse();
-  return pair;
-}
-
-/** Окно появления стартовых нитей — реальные минуты после основания города. */
+/** Окно появления стартовой нити — реальные минуты после основания города. */
 export const OPENING_SEED_REAL_MINUTES = [5, 10];
 
 /**
@@ -356,18 +295,17 @@ export function openingSeedDelays(count, { config = null, rng = Math.random } = 
  * рассказывал вовсе, и игрок узнавал о них лишь когда срабатывала угроза.
  */
 export function enqueueOpeningSeeds(domain, { day = 0, config = null, rng = Math.random } = {}) {
-  const delays = openingSeedDelays(OPENING_STORY_GRAVITIES.length, { config, rng });
-  const grains = openingPairGrains(rng);
-  return OPENING_STORY_GRAVITIES.map((gravity, i) =>
+  const [delay] = openingSeedDelays(1, { config, rng });
+  return [
     enqueueSeedRequest(domain, {
       source: 'void',
-      grain: grains[i],
-      gravity,
+      grain: 'genesis',
+      gravity: 'CRISIS',
       day,
-      delayDays: delays[i],
+      delayDays: delay,
       rng,
     }),
-  );
+  ];
 }
 
 export function dueSeedRequests(domain, day) {

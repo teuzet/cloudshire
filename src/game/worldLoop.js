@@ -823,13 +823,14 @@ export function seedAttemptEvent({ config, domain, world, day = 0, rng = Math.ra
   const decision = decideSeedAttempt(domain, { day, world, config, rng });
 
   if (decision.seed) {
-    const chronicle = yearChronicleGrain(domain, world, { day });
-    const seedText = decision.source === 'chronicle' ? formatChronicleGrain(chronicle) : '';
+    const seedText = decision.seedText
+      || (decision.source === 'chronicle' ? formatChronicleGrain(yearChronicleGrain(domain, world, { day })) : '');
     const request = enqueueSeedRequest(domain, {
-      source: decision.source === 'chronicle' ? 'chronicle' : 'void',
+      source: decision.source === 'errand' ? 'errand' : decision.source === 'chronicle' ? 'chronicle' : 'void',
       grain: decision.source,
       gravity: decision.gravity,
       seedText,
+      seedFactId: decision.seedFactId || null,
       day,
       delayDays: 0,
       rng,

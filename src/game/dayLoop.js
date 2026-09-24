@@ -380,6 +380,11 @@ export async function runDayLoop({
 
   for (const stale of domains) {
     if (stale.status && stale.status !== 'playing') continue;
+    if (stale.state?.genesisPending) {
+      log.info('dayLoop.yield_genesis', { domainId: stale.id });
+      results.push({ domainId: stale.id, name: stale.name, skipped: 'genesis' });
+      continue;
+    }
 
     // Ход правителя важнее прохода мира, но только в своём городе: ждать
     // минуту, пока жрец думает, остальные города не обязаны.

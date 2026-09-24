@@ -63,8 +63,8 @@ test('без записанного срока первая попытка пр�
   assert.equal(seedAttemptDue(domain(), 0), true);
   const d = domain();
   scheduleNextAttempt(d, 100, () => 0);
-  assert.equal(seedAttemptDue(d, 105), false);
-  assert.equal(seedAttemptDue(d, 108), true);
+  assert.equal(seedAttemptDue(d, 114), false);
+  assert.equal(seedAttemptDue(d, 115), true);
 });
 
 test('холодный период кончается сам', () => {
@@ -96,48 +96,36 @@ test('насыщенность гасит посев и разгоняет ег�
   assert.equal(saturationFactor(THREAT_TARGET_MAX + 1), 0, 'выше нормы не сеем вовсе');
 });
 
-test('пять слотов сановников — городской посев молчит и греется', () => {
+test('без слотов под следующий масштаб посева нет и расписание не сдвигается', () => {
   const d = domain({
     plotlines: [stakedPlot('p1', 0)],
   });
-  d.plotlines[0].gravity = 'RUPTURE';
-  d.plotlines.push({ ...stakedPlot('p2', 0), gravity: 'SITUATION' });
-  d.state.seedTemp = { city: 5, errand: 10 };
+  d.plotlines[0].gravity = 'CRISIS';
+  d.state.gravitySchedule = ['EPISODE'];
+  d.state.gravityScheduleAt = 0;
   const res = decideSeedAttempt(d, { day: 0, rng: () => 0 });
   assert.equal(res.seed, false);
-  assert.equal(res.reason, 'full');
-  assert.equal(d.state.seedTemp.city, 6);
+  assert.equal(res.reason, 'slots');
+  assert.equal(res.gravity, 'EPISODE');
+  assert.equal(d.state.gravityScheduleAt, 0);
+  assert.equal(d.state.seedTemp.genesis, 1);
 });
 
-test('нулевая городская температура не сеет', () => {
+test('пустая доска сеет масштаб из расписания и остужает выбранное зерно', () => {
   const d = domain();
-  d.state.seedTemp = { city: 0, errand: 10 };
-  const res = decideSeedAttempt(d, { day: 0, rng: () => 0 });
-  assert.equal(res.seed, false);
-  assert.equal(res.reason, 'roll');
-});
-
-test('прохладный город не сеет на высоком жребии', () => {
-  const d = domain();
-  d.state.seedTemp = { city: 3, errand: 10 };
-  const res = decideSeedAttempt(d, { day: 0, rng: () => 0.999 });
-  assert.equal(res.seed, false);
-  assert.equal(res.reason, 'roll');
-  assert.ok(res.chance > 0 && res.chance < 1);
-  assert.equal(d.state.seedTemp.city, 5);
-});
-
-test('горячий пустой город сеет сразу и остывает', () => {
-  const d = domain();
-  d.state.seedTemp = { city: 10, errand: 10 };
+  d.state.gravitySchedule = ['SITUATION'];
+  d.state.gravityScheduleAt = 0;
   const res = decideSeedAttempt(d, { day: 0, rng: () => 0 });
   assert.equal(res.seed, true);
-  assert.equal(res.chance, 1);
-  assert.equal(d.state.seedTemp.city, 4);
-  assert.ok(['genesis', 'void', 'chronicle'].includes(res.source));
+  assert.equal(res.gravity, 'SITUATION');
+  assert.equal(res.source, 'genesis');
+  assert.equal(d.state.seedTemp.genesis, 0);
+  assert.equal(d.state.seedTemp.void, 2);
+  assert.equal(d.state.seedTemp.errand, 10);
+  assert.equal(d.state.gravityScheduleAt, 1);
 });
 
-test('решение температуры пишется отдельным документом города', async () => {
+test('решение посева пишется отдельным документом города', async () => {
   const docs = [];
   initSeedLogRecording({
     appendSeedLog: async (doc) => {
@@ -148,39 +136,31 @@ test('решение температуры пишется отдельным д
     const d = domain();
     d.id = 'domain_hot';
     d.name = 'Тихая Гряда';
-    d.state.seedTemp = { city: 10, errand: 10 };
+    d.state.gravitySchedule = ['EPISODE'];
+    d.state.gravityScheduleAt = 0;
     decideSeedAttempt(d, { day: 40, rng: () => 0 });
-    offerErrandSeed(
-      d,
-      { processId: 'p1', summary: 'обелиск', objectiveMonths: 1 },
-      { day: 40, rng: () => 0.99 },
-    );
     await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(docs.length, 2);
+    assert.equal(docs.length, 1);
     assert.equal(docs[0].kind, 'city');
     assert.equal(docs[0].domainId, 'domain_hot');
     assert.equal(docs[0].domainName, 'Тихая Гряда');
     assert.equal(docs[0].seed, true);
-    assert.equal(docs[0].tempBefore, 10);
-    assert.equal(docs[0].tempAfter, 4);
+    assert.equal(docs[0].gravity, 'EPISODE');
+    assert.equal(docs[0].source, 'genesis');
     assert.equal(docs[0].day, 40);
-    assert.equal(docs[1].kind, 'errand');
-    assert.equal(docs[1].seed, false);
-    assert.equal(docs[1].reason, 'roll');
-    assert.equal(docs[1].months, 1);
-    assert.equal(docs[1].summary, 'обелиск');
-    assert.equal(docs[1].domainId, 'domain_hot');
   } finally {
     initSeedLogRecording(null);
   }
 });
 
-test('четыре слота ещё позволяют посев, масштаб уже стоящей истории легче', () => {
-  const d = domain({ plotlines: [{ ...stakedPlot('p1'), gravity: 'RUPTURE' }] });
-  d.state.seedTemp = { city: 10, errand: 10 };
+test('занятый слот ещё пускает ситуацию из расписания', () => {
+  const d = domain({ plotlines: [{ ...stakedPlot('p1'), gravity: 'CRISIS' }] });
+  d.state.gravitySchedule = ['SITUATION'];
+  d.state.gravityScheduleAt = 0;
   const res = decideSeedAttempt(d, { day: 0, rng: () => 0 });
   assert.equal(res.seed, true);
-  assert.equal(res.occupied, 4);
+  assert.equal(res.gravity, 'SITUATION');
+  assert.equal(res.occupied, 3);
 });
 
 // ────────────────────── очередь отложенных посевов ──────────────────────
