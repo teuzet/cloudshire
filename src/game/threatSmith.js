@@ -10,7 +10,7 @@ import { getLogger } from '../log.js';
 import { captureAgentPrompt } from './agentPrompt.js';
 import { formatStoryFactsBlock, storyLinkedFacts } from './memory.js';
 import { plotChronicleTail } from './chronicler.js';
-import { formatFreeformGravityForPrompt } from './freeform.js';
+import { formatFreeformGravityForPrompt, formatContinuationAuthorForPrompt, pickContinuationAuthor } from './freeform.js';
 import { attachThreat, createThreat, formatKnownUnknown, stagePoolRequest } from './threats.js';
 
 const THREAT_TEXT_MAX = 240;
@@ -39,7 +39,7 @@ function chronicleBlock(entries) {
  * Хроника должна уже лежать на домене: пул пишется после записи, которая
  * открыла эту стадию.
  */
-export function formatThreatStageRequest(req, plot, config = null, { chronicle = [], storyFacts = [] } = {}) {
+export function formatThreatStageRequest(req, plot, config = null, { chronicle = [], storyFacts = [], author = null } = {}) {
   const stage = threatStageBrief(config, req.final);
   const story = [
     'ИСТОРИЯ',
@@ -61,13 +61,16 @@ export function formatThreatStageRequest(req, plot, config = null, { chronicle =
     formatStoryFactsBlock(storyFacts),
     order.join('\n'),
     formatKnownUnknown(plot),
+    formatContinuationAuthorForPrompt(author),
   ];
   return sections.filter(Boolean).join('\n\n');
 }
 
 /** Один вызов на стадию. Возвращает список формулировок. */
-export async function draftStageThreats({ runtime, domain, plot, request, config = null, log: parentLog }) {
+export async function draftStageThreats({ runtime, domain, plot, request, config = null, rng = Math.random, log: parentLog }) {
   const log = (parentLog || getLogger()).child({ scope: 'threat.smith', plotId: plot?.id });
+  const author = pickContinuationAuthor(config, rng);
+  if (author) log.info('threat.smith.author', { author: author.id });
   const draft = { texts: [] };
   const runOpts = {
     agentId: 'threatSmith',
@@ -114,6 +117,7 @@ export async function draftStageThreats({ runtime, domain, plot, request, config
         content: formatThreatStageRequest(request, plot, config, {
           chronicle: plotChronicleTail(domain, plot?.id),
           storyFacts: storyLinkedFacts(domain, plot),
+          author,
         }),
       },
     ],
@@ -135,7 +139,7 @@ export async function draftStageThreats({ runtime, domain, plot, request, config
 export async function fillStageThreats({ runtime, domain, plot, day = 0, config = null, rng = Math.random, log } = {}) {
   const request = stagePoolRequest(plot, { config, rng });
   if (!request) return [];
-  const drafted = runtime ? await draftStageThreats({ runtime, domain, plot, request, config, log }) : null;
+  const drafted = runtime ? await draftStageThreats({ runtime, domain, plot, request, config, rng, log }) : null;
   const texts = drafted?.texts || [];
   const created = [];
   for (const text of texts) {

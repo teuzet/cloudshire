@@ -19,7 +19,7 @@ import {
 import { resetPressure } from '../src/game/pressure.js';
 import { createThreat, attachThreat, liveThreats, findThreat } from '../src/game/threats.js';
 import { startDeed } from '../src/game/deeds.js';
-import { cityRules, markRuleDeed } from '../src/game/cityRules.js';
+import { markRuleDeed } from '../src/game/cityRules.js';
 import { addPriestOrder } from '../src/game/priestOrders.js';
 import { seedQueue, enqueueSeedRequest } from '../src/game/seedSchedule.js';
 import { jobList, dueJobs } from '../src/game/scheduler.js';
@@ -433,7 +433,7 @@ test('провал, переполнивший шкалу, пишет беду �
   assert.equal(calls.length, 1);
   assert.match(calls[0], /укрепить опору/);
   assert.match(calls[0], /Пыль забьёт водосборный сток/);
-  assert.match(calls[0], /ПРИВЕЛО К СОБЫТИЮ/);
+  assert.match(calls[0], /Что в результате произошло/);
   assert.match(calls[0], /История не закрыта/);
   assert.ok(calls[0].indexOf('укрепить опору') < calls[0].indexOf('Пыль забьёт'));
 });
@@ -472,7 +472,7 @@ test('провал, сорвавший концовку, пишет её тек�
   assert.equal(calls.length, 1);
   assert.match(calls[0], /подготовить ночной выход/);
   assert.match(calls[0], /Ночной выход обрушит лавовый склон/);
-  assert.match(calls[0], /ПРИВЕЛО К СОБЫТИЮ/);
+  assert.match(calls[0], /ЧТО ПРИВЕЛО К РАЗВЯЗКЕ/);
   assert.match(calls[0], /GRAVITY: CRISIS/);
   assert.ok(calls[0].indexOf('подготовить ночной выход') < calls[0].indexOf('Ночной выход обрушит'));
 });
@@ -611,7 +611,7 @@ test('сработавшая беда ложится в хронику прош�
     log: silentLog,
   });
   assert.equal(domain.lore[0].text, 'Водосборный сток у западных каменоломен забило известковой пылью.');
-  assert.match(calls[0], /В БУДУЩЕМ ВРЕМЕНИ/);
+  assert.match(calls[0], /будущем времени/);
   assert.match(calls[0], /Пыль забьёт водосборный сток/);
 });
 
@@ -672,7 +672,7 @@ test('дело, которого нет или которое не идёт, п�
   assert.equal(domain.lore.length, 0, 'запись о паузе не пишется');
 });
 
-test('дело о постоянном порядке кладёт след в изменения города, а не в глубину', async () => {
+test('старое дело с полем правила закрывается как обычное поручение', async () => {
   const domain = makeDomain();
   const world = makeWorld();
   const process = markRuleDeed(
@@ -693,10 +693,10 @@ test('дело о постоянном порядке кладёт след в �
     rng: () => 0.5,
     log: silentLog,
   });
-  assert.equal(res.rule.applied, true);
-  assert.equal(cityRules(domain)[0].text, 'Подать удвоена');
-  assert.match(domain.lore[0].text, /Подать удвоена/);
-  assert.equal(domain.lore[0].author, 'engine:rule');
+  assert.equal(res.rule, undefined);
+  assert.equal(domain.modifiers?.length || 0, 0);
+  assert.equal(domain.lore[0].author, 'engine:deed');
+  assert.equal(process.status, 'resolved');
 });
 
 test('завершённое поручение само историю не сеет', async () => {

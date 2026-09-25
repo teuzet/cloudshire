@@ -87,14 +87,17 @@ test('закрывшее историю дело получает право н�
   assert.doesNotMatch(lines, /История не закрыта/);
 });
 
-test('отведённая беда называется в записи', () => {
+test('отведённую беду хронисту не называют, просят показать событием', () => {
   const lines = deedConsequenceLines({
     plot: plot(),
     applied: { alignment: 'RELEVANT', finish: 'ok' },
     averted: [{ id: 't1', text: 'Известковая пыль забьёт водосборный сток' }],
   }).join('\n');
-  assert.match(lines, /Известковая пыль/);
-  assert.match(lines, /чего избежал/);
+  assert.doesNotMatch(lines, /Известковая пыль/);
+  assert.doesNotMatch(lines, /чего избежал/);
+  assert.match(lines, /не называй/);
+  assert.match(lines, /предметным событием/);
+  assert.match(lines, /не зря/);
 });
 
 test('UNRELATED-делу прямо запрещают двигать историю', () => {
@@ -265,7 +268,7 @@ test('промпт беды требует прошедшего времени',
     remainingPct: 50,
     config: cfg,
   });
-  assert.match(text, /В БУДУЩЕМ ВРЕМЕНИ/);
+  assert.match(text, /в будущем времени/);
   assert.match(text, /как случившееся, в прошедшем времени/);
   assert.match(text, /забьёт водосборный сток/, 'предсказание отдаём как есть');
   assert.match(text, /История не закрыта/);
@@ -292,13 +295,22 @@ test('провал, сорвавший беду, стоит в промпте п
     causeLines: cause,
     config: loadConfig(),
   });
-  assert.match(text, /ПРОВАЛЬНОЕ ДЕЛО ПРИВЕЛО К СОБЫТИЮ НИЖЕ/);
+  assert.match(text, /1\) Кто вёл/);
+  assert.match(text, /Канцлер Жален, мужчина/);
+  assert.doesNotMatch(text, /Согласуй род/);
+  assert.match(text, /2\) Чего добивались/);
+  assert.match(text, /Узнать причину гула/);
+  assert.match(text, /3\) Что именно делали/);
   assert.match(text, /Вскрыть ступени в Срединном поясе/);
+  assert.match(text, /4\) Исход/);
   assert.match(text, /\[ПРОВАЛ\]/);
-  assert.match(text, /одной причиной/);
-  assert.match(text, /Событие не подменяй другим/);
+  assert.match(text, /что именно пошло не так/);
+  assert.match(text, /5\) Что в результате произошло/);
+  assert.doesNotMatch(text, /одной причиной/);
+  assert.match(text, /один цельный текст/);
   assert.match(text, /История не закрыта/);
   assert.ok(text.indexOf('Вскрыть ступени') < text.indexOf(event));
+  assert.ok(text.indexOf(event) < text.indexOf('один цельный текст'));
 });
 
 test('концовка от провала держит и дело, и выбранное событие', () => {
@@ -316,7 +328,8 @@ test('концовка от провала держит и дело, и выбр
     config: loadConfig(),
     scale: 'CRISIS',
   });
-  assert.match(text, /ПРОВАЛЬНОЕ ДЕЛО ПРИВЕЛО К СОБЫТИЮ НИЖЕ/);
+  assert.match(text, /1\) Кто вёл/);
+  assert.doesNotMatch(text, /Согласуй род/);
   assert.match(text, /Вскрыть ступени в Срединном поясе/);
   assert.match(text, new RegExp(event));
   assert.match(text, /этим история кончается/i);

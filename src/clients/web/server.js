@@ -25,7 +25,7 @@ import { overlayWithPartner, stripConfluxView } from '../../game/confluxBoard.js
 import { deriveOnboardingPhase, normalizeOnboardingDraft } from '../../game/onboarding.js';
 import { genesisTutorialText } from '../../game/progressBar.js';
 import { miniCityPayload } from '../../game/miniCity.js';
-import { cityRules, proxyText } from '../../game/cityRules.js';
+import { proxyText } from '../../game/cityRules.js';
 import {
   worldDay,
   clockIsHeld,
@@ -761,7 +761,6 @@ export function createWebServer({ config, app, runtime, storage }) {
             mana: domain.state?.mana ?? 0,
             tags: (domain.tags || []).map((t) => t.tagName || t.tagId),
             processes: (domain.state?.pendingActions || []).map((p) => inspectProcess(p, day)),
-            standingRules: cityRules(domain),
             proxyText: proxyText(domain) || null,
             priestOrders: priestOrders(domain),
             notify: notifySettings(domain),

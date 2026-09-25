@@ -886,25 +886,9 @@ function renderConfluxTab(d) {
 }
 
 function renderOrdersBlocks(d) {
-  const rules = d.standingRules || [];
   const proxy = d.proxyText || (d.confluxDirective && d.confluxDirective.text) || null;
   const subjects = d.priestOrders || [];
   const out = [
-    block(
-      `Постоянный порядок (${rules.length})`,
-      rules.length
-        ? `<ul>${rules
-            .map(
-              (r) =>
-                `<li>${esc(r.text)} <span class="muted small">${esc(
-                  [r.sinceLabel || (r.sinceDay != null ? `день ${r.sinceDay}` : null), r.by]
-                    .filter(Boolean)
-                    .join(' · '),
-                )}</span></li>`,
-            )
-            .join('')}</ul>`
-        : '<p class="muted">порядка нет</p>',
-    ),
     block(
       'Доверенность',
       proxy ? `<p>${esc(typeof proxy === 'string' ? proxy : proxy.text || '')}</p>` : '<p class="muted">доверенности нет</p>',

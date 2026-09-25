@@ -178,10 +178,22 @@ test('автор бед видит хронику, которая уже слу�
   assert.match(text, /пиши беды после этих записей/);
 });
 
+test('автор бед получает брошенного автора, как завязка', () => {
+  const p = plot({ failCount: 0, maxFails: 2, stage: 0 });
+  const text = formatThreatStageRequest(stagePoolRequest(p, { rng: () => 0 }), p, loadConfig(), {
+    author: { id: 'poe', name: 'Эдгар Аллан По' },
+  });
+  assert.match(text, /Эдгар Аллан По/);
+  assert.match(text, /нарративную эстетику/);
+  assert.match(text, /самого автора в тексте не поминай/i);
+});
+
 test('инструкция автора бед больше не говорит про часы и анти-таргет', () => {
   const agent = loadConfig().agents.threatSmith;
   assert.match(agent.instructions, /submit_threats/);
   assert.match(agent.instructions, /Хроника в заказе уже случилась/);
+  assert.match(agent.instructions, /известн[а-я]* автор/);
+  assert.match(agent.instructions, /нарративную эстетику/);
   assert.doesNotMatch(agent.instructions, /анти-таргет|ещё 50%|параллельные часы/i);
   assert.match(agent.prompts.wound, /не последняя стадия/);
   assert.match(agent.prompts.wound, /Срок не называй/);

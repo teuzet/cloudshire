@@ -837,36 +837,13 @@ function renderStories() {
   );
 }
 
-/**
- * Постоянный порядок города. Указов-нитей больше нет: правило живёт
- * в `domain.modifiers`, наказ на сопряжение — в состоянии, темы докладов — у жреца.
- */
+/** Доверенность на сопряжение и темы докладов жреца. */
 function renderOrders() {
   const d = view.domain;
   if (!d) return empty('города ещё нет');
-  const rules = d.modifiers || d.state?.modifiers || [];
   const proxy = String(d.proxyText || d.state?.confluxDirective?.text || '').trim();
   const subjects = d.state?.priestOrders || [];
   const out = [
-    block(
-      `Постоянный порядок (${rules.length})`,
-      rules.length
-        ? rules
-            .map(
-              (m) =>
-                `<article class="ins-card"><h4>${esc(m.text || m.summary || m.id)}</h4>` +
-                `<div class="muted small">${esc(
-                  [
-                    m.sinceLabel || (m.sinceDay != null ? `с дня ${m.sinceDay}` : null),
-                    m.by || m.initiative,
-                  ]
-                    .filter(Boolean)
-                    .join(' · '),
-                )}</div></article>`,
-            )
-            .join('')
-        : empty('порядка нет'),
-    ),
     block(
       'Доверенность',
       proxy ? `<article class="ins-card"><p class="pre">${esc(proxy)}</p></article>` : empty('доверенности нет'),

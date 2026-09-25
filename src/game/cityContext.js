@@ -2,8 +2,8 @@
  * Город для агентов: компактный cityBrief.
  * Постоянный след города — в брифе (cityGenesisRewrite).
  * Канонические неизвестности — блок «Неизвестно (канон):» в том же тексте.
- * Дописки (modifiers) клеятся в хвост: они дополняют бриф, пока компактор
- * не свернёт их в текст. Указы живут на plotline.
+ * Дописки (modifiers) в бриф агентам не клеятся: постоянный порядок снят.
+ * Компактор генезиса по-прежнему может свернуть уже накопленные строки в текст.
  */
 
 import { newId } from './ids.js';
@@ -186,9 +186,7 @@ export function stableCityProse(domain) {
 
 /** То, что видят агенты вместо полного генезиса: бриф как есть и дописки. */
 export function formatCityForAgents(domain) {
-  const brief = stableCityProse(domain);
-  const mods = formatCityModifiersForPrompt(domain);
-  return mods ? `${brief}\n\n${mods}` : brief;
+  return stableCityProse(domain);
 }
 
 /** Зерно посева из генезиса: бриф как есть. Пустая строка, если города ещё нет. */

@@ -284,7 +284,7 @@ function renderEvents(events) {
 }
 
 function renderOrders(list) {
-  if (!list?.length) return empty('Постоянного порядка в городе нет.');
+  if (!list?.length) return empty('Доверенности нет.');
   return list
     .map((o) => {
       const when = o.since ? `заведено: ${o.since}` : '';

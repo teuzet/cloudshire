@@ -1,5 +1,5 @@
 /**
- * Тулы жреца: дела, постоянный порядок, лормастер, память.
+ * Тулы жреца: дела, доверенность, лормастер, память.
  * Состояние города собирает readDomainBrief и кладётся в блок хода, отдельного тула нет.
  * Вызываются из GameApp.runRuler; submit_reply собирается отдельно.
  *
@@ -50,15 +50,7 @@ import {
 } from './deeds.js';
 import { judgeDeed } from './deedJudge.js';
 import { scheduleDeedJob, cancelDeedJobs } from './worldLoop.js';
-import {
-  cityRules,
-  isRuleDeed,
-  markRuleDeed,
-  parseRuleAction,
-  findRule,
-  proxyText,
-  setProxyText,
-} from './cityRules.js';
+import { proxyText, setProxyText } from './cityRules.js';
 import { holdPassageShut } from './passage.js';
 import {
   normalizeDomainProcesses,
@@ -112,7 +104,7 @@ import {
   detachProcessFromPlots,
 } from './plotEngine.js';
 import { judgeProcessAlignment, engagementOf } from './plotAlign.js';
-import { stableCityProse, formatCityModifiersForPrompt } from './cityContext.js';
+import { stableCityProse } from './cityContext.js';
 import { writeRulerMemory, forgetRulerMemory, formatRulerVoiceForPrompt } from './rulerMemory.js';
 import { toolFail } from '../agents/toolResult.js';
 
@@ -319,7 +311,6 @@ export function readDomainBrief(domain, character, ctx = {}) {
       (action) => action.status !== 'paused',
     ),
     proxyText: proxyText(domain) || '',
-    modifiers: formatCityModifiersForPrompt(domain),
   };
 }
 
@@ -408,7 +399,6 @@ export function formatPriestTurn(domain, character, ctx = {}) {
     brief.dateLabel ? `ДАТА СЕЙЧАС: ${brief.dateLabel}.` : '',
     patronLine,
     `Население: ${brief.populationFeel}`,
-    brief.modifiers,
     `ЖИВЫЕ ИСТОРИИ\n${stories}`,
     `САНОВНИКИ\n${officers}`,
     paused,
@@ -442,17 +432,15 @@ export function rulerReplyCommitError({
     return {
       error: 'proxy_missing',
       message:
-        'commitment=proxy, но set_proxy не выполнен. Прими доверенность через tool или смени commitment. ' +
-        'Постоянное правило города — это не доверенность: оно заводится declare_process с rule, commitment=process.',
+        'commitment=proxy, но set_proxy не выполнен. Прими доверенность через tool или смени commitment.',
     };
   }
   if (commitment === 'revoked' && !succeeded('revoke_process', 'set_proxy')) {
     return {
       error: 'revoke_missing',
       message:
-        'commitment=revoked, но отмена не выполнена. Сверни дело (revoke_process), сними доверенность ' +
-        '(set_proxy с clear=true) или отмените правило (declare_process с rule и ruleAction=revoke, ' +
-        'тогда commitment=process), либо смени commitment.',
+        'commitment=revoked, но отмена не выполнена. Сверни дело (revoke_process) или сними доверенность ' +
+        '(set_proxy с clear=true), либо смени commitment.',
     };
   }
   if (commitment === 'clarify') {
@@ -514,7 +502,7 @@ export function submitReplyTool(turn, character) {
     description:
       'ЕДИНСТВЕННЫЙ способ ответить покровителю. Когда воля ясна, вызывай в том же ответе модели, что и действие, последним. ' +
       'text — сама речь; requestKind — чего просил покровитель; commitment — что ты реально сделал этим ходом. ' +
-      'Если приказ ещё нельзя облечь в дело или порядок — спроси и поставь commitment=clarify.',
+      'Если приказ ещё нельзя облечь в дело — спроси и поставь commitment=clarify.',
     parameters: {
       type: 'object',
       required: ['text', 'requestKind', 'commitment'],
@@ -533,8 +521,7 @@ export function submitReplyTool(turn, character) {
             'other',
           ],
           description:
-            'order_long — велел работу: стройку, суд, поход, разовое дело, а также объявить постоянное ' +
-            'правило (всё это declare_process). ' +
+            'order_long — велел работу: стройку, суд, поход, разовое дело (всё это declare_process). ' +
             '«Так и оставить / сами справятся» — commitment=none. ' +
             'order_impossible — велел то, чего в этом мире не бывает ' +
             '(отправить тебя за край или в пустоту, воскресить мёртвых, стереть память, космос, перенос); ' +
@@ -558,7 +545,7 @@ export function submitReplyTool(turn, character) {
           type: 'string',
           enum: ['none', 'process', 'proxy', 'revoked', 'refused', 'clarify'],
           description:
-            'Что сделано этим ходом: process (declare_process/update_process, в том числе правило через rule), ' +
+            'Что сделано этим ходом: process (declare_process/update_process), ' +
             'proxy (принял или снял доверенность), ' +
             'revoked (свернул дело или снял доверенность), refused (честно отказал или отговорил), ' +
             'clarify (приказ есть, но воля неясна — спросил, дело ещё не заводил), ' +
@@ -731,7 +718,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
     {
       name: 'declare_process',
       description:
-        'Дело: стройка, суд, поход, снабжение, а также объявление или отмена постоянного правила (через rule). ' +
+        'Дело: стройка, суд, поход, снабжение. ' +
         'Если воля ещё неясна — не вызывай, спроси покровителя (commitment=clarify). ' +
         'Срок и трудность сам не оценивай: их посчитает отдельный оценщик. ' +
         'Отказы: too_many_processes (все сановники заняты), officer_busy (названный сановник уже ведёт другое). ' +
@@ -757,18 +744,6 @@ export function buildRulerTools(domain, storage, character, ctx) {
             description:
               'Только воля покровителя к темпу, не твоя оценка. «спешка» — велел быстрее (риск выше), ' +
               '«обстоятельно» — велел не спешить. Не назвал темпа — поле не передавай.',
-          },
-          rule: {
-            type: 'string',
-            description:
-              'Формулировка ПОСТОЯННОГО правила города (запрет, закон, регулярный обряд, порядок службы). ' +
-              'Передавай, только если покровитель хочет всегдашний порядок, а не разовую работу. ' +
-              'Дело объявляет волю: успех вписывает правило в порядок города, провал — «объявили, но не приняли».',
-          },
-          ruleAction: {
-            type: 'string',
-            enum: ['declare', 'revoke'],
-            description: 'declare — ввести правило (по умолчанию), revoke — отменить уже действующее.',
           },
           linkedStats: {
             type: 'array',
@@ -835,8 +810,6 @@ export function buildRulerTools(domain, storage, character, ctx) {
         summary,
         detail,
         pace = null,
-        rule = null,
-        ruleAction = 'declare',
         linkedStats,
         onBehalfOf = 'patron',
         characterNote,
@@ -929,30 +902,6 @@ export function buildRulerTools(domain, storage, character, ctx) {
               'Сначала поспорь и предупреди, что справится плохо. Если настаивает — повтори declare_process с insistOffPortfolio=true.',
           );
         }
-        const ruleText = String(rule || '').trim();
-        const ruleKind = ruleText ? parseRuleAction(ruleAction) : null;
-        if (ruleText && ruleText.length < 3) {
-          return toolFail(
-            'rule_too_short',
-            'Формулировка постоянного правила слишком короткая. Скажи правило целиком и вызови снова.',
-          );
-        }
-        let revoking = null;
-        if (ruleKind === 'revoke') {
-          revoking = findRule(domain, { text: ruleText });
-          if (!revoking) {
-            const list = cityRules(domain);
-            return {
-              ok: false,
-              error: 'rule_not_found',
-              standingRules: list.map((m) => ({ id: m.id, text: m.text })),
-              agentMessage:
-                'Такого постоянного правила в городе нет. Возьми формулировку из списка ниже и вызови снова, ' +
-                'либо скажи покровителю, что этот порядок и так не действует.\n' +
-                (list.map((m) => `- ${m.text}`).join('\n') || '(постоянных правил нет)'),
-            };
-          }
-        }
         const paceShift = pace === 'спешка' ? -1 : pace === 'обстоятельно' ? 1 : 0;
         const wantIntel = Boolean(intel);
         const partners = ctx.conflux && ctx.partner ? [domain, ctx.partner] : [domain];
@@ -1012,49 +961,39 @@ export function buildRulerTools(domain, storage, character, ctx) {
         domain.state.pendingActions.push(action);
         bindOfficerProcess(domain, officer, action);
 
-        // Объявление воли — дело считанных дней и посильное; оценщик тут не нужен.
-        let judged = null;
-        if (ruleKind) {
-          markRuleDeed(action, {
-            text: ruleText,
-            action: ruleKind,
-            modifierId: revoking?.id || null,
-          });
-        } else {
-          judged = await judgeDeed({
-            runtime: ctx.runtime,
-            domain,
-            summary,
-            detail,
-            goal: action.goal || '',
-            remainingWindowBand:
-              ctx.conflux?.status === 'docked' ? remainingWindowBand(ctx.conflux, day) : '',
-            partnerName: ctx.partner?.name || '',
-            log: ctx.log,
-          });
-          if (judged.note) action.durationNote = judged.note;
-          if (action.passageGuard) {
-            if (durationBandIndex(judged.durationBand) < durationBandIndex('SEASON')) {
-              judged.durationBand = 'SEASON';
-            }
-            if (difficultyBandIndex(judged.difficulty) < difficultyBandIndex('HARD')) {
-              judged.difficulty = 'HARD';
-            }
+        let judged = await judgeDeed({
+          runtime: ctx.runtime,
+          domain,
+          summary,
+          detail,
+          goal: action.goal || '',
+          remainingWindowBand:
+            ctx.conflux?.status === 'docked' ? remainingWindowBand(ctx.conflux, day) : '',
+          partnerName: ctx.partner?.name || '',
+          log: ctx.log,
+        });
+        if (judged.note) action.durationNote = judged.note;
+        if (action.passageGuard) {
+          if (durationBandIndex(judged.durationBand) < durationBandIndex('SEASON')) {
+            judged.durationBand = 'SEASON';
           }
-          const applied = applyDockedDeedClassification(judged, {
-            action,
-            domain,
-            ctx,
-            day,
-            targetPlot,
-          });
-          if (applied.error === 'window') {
-            domain.state.pendingActions = (domain.state.pendingActions || []).filter((p) => p.id !== action.id);
-            releaseOfficerProcess(domain, action);
-            return toolFail('window', applied.message);
+          if (difficultyBandIndex(judged.difficulty) < difficultyBandIndex('HARD')) {
+            judged.difficulty = 'HARD';
           }
-          judged = applied.judged;
         }
+        const applied = applyDockedDeedClassification(judged, {
+          action,
+          domain,
+          ctx,
+          day,
+          targetPlot,
+        });
+        if (applied.error === 'window') {
+          domain.state.pendingActions = (domain.state.pendingActions || []).filter((p) => p.id !== action.id);
+          releaseOfficerProcess(domain, action);
+          return toolFail('window', applied.message);
+        }
+        judged = applied.judged;
         startDeed(action, { day, judged });
         if (paceShift) applyPace(action, paceShift, { day });
         scheduleDeedJob(world, domain, action);
@@ -1117,15 +1056,9 @@ export function buildRulerTools(domain, storage, character, ctx) {
         const impossibleWarn = action.impossible
           ? ' Это дело смертным не по силам: людей займут, а толку не будет. Предупреди заранее.'
           : '';
-        const ruleWarn = ruleKind
-          ? ruleKind === 'revoke'
-            ? ' Это отмена постоянного правила: объявить недолго, но город ещё должен отвыкнуть.'
-            : ' Это объявление постоянного правила: если город его примет, оно останется в порядке города.'
-          : '';
         const hint = rehomed
           ? unrelatedAttachHint(paceHint(action, judged?.note))
           : `В речи: принял повеление. ${paceHint(action, judged?.note)}` +
-            ruleWarn +
             impossibleWarn +
             ' Не говори «уже сделали» и не рапортуй механику: весть об исходе принесёшь сам, когда работа кончится.';
         return {
@@ -1133,7 +1066,6 @@ export function buildRulerTools(domain, storage, character, ctx) {
           process: action,
           duration: spokenSpan(action),
           difficulty: difficultyWord(action.difficulty),
-          rule: ruleKind,
           rehomed,
           hint,
         };
@@ -1143,7 +1075,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
       name: 'set_proxy',
       description:
         'Доверенность правителя: свободный текст, как городу вести себя при сопряжении и на ходе нити. ' +
-        'Не дело и не постоянное правило. Сановник может по ней действовать или нет. ' +
+        'Не дело. Сановник может по ней действовать или нет. ' +
         'clear=true — снять прежнюю доверенность.',
       parameters: {
         type: 'object',
@@ -1249,7 +1181,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
           ctx.config,
         );
         // Переписанное дело — другая работа: срок и трудность считаются заново.
-        if (revised.rewritten && !isRuleDeed(action)) {
+        if (revised.rewritten) {
           if (ctx.conflux?.status === 'docked') {
             action.crossIsland = false;
             action.targetDomainId = null;

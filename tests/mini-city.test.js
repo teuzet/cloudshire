@@ -268,8 +268,7 @@ test('мини-аппка: свои истории и участие в сопр
   assert.equal(fight.processes[0].blessCost, 8, 'недели — полоса WEEKS');
   assert.equal(fight.processes[0].canBless, true);
   assert.equal(knowledge.about, 'Помнит ли город, как лечить и читать.');
-  assert.equal(view.orders[0].text, 'Ночной дозор у края');
-  assert.match(view.orders[0].since, /Год 1, месяц 4/);
+  assert.deepEqual(view.orders, []);
   assert.equal(view.gameDate, 'Год 1, месяц 5, день 6');
 
   const well2 = view.events.find((e) => e.title === 'Гул колодца');
@@ -368,9 +367,8 @@ test('раздел «Город» — меню из вкладок, а не од
   assert.deepEqual(tabs.map((t) => t.id), ['description', 'brief', 'chronicle', 'people']);
 
   const brief = tabs.find((t) => t.id === 'brief');
-  assert.deepEqual(brief.sections.map((s) => s.id), ['brief-body', 'brief-unknowns', 'brief-modifiers']);
+  assert.deepEqual(brief.sections.map((s) => s.id), ['brief-body', 'brief-unknowns']);
   assert.match(brief.sections[1].text, /нижние мостки/);
-  assert.match(brief.sections[2].text, /подать удвоена/);
 
   const chronicle = tabs.find((t) => t.id === 'chronicle');
   assert.deepEqual(chronicle.entries.map((f) => f.id), ['f2', 'f1'], 'свежее сверху');

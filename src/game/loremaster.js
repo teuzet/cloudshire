@@ -4,7 +4,6 @@ import { formatFullChronicleForPrompt, formatFactsForPrompt } from './memory.js'
 import { findActiveConfluxForDomain } from './conflux.js';
 import { daysUntilDock } from './confluxTime.js';
 import { attachFactToPlotlines, plotsForPriest, isStoryPlot } from './plotlines.js';
-import { cityRules } from './cityRules.js';
 import { overlayConfluxView, stampNewBoardItems, stripConfluxView } from './confluxBoard.js';
 import { revealedPremises, revealedAnswer, hiddenAnswer, hiddenPremises, knownFacts } from './premises.js';
 import { formatCityForAgents, parseCityBrief, formatCanonicalUnknownsForPrompt } from './cityContext.js';
@@ -193,7 +192,6 @@ export async function askLoremaster({
           chronicle: formatFullChronicleForPrompt({ ...working, lore: visible }),
           facts: formatFactsForPrompt(visible, { limit: 60 }),
           knownPeople: formatCastForPrompt(visible, { limit: 30 }),
-          standingRules: cityRules(working).map((m) => m.text),
           currentEvents: (working.state?.events || []).map((e) =>
             typeof e === 'string' ? e : e?.text,
           ),

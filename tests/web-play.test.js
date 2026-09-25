@@ -508,10 +508,10 @@ test('клиент рисует концовки списком с пометк�
   });
 });
 
-test('порядок города, доверенность и темы докладов видны клиенту', async () => {
+test('доверенность и темы докладов видны клиенту', async () => {
   await withServer(async ({ base }) => {
     const data = await get(base, '/api/play/inspect?userId=local-user');
-    assert.equal(data.domain.standingRules[0].text, 'Ночной дозор у края');
+    assert.equal('standingRules' in data.domain, false);
     assert.equal(data.domain.proxyText, 'Не пускать чужих в город');
     assert.deepEqual(
       data.domain.priestOrders.map((o) => o.subject),
@@ -531,13 +531,13 @@ test('справочник города открывается по слоту, 
     assert.equal(view.gameDate, 'Год 1, месяц 5, день 6');
     assert.deepEqual(
       view.city.tabs.map((t) => t.id),
-      ['description', 'brief', 'chronicle', 'people'],
+      ['description', 'chronicle', 'people'],
     );
     const well = view.events.find((e) => e.title === 'Гул колодца');
     assert.equal(well.threats, undefined);
     assert.equal(well.processes[0].remaining, 'дни');
-    assert.equal(view.orders[0].text, 'Ночной дозор у края');
-    assert.match(view.orders[1].text, /Не пускать чужих/);
+    assert.equal(view.orders.length, 1);
+    assert.match(view.orders[0].text, /Не пускать чужих/);
   });
 });
 

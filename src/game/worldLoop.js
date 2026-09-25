@@ -82,7 +82,6 @@ import {
   postponeSeedRequest,
 } from './seedSchedule.js';
 import { grainForSource, openingGrain, openingVoidGrain, yearChronicleGrain, formatChronicleGrain } from './seedChannels.js';
-import { applyRuleDeed } from './cityRules.js';
 import { plantStakedStory } from './storyteller.js';
 import { accrueMana } from './mana.js';
 import { countEvent, markReported, pickReportSubject } from './priestOrders.js';
@@ -397,20 +396,15 @@ export async function resolveDeedEvent({
   }
   const woundBudget = firedThreat ? rememberWoundBudget(firedThreat, plot, config, rng) : 0;
 
-  // Постоянный порядок — тоже обычное дело, только его след ложится не в
-  // глубину истории, а в постоянные изменения города.
-  const rule = applyRuleDeed(domain, process, { finish: rolled.finish, day, rng });
-
   // Запись хроники пишет хронист, а не движок: шаблон «дело кончилось успехом»
   // и был тем метагеймом, который жрец потом честно пересказывал.
-  // Порядок города говорит сам за себя — там текст уже предметный.
-  let text = rule?.text || null;
+  let text = null;
   let pairNarration = null;
   const closesStory = Boolean(applied.closes || fireRes?.closes) && Boolean(plot);
   const completionBudget = closesStory && (plot?.ending?.kind || applied.endingKind) === 'GOOD_ENDING'
     ? rollStoryCompletionBudget(plot, config, rng)
     : 0;
-  const pairDeed = !rule && conflux?.status === 'docked' && isPairCrossingDeed(process, plot, partner);
+  const pairDeed = conflux?.status === 'docked' && isPairCrossingDeed(process, plot, partner);
   if (!text && pairDeed) {
     pairNarration = await narratePairDeed({
       runtime,
@@ -517,7 +511,7 @@ export async function resolveDeedEvent({
         plotId: plot?.id || null,
         processId: process.id,
         day,
-        author: rule ? 'engine:rule' : 'engine:deed',
+        author: 'engine:deed',
         finish: rolled.finish,
         secret: Boolean(process.secret),
         secretForDomainId: process.secret ? domain.id : null,
@@ -618,7 +612,7 @@ export async function resolveDeedEvent({
     if (storage && host !== domain) await storage.saveDomain(host);
   }
 
-  if (!plot && !rule && !process.intel) {
+  if (!plot && !process.intel) {
     const seeded = offerErrandSeed(domain, {
       processId: process.id,
       summary: process.summary,
@@ -653,7 +647,6 @@ export async function resolveDeedEvent({
     occasion: closed ? 'развязка' : 'дело',
     outcome,
     applied,
-    rule,
     closed: Boolean(closed),
     actor: deedActor(domain, process),
     actorGender: deedActorGender(domain, process),

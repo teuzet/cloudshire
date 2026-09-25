@@ -528,6 +528,7 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformTell.instructions, /НА САМОМ ДЕЛЕ/);
   assert.match(agents.freeformArchitectTell.instructions, /НА САМОМ ДЕЛЕ/);
   assert.match(agents.freeformEndings.instructions, /хотя бы по одной/);
+  assert.match(agents.freeformEndings.instructions, /нарративную эстетику/);
   assert.equal(agents.freeformAssemble.model, 'gpt-5.6-luna');
   assert.deepEqual(agents.freeformAssemble.canon, ['chronicle', 'world']);
   assert.deepEqual(agents.freeformAssemble.styles, []);

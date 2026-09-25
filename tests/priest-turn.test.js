@@ -159,7 +159,7 @@ test('блок хода: бриф города раньше даты, истор
   assert.ok(dateAt >= 0 && dateAt < storiesAt && storiesAt < officersAt);
   assert.ok(officersAt < pausedAt && pausedAt < chronicleAt);
   assert.match(dynamic, /Имя покровителя: «Орион», пол: мужчина/);
-  assert.match(dynamic, /Ночной дозор у края/);
+  assert.doesNotMatch(dynamic, /Ночной дозор/);
   assert.match(dynamic, new RegExp(SYNOPSIS.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.doesNotMatch(dynamic, /Обвал нижних террас/);
   assert.match(dynamic, /Сторожить амбары/);

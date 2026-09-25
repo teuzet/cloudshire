@@ -162,6 +162,9 @@ test('FAIL судьи даёт ровно один круг починки', asy
   );
   assert.match(runtime.calls[2].user, /CAUSE_UNTOUCHED/);
   assert.match(runtime.calls[2].user, /Первопричина осталась на месте/);
+  const voice = runtime.calls[0].user.match(/Развивай ход так, как это сделал бы автор: .+/);
+  assert.ok(voice, 'первой выдаче брошен автор');
+  assert.ok(runtime.calls[2].user.includes(voice[0]));
   assert.match(res.endings[0].text, /Гнездовье перенесли/);
 });
 

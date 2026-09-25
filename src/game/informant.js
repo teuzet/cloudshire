@@ -5,7 +5,6 @@
 import { newId } from './ids.js';
 import { createLoreFact, formatCastForPrompt, chronicleEntries } from './models.js';
 import { findActiveConfluxForDomain } from './conflux.js';
-import { cityRules } from './cityRules.js';
 import { parseCityBrief, normalizeCanonicalUnknowns } from './cityContext.js';
 import { isStoryPlot } from './plotlines.js';
 import { formatPairArchive } from './confluxCanon.js';
@@ -189,7 +188,6 @@ export async function askInformant({
         past: formatChronicleForInformant(visible),
         facts: formatFactsForInformant(visible),
         knownPeople: formatCastForPrompt(visible, { limit: 30 }),
-        standingRules: cityRules(partner).map((m) => m.text),
         currentEvents: (partner.state?.events || []).map((e) => (typeof e === 'string' ? e : e?.text)),
         currentTroubles: formatNeighborPlotList(partner.plotlines),
         whileTogether: formatTogetherForInformant(conflux, [domain, partner]),

@@ -4,7 +4,7 @@ import { isStoryPlot, parseFreeformGravity, storyOfficerSlots } from './plotline
 import { activeProcesses, pausedProcesses, processOwnedBy, processStatAverage, processPaceRatio } from './processes.js';
 import { finishChancePercents } from './rolls.js';
 import { blessManaCost, currentMana } from './mana.js';
-import { cityRules, proxyText } from './cityRules.js';
+import { proxyText } from './cityRules.js';
 import { gameDateFromTickIndex } from './tickClock.js';
 import { gameDateFromDay, realWaitLabel } from './gameClock.js';
 import {
@@ -121,16 +121,6 @@ function briefTab(domain) {
       id: 'brief-unknowns',
       title: 'Неизвестно',
       text: unknowns.map((u) => `— ${u}`).join('\n'),
-    });
-  }
-  const modifiers = (domain?.modifiers || [])
-    .map((m) => String(m?.text || '').trim())
-    .filter(Boolean);
-  if (modifiers.length) {
-    sections.push({
-      id: 'brief-modifiers',
-      title: 'Постоянные изменения',
-      text: clip(modifiers.map((t) => `— ${t}`).join('\n'), DESC_SECTION_MAX),
     });
   }
   return { id: 'brief', title: 'Бриф', sections };
@@ -369,13 +359,7 @@ export function miniCityPayload({
     : null;
 
   const proxy = proxyText(domain);
-  const orders = [
-    ...cityRules(domain).map((m) => ({
-      text: clip(m.text || '', 400),
-      since: m.sinceLabel || gameDateLabelAtTick(world, m.sinceTick),
-    })),
-    ...(proxy ? [{ text: `Доверенность: ${clip(proxy, 360)}`, since: null }] : []),
-  ];
+  const orders = proxy ? [{ text: `Доверенность: ${clip(proxy, 360)}`, since: null }] : [];
 
   return {
     city: {
