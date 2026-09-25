@@ -108,7 +108,14 @@ import {
   shouldRulerAskPatron,
   markRulerAsked,
 } from './rulerMemory.js';
-import { resolveReply, formatReplyForPrompt, rememberPush } from './replyContext.js';
+import {
+  resolveReply,
+  formatReplyForPrompt,
+  rememberPush,
+  remembersReply,
+  catchUpHeldDomain,
+  findPush,
+} from './replyContext.js';
 import { clearPatronPresenceAsked } from './steward.js';
 import { getLogger, truncate, setLoggerWorldId } from '../log.js';
 import { initUsageRecording } from '../llm/usage.js';
@@ -285,12 +292,12 @@ export class GameApp {
 
   /** Запомнить, о чём был отправленный пуш: реплай должен разрешаться в объект. */
   async recordPushMessage(domainId, entry) {
-    const domain = await this.storage.getDomain(domainId);
-    if (!domain) return null;
-    const saved = rememberPush(domain, entry);
-    if (!saved) return null;
-    await this.storage.saveDomain(domain);
-    return saved;
+    if (!remembersReply(entry?.kind)) return null;
+    const written = await this.storage.updateDomain(domainId, (domain) => {
+      rememberPush(domain, entry);
+    });
+    if (!written) return null;
+    return findPush(written, entry?.messageId);
   }
 
   async getStatus() {
@@ -515,6 +522,7 @@ export class GameApp {
           kind: 'game_start',
         });
         if (domain.state) domain.state.genesisPending = false;
+        await catchUpHeldDomain(this.storage, domain);
         await this.storage.saveDomain(domain);
         log.info('genesis.done', {
           domainId: domain.id,
@@ -1241,6 +1249,7 @@ export class GameApp {
     if (character.dialogHistory.length > 200) {
       character.dialogHistory = character.dialogHistory.slice(-150);
     }
+    await catchUpHeldDomain(this.storage, domain);
     await this.storage.saveDomain(domain);
   }
 

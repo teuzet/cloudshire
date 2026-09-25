@@ -1,3 +1,5 @@
+import { revisionOf } from '../storage/revision.js';
+
 /**
  * Реплаи в Telegram.
  *
@@ -11,6 +13,43 @@
 
 /** Держим последние N отправленных сообщений: глубже игрок не отвечает. */
 export const PUSH_MAP_LIMIT = 60;
+
+/**
+ * Системные вести: на них не отвечают реплаем, и записывать message_id не нужно.
+ * Запись пуша читает город заново и сохраняет его — старая копия генезиса или
+ * дневного шага после этого уже не имеет права писать город целиком.
+ */
+const NO_REPLY_KINDS = new Set([
+  'game_date',
+  'genesis_tutorial',
+  'generating_error',
+  'progress',
+  'ruler_hold',
+  'island_reveal',
+]);
+
+export function remembersReply(kind) {
+  return !NO_REPLY_KINDS.has(String(kind || ''));
+}
+
+/**
+ * Пуш уже лёг в базу отдельной копией. Подтянуть его ревизию и карту,
+ * не трогая остальное, что эта копия ещё не сохранила.
+ */
+export async function catchUpHeldDomain(storage, domain) {
+  if (!domain?.id || typeof storage?.getDomain !== 'function') return domain;
+  const stored = await storage.getDomain(domain.id);
+  if (!stored) return domain;
+  const storedRev = revisionOf(stored);
+  const mine = revisionOf(domain);
+  if (storedRev == null || mine == null || storedRev <= mine) return domain;
+  domain.rev = storedRev;
+  if (!domain.state) domain.state = {};
+  domain.state.pushMap = Array.isArray(stored.state?.pushMap)
+    ? stored.state.pushMap.map((entry) => ({ ...entry }))
+    : [];
+  return domain;
+}
 
 export function pushMap(domain) {
   if (!domain.state) domain.state = {};

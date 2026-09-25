@@ -27,6 +27,7 @@ import {
 } from './worldLoop.js';
 import { narrateEvent } from './herald.js';
 import { markPushed, shouldPush } from './notify.js';
+import { catchUpHeldDomain } from './replyContext.js';
 import { scoreChronicleStats, factsForStatJudge } from './statJudge.js';
 import { keepStories } from './storyteller.js';
 import { formatRulerVoiceForPrompt } from './rulerMemory.js';
@@ -475,7 +476,8 @@ export async function runDayLoop({
           });
         }
       }
-      await storage.saveDomain(domain);
+      await catchUpHeldDomain(storage, domain);
+      await saveDomainOrShout(storage, domain, log, 'after_say');
       return {
         domainId: domain.id,
         name: domain.name,

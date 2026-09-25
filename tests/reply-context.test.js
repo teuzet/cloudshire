@@ -8,6 +8,8 @@ import {
   replyFromTelegram,
   resolveReply,
   formatReplyForPrompt,
+  remembersReply,
+  catchUpHeldDomain,
 } from '../src/game/replyContext.js';
 
 function domain() {
@@ -130,4 +132,32 @@ test('блок для промпта отделяет цитату от ныне
 test('без реплая блок пустой', () => {
   assert.equal(formatReplyForPrompt(null), '');
   assert.equal(formatReplyForPrompt({ text: '' }), '');
+});
+
+test('системные вести не запоминаются для реплая', () => {
+  assert.equal(remembersReply('game_date'), false);
+  assert.equal(remembersReply('genesis_tutorial'), false);
+  assert.equal(remembersReply('island_reveal'), false);
+  assert.equal(remembersReply('generating_error'), false);
+  assert.equal(remembersReply('event'), true);
+  assert.equal(remembersReply('game_start'), true);
+});
+
+test('удержанная копия подхватывает пуш, записанный свежим чтением', async () => {
+  const held = {
+    id: 'd1',
+    rev: 4,
+    state: { pushMap: [], genesisPending: true },
+    characters: [{ dialogHistory: [{ role: 'assistant', content: 'приветствие' }] }],
+  };
+  const stored = {
+    id: 'd1',
+    rev: 5,
+    state: { pushMap: [{ messageId: 9, kind: 'event', text: 'дата не эта' }] },
+  };
+  await catchUpHeldDomain({ async getDomain() { return stored; } }, held);
+  assert.equal(held.rev, 5);
+  assert.equal(held.state.pushMap[0].messageId, 9);
+  assert.equal(held.state.genesisPending, true);
+  assert.equal(held.characters[0].dialogHistory[0].content, 'приветствие');
 });
