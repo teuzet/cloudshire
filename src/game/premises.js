@@ -50,6 +50,41 @@ export function normalizeRevealedPremises(raw) {
   return normalizeHiddenPremises(raw);
 }
 
+/** Известное городу сверх хроники: остаток завязки и уже раскрытые тайны. */
+export const KNOWN_FACT_MAX = 24;
+
+export function normalizeKnownFacts(raw) {
+  const list = Array.isArray(raw) ? raw : [];
+  const out = [];
+  const seen = new Set();
+  for (const item of list) {
+    const text = normalizeSpace(typeof item === 'string' ? item : item?.text || item?.fact || '');
+    if (text.length < 8) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+    if (out.length >= KNOWN_FACT_MAX) break;
+  }
+  return out;
+}
+
+export function knownFacts(plot) {
+  return Array.isArray(plot?.knownFacts) ? plot.knownFacts : [];
+}
+
+/** Дописать известный факт. Повтор той же строки не копится. */
+export function addKnownFact(plot, text) {
+  if (!plot || !text) return null;
+  const [fact] = normalizeKnownFacts([text]);
+  if (!fact) return null;
+  if (!Array.isArray(plot.knownFacts)) plot.knownFacts = [];
+  const key = fact.toLowerCase();
+  if (plot.knownFacts.some((item) => String(item).toLowerCase() === key)) return fact;
+  plot.knownFacts.push(fact);
+  return fact;
+}
+
 export function hiddenPremises(plot) {
   return Array.isArray(plot?.hiddenPremises) ? plot.hiddenPremises : [];
 }
@@ -121,6 +156,7 @@ export function revealPremise(plot, text) {
   const [found] = plot.hiddenPremises.splice(i, 1);
   if (!Array.isArray(plot.revealedPremises)) plot.revealedPremises = [];
   plot.revealedPremises.push(found);
+  addKnownFact(plot, found);
   return found;
 }
 
@@ -130,6 +166,7 @@ export function revealAnswer(plot) {
   if (!text) return null;
   plot.hiddenAnswer = '';
   plot.revealedAnswer = text;
+  addKnownFact(plot, text);
   return text;
 }
 
@@ -155,7 +192,13 @@ function speechWords(text, min) {
 export function speechHintsHidden(plot, speech, { alreadySaid = '' } = {}) {
   const secret = [hiddenAnswer(plot), ...hiddenPremises(plot)].filter(Boolean).join(' ');
   if (!foldSpeech(secret)) return false;
-  const pub = [plot?.synopsis, plot?.title, revealedAnswer(plot), ...revealedPremises(plot)].join(' ');
+  const pub = [
+    plot?.synopsis,
+    plot?.title,
+    revealedAnswer(plot),
+    ...revealedPremises(plot),
+    ...knownFacts(plot),
+  ].join(' ');
   const publicStems = new Set(speechWords(pub, 5).map((w) => w.slice(0, 6)));
   const allowed = new Set(speechWords(alreadySaid, 5).map((w) => w.slice(0, 6)));
   const said = foldSpeech(speech);

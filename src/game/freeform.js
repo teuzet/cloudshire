@@ -33,7 +33,7 @@ import { formatCityForAgents } from './cityContext.js';
 import { formatOfficersCastHint } from './officers.js';
 import { formatCastForPrompt } from './models.js';
 import { normalizeBeatDynamics } from './freeformDynamics.js';
-import { hiddenPremises, revealedPremises, hiddenAnswer, revealedAnswer } from './premises.js';
+import { hiddenPremises, revealedPremises, hiddenAnswer, revealedAnswer, knownFacts } from './premises.js';
 
 export const FREEFORM_FINISH = ['fail', 'ok', 'crit'];
 
@@ -571,6 +571,7 @@ export function createFreeformPlot({ domain, world, variant, config, seedChronic
     closeWhen: variant.closeWhen,
     type: 'story',
     hiddenPremises: variant.hiddenPremises,
+    knownFacts: variant.knownFacts,
     hiddenAnswer: variant.hiddenAnswer,
     seed: variant.seed,
     urgency,
@@ -636,6 +637,17 @@ export function cityStateForPrompt(domain, world, { officers = true, cast = fals
     .join('\n\n');
 }
 
+function formatKnownFactsBlock(plot) {
+  const taken = new Set(
+    [revealedAnswer(plot), ...revealedPremises(plot)]
+      .map((item) => String(item || '').replace(/\s+/g, ' ').trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const rows = knownFacts(plot).filter((item) => !taken.has(String(item).toLowerCase()));
+  if (!rows.length) return '';
+  return `Городу уже известно:\n${rows.map((item) => `- ${item}`).join('\n')}`;
+}
+
 export function plotCardForPrompt(plot, { revealHidden = true, includeSeed = false } = {}) {
   if (!plot) return '';
   const known = revealedPremises(plot);
@@ -649,6 +661,7 @@ export function plotCardForPrompt(plot, { revealHidden = true, includeSeed = fal
     // говорить и писать в отличие от скрытого слоя ниже.
     solved ? `Город разгадал: ${solved}` : '',
     known.length ? `Город это уже выяснил:\n${known.map((h) => `- ${h}`).join('\n')}` : '',
+    formatKnownFactsBlock(plot),
     formatFreeformProgress(plot),
     `gravity: ${plot.gravity || '—'}`,
   ];
@@ -683,6 +696,7 @@ export function formatStoryForBeatArchitect(domain, plot) {
     plotChronicleForPrompt(domain, plot),
     solved ? `Город разгадал: ${solved}` : '',
     known.length ? `Город это уже установил:\n${known.map((h) => `- ${h}`).join('\n')}` : '',
+    formatKnownFactsBlock(plot),
     hiddenLayerForPrompt(plot).replace(
       'Скрыто от города (только тебе, в хронику не писать):',
       'На самом деле (в текст не пиши):',

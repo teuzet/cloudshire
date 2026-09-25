@@ -14,7 +14,7 @@ import { captureAgentPrompt } from './agentPrompt.js';
 import { chronicleEntries } from './models.js';
 import { isGenesisNotice } from './memory.js';
 import { livesLeft } from './threats.js';
-import { revealedPremises, revealedAnswer } from './premises.js';
+import { revealedPremises, revealedAnswer, knownFacts } from './premises.js';
 import { remainingWork } from './deedMath.js';
 
 export const OCCASIONS = ['новая история', 'дело', 'угроза', 'разрешение', 'развязка', 'доклад'];
@@ -106,11 +106,30 @@ export function threadCard(plot, day, { closed = false } = {}) {
     workLeft: remainingWork(plot),
     // Выясненное городом. Жрецу это можно говорить — в отличие от того,
     // что ещё скрыто и ему вовсе не показывается.
-    established: [
+    established: uniqueEstablished([
       revealedAnswer(plot) ? `разгадка: ${revealedAnswer(plot)}` : '',
       ...revealedPremises(plot),
-    ].filter(Boolean),
+      ...knownFacts(plot).filter((item) => {
+        const key = String(item).toLowerCase();
+        if (revealedAnswer(plot).toLowerCase() === key) return false;
+        return !revealedPremises(plot).some((known) => known.toLowerCase() === key);
+      }),
+    ]),
   };
+}
+
+function uniqueEstablished(list) {
+  const seen = new Set();
+  const out = [];
+  for (const item of list) {
+    const text = String(item || '').trim();
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+  }
+  return out;
 }
 
 /** Чем история кончилась: вид развязки и обещание, которое она сняла. */

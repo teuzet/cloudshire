@@ -8,7 +8,7 @@ import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { clipPlotText, PLOT_SUMMARY_MAX } from './plotlines.js';
 import { captureAgentPrompt } from './freeformArchitect.js';
-import { normalizeHiddenPremises } from './premises.js';
+import { normalizeHiddenPremises, normalizeKnownFacts } from './premises.js';
 import {
   cityStateForPrompt,
   parseFreeformGravity,
@@ -351,6 +351,101 @@ export async function splitAssembledHidden({
   };
 }
 
+function formatHiddenForKnown(story) {
+  const answer = String(story?.hiddenAnswer || '').trim();
+  const premises = Array.isArray(story?.hiddenPremises) ? story.hiddenPremises : [];
+  const rows = [
+    answer ? `- разгадка: ${answer}` : '',
+    ...premises.map((item) => `- ${item}`),
+  ].filter(Boolean);
+  return rows.join('\n');
+}
+
+function factAlreadyPlaced(fact, chronicle, hidden) {
+  const folded = String(fact || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!folded) return true;
+  const hay = `${chronicle}\n${hidden}`.toLowerCase();
+  return hay.includes(folded);
+}
+
+/**
+ * Остаток завязки: то, что город уже знает, но чего нет ни в хронике, ни в скрытом слое.
+ * Пустой список — норма: всё уже разложили.
+ */
+export async function extractKnownFacts({
+  runtime,
+  story,
+  seed = '',
+  log: parentLog,
+  domainId = null,
+} = {}) {
+  const log = (parentLog || getLogger()).child({ scope: 'freeform.known' });
+  const chronicle = String(story?.chronicle || '').trim();
+  const seedText = String(seed || '').trim();
+  const hidden = formatHiddenForKnown(story);
+  if (!seedText || !runtime?.run) return { knownFacts: [], prompt: '' };
+  const draft = { knownFacts: [] };
+  const runOpts = {
+    agentId: 'freeformKnownFacts',
+    tools: [
+      {
+        name: 'submit_known_facts',
+        description: 'Факты завязки, которые город уже знает и которые не вошли в хронику и скрытый слой.',
+        parameters: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['knownFacts'],
+          properties: {
+            knownFacts: {
+              type: 'array',
+              items: { type: 'string' },
+              description:
+                'Открытые факты завязки, которых нет в хронике и нет в скрытом слое. Пустой массив, если раскладывать нечего.',
+            },
+          },
+        },
+        handler: async (args) => {
+          draft.knownFacts = normalizeKnownFacts(args?.knownFacts).filter(
+            (item) => !factAlreadyPlaced(item, chronicle, hidden),
+          );
+          return { ok: true };
+        },
+      },
+    ],
+    maxTurns: 2,
+    toolChoice: { type: 'function', function: { name: 'submit_known_facts' } },
+    log,
+    scene: 'freeform_known_facts',
+    domainId,
+    userMessages: [
+      {
+        role: 'user',
+        content: [
+          'ЗАТРАВКА',
+          seedText,
+          '',
+          'ХРОНИКА',
+          chronicle || '(нет)',
+          '',
+          'СКРЫТЫЙ СЛОЙ',
+          hidden || '(нет)',
+          '',
+          'Вынеси в knownFacts открытые факты затравки, которых нет ни в хронике, ни в скрытом слое.',
+          'Это то, что город уже знает. Тайну, разгадку и подступы сюда не клади.',
+          'Новых фактов не выдумывай. Если всё уже разложено — верни пустой массив.',
+        ].join('\n'),
+      },
+    ],
+  };
+  const prompt = captureAgentPrompt(runtime, runOpts);
+  try {
+    await runtime.run(runOpts);
+  } catch (err) {
+    log.warn('freeform.known_facts_failed', { error: err.message });
+  }
+  return { knownFacts: draft.knownFacts, prompt };
+}
+
 /**
  * Имя по наблюдаемому слою. Тайну сюда не кладём: иначе заголовок сам её выдаёт.
  */
@@ -536,8 +631,15 @@ export async function assembleFreeformLabStory({
     domainId: domain?.id,
   });
   if (requireMystery && !layered.hiddenAnswer) {
-    return { ...layered, seed, hiddenAnswer: '', hiddenPremises: [], ok: false, error: 'no_reveal' };
+    return { ...layered, seed, hiddenAnswer: '', hiddenPremises: [], knownFacts: [], ok: false, error: 'no_reveal' };
   }
+  const known = await extractKnownFacts({
+    runtime,
+    story: layered,
+    seed: candidateSeedText(candidate),
+    log,
+    domainId: domain?.id,
+  });
   const named = await nameAssembledStory({
     runtime,
     chronicle: layered.chronicle,
@@ -556,6 +658,8 @@ export async function assembleFreeformLabStory({
     target: candidate?.target || '',
     knowledge: candidate?.knowledge || '',
     assemblePrompt: constructed.prompt || '',
+    knownFacts: known.knownFacts,
+    knownPrompt: known.prompt || '',
     hiddenPrompt: layered.prompt || '',
     titlePrompt: named.prompt || '',
   };

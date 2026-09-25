@@ -2,7 +2,7 @@ import { newId } from './ids.js';
 import { parseSeedConfig } from './seedTemp.js';
 import { textsLookSame, processIsLive } from './processes.js';
 import { normalizeThreat } from './threats.js';
-import { normalizeHiddenPremises, normalizeRevealedPremises } from './premises.js';
+import { normalizeHiddenPremises, normalizeRevealedPremises, normalizeKnownFacts } from './premises.js';
 
 /**
  * Сюжетные нити — ядро мира: событий вне нитей не бывает.
@@ -494,6 +494,7 @@ function storyActState(p = {}) {
       // Раскрытое городом знание. Живёт отдельно от hiddenPremises, чтобы тот
       // список всегда означал ровно одно: чего город ещё не знает.
       revealedPremises: normalizeRevealedPremises(p.revealedPremises),
+      knownFacts: normalizeKnownFacts(p.knownFacts),
       threats: normalizeThreatList(p.threats, p.id),
       defenseCount: Math.max(0, Math.round(Number(p.defenseCount) || 0)),
     };
@@ -868,6 +869,7 @@ export function createPlotline({
   depth = null,
   maxDepth = null,
   hiddenPremises = [],
+  knownFacts = [],
   hiddenAnswer = '',
   seed = '',
   cause = '',
@@ -921,6 +923,7 @@ export function createPlotline({
       maxFails,
       endings,
       hiddenPremises,
+      knownFacts,
       hiddenAnswer,
       seed,
       cause,

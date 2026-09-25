@@ -96,7 +96,8 @@ test('мини-аппка: свои истории и участие в сопр
         title: 'Хранитель',
         name: 'Мира',
         processId: 'act_1',
-        nature: 'осторожна и памятлива',
+        nature:
+          'Мира решает ровно и хладнокровно, выстраивая факты в безупречную схему и безжалостно отбрасывая всё, что ей противоречит. Она не выносит небрежности в записях и чужой тайны, которую нельзя проверить; славится блестящей памятью и тем, что карает нарушение порядка без гнева, почти любезно.',
         gender: 'female',
         ageYears: 40,
         look: {
@@ -254,7 +255,10 @@ test('мини-аппка: свои истории и участие в сопр
   assert.equal(well.process.remainingDays, 65);
   assert.equal(well.process.totalDays, 90);
   assert.equal(well.process.remainingReal, '~4,3 ч', '65 игровых дней это 260 реальных минут');
-  assert.equal(well.nature, 'осторожна и памятлива');
+  assert.match(well.nature, /карает нарушение порядка без гнева/);
+  assert.equal(knowledge.officer.nature, well.nature);
+  const people = view.city.tabs.find((t) => t.id === 'people');
+  assert.equal(people.people.find((p) => p.name === 'Мира').about, well.nature);
   assert.equal(well.ageYears, 40);
   assert.equal(well.gender, 'female');
   assert.equal(well.look, undefined);

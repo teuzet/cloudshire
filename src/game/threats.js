@@ -8,7 +8,7 @@
 
 import { newId } from './ids.js';
 import { maxFailsForGravity, parseFreeformGravity } from './plotlines.js';
-import { hiddenAnswer, hiddenPremises, revealedAnswer, revealedPremises } from './premises.js';
+import { hiddenAnswer, hiddenPremises, revealedAnswer, revealedPremises, knownFacts } from './premises.js';
 import { threatConfig } from './pressure.js';
 
 const SCALE_LADDER = ['SITUATION', 'EPISODE', 'CRISIS', 'RUPTURE'];
@@ -218,6 +218,7 @@ export function formatKnownUnknown(plot) {
     plot?.synopsis ? `Наблюдаемый слой: ${plot.synopsis}` : '',
     revealedAnswer(plot) ? `Город уже знает разгадку: ${revealedAnswer(plot)}` : '',
     ...(revealedPremises(plot) || []).map((item) => `Город выяснил: ${item}`),
+    ...(knownFacts(plot) || []).map((item) => `Городу уже известно: ${item}`),
   ].filter(Boolean);
   const hidden = [
     hiddenAnswer(plot) ? `Разгадка (город не знает): ${hiddenAnswer(plot)}` : '',

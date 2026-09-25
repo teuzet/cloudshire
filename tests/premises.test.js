@@ -4,6 +4,7 @@ import {
   premiseAtIndex,
   revealPremise,
   revealAnswer,
+  knownFacts,
   revealedPremises,
   hiddenAnswer,
   revealedAnswer,
@@ -72,6 +73,7 @@ test('раскрытие переносит подступ из скрытого
   assert.equal(revealPremise(p, ELDER), ELDER);
   assert.deepEqual(p.hiddenPremises, [TRACKS]);
   assert.deepEqual(p.revealedPremises, [ELDER]);
+  assert.deepEqual(knownFacts(p), [ELDER]);
   assert.equal(hiddenAnswer(p), ANSWER, 'подступ сам по себе сердцевину не отдаёт');
 });
 
@@ -96,6 +98,7 @@ test('разгадка переезжает в раскрытое целиком
   assert.equal(revealAnswer(p), ANSWER);
   assert.equal(hiddenAnswer(p), '');
   assert.equal(revealedAnswer(p), ANSWER);
+  assert.deepEqual(knownFacts(p), [ANSWER]);
   assert.equal(revealAnswer(p), null, 'разгадывать дважды нечего');
 });
 

@@ -50,6 +50,7 @@ import {
   heuristicHiddenSplit,
   leftoverSeedFacts,
   splitAssembledHidden,
+  extractKnownFacts,
   candidateHiddenLayer,
   formatCandidateSeed,
 } from '../src/game/freeformAssemble.js';
@@ -554,6 +555,12 @@ test('конфиг freeform читается из YAML', () => {
   assert.match(agents.freeformHiddenSplit.instructions, /намекают на разгадку/);
   assert.doesNotMatch(agents.freeformHiddenSplit.instructions, /Не дописывай подступы/);
   assert.doesNotMatch(agents.freeformHiddenSplit.instructions, /cityBrief/);
+  assert.equal(agents.freeformKnownFacts.model, 'gpt-5.6-luna');
+  assert.equal(agents.freeformKnownFacts.maxTokens, 800);
+  assert.deepEqual(agents.freeformKnownFacts.canon, []);
+  assert.match(agents.freeformKnownFacts.instructions, /submit_known_facts/);
+  assert.match(agents.freeformKnownFacts.instructions, /knownFacts/);
+  assert.match(agents.freeformKnownFacts.instructions, /пустой массив/);
   assert.equal(agents.freeformTitle.model, 'gpt-5.6-luna');
   assert.equal(agents.freeformTitle.maxTokens, 400);
   assert.equal(agents.freeformTitle.reasoningEffort, undefined);
@@ -2979,6 +2986,46 @@ test('hiddenSplit не зовут без затравки; иначе вынос
   assert.deepEqual(keepDump.hiddenPremises, ['Соль сыплется из разлома края, не из склада.']);
 });
 
+test('knownFacts забирает остаток завязки и отбрасывает уже разложенное', async () => {
+  const silentLog = { child: () => silentLog, info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
+  const skipped = await extractKnownFacts({
+    runtime: { async run() { throw new Error('не должны звать'); } },
+    story: { chronicle: 'Двор чинит мосток.' },
+    seed: '',
+    log: silentLog,
+  });
+  assert.deepEqual(skipped.knownFacts, []);
+
+  const out = await extractKnownFacts({
+    runtime: {
+      assembleChat: () => ({ systemContent: '', userContent: '' }),
+      async run(opts) {
+        const asked = String(opts.userMessages?.[0]?.content || '');
+        assert.match(asked, /сопряжения/);
+        assert.match(asked, /ХРОНИКА/);
+        assert.match(asked, /кристаллическими волосками/);
+        await opts.tools[0].handler({
+          knownFacts: [
+            'Несколько десятилетий назад инструменты попали в город во время сопряжения.',
+            'После нагрева поверхность покрывается кристаллическими волосками.',
+            'Мастера теряют точность.',
+          ],
+        });
+      },
+    },
+    story: {
+      chronicle: 'Мастера теряют точность.',
+      hiddenAnswer: 'После нагрева поверхность покрывается кристаллическими волосками.',
+      hiddenPremises: [],
+    },
+    seed: 'Несколько десятилетий назад во время сопряжения в город попали инструменты. Мастера теряют точность.',
+    log: silentLog,
+  });
+  assert.deepEqual(out.knownFacts, [
+    'Несколько десятилетий назад инструменты попали в город во время сопряжения.',
+  ]);
+});
+
 test('имя-агент не принимает пересказ хроники', async () => {
   const chronicle =
     'На восточном дереве, где стоит храм Ориона, каменщики и смолокуры давно замечали: кора сочится гуще.';
@@ -3049,6 +3096,15 @@ test('конструктор собирает хронику и hidden — бе�
           hiddenAnswer: 'Соль сыплется из разлома края, не из склада.',
           hiddenPremises: ['Старший видел расходную книгу деда.'],
         });
+      } else if (opts.agentId === 'freeformKnownFacts') {
+        const asked = String(opts.userMessages?.[0]?.content || '');
+        assert.match(asked, /ЗАТРАВКА/);
+        assert.match(asked, /ХРОНИКА/);
+        assert.match(asked, /СКРЫТЫЙ СЛОЙ/);
+        assert.match(asked, /площади Грастока/);
+        await tool.handler({
+          knownFacts: ['Двор держит сапог уже третью неделю.'],
+        });
       } else if (opts.agentId === 'freeformTitle') {
         const asked = String(opts.userMessages?.[0]?.content || '');
         assert.match(asked, /площади Грастока/);
@@ -3072,7 +3128,7 @@ test('конструктор собирает хронику и hidden — бе�
     },
     gravity: 'EPISODE',
   });
-  assert.deepEqual(calls, ['freeformAssemble', 'freeformHiddenSplit', 'freeformTitle']);
+  assert.deepEqual(calls, ['freeformAssemble', 'freeformHiddenSplit', 'freeformKnownFacts', 'freeformTitle']);
   assert.equal(out.title, 'Сапог на площади');
   assert.match(out.chronicle, /площади/);
   assert.doesNotMatch(out.chronicle, /На самом деле/i);
@@ -3080,6 +3136,7 @@ test('конструктор собирает хронику и hidden — бе�
   assert.match(out.cause, /разлома края/);
   assert.match(out.hiddenAnswer, /Соль/);
   assert.match(out.hiddenPremises[0], /расходную книгу/);
+  assert.deepEqual(out.knownFacts, ['Двор держит сапог уже третью неделю.']);
   assert.equal(out.countdown, undefined);
   assert.match(out.assemblePrompt, /submit_freeform_story/);
   assert.doesNotMatch(out.assemblePrompt, /whyMoves|что ситуация сделает следующим/);

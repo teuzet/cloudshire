@@ -6,7 +6,7 @@ import { daysUntilDock } from './confluxTime.js';
 import { attachFactToPlotlines, plotsForPriest, isStoryPlot } from './plotlines.js';
 import { cityRules } from './cityRules.js';
 import { overlayConfluxView, stampNewBoardItems, stripConfluxView } from './confluxBoard.js';
-import { revealedPremises, revealedAnswer, hiddenAnswer, hiddenPremises } from './premises.js';
+import { revealedPremises, revealedAnswer, hiddenAnswer, hiddenPremises, knownFacts } from './premises.js';
 import { formatCityForAgents, parseCityBrief, formatCanonicalUnknownsForPrompt } from './cityContext.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
@@ -91,7 +91,14 @@ export function formatFocusedStoryForLoremaster(p, { viewerId = null } = {}) {
     return lines.filter(Boolean).join('\n');
   }
   const solved = revealedAnswer(p);
-  const known = revealedPremises(p);
+  const seenKnown = new Set();
+  const known = [];
+  for (const text of [...revealedPremises(p), ...knownFacts(p)]) {
+    const key = String(text).toLowerCase();
+    if (seenKnown.has(key)) continue;
+    seenKnown.add(key);
+    known.push(text);
+  }
   if (solved || known.length) {
     lines.push('ГОРОД ЭТО УЖЕ ВЫЯСНИЛ (можно отвечать прямо, это установлено):');
     if (solved) lines.push(`- разгадка: ${solved}`);

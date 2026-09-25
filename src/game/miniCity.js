@@ -89,7 +89,7 @@ function peopleTab(domain) {
     people.push({
       name: officer.name,
       role: officer.title || officer.office || null,
-      about: clip(officer.nature || '', 400),
+      about: String(officer.nature || '').trim(),
       officer: true,
       dead: false,
     });
@@ -264,7 +264,7 @@ function slimOfficerSlot(officer, process, config, mana, domain, day = 0) {
     officerId: officer.id,
     hasPortrait: officerHasPortrait(officer),
     portraitUrl: officer.portraitUrl || null,
-    nature: clip(officer.nature || '', 800),
+    nature: String(officer.nature || '').trim(),
     temper: officer?.axes ? clip(formatAxesForSpeech(officer.axes, config), 120) : '',
     ageYears,
     gender,
@@ -354,7 +354,7 @@ export function miniCityPayload({
             office: officer.office,
             title: officer.title,
             name: officer.name,
-            nature: clip(officer.nature || '', 280),
+            nature: String(officer.nature || '').trim(),
             hasPortrait: officerHasPortrait(officer),
             portraitUrl: officer.portraitUrl || null,
             busy: Boolean(officer.processId),
