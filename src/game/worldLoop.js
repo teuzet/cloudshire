@@ -911,6 +911,19 @@ export async function seedAppearEvent({
     return { skipped: fresh.reason };
   }
 
+  if (request.scenario) {
+    const { initializeScenario, loadScenarioSeed } = await import('../world/scenario.js');
+    const seed = typeof request.scenario === 'string' ? loadScenarioSeed(request.scenario) : request.scenario;
+    const planted = await initializeScenario({ config, runtime, domain, seed, day, log });
+    dropSeedRequest(domain, request.id);
+    log.info('loop.seed_fronts', { fronts: planted.fronts?.length || 0 });
+    return {
+      fronts: planted.fronts,
+      occasion: 'новая история',
+      ...(planted.fronts?.length ? {} : { skipped: 'plant_failed' }),
+    };
+  }
+
   // Текст зерна собирается сейчас, а не в момент постановки заявки:
   // за задержку мир успел измениться, и старый текст противоречил бы хронике.
   const grain = request.grain === 'errand'
@@ -997,6 +1010,14 @@ const HANDLERS = {
   },
   async seed_appear(ctx, job) {
     return seedAppearEvent({ ...ctx, requestId: job.payload?.requestId });
+  },
+  async front_beat(ctx, job) {
+    const { resolveFrontBeat } = await import('../world/beats.js');
+    return resolveFrontBeat({ ...ctx, frontId: job.payload?.frontId });
+  },
+  async front_stake(ctx, job) {
+    const { resolveFrontStake } = await import('../world/stake.js');
+    return resolveFrontStake({ ...ctx, frontId: job.payload?.frontId });
   },
 };
 

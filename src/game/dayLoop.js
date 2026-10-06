@@ -17,6 +17,7 @@ import {
   clockIsHeld,
 } from './scheduler.js';
 import { StaleWriteError } from '../storage/revision.js';
+import { armFrontSchedule } from '../world/frontJobs.js';
 import {
   armDomainSchedule,
   askForEvent,
@@ -228,6 +229,7 @@ export async function stepDomain({
   if (conflux) overlayConfluxView(domain, conflux, partner);
 
   await armDomainSchedule({ runtime, domain, world, day, rng, log });
+  armFrontSchedule(config, domain, world, day);
   const events = await drainDomainJobs({
     config,
     runtime,

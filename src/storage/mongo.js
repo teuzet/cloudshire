@@ -91,7 +91,7 @@ export class MongoStorage {
     const doc = await this.col('domains').findOne({ _id: domainId });
     if (!doc) return null;
     const { _id, ...rest } = doc;
-    return normalizeDomain({ id: _id, ...rest });
+    return normalizeDomain({ id: _id, ...rest }, this.config);
   }
 
   async writeDomainUnlocked(domain, { force = false } = {}) {
@@ -99,7 +99,7 @@ export class MongoStorage {
       this.guard.reject('domain', domain?.id);
       return domain;
     }
-    normalizeDomain(domain);
+    normalizeDomain(domain, this.config);
     stripOfficerPortraitPayload(domain);
     const stored = await this.col('domains').findOne({ _id: domain.id }, { projection: { rev: 1 } });
     domain.rev = nextRevision('domain', domain, stored?.rev, { force });
@@ -129,7 +129,7 @@ export class MongoStorage {
 
   async listDomains() {
     const docs = await this.col('domains').find({}).toArray();
-    return docs.map(({ _id, ...rest }) => normalizeDomain({ id: _id, ...rest }));
+    return docs.map(({ _id, ...rest }) => normalizeDomain({ id: _id, ...rest }, this.config));
   }
 
   async getUserBinding(userId) {

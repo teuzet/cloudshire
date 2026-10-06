@@ -119,7 +119,7 @@ export class YamlStorage {
   async getDomain(domainId) {
     const domain = await readYaml(this.domainPath(domainId), null);
     if (!domain) return null;
-    normalizeDomain(domain);
+    normalizeDomain(domain, this.config);
     ensureOfficersFromLore(domain, this.config);
     return domain;
   }
@@ -129,7 +129,7 @@ export class YamlStorage {
       this.guard.reject('domain', domain?.id);
       return domain;
     }
-    normalizeDomain(domain);
+    normalizeDomain(domain, this.config);
     ensureOfficersFromLore(domain, this.config);
     stripOfficerPortraitPayload(domain);
     const stored = await readYaml(this.domainPath(domain.id), null);
@@ -165,7 +165,7 @@ export class YamlStorage {
       if (!file.endsWith('.yaml')) continue;
       const domain = await readYaml(path.join(dir, file), null);
       if (domain) {
-        normalizeDomain(domain);
+        normalizeDomain(domain, this.config);
         ensureOfficersFromLore(domain, this.config);
         domains.push(domain);
       }

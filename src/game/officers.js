@@ -230,10 +230,13 @@ export function pickRandomFreeOfficer(domain, rng = Math.random) {
 
 export function officerActiveProcess(domain, officer) {
   if (!officer?.processId) return null;
-  const a = (domain?.state?.pendingActions || []).find((p) => String(p.id) === String(officer.processId));
-  if (!a) return null;
-  if (a.status && a.status !== 'active') return null;
-  return a;
+  const needle = String(officer.processId);
+  const action = (domain?.state?.pendingActions || []).find((item) => String(item.id) === needle);
+  if (action && (!action.status || action.status === 'active')) return action;
+  const assignment = (domain?.assignments || []).find(
+    (item) => item && String(item.id) === needle && item.status === 'active',
+  );
+  return assignment || null;
 }
 
 export function officerBusy(officer, domain = null) {

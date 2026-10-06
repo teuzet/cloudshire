@@ -1,10 +1,10 @@
 import { newId } from './ids.js';
 import {
   rollPopulation,
-  allocateStats,
-  syncFaith,
   isForbiddenDomainName,
 } from './stats.js';
+import { buildGenesisObjects, requestWorldObjects } from '../world/genesisObjects.js';
+import { recomputeStats } from '../world/statSum.js';
 import {
   createCharacter,
   createDomainRecord,
@@ -31,7 +31,7 @@ import { toolFail } from '../agents/toolResult.js';
 import { formatWorldContractForPrompt } from './worldContract.js';
 import { formatFrozenConceptForPrompt, openingLoreFromConcept } from './genesisConcept.js';
 import { axesSnapshotTags, normalizeAxesState } from './genesisAxes.js';
-import { generateOfficers, requestCityStrengths, formatOfficerIntroSpeech } from './officers.js';
+import { generateOfficers, formatOfficerIntroSpeech } from './officers.js';
 import { stampGenesisConfluxBan } from './confluxTime.js';
 
 function aspectDefs(config) {
@@ -692,9 +692,19 @@ export async function generateDomain({
 
   const description = assembleDescription(aspects, aspectsConfig);
 
-  await onProgress?.('силы города');
-  const scores = await requestCityStrengths({ runtime, config, description, frozenConcept, log });
-  const stats = allocateStats(scores, config);
+  const domainName = isForbiddenDomainName(core.domainName)
+    ? frozenConcept.name || fallbackName()
+    : core.domainName;
+
+  await onProgress?.('объекты города');
+  const drafts = await requestWorldObjects({ runtime, config, description, frozenConcept, log });
+  const built = buildGenesisObjects({
+    drafts,
+    config,
+    cityName: domainName,
+    day: 0,
+  });
+  const stats = Object.fromEntries((config.stats || []).map((def) => [def.id, 0]));
 
   const character = createCharacter({
     id: newId('char'),
@@ -717,10 +727,6 @@ export async function generateDomain({
       author: 'genesis',
     }),
   );
-
-  const domainName = isForbiddenDomainName(core.domainName)
-    ? frozenConcept.name || fallbackName()
-    : core.domainName;
 
   lore.unshift(
     createLoreFact({
@@ -753,7 +759,9 @@ export async function generateDomain({
     playerDirectives,
   });
   stampGenesisConfluxBan(domain, { config });
-  syncFaith(domain);
+  domain.worldObjects = built.objects;
+  domain.statScale = built.statScale;
+  recomputeStats(domain, config);
 
   if (forcedPatronName) {
     applyPatronName(domain, forcedPatronName, {

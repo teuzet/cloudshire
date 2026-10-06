@@ -18,6 +18,7 @@ import { paceLabel } from './deedMath.js';
 import { chronicleEntries } from './models.js';
 import { parseCityBrief } from './cityContext.js';
 import { domainHasIslandImage, officerHasPortrait } from '../storage/r2.js';
+import { progressAt } from '../world/front.js';
 import { formatAxesForSpeech } from './officers.js';
 
 function clip(text, max = 800) {
@@ -328,6 +329,7 @@ export function miniCityPayload({
       events: [],
       processes: [],
       orders: [],
+      fronts: [],
     };
   }
 
@@ -420,5 +422,13 @@ export function miniCityPayload({
       return slimOfficerSlot(o, proc, config, mana, domain, today);
     }),
     orders,
+    fronts: (domain.fronts || [])
+      .filter((front) => front && front.status === 'active')
+      .map((front) => ({
+        id: front.id,
+        description: front.description,
+        progress: progressAt(front, today),
+        effort: front.effort,
+      })),
   };
 }

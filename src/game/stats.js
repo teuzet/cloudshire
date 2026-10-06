@@ -106,27 +106,11 @@ export function statBudgetConfig(config = {}) {
 }
 
 /**
- * Относительные скоры (0–10) → сумма budget, каждый в [min, max].
- * Равные скоры → ровная раздача (55×4 при 220).
+ * Довести набор чисел до суммы budget, не выходя из [min, max].
+ * values — массив, порядок сохраняется.
  */
-export function allocateStats(scores = {}, config = {}) {
-  const ids = (config.stats || []).map((d) => d.id);
-  const { budget, min, max } = statBudgetConfig(config);
-  if (!ids.length) return {};
-
-  const even = Math.round(budget / ids.length);
-  const raw = ids.map((id) => Math.max(0, Number(scores?.[id]) || 0));
-  const allEqual = raw.every((v) => v === raw[0]);
-  let floats;
-  if (allEqual) {
-    floats = ids.map(() => budget / ids.length);
-  } else {
-    const shift = Math.max(0, 0.01 - Math.min(...raw));
-    const shifted = raw.map((v) => v + shift);
-    const sum = shifted.reduce((a, b) => a + b, 0) || 1;
-    floats = shifted.map((v) => (v / sum) * budget);
-  }
-  let ints = floats.map((v) => clamp(v, min, max));
+export function clipToBudget(values, { budget, min, max }) {
+  let ints = values.map((v) => clamp(v, min, max));
   let cur = ints.reduce((a, b) => a + b, 0);
   let guard = 0;
   while (cur !== budget && guard < 500) {
@@ -147,9 +131,30 @@ export function allocateStats(scores = {}, config = {}) {
     ints[idx] += dir;
     cur += dir;
   }
-  if (cur !== budget && ints.every((v) => v === even || v === min || v === max)) {
-    // last-ditch: if stuck, prefer even split already clipped
+  return ints;
+}
+
+/**
+ * Относительные скоры (0–10) → сумма budget, каждый в [min, max].
+ * Равные скоры → ровная раздача (55×4 при 220).
+ */
+export function allocateStats(scores = {}, config = {}) {
+  const ids = (config.stats || []).map((d) => d.id);
+  const { budget, min, max } = statBudgetConfig(config);
+  if (!ids.length) return {};
+
+  const raw = ids.map((id) => Math.max(0, Number(scores?.[id]) || 0));
+  const allEqual = raw.every((v) => v === raw[0]);
+  let floats;
+  if (allEqual) {
+    floats = ids.map(() => budget / ids.length);
+  } else {
+    const shift = Math.max(0, 0.01 - Math.min(...raw));
+    const shifted = raw.map((v) => v + shift);
+    const sum = shifted.reduce((a, b) => a + b, 0) || 1;
+    floats = shifted.map((v) => (v / sum) * budget);
   }
+  const ints = clipToBudget(floats, { budget, min, max });
   const out = {};
   ids.forEach((id, i) => {
     out[id] = ints[i];

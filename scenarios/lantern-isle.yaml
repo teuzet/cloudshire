@@ -1,0 +1,30 @@
+title: Островок с горящими фонарями
+
+create:
+  objects:
+    - id: island
+      type: site
+      name: Островок с горящими фонарями
+      description: Малый остров, который ночью сам зажигает фонари вдоль кромки.
+    - id: tower
+      type: structure
+      name: Башня на островке
+      description: Закрытая башня. Дверь держит старый засов, окна темны.
+      refs: [island]
+  fronts:
+    - id: obtain-recipe
+      description: Добраться до рецепта, который спрятан в башне.
+      impact: SIGNIFICANT
+      drift: NONE
+      beat_count: 2
+      refs: [tower, island]
+      alignment: |
+        Фронт двигают действия, которые реально исследуют устройство башни,
+        преодолевают её защиту и приближают экспедицию к лаборатории.
+      stake:
+        reveal:
+          text: Рецепт был способом удерживать островок на месте.
+      clues:
+        - id: inscriptions
+          fact: Надписи описывают изменение направления движения острова.
+          alignment: Расшифровка надписей, языков и символов.

@@ -2,6 +2,9 @@ import { newId } from './ids.js';
 import { seedWorldNamePool, normalizeNamePool } from './names.js';
 import { stampPersonAge } from './ages.js';
 import { normalizeCityEntities } from './cityEntities.js';
+import { normalizeWorldObjects } from '../world/objects.js';
+import { normalizeFronts } from '../world/front.js';
+import { normalizeAssignments } from '../world/assignment.js';
 import { applyClockAlignedCalendar } from './tickClock.js';
 import { normalizeCityModifiers } from './cityContext.js';
 import { emptySeedTemp, normalizeSeedTemp } from './seedTemp.js';
@@ -31,7 +34,7 @@ export function emptyState() {
 }
 
 /** Подтянуть новые поля state/tags у старых доменов без миграции файлов. */
-export function normalizeDomain(domain) {
+export function normalizeDomain(domain, config = null) {
   if (!domain || typeof domain !== 'object') return domain;
   if (!domain.state || typeof domain.state !== 'object') {
     domain.state = emptyState();
@@ -92,6 +95,15 @@ export function normalizeDomain(domain) {
   if (typeof domain.cityBrief !== 'string') domain.cityBrief = domain.cityBrief || '';
   if (!Array.isArray(domain.seedClimate)) domain.seedClimate = [];
   domain.cityEntities = normalizeCityEntities(domain.cityEntities);
+  domain.worldObjects = normalizeWorldObjects(domain.worldObjects, config);
+  if (!domain.statLedger || typeof domain.statLedger !== 'object') {
+    domain.statLedger = { prosperity: 0, influence: 0, knowledge: 0, security: 0 };
+  }
+  if (!Number.isFinite(Number(domain.statScale))) domain.statScale = 1;
+  if (!Array.isArray(domain.fronts)) domain.fronts = [];
+  domain.fronts = normalizeFronts(domain.fronts, config);
+  if (!Array.isArray(domain.assignments)) domain.assignments = [];
+  domain.assignments = normalizeAssignments(domain.assignments, config);
   if (domain.cityEntities.length) domain.cityEntitiesReady = true;
   else if (typeof domain.cityEntitiesReady !== 'boolean') domain.cityEntitiesReady = false;
   ensurePatronFact(domain);
@@ -222,6 +234,11 @@ export function createDomainRecord({
     characters: [character],
     lore,
     plotlines: [],
+    worldObjects: [],
+    fronts: [],
+    assignments: [],
+    statLedger: { prosperity: 0, influence: 0, knowledge: 0, security: 0 },
+    statScale: 1,
     cityEntities: [],
     cityEntitiesReady: false,
     status: 'playing',

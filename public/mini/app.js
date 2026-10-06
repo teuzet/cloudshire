@@ -255,6 +255,22 @@ function scaleMarks(event) {
   return `<p class="scale">${label ? `<span class="scale-name">${label}</span>` : ''}<span class="shards" aria-label="${lit} из ${total}">${marks}</span></p>`;
 }
 
+function renderFronts(fronts) {
+  if (!fronts?.length) return '';
+  return fronts
+    .map((front) => {
+      const effort = Number(front.effort) || 0;
+      const progress = Number(front.progress) || 0;
+      const pct = effort > 0 ? Math.round((100 * progress) / effort) : 0;
+      return `
+        <article class="card">
+          <h2>${esc(front.description)}</h2>
+          <p class="meta">${pct}% · ${esc(String(Math.round(progress * 10) / 10))} / ${esc(String(effort))}</p>
+        </article>`;
+    })
+    .join('');
+}
+
 function renderEvents(events) {
   if (!events?.length) return empty('Сейчас нет открытых историй.');
   return events
@@ -387,7 +403,7 @@ function render() {
   }
   const body =
     tab === 'events'
-      ? renderEvents(state.events)
+      ? renderFronts(state.fronts) + renderEvents(state.events)
       : tab === 'processes'
         ? renderProcesses(state.processes, state.mana)
         : tab === 'orders'

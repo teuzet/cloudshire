@@ -989,6 +989,55 @@ stats:
       75: "Город умеет договариваться и задавать тон"
       100: "Слово города весит как закон для своих и память для чужих"
 
+fronts:
+  # §21 документа. Ни одно из этих чисел не попадает в промпт:
+  # LLM называет полосу, число подставляет код.
+  impact:
+    levels: [NONE, MINOR, SIGNIFICANT, MAJOR, DEFINING]
+    rawBudget:    { NONE: 0, MINOR: 1, SIGNIFICANT: 3, MAJOR: 6, DEFINING: 10 }
+    effort:       { NONE: 0, MINOR: 2, SIGNIFICANT: 5, MAJOR: 9, DEFINING: 14 }
+    consequences: { NONE: 0, MINOR: 0, SIGNIFICANT: 1, MAJOR: 2, DEFINING: 3 }
+
+  drift:
+    bands: [NONE, SLOW, STEADY, FAST]
+    # effort за игровой месяц; в день делит код по DAYS_PER_MONTH
+    perMonth: { NONE: 0, SLOW: 0.5, STEADY: 1, FAST: 2 }
+
+  assignment:
+    # rate = baseRate * (statFloor + stat/100) * efficiency
+    baseRate: 0.1
+    statFloor: 0.5
+    efficiency: { weak: 0.4, normal: 1.0, strong: 1.8 }
+    # сколько фронтов-кандидатов оценивать за один ход жреца
+    evaluatorCandidates: 3
+
+  risk:
+    levels: [LOW, MEDIUM, HIGH]
+    perEffort: { LOW: 0.02, MEDIUM: 0.06, HIGH: 0.14 }
+    impactCap: { LOW: MINOR, MEDIUM: SIGNIFICANT, HIGH: SIGNIFICANT }
+
+  consequences:
+    # сколько кандидатов сверх бюджета просить у генератора,
+    # чтобы судье было из чего выбирать
+    overdraft: 2
+
+  objects:
+    types: [building, structure, landmark, district, settlement, site, object,
+            resource, organization, community, person, practice, capability,
+            policy, threat, mystery]
+    nameMax: 80
+    descriptionMax: 400
+    baselineId: city-baseline
+
+  genesisObjects:
+    minCount: 12
+    maxCount: 20
+    # stat_profile — относительные целые в -profileRange..+profileRange
+    profileRange: 5
+
+  cascade:
+    maxSteps: 24
+
 genesis:
   # Игроку один раз, отдельным сообщением, как только началась генерация острова.
   # Полоска прогресса это сообщение не затирает. Сановников и статов здесь нет.
@@ -1634,6 +1683,173 @@ agents:
       Ты пишешь характер четырёх сановников города: казначей, маршал, хранитель, канцлер.
       По 1–2 предложения на каждого: как решает, чего не выносит, чем славится.
       Не биография, не диалог, не герои историй. Отвечай через submit_officer_natures.
+
+  assignmentEvaluator:
+    provider: openai
+    model: gpt-5.6-luna
+    maxTokens: 1500
+    canon: [world]
+    instructions: |
+      Ты оцениваешь, двигает ли поручение сановника данный фронт.
+      Отвечай ТОЛЬКО через submit_assignment_eval.
+
+      direction: forward — метод реально приближает ставку; backward — сдерживает или откатывает;
+      none — к скрытой логике фронта не относится.
+      efficiency: weak, normal или strong — насколько метод попадает в эту логику.
+      blocks — id событий фронта, которые подготовка реально закрывает. Чужие id не выдумывай.
+      stop_when: next_result — хватит одного содержательного результата;
+      stake — вести до конца фронта; cancelled — пока игрок сам не снимет.
+
+      Не называй процентов, дней, effort и любых чисел. Не пиши хронику.
+
+  beatResolver:
+    provider: openai
+    model: gpt-5.6-luna
+    maxTokens: 800
+    canon: [world]
+    instructions: |
+      На пороге фронта выбери одно событие или одну улику из переданного списка.
+      Отвечай ТОЛЬКО через submit_beat_pick. Бери только id из списка.
+      Заблокированное событие тоже можно выбрать: подготовка не вычёркивает его из пула.
+
+  frontChronicle:
+    provider: openai
+    model: gpt-5.6-luna
+    maxTokens: 1200
+    canon: [world]
+    styles: [names]
+    instructions: |
+      Ты пишешь одну законченную запись хроники по уже решённому факту.
+      Не добавляй исхода, которого нет во факте. Не называй номера дел, фронтов и статов.
+      Отвечай ТОЛЬКО через submit_chronicle. Язык — русский.
+
+  objectVersionWriter:
+    provider: openai
+    model: gpt-5.6-luna
+    maxTokens: 1500
+    canon: [world]
+    instructions: |
+      Ты пишешь новую компактную версию объекта: текущее состояние, не летопись изменений.
+      Учти прежние версии, чтобы не потерять их смысл, но не пересказывай их.
+      stat_profile — относительные целые, не очки статов.
+      Отвечай ТОЛЬКО через submit_object_version.
+
+  mutationAgent:
+    provider: openai
+    model: gpt-5.6-luna
+    maxTokens: 1500
+    canon: [world]
+    instructions: |
+      Свободное намерение игрока преврати в одно конкретное изменение мира: create, modify или delete.
+      Не оценивай, возможно ли оно и сколько стоит. Не создавай фронт.
+      Отвечай ТОЛЬКО через submit_mutation.
+
+  feasibilityJudge:
+    provider: openai
+    model: gpt-5.6-luna
+    maxTokens: 800
+    canon: [world]
+    instructions: |
+      Можно ли начать это изменение в сеттинге летающего острова.
+      FEASIBLE — можно начинать. LOCKED — возможно, но не хватает конкретного условия: назови его.
+      IMPOSSIBLE — противоречит правилам мира. Отвечай ТОЛЬКО через submit_feasibility.
+
+  impactJudge:
+    provider: openai
+    model: gpt-5.6-luna
+    maxTokens: 800
+    canon: [world]
+    instructions: |
+      Насколько город с этим изменением отличается от города без него.
+      Для правки существующего объекта оцени только разницу старой и новой версии.
+      Верни уровень NONE, MINOR, SIGNIFICANT, MAJOR или DEFINING и относительный stat_profile.
+      Не называй очки статов и effort. Отвечай ТОЛЬКО через submit_impact.
+
+  consequencesGenerator:
+    provider: openai
+    model: gpt-5.6-luna
+    maxTokens: 2000
+    canon: [world]
+    instructions: |
+      Для крупного изменения предложи несколько отдельных устойчивых процессов-последствий.
+      Каждый — своя причинная линия, не пересказ основного дела.
+      Сколько просить — сказано во входе. Отвечай ТОЛЬКО через submit_consequences.
+
+  consequenceJudge:
+    provider: openai
+    model: gpt-5.6-luna
+    maxTokens: 800
+    canon: [world]
+    instructions: |
+      Один предложенный процесс: он причинно следует из изменения и живёт сам по себе?
+      Отвечай ТОЛЬКО через submit_consequence_verdict. Не сравнивай с другими кандидатами.
+
+  riskJudge:
+    provider: openai
+    model: gpt-5.6-luna
+    maxTokens: 400
+    canon: [world]
+    instructions: |
+      Насколько способ работы сам по себе опасен осложнением: LOW, MEDIUM или HIGH.
+      Это не шанс успеха и не провал поручения. Отвечай ТОЛЬКО через submit_risk.
+
+  complicationGenerator:
+    provider: openai
+    model: gpt-5.6-luna
+    maxTokens: 1200
+    canon: [world]
+    instructions: |
+      Риск уже сработал. Опиши одно причинное негативное изменение мира, связанное с методом работы.
+      Масштаб не выше переданного потолка. Это не провал поручения: работа продолжается, мир стал хуже.
+      Отвечай ТОЛЬКО через submit_complication.
+
+  localWorldUpdater:
+    provider: openai
+    model: gpt-5.6-luna
+    maxTokens: 800
+    canon: [world]
+    instructions: |
+      Тебе дано одно изменение и одна сущность. Реши, осталась ли она прежней, изменилась,
+      стала invalid или resolved. Не смотри на город целиком: других сущностей перед тобой нет.
+      Отвечай ТОЛЬКО через submit_local_update.
+
+  scenarioInitializer:
+    provider: openai
+    model: gpt-5.6-luna
+    maxTokens: 4000
+    canon: [world]
+    styles: [names]
+    instructions: |
+      По зерну истории и контексту города создай объекты, фронты, ставки, пулы событий или улик,
+      скрытый alignment и refs. Не пиши будущие хроники. Drift и effort не назначай числами:
+      drift — полоса NONE, SLOW, STEADY или FAST, вес — уровень значимости.
+      Отвечай ТОЛЬКО через submit_scenario.
+
+  worldObjectsGenesis:
+    provider: openai
+    model: gpt-5.6-luna
+    maxTokens: 8000
+    canon: [world]
+    styles: [names]
+    instructions: |
+      Ты извлекаешь значимые объекты мира из уже написанного описания города на летающем острове.
+      Отвечай ТОЛЬКО через submit_world_objects. Язык — русский.
+
+      Объект — устойчивая часть города: здание, сооружение, место, район, поселение, ресурс,
+      организация, сообщество, человек, обычай, способность, политика, угроза, тайна.
+      Для каждого дай type, name, description, weight и stat_profile.
+
+      weight отвечает на вопрос: насколько город с этой сущностью отличается от того же города без неё.
+      Допустимые значения: MINOR, SIGNIFICANT, MAJOR, DEFINING. NONE не используй.
+
+      stat_profile — относительные направления по четырём статам prosperity, influence, knowledge, security.
+      Целые от -5 до 5. Это не очки статов и не проценты: только знак и сравнительная сила.
+      Нулевой профиль по всем четырём недопустим.
+
+      Объектов от 12 до 20. Бери из описания, не выдумывай второй город.
+      description — короткое состояние объекта сейчас, не его история.
+      Именованных людей заноси только если они часть устройства города, а не герои месяца.
+      Low-magic: магия редка. Люди не летают, небесных пристаней нет.
 
   cityEntities:
     provider: openai

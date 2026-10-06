@@ -17,6 +17,8 @@ export const JOB_KINDS = [
   'conflux_undock',
   'conflux_contact',
   'conflux_transfer',
+  'front_beat',
+  'front_stake',
 ];
 
 export const JOB_STATES = ['pending', 'running', 'done', 'failed'];

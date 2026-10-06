@@ -50,6 +50,9 @@ import {
 } from './deeds.js';
 import { judgeDeed } from './deedJudge.js';
 import { scheduleDeedJob, cancelDeedJobs } from './worldLoop.js';
+import { assignToFront } from '../world/assignment.js';
+import { recomputeRate } from '../world/front.js';
+import { scheduleFrontJob } from '../world/frontJobs.js';
 import {
   cityRules,
   isRuleDeed,
@@ -920,6 +923,32 @@ export function buildRulerTools(domain, storage, character, ctx) {
         const stillBusy = officerActiveProcess(domain, officer);
         if (stillBusy) {
           return toolFail('officer_busy', officerBusyAgentMessage(officer, stillBusy));
+        }
+        const placed = await assignToFront({
+          runtime: ctx.runtime,
+          config: ctx.config,
+          domain,
+          officer,
+          text: [summary, detail].filter(Boolean).join('\n'),
+          day,
+          log: ctx.log,
+        });
+        if (placed) {
+          if (placed.front) {
+            recomputeRate(ctx.config, placed.front, domain, day);
+            scheduleFrontJob(world, domain, placed.front);
+          }
+          await save();
+          return {
+            ok: true,
+            assignmentId: placed.assignment.id,
+            frontId: placed.front?.id || null,
+            direction: placed.assignment.direction,
+            efficiency: placed.assignment.efficiency,
+            stopWhen: placed.assignment.stopWhen,
+            agentMessage:
+              'Поручение принято. Срок и шанс не называй: сановник работает, пока фронт не дойдёт до ставки или пока поручение не снимут.',
+          };
         }
         const mismatch = isOffPortfolio(officer, linkedStat);
         if (mismatch && named && !insistOffPortfolio && !randomOfficer) {
