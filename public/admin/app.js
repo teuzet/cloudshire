@@ -828,7 +828,20 @@ function renderStories() {
   const d = view.domain;
   if (!d) return empty('города ещё нет');
   const { stories, closedStories } = splitPlots(d);
+  const fronts = (d.fronts || [])
+    .map((front) => {
+      const effort = Number(front.effort) || 0;
+      const progress = Number(front.progress) || 0;
+      const pct = effort > 0 ? Math.round((100 * progress) / effort) : 0;
+      const shown = Math.round(progress * 10) / 10;
+      return (
+        `<article class="ins-card"><h4>${esc(front.description || front.id || 'Фронт')}</h4>` +
+        `<p class="muted small">${pct}% · ${esc(String(shown))} / ${esc(String(effort))}</p></article>`
+      );
+    })
+    .join('');
   return (
+    (fronts ? block(`Фронты (${(d.fronts || []).length})`, fronts) : '') +
     block(
       `Истории (${stories.length})`,
       stories.length ? stories.map(plotCard).join('') : empty('открытых историй нет'),

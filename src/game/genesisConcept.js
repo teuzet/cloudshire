@@ -165,6 +165,7 @@ export function normalizeConcept(raw) {
 export async function requestCityConcept({
   config,
   runtime,
+  domainId = null,
   axes,
   directives,
   playerBrief,
@@ -257,6 +258,7 @@ export async function requestCityConcept({
     toolChoice: { type: 'function', function: { name: 'submit_concept' } },
     log,
     scene: 'genesis_concept',
+    domainId,
     userMessages: [
       {
         role: 'user',

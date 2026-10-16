@@ -3,10 +3,35 @@ import { createLoreFact, formatCastForPrompt, chronicleEntries, formatChronicleP
 import { formatFullChronicleForPrompt, formatFactsForPrompt } from './memory.js';
 import { findActiveConfluxForDomain } from './conflux.js';
 import { daysUntilDock } from './confluxTime.js';
-import { attachFactToPlotlines, plotsForPriest, isStoryPlot } from './plotlines.js';
+import { isStoryPlot } from '../world/legacyHooks.js';
+
+function plotsForPriest(plots) {
+  return (plots || []).filter((plot) => plot && isStoryPlot(plot) && plot.status !== 'closed');
+}
+
+function attachFactToPlotlines(board, factId, ids) {
+  const want = new Set((ids || []).map(String));
+  for (const plot of board?.plotlines || []) {
+    if (!want.has(String(plot.id))) continue;
+    plot.chronicleIds = plot.chronicleIds || [];
+    if (!plot.chronicleIds.includes(factId)) plot.chronicleIds.push(factId);
+  }
+}
+
+function hiddenAnswer() {
+  return '';
+}
+function hiddenPremises() {
+  return [];
+}
+function revealedAnswer() {
+  return '';
+}
+function revealedPremises() {
+  return [];
+}
 import { cityRules } from './cityRules.js';
 import { overlayConfluxView, stampNewBoardItems, stripConfluxView } from './confluxBoard.js';
-import { revealedPremises, revealedAnswer, hiddenAnswer, hiddenPremises } from './premises.js';
 import { formatCityForAgents, parseCityBrief, formatCanonicalUnknownsForPrompt } from './cityContext.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';

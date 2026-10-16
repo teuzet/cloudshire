@@ -11,16 +11,11 @@ import {
   findDuplicateProcess,
   resolveLinkedStats,
 } from './processes.js';
-import { judgeDeed } from './deedJudge.js';
-import { startDeed, deedRemainingBand } from './deeds.js';
-import { applyCrossIslandJudged, remainingWindowBand, isConflictOfInterestDeed } from './deedConflux.js';
 import { plotHostId } from './confluxBoard.js';
 import { gameDateFromDay } from './gameClock.js';
-import { scheduleDeedJob } from './worldLoop.js';
-import { DURATION_SPEC } from './bands.js';
-import { formatBoardForPrompt, isStakedStory, isStoryPlot, plotHasLiveProcess } from './plotlines.js';
-import { ensureErrandForProcess, linkProcessToPlotline, rehomeUnrelatedProcess } from './plotEngine.js';
-import { judgeProcessAlignment, engagementOf } from './plotAlign.js';
+import { assignToFront } from '../world/assignment.js';
+import { recomputeRate } from '../world/front.js';
+import { scheduleFrontJob } from '../world/frontJobs.js';
 import { qualitativeStatsBrief, qualitativePopulation } from './stats.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
@@ -166,6 +161,38 @@ async function applyProcess(domain, args, {
   domain.state.pendingActions = domain.state.pendingActions || [];
   domain.state.pendingActions.push(action);
   bindOfficerProcess(domain, officer, action);
+  let placed = null;
+  try {
+    placed = await assignToFront({
+      runtime,
+      config,
+      domain,
+      officer,
+      text: [summary, detail].filter(Boolean).join('\n'),
+      day,
+      log,
+    });
+  } catch (err) {
+    if (!String(err?.message || '').includes('config.fronts')) throw err;
+  }
+  domain.state.pendingActions = (domain.state.pendingActions || []).filter((item) => item.id !== action.id);
+  releaseOfficerProcess(domain, action);
+  rememberOfficerInitiative(domain, {
+    world,
+    officer,
+    day,
+    text: `${officer.title} ${officer.name} сам взялся за дело: ${summary}.`,
+  });
+  if (placed?.front) {
+    recomputeRate(config, placed.front, domain, day);
+    scheduleFrontJob(world, domain, placed.front);
+  }
+  return {
+    action: {
+      id: placed?.assignment?.id || action.id,
+      summary: placed?.assignment?.summary || summary,
+    },
+  };
   const judged = await judgeDeed({
     runtime,
     domain,
@@ -328,12 +355,11 @@ export async function runOfficerAct({
     .slice(-6)
     .map((e) => `- ${e.gameDateLabel || '?'}: ${e.text}`)
     .join('\n');
-  const processes = activeProcesses(domain, config)
-    .map((p) => `- ${p.summary} (ждать ещё: ${DURATION_SPEC[deedRemainingBand(p, day)].label})`)
+  const processes = (domain.assignments || [])
+    .filter((item) => item && item.status === 'active')
+    .map((item) => `- ${item.summary || item.text}`)
     .join('\n');
-  const openStories = (domain.plotlines || []).filter(
-    (p) => isStoryPlot(p) && !plotHasLiveProcess(domain, p),
-  );
+  const openStories = (domain.fronts || []).filter((front) => front && front.status === 'active');
 
   await runtime.run({
     agentId: 'officerAct',
@@ -371,7 +397,7 @@ export async function runOfficerAct({
           'Если не за что браться — action=none.',
           openStories.length
             ? `Истории без поручения:\n${openStories
-                .map((p) => `- [${p.id}] «${p.title}»: ${p.synopsis || ''}`)
+                .map((front) => `- [${front.id}] ${front.description || ''}`)
                 .join('\n')}`
             : 'Открытых историй без поручения нет — можно none.',
           '',
@@ -380,8 +406,8 @@ export async function runOfficerAct({
           `Город: ${qualitativePopulation(domain.population || 0)}`,
           qualitativeStatsBrief(domain.stats || {}, config),
           '',
-          'Живые нити:',
-          formatBoardForPrompt(domain),
+          'Живые дела города:',
+          openStories.map((front) => `- ${front.description || front.id}`).join('\n') || '- (нет)',
           '',
           'Уже идут дела:',
           processes || '- (нет)',

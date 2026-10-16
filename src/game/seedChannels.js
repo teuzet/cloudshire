@@ -4,8 +4,21 @@
  */
 
 import { chronicleEntries } from './models.js';
-import { countOpen, plotConfig, isStoryPlot, parseFreeformGravity } from './plotlines.js';
-import { FINISH_SHORT } from './rolls.js';
+import { isStoryPlot } from '../world/legacyHooks.js';
+
+function countOpen(domain) {
+  const stories = (domain?.plotlines || []).filter(
+    (plot) => isStoryPlot(plot) && plot.status !== 'closed',
+  ).length;
+  return { total: stories, stories };
+}
+function plotConfig() {
+  return { board: { maxOpen: 4 } };
+}
+function parseFreeformGravity(value) {
+  return String(value || '').trim().toUpperCase();
+}
+const FINISH_SHORT = { fail: 'провал', ok: 'успех', crit: 'крит' };
 import {
   SEED_SOURCES,
   GRAIN_BASE_WEIGHTS,

@@ -13,9 +13,6 @@ import { getLogger } from '../log.js';
 import { captureAgentPrompt } from './agentPrompt.js';
 import { chronicleEntries } from './models.js';
 import { isGenesisNotice } from './memory.js';
-import { livesLeft } from './threats.js';
-import { revealedPremises, revealedAnswer } from './premises.js';
-import { remainingWork } from './deedMath.js';
 
 export const OCCASIONS = ['новая история', 'дело', 'угроза', 'разрешение', 'развязка', 'доклад'];
 
@@ -102,14 +99,9 @@ export function threadCard(plot, day, { closed = false } = {}) {
     synopsis: plot.synopsis || '',
     gravity: plot.gravity || null,
     closed: false,
-    livesLeft: livesLeft(plot),
-    workLeft: remainingWork(plot),
-    // Выясненное городом. Жрецу это можно говорить — в отличие от того,
-    // что ещё скрыто и ему вовсе не показывается.
-    established: [
-      revealedAnswer(plot) ? `разгадка: ${revealedAnswer(plot)}` : '',
-      ...revealedPremises(plot),
-    ].filter(Boolean),
+    livesLeft: null,
+    workLeft: null,
+    established: [],
   };
 }
 

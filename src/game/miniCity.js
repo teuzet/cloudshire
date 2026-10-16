@@ -1,20 +1,70 @@
 import { statEpithet } from './stats.js';
 import { plotConcerns } from './confluxBoard.js';
-import { isStoryPlot, parseFreeformGravity, storyOfficerSlots } from './plotlines.js';
+import { isStoryPlot } from '../world/legacyHooks.js';
 import { activeProcesses, pausedProcesses, processOwnedBy, processStatAverage, processPaceRatio } from './processes.js';
-import { finishChancePercents } from './rolls.js';
 import { blessManaCost, currentMana } from './mana.js';
+
+function parseFreeformGravity(value) {
+  return String(value || '').trim().toUpperCase();
+}
+const STORY_OFFICER_SLOTS = { SITUATION: 1, EPISODE: 2, CRISIS: 3, RUPTURE: 4 };
+
+function storyOfficerSlots(plot) {
+  return STORY_OFFICER_SLOTS[parseFreeformGravity(plot?.gravity)] ?? STORY_OFFICER_SLOTS.EPISODE;
+}
+function finishChancePercents() {
+  return { fail: 0, ok: 100, crit: 0 };
+}
+const DURATION_SPEC = {
+  INSTANT: { label: 'сейчас' },
+  DAYS: { label: 'дни' },
+  WEEKS: { label: 'недели' },
+  SEASON: { label: 'сезон' },
+  YEAR: { label: 'год' },
+  YEARS: { label: 'годы' },
+};
+const DIFFICULTY_SPEC = {
+  TRIVIAL: { label: 'по силам любому' },
+  PLAIN: { label: 'обычное' },
+  HARD: { label: 'трудное' },
+  SEVERE: { label: 'очень трудное' },
+  EXTREME: { label: 'на пределе' },
+  IMPOSSIBLE: { label: 'невозможное' },
+};
+function normalizeDurationBand(band) {
+  return DURATION_SPEC[band] ? band : 'WEEKS';
+}
+function normalizeDifficultyBand(band) {
+  return DIFFICULTY_SPEC[band] ? band : 'NORMAL';
+}
+function deedDurationBand(process) {
+  return normalizeDurationBand(process?.durationBand);
+}
+function remainingBand(days) {
+  const d = Math.max(0, Number(days) || 0);
+  if (d <= 3) return 'INSTANT';
+  if (d <= 18) return 'DAYS';
+  if (d <= 65) return 'WEEKS';
+  if (d <= 160) return 'SEASON';
+  if (d <= 400) return 'YEAR';
+  return 'YEARS';
+}
+function deedRemainingBand(process, day) {
+  return remainingBand(deedRemainingDays(process, day));
+}
+function deedRemainingDays(process, day) {
+  const due = Number(process?.dueDay);
+  return Number.isFinite(due) ? Math.max(0, Math.round(due - Number(day) || 0)) : null;
+}
+function paceLabel(shift) {
+  const s = Math.max(-1, Math.min(1, Math.round(Number(shift) || 0)));
+  if (s < 0) return 'спешка';
+  if (s > 0) return 'обстоятельно';
+  return 'обычно';
+}
 import { cityRules, proxyText } from './cityRules.js';
 import { gameDateFromTickIndex } from './tickClock.js';
 import { gameDateFromDay, realWaitLabel } from './gameClock.js';
-import {
-  DIFFICULTY_SPEC,
-  DURATION_SPEC,
-  normalizeDifficultyBand,
-  normalizeDurationBand,
-} from './bands.js';
-import { deedDurationBand, deedRemainingBand, deedRemainingDays } from './deeds.js';
-import { paceLabel } from './deedMath.js';
 import { chronicleEntries } from './models.js';
 import { parseCityBrief } from './cityContext.js';
 import { domainHasIslandImage, officerHasPortrait } from '../storage/r2.js';

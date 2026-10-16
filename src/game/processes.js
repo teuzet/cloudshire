@@ -12,14 +12,34 @@ import {
   ensureOfficersFromLore,
 } from './officers.js';
 import { blessManaCost, spendMana } from './mana.js';
-import {
-  rollProcessAdvance,
-  rollProcessFinish,
-  applyBlessShift,
-  FINISH_LABELS,
-  FINISH_SHORT,
-  formatFinishForPrompt,
-} from './rolls.js';
+
+const FINISH_LABELS = {
+  fail: '[ПРОВАЛ]: цель не достигнута, негативные последствия',
+  ok: '[УСПЕХ]: цель достигнут, нейтральные или слабые негативные побочные эффекты',
+  crit: '[КРИТИЧЕСКИЙ УСПЕХ]: цель достигнута триумфально',
+  blessed: 'Благословение покровителя сдвинуло исход на ступень вверх (провал→успех, успех→крит).',
+};
+const FINISH_SHORT = { fail: 'провал', ok: 'успех', crit: 'крит' };
+
+function rollProcessAdvance(avgStat) {
+  const avg = Math.round(Number(avgStat) || 0);
+  return { roll: null, avg, advance: 1, kind: 'normal' };
+}
+
+function rollProcessFinish() {
+  return { finish: 'ok', weights: { fail: 0, ok: 1, crit: 0 }, blessed: false };
+}
+
+function applyBlessShift(finish) {
+  if (finish === 'fail') return 'ok';
+  if (finish === 'ok') return 'crit';
+  return finish;
+}
+
+function formatFinishForPrompt(finish, { blessed = false } = {}) {
+  const gloss = FINISH_LABELS[finish] || FINISH_LABELS.ok;
+  return blessed ? `${gloss} ${FINISH_LABELS.blessed}` : gloss;
+}
 
 export function listStatIds(config) {
   return (config?.stats || []).map((s) => s.id);

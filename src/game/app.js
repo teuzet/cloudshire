@@ -1,3 +1,4 @@
+import { newId } from './ids.js';
 import { buildOnboardingTools } from './onboardingTools.js';
 import {
   chronicleEntries,
@@ -69,19 +70,8 @@ import {
   mergeWorldJobs,
 } from './scheduler.js';
 import { syncWorldClock } from './gameClock.js';
-import { findPlotline, findClosedPlotline, isStoryPlot } from './plotlines.js';
-import { plantStakedStory } from './storyteller.js';
-import {
-  ensurePlotObligations,
-  fireThreatEvent,
-  firePressureEvent,
-  resolveDeedEvent,
-  cancelDeedJobs,
-  schedulePressureJob,
-} from './worldLoop.js';
-import { ensurePressure } from './pressure.js';
+import { isStoryPlot } from '../world/legacyHooks.js';
 import { deliverEvent, settleEvents } from './dayLoop.js';
-import { findThreat } from './threats.js';
 import {
   packPlaySeedGrain,
   dropPlayStory as applyDropPlayStory,
@@ -166,6 +156,18 @@ function stripSpeakerPrefix(text, characterName) {
     t = t.replace(new RegExp(`^${esc}\\s*[:：—\\-]\\s*`, 'i'), '');
   }
   return t.trim();
+}
+
+function findPlotline(domain, id) {
+  const needle = String(id || '');
+  if (!needle || !domain) return null;
+  return (domain.plotlines || []).find((plot) => String(plot.id) === needle) || null;
+}
+
+function findClosedPlotline(domain, id) {
+  const needle = String(id || '');
+  if (!needle || !domain) return null;
+  return (domain.closedPlotlines || []).find((plot) => String(plot.id) === needle) || null;
 }
 
 function findPlayLoreFact({ domain, conflux, partner }, factId) {
@@ -390,7 +392,7 @@ export class GameApp {
     }
   }
 
-  startDomainGeneration(userId, { channel, forcedName, forcedPatronName, forcedPatronGender, frozenConcept, axes, playerDirectives, playerBrief }) {
+  startDomainGeneration(userId, { channel, forcedName, forcedPatronName, forcedPatronGender, frozenConcept, axes, playerDirectives, playerBrief, domainId = null }) {
     const uid = String(userId);
     if (this.generatingUsers.has(uid)) {
       getLogger().warn('genesis.already_running', { userId: uid });
@@ -440,6 +442,7 @@ export class GameApp {
           runtime: this.runtime,
           storage: this.storage,
           ownerUserId: uid,
+          domainId: domainId || null,
           channel,
           forcedName: forcedName || null,
           forcedPatronName: forcedPatronName || null,
@@ -697,6 +700,7 @@ export class GameApp {
         ? `\nИгрок назвал «${takenAttempt}», но оно уже занято. Скажи, что имя занято, и предложи или спроси другое. Чужие города не перечисляй.`
         : '',
     ].join('\n');
+    if (!draft.pendingDomainId) draft.pendingDomainId = newId('domain');
     const result = await this.runtime.run({
       agentId: 'onboarding',
       userMessages: [...history, { role: 'user', content: userContent }],
@@ -704,6 +708,8 @@ export class GameApp {
       extraSystem,
       log,
       scene: 'onboarding',
+      domainId: draft.pendingDomainId,
+      maxTurns: 50,
     });
     if (startFlag.started) startedGenerating = true;
 
@@ -750,6 +756,7 @@ export class GameApp {
         patronName: draft.patronName,
         reason: auto.reason,
       });
+      if (!draft.pendingDomainId) draft.pendingDomainId = newId('domain');
       this.startDomainGeneration(userId, {
         channel,
         forcedName: draft.cityName,
@@ -759,6 +766,7 @@ export class GameApp {
         axes: draft.axes,
         playerDirectives: draft.playerDirectives,
         playerBrief: { ...(draft.playerBrief || {}) },
+        domainId: draft.pendingDomainId,
       });
       startedGenerating = true;
     } else if (auto.stripFalseStart) {
@@ -1397,7 +1405,11 @@ export class GameApp {
    * Тестовый клиент: посадить историю сейчас, тем же конвейером, что живой посев.
    * Зерно и gravity задаёт человек, не бросок канала.
    */
-  async forceSeedStory(userId, { gravity, grain, mystery } = {}) {
+  async forceSeedStory() {
+    return { ok: false, error: 'retired', message: 'посев нитей снят' };
+  }
+
+  async forceSeedStoryUnused(userId, { gravity, grain, mystery } = {}) {
     const uid = String(userId || '').trim();
     if (this.isWorldTicking()) {
       return { ok: false, error: 'ticking', message: 'сейчас идёт шаг времени' };
@@ -1582,7 +1594,11 @@ export class GameApp {
   }
 
   /** Тестовый клиент: выставить шкалу. На ста срабатывает беда из пула. */
-  async setPlayPressure(userId, { plotId, value } = {}) {
+  async setPlayPressure() {
+    return { ok: false, error: 'retired', message: 'шкала давления снята' };
+  }
+
+  async setPlayPressureUnused(userId, { plotId, value } = {}) {
     const pid = String(plotId || '').trim();
     const next = Math.round(Number(value));
     if (!pid) return { ok: false, error: 'not_found', message: 'не указана нить' };
@@ -1653,7 +1669,11 @@ export class GameApp {
   }
 
   /** Тестовый клиент: сработать живую угрозу сейчас, не дожидаясь срока. */
-  async forcePlayThreat(userId, { plotId, threatId } = {}) {
+  async forcePlayThreat() {
+    return { ok: false, error: 'retired', message: 'угрозы сняты' };
+  }
+
+  async forcePlayThreatUnused(userId, { plotId, threatId } = {}) {
     const pid = String(plotId || '').trim();
     const tid = String(threatId || '').trim();
     if (!pid || !tid) return { ok: false, error: 'not_found', message: 'не указаны нить или угроза' };
@@ -1729,7 +1749,11 @@ export class GameApp {
   }
 
   /** Тестовый клиент: закрыть дело выбранным исходом, без броска. */
-  async forcePlayDeed(userId, { processId, finish } = {}) {
+  async forcePlayDeed() {
+    return { ok: false, error: 'retired', message: 'дела сняты' };
+  }
+
+  async forcePlayDeedUnused(userId, { processId, finish } = {}) {
     const id = String(processId || '').trim();
     const kind = parsePlayDeedFinish(finish);
     if (!id) return { ok: false, error: 'not_found', message: 'не указано дело' };

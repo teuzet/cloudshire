@@ -15,8 +15,6 @@ test('тутор генезиса — статичный текст в конф�
   assert.ok(text.length > 200);
   assert.match(text, /четыре реальные минуты/);
   assert.match(text, /сопряжен/);
-  assert.match(text, /лояльност/);
-  assert.match(text, /ужас/);
   assert.match(text, /Дело/);
   assert.match(text, /Постоянный порядок/);
   assert.match(text, /поторопить/);

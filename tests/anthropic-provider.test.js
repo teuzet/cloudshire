@@ -141,8 +141,8 @@ test('thinking-блоки Claude уходят обратно с tool-резул�
   assert.equal(messages[1].content[1].type, 'tool_use');
 });
 
-test('freeform brainstorm — Claude', () => {
+test('генезис — Claude', () => {
   const config = loadConfig();
   assert.equal(config.llm.anthropic.apiKeyEnv, 'ANTHROPIC_API_KEY');
-  assert.equal(config.agents.freeformBrainstorm.provider, 'anthropic');
+  assert.equal(config.agents.genesis.provider, 'anthropic');
 });

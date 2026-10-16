@@ -15,7 +15,7 @@ import {
   spreadChronicleToPair,
   judgeChronicleLeak,
 } from '../src/game/confluxCanon.js';
-import { createPlotline } from '../src/game/plotlines.js';
+import { createPlotline } from '../src/world/legacyHooks.js';
 import { loadConfig } from '../src/config.js';
 
 function city(id, name) {

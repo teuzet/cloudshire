@@ -267,7 +267,7 @@ button.danger:hover { border-color: #d98080; }
   position: fixed;
   top: 0;
   right: 0;
-  width: min(520px, 100vw);
+  width: min(760px, 100vw);
   height: 100vh;
   display: flex;
   flex-direction: column;
@@ -331,7 +331,44 @@ button.danger:hover { border-color: #d98080; }
   margin-bottom: 0.5rem;
 }
 
-.ins-card.dim { opacity: 0.5; }
+.ins-card.dim { opacity: 0.55; }
+
+.meter {
+  height: 8px;
+  margin-top: 0.4rem;
+  background: #0e1216;
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.meter > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0 0 0.7rem;
+}
+
+.chip {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 99px;
+  padding: 0.15rem 0.55rem;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.chip.on {
+  color: var(--ink);
+  border-color: var(--accent);
+}
 .ins-card h4 { margin: 0 0 0.2rem; font-size: 0.9rem; }
 .ins-card p { margin: 0.35rem 0 0; }
 .ins-card ul { margin: 0.2rem 0 0; padding-left: 1.1rem; }

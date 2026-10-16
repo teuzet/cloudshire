@@ -4,7 +4,7 @@
  * живёт в `domain.modifiers` и на доску не попадает.
  */
 
-import { refreshPlotAwareness, isConfluxPlot } from './plotlines.js';
+import { refreshPlotAwareness, isConfluxPlot } from '../world/legacyHooks.js';
 import { newId } from './ids.js';
 import { createLoreFact } from './models.js';
 

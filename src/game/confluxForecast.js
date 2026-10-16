@@ -6,7 +6,7 @@
  * Часы расставания живут на объекте пары, не угрозой-сюжетом.
  */
 
-import { keepStories } from './storyteller.js';
+import { keepStories } from '../world/legacyHooks.js';
 import { confluxConfig, pairPrimaryId } from './confluxTime.js';
 import { scheduleJob, cancelJobs } from './scheduler.js';
 import { getLogger } from '../log.js';

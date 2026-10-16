@@ -19,7 +19,6 @@ import { newId } from './ids.js';
 import { appendCityModifier, normalizeCityModifiers } from './cityContext.js';
 import { dropSeedRequestsForOrder, enqueueSeedRequest } from './seedSchedule.js';
 import { gameDateFromDay } from './gameClock.js';
-import { pauseDeedClock, startDeed } from './deeds.js';
 import {
   bindOfficerProcess,
   findOfficer,

@@ -19,9 +19,15 @@ import {
   advanceGravitySchedule,
   pickScheduledGrain,
 } from './seedChannels.js';
-import { occupiedOfficerSlots, STORY_OFFICER_SLOTS } from './plotlines.js';
-import { liveThreats } from './threats.js';
-import { isStakedStory } from './plotlines.js';
+import { isStakedStory } from '../world/legacyHooks.js';
+
+function occupiedOfficerSlots() {
+  return 0;
+}
+const STORY_OFFICER_SLOTS = { SITUATION: 0, EPISODE: 1, CRISIS: 2, RUPTURE: 3 };
+function liveThreats() {
+  return [];
+}
 
 /** Цель по живым угрозам у игрока. Ниже — сеем охотнее, выше — не сеем. */
 export const THREAT_TARGET_MIN = 3;

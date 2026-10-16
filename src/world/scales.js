@@ -87,8 +87,6 @@ function validate(config) {
   const types = stringList(objects.types, 'config.fronts.objects.types');
   const nameMax = finiteAt(objects.nameMax, 'config.fronts.objects.nameMax');
   const descriptionMax = finiteAt(objects.descriptionMax, 'config.fronts.objects.descriptionMax');
-  const baselineId = String(objects.baselineId || '').trim();
-  if (!baselineId) fail('config.fronts.objects.baselineId');
 
   const genesisObjects = fronts.genesisObjects;
   if (!genesisObjects || typeof genesisObjects !== 'object') fail('config.fronts.genesisObjects');
@@ -111,7 +109,7 @@ function validate(config) {
     assignment: { baseRate, statFloor, efficiency: efficiencyTable, evaluatorCandidates },
     risk: { levels: riskLevels, perEffort, impactCap },
     consequences: { overdraft },
-    objects: { types, nameMax, descriptionMax, baselineId },
+    objects: { types, nameMax, descriptionMax },
     genesisObjects: { minCount, maxCount, profileRange },
     cascade: { maxSteps },
   };
@@ -219,7 +217,7 @@ export function objectTypes(config) {
 
 export function objectLimits(config) {
   const objects = frontScales(config).objects;
-  return { nameMax: objects.nameMax, descriptionMax: objects.descriptionMax, baselineId: objects.baselineId };
+  return { nameMax: objects.nameMax, descriptionMax: objects.descriptionMax };
 }
 
 export function genesisObjectBounds(config) {

@@ -2,10 +2,10 @@
  * След расстыковки: зараза, перенос вещи или идеи, перманентная правка города.
  */
 
-import { addCityEntity } from './cityEntities.js';
+import { addCityEntity } from '../world/legacyHooks.js';
 import { appendCityModifier } from './cityContext.js';
 import { enqueueSeedRequest } from './seedSchedule.js';
-import { isStakedStory } from './plotlines.js';
+import { isStakedStory } from '../world/legacyHooks.js';
 
 function originWeight(entity) {
   const src = String(entity?.origin || entity?.source || 'genesis');

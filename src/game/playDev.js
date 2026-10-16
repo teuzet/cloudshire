@@ -4,18 +4,39 @@
  */
 
 import { yearChronicleGrain, formatChronicleGrain, cityGenesisGrainText } from './seedChannels.js';
-import {
-  findPlotline,
-  isStoryPlot,
-  isConfluxPlot,
-  plotHasLiveProcess,
-  parseFreeformGravity,
-  FREEFORM_GRAVITY,
-  plotConfig,
-  countOpen,
-} from './plotlines.js';
-import { liveThreats } from './threats.js';
+import { isStoryPlot, isConfluxPlot } from '../world/legacyHooks.js';
 import { cancelJobsForPlot } from './scheduler.js';
+
+function findPlotline(domain, id) {
+  const needle = String(id || '');
+  return (domain?.plotlines || []).find((plot) => plot.id === needle) || (domain?.closedPlotlines || []).find((plot) => plot.id === needle) || null;
+}
+function plotHasLiveProcess(domain, plot) {
+  const ids = new Set((plot?.relatedProcessIds || []).map(String));
+  return (domain?.state?.pendingActions || []).some(
+    (action) =>
+      action &&
+      (!action.status || action.status === 'active') &&
+      (ids.has(String(action.id)) || String(action.plotlineId || '') === String(plot?.id || '')),
+  );
+}
+function parseFreeformGravity(value) {
+  return String(value || '').trim().toUpperCase();
+}
+const FREEFORM_GRAVITY = ['SITUATION', 'EPISODE', 'CRISIS', 'RUPTURE'];
+function plotConfig(config) {
+  const maxOpen = Number(config?.tick?.plot?.board?.maxOpen);
+  return { board: { maxOpen: Number.isFinite(maxOpen) && maxOpen > 0 ? maxOpen : 4 } };
+}
+function countOpen(domain) {
+  const stories = (domain?.plotlines || []).filter(
+    (plot) => isStoryPlot(plot) && plot.status !== 'closed',
+  ).length;
+  return { total: stories, stories };
+}
+function liveThreats() {
+  return [];
+}
 
 export const PLAY_SEED_GRAINS = ['genesis', 'chronicle', 'void'];
 export const PLAY_DEED_FINISHES = ['fail', 'ok', 'crit'];

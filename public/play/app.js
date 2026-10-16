@@ -7,6 +7,7 @@ let renderedCount = -1;
 let lastGenerating = false;
 let busy = false;
 let inspectTab = 'city';
+let objectTypeFilter = 'all';
 let inspectData = null;
 let lastCityDay = null;
 let canDev = false;
@@ -426,6 +427,30 @@ function renderCityTab(d) {
       ),
     );
   }
+  if (d.officers?.length) {
+    const busy = new Map(
+      (d.assignments || [])
+        .filter((item) => item.status === 'active' && item.officerId)
+        .map((item) => [item.officerId, item.text]),
+    );
+    out.push(
+      block(
+        'Сановники',
+        d.officers
+          .map((officer) => {
+            const task = busy.get(officer.id);
+            return (
+              `<article class="ins-card"><h4>${esc(officer.name || officer.title)}</h4>` +
+              `<div class="muted small">${esc(officer.title || officer.office || '')}</div>` +
+              (task ? `<p>${esc(task)}</p>` : '<p class="muted">поручения нет</p>') +
+              (officer.nature ? `<p class="pre">${esc(officer.nature)}</p>` : '') +
+              `</article>`
+            );
+          })
+          .join(''),
+      ),
+    );
+  }
   if (d.description) out.push(block('Описание острова', `<p class="pre">${esc(d.description)}</p>`));
   if (d.tags?.length) out.push(block('Метки', `<p>${esc(d.tags.join(', '))}</p>`));
   const c = d.conflux;
@@ -664,7 +689,6 @@ function plotCard(p, names = {}) {
     host ? `хозяин: ${host}` : null,
     concerns.length ? `касается: ${concerns.join(', ')}` : null,
     `жар ${p.temperature}`,
-    `возраст ${p.ageMonths}/${p.maxAgeMonths}`,
     `битов ${p.beatCount}`,
     p.mirrorOf ? 'зеркало' : null,
     p.partnerGone ? 'партнёр ушёл' : null,
@@ -765,6 +789,21 @@ function seedFormHtml() {
   );
 }
 
+function frontCards(fronts) {
+  return (fronts || [])
+    .map((front) => {
+      const effort = Number(front.effort) || 0;
+      const progress = Number(front.progress) || 0;
+      const pct = effort > 0 ? Math.round((100 * progress) / effort) : 0;
+      const shown = Math.round(progress * 10) / 10;
+      return (
+        `<article class="ins-card"><h4>${esc(front.description || front.id || 'Фронт')}</h4>` +
+        `<div class="muted small">${pct}% · ${esc(String(shown))} / ${esc(String(effort))}</div></article>`
+      );
+    })
+    .join('');
+}
+
 function renderPlotsTab(d) {
   const plots = d.plotlines || [];
   const note = d.conflux?.plotlines?.length
@@ -781,7 +820,9 @@ function renderPlotsTab(d) {
       )
     : '';
 
+  const fronts = frontCards(d.fronts);
   return (
+    (fronts ? block('Фронты', fronts) : '') +
     note +
     block(`Нити города (${plots.length})`, seedFormHtml() + body) +
     closed
@@ -1070,23 +1111,189 @@ function renderFactsTab(d) {
   );
 }
 
-function renderCastTab(d) {
-  const list = d.cast || [];
-  if (!list.length) return block('Люди', '<p class="muted">названных людей пока нет</p>');
-  return block(
-    `Люди (${list.length})`,
-    list
-      .map(
-        (c) =>
-          `<article class="ins-card"><h4>${esc(c.name)}${c.status && c.status !== 'alive' ? ` <span class="muted small">${esc(c.status)}</span>` : ''}</h4>` +
-          `<div class="muted small">${esc(
-            [Number.isFinite(Number(c.ageYears)) ? `${c.ageYears} лет` : null, c.role].filter(Boolean).join(' · '),
-          )}</div>` +
-          (c.about ? `<p class="pre">${esc(c.about)}</p>` : '') +
-          `</article>`,
-      )
-      .join(''),
+function formatPoints(value) {
+  const n = Math.round(Number(value) * 10) / 10;
+  const text = Number.isInteger(n) ? String(n) : n.toFixed(1);
+  return n > 0 ? `+${text}` : text;
+}
+
+function effectLine(effect, stats) {
+  const names = Object.fromEntries((stats || []).map((s) => [s.id, s.name]));
+  return Object.entries(effect || {})
+    .filter(([, value]) => Number(value))
+    .map(([id, value]) => `${names[id] || id} ${formatPoints(value)}`)
+    .join(' · ');
+}
+
+function meter(progress, effort) {
+  const total = Number(effort) || 0;
+  const done = Number(progress) || 0;
+  const pct = total > 0 ? Math.max(0, Math.min(100, Math.round((100 * done) / total))) : 0;
+  const shown = Math.round(done * 10) / 10;
+  return (
+    `<div class="meter" aria-hidden="true"><span style="width:${pct}%"></span></div>` +
+    `<div class="muted small">${pct}% · ${esc(String(shown))} / ${esc(String(total))}</div>`
   );
+}
+
+const OBJECT_TYPE_RU = {
+  building: 'здание',
+  structure: 'сооружение',
+  landmark: 'ориентир',
+  district: 'квартал',
+  settlement: 'поселение',
+  site: 'место',
+  object: 'вещь',
+  resource: 'ресурс',
+  organization: 'организация',
+  community: 'община',
+  person: 'человек',
+  practice: 'практика',
+  capability: 'умение',
+  policy: 'порядок',
+  threat: 'угроза',
+  mystery: 'тайна',
+};
+
+const FRONT_STATUS_RU = { active: 'идёт', resolved: 'закрыт', invalid: 'сломан' };
+const DEED_STATUS_RU = { active: 'идёт', done: 'сделано', cancelled: 'снято' };
+const DIRECTION_RU = { forward: 'вперёд', backward: 'назад', none: 'без сдвига' };
+const EFFICIENCY_RU = { weak: 'слабо', normal: 'обычно', strong: 'сильно' };
+
+function nameById(list, id) {
+  const found = (list || []).find((item) => item.id === id);
+  return found?.name || found?.description || found?.title || id;
+}
+
+function renderFrontsTab(d) {
+  const list = [...(d.fronts || [])].sort((a, b) => {
+    if (a.status === b.status) return 0;
+    return a.status === 'active' ? -1 : 1;
+  });
+  const cards = list.length
+    ? list
+        .map((front) => {
+          const rate = Number(front.ratePerDay) || 0;
+          const meta = [
+            FRONT_STATUS_RU[front.status] || front.status,
+            rate ? `${Math.round(rate * 100) / 100} в день` : null,
+            front.driftBand && front.driftBand !== 'NONE' ? `дрейф ${front.driftBand}` : null,
+            front.stake ? `ставка: ${[front.stake.form, front.stake.text].filter(Boolean).join(' · ')}` : null,
+          ]
+            .filter(Boolean)
+            .join(' · ');
+          const events = (front.events || [])
+            .map((event) => `<li>${esc(event.description)} <span class="muted">${esc(event.status || '')}</span></li>`)
+            .join('');
+          const clues = (front.clues || [])
+            .map((clue) => `<li>${esc(clue.fact)} <span class="muted">${esc(clue.status || '')}</span></li>`)
+            .join('');
+          const linked = (d.assignments || []).filter((item) => item.frontId === front.id && item.status === 'active');
+          return (
+            `<article class="ins-card${front.status === 'active' ? '' : ' dim'}">` +
+            `<h4>${esc(front.description)}</h4>` +
+            `<div class="muted small">${esc(meta)}</div>` +
+            meter(front.progress, front.effort) +
+            (front.alignment ? `<p class="pre">${esc(front.alignment)}</p>` : '') +
+            (front.stake?.detail ? `<p class="muted small">${esc(front.stake.detail)}</p>` : '') +
+            (linked.length
+              ? `<p class="small">поручения: ${esc(linked.map((item) => item.text).join('; '))}</p>`
+              : '') +
+            (events ? `<div class="muted small">события</div><ul class="small">${events}</ul>` : '') +
+            (clues ? `<div class="muted small">улики</div><ul class="small">${clues}</ul>` : '') +
+            `</article>`
+          );
+        })
+        .join('')
+    : '<p class="muted">открытых фронтов нет</p>';
+  return block(`Фронты (${list.filter((front) => front.status === 'active').length} живых)`, cards) + (canDev ? seedFormHtml() : '');
+}
+
+function renderObjectsTab(d) {
+  const all = d.objects || [];
+  const types = [...new Set(all.map((obj) => obj.type).filter(Boolean))];
+  const chips = ['all', ...types]
+    .map((type) => {
+      const label = type === 'all' ? 'все' : OBJECT_TYPE_RU[type] || type;
+      const count = type === 'all' ? all.length : all.filter((obj) => obj.type === type).length;
+      const on = objectTypeFilter === type ? ' on' : '';
+      return `<button type="button" class="chip${on}" data-object-type="${esc(type)}">${esc(label)} ${count}</button>`;
+    })
+    .join('');
+  const list = all.filter((obj) => objectTypeFilter === 'all' || obj.type === objectTypeFilter);
+  const cards = list.length
+    ? list
+        .map((obj) => {
+          const effect = effectLine(obj.statEffect, d.stats);
+          const refs = (obj.refs || []).map((id) => nameById(all, id)).filter(Boolean);
+          const history = (obj.versions || []).length > 1
+            ? (obj.versions || [])
+                .map((version) => `<li>v${esc(version.version)} · день ${esc(version.createdDay ?? '—')}: ${esc(version.description)}</li>`)
+                .join('')
+            : '';
+          return (
+            `<article class="ins-card${obj.status === 'active' ? '' : ' dim'}">` +
+            `<h4>${esc(obj.name)}</h4>` +
+            `<div class="muted small">${esc(
+              [
+                OBJECT_TYPE_RU[obj.type] || obj.type,
+                obj.status === 'deleted' ? 'убран' : null,
+                obj.protected ? 'защищён' : null,
+                `v${obj.version || 1}`,
+              ]
+                .filter(Boolean)
+                .join(' · '),
+            )}</div>` +
+            (obj.description ? `<p class="pre">${esc(obj.description)}</p>` : '') +
+            (effect ? `<p class="small">${esc(effect)}</p>` : '') +
+            (refs.length ? `<p class="muted small">связано: ${esc(refs.join(', '))}</p>` : '') +
+            (history ? `<ul class="small">${history}</ul>` : '') +
+            `</article>`
+          );
+        })
+        .join('')
+    : '<p class="muted">таких объектов нет</p>';
+  return `<div class="chips">${chips}</div>${cards}`;
+}
+
+function renderDeedsTab(d) {
+  const officers = d.officers || [];
+  const fronts = d.fronts || [];
+  const list = d.assignments || [];
+  const active = list.filter((item) => item.status === 'active');
+  const closed = list.filter((item) => item.status && item.status !== 'active');
+  const card = (item) => {
+    const officer = officers.find((person) => person.id === item.officerId);
+    const who = officer ? `${officer.title || ''} ${officer.name || ''}`.trim() : item.office || 'сановник';
+    const front = fronts.find((entry) => entry.id === item.frontId);
+    const meta = [
+      DEED_STATUS_RU[item.status] || item.status,
+      who,
+      DIRECTION_RU[item.direction] || null,
+      EFFICIENCY_RU[item.efficiency] || null,
+      item.risk ? `риск ${item.risk}` : null,
+      item.effortDone ? `вложено ${Math.round(item.effortDone * 10) / 10}` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    return (
+      `<article class="ins-card${item.status === 'active' ? '' : ' dim'}">` +
+      `<h4>${esc(item.text)}</h4>` +
+      `<div class="muted small">${esc(meta)}</div>` +
+      (front ? `<p class="small">фронт: ${esc(front.description)}</p>` : '') +
+      `</article>`
+    );
+  };
+  const activeBlock = block(
+    `Поручения (${active.length})`,
+    active.length ? active.map(card).join('') : '<p class="muted">живых поручений нет</p>',
+  );
+  const closedBlock = closed.length ? block(`Закрытые (${closed.length})`, closed.map(card).join('')) : '';
+  const old = (d.processes || []).filter((process) => !list.some((item) => item.id === process.id));
+  const oldBlock = old.length
+    ? block('Прежние дела', old.map((process) => processCard(process, { viewerId: d.id, mana: d.mana, threats: threatById(d) })).join(''))
+    : '';
+  return activeBlock + closedBlock + oldBlock;
 }
 
 function renderInspector() {
@@ -1109,12 +1316,10 @@ function renderInspector() {
   }
   const render = {
     city: renderCityTab,
-    conflux: renderConfluxTab,
-    plots: renderPlotsTab,
-    processes: renderProcessesTab,
-    chronicle: renderChronicleTab,
-    facts: renderFactsTab,
-    cast: renderCastTab,
+    fronts: renderFrontsTab,
+    objects: renderObjectsTab,
+    deeds: renderDeedsTab,
+    chronicle: (domain) => renderChronicleTab(domain) + renderFactsTab(domain),
   }[inspectTab];
   box.innerHTML = render ? render(d) : '';
 }
@@ -1173,6 +1378,12 @@ $('inspectTabs').addEventListener('click', (e) => {
 });
 
 $('inspectBody').addEventListener('click', async (e) => {
+  const typeBtn = e.target.closest('[data-object-type]');
+  if (typeBtn) {
+    objectTypeFilter = typeBtn.getAttribute('data-object-type') || 'all';
+    renderInspector();
+    return;
+  }
   const drop = e.target.closest('[data-drop]');
   if (drop) {
     const plotId = drop.getAttribute('data-drop');
@@ -1345,7 +1556,7 @@ $('inspectBody').addEventListener('submit', async (e) => {
 
 $('btnSeed').addEventListener('click', async () => {
   $('cityPanel').classList.add('hidden');
-  inspectTab = 'plots';
+  inspectTab = 'fronts';
   $('inspector').classList.remove('hidden');
   await refreshInspector();
   const form = document.querySelector('[data-seed-form]');

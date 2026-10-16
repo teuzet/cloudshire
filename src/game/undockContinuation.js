@@ -1,6 +1,6 @@
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
-import { stripPlotSecrets } from './plotlines.js';
+import { stripPlotSecrets } from '../world/legacyHooks.js';
 
 /**
  * Может ли эта предпосылка жить в городе без соседа.

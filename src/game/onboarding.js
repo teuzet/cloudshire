@@ -153,6 +153,7 @@ export function normalizeOnboardingDraft(draft) {
   if (!('patronNameApproved' in d)) d.patronNameApproved = false;
   if (!('patronGender' in d)) d.patronGender = null;
   d.patronGender = normalizePatronGender(d.patronGender);
+  d.pendingDomainId = String(d.pendingDomainId || '').trim() || null;
   clipOnboardingBrief(d.playerBrief);
   d.phase = deriveOnboardingPhase(d);
   return d;

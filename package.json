@@ -11,7 +11,6 @@
     "playtest": "node src/cli.js playtest",
     "tokens": "node scripts/token-report.js",
     "report": "node scripts/world-report.js",
-    "seed-sample": "node scripts/sample-plot-seeds.mjs",
     "seed-annotations": "node scripts/sample-mystery-annotations.mjs",
     "seed-suspense-annotations": "node scripts/sample-suspense-annotations.mjs",
     "test": "node --test tests/*.js"

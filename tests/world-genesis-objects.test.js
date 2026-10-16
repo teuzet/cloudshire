@@ -2,9 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { statBudgetConfig } from '../src/game/stats.js';
 import { deleteWorldObject } from '../src/world/objects.js';
-import { buildGenesisObjects } from '../src/world/genesisObjects.js';
+import { buildGenesisObjects, retireCityBaseline } from '../src/world/genesisObjects.js';
 import { recomputeStats } from '../src/world/statSum.js';
-import { genesisObjectBounds, impactLevels, objectLimits } from '../src/world/scales.js';
+import { genesisObjectBounds, impactLevels } from '../src/world/scales.js';
 import { testConfig } from './helpers/config.js';
 
 const cfg = testConfig();
@@ -33,7 +33,6 @@ test('генезис сводит статы к бюджету и коридор
   const built = buildGenesisObjects({
     drafts: draftsOf(genesisObjectBounds(cfg).minCount),
     config: cfg,
-    cityName: 'Терракота',
     day: 0,
   });
   const sum = Object.values(built.stats).reduce((a, b) => a + b, 0);
@@ -47,13 +46,12 @@ test('пересчёт статов совпадает с тем, что соб�
   const built = buildGenesisObjects({
     drafts: draftsOf(genesisObjectBounds(cfg).minCount),
     config: cfg,
-    cityName: 'Терракота',
     day: 0,
   });
   const domain = {
     worldObjects: built.objects,
     statScale: built.statScale,
-    statLedger: { prosperity: 0, influence: 0, knowledge: 0, security: 0 },
+    statLedger: built.ledger,
     stats: {},
     state: {},
   };
@@ -61,34 +59,49 @@ test('пересчёт статов совпадает с тем, что соб�
   assert.deepEqual(domain.stats, built.stats);
 });
 
-test('базовый объект города защищён от удаления', () => {
+test('сам город в список объектов не попадает, остаток бюджета лежит в ledger', () => {
+  const drafts = draftsOf(genesisObjectBounds(cfg).minCount);
   const built = buildGenesisObjects({
-    drafts: draftsOf(genesisObjectBounds(cfg).minCount),
+    drafts,
     config: cfg,
-    cityName: 'Терракота',
+    day: 0,
   });
-  const baseline = built.objects.find((obj) => obj.id === objectLimits(cfg).baselineId);
-  assert.ok(baseline);
-  assert.equal(baseline.protected, true);
-  assert.equal(baseline.name, 'Терракота');
+  assert.equal(built.objects.length, drafts.length);
+  assert.equal(built.objects.some((obj) => obj.id === 'city-baseline'), false);
+  const domain = {
+    worldObjects: [
+      ...built.objects,
+      {
+        id: 'city-baseline',
+        type: 'settlement',
+        name: 'Терракота',
+        statEffect: { prosperity: 1, influence: 0, knowledge: 0, security: -0.5 },
+      },
+    ],
+    statScale: 2,
+    statLedger: { prosperity: 0, influence: 0, knowledge: 0, security: 0 },
+  };
+  retireCityBaseline(domain);
+  assert.equal(domain.worldObjects.some((obj) => obj.id === 'city-baseline'), false);
+  assert.equal(domain.statLedger.prosperity, 2);
+  assert.equal(domain.statLedger.security, -1);
 });
 
 test('удаление обычного объекта меняет статы', () => {
   const built = buildGenesisObjects({
     drafts: draftsOf(genesisObjectBounds(cfg).minCount),
     config: cfg,
-    cityName: 'Терракота',
   });
   const domain = {
     worldObjects: built.objects,
     statScale: built.statScale,
-    statLedger: { prosperity: 0, influence: 0, knowledge: 0, security: 0 },
+    statLedger: built.ledger,
     stats: {},
     state: {},
   };
   recomputeStats(domain, cfg);
   const before = { ...domain.stats };
-  const victim = built.objects.find((obj) => obj.id !== objectLimits(cfg).baselineId);
+  const victim = built.objects[0];
   deleteWorldObject(victim, 1);
   recomputeStats(domain, cfg);
   assert.notDeepEqual(domain.stats, before);
@@ -107,7 +120,6 @@ test('неположительный суммарный вклад отверг�
         },
       ],
       config: cfg,
-      cityName: 'Терракота',
     }),
   );
 });

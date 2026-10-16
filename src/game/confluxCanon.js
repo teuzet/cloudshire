@@ -6,16 +6,14 @@
  */
 
 import { writeChronicle, CHRONICLE_FINALE_MAX, nativePlotChronicleTail, finishForPrompt } from './chronicler.js';
-import { appendChronicle } from './freeform.js';
+import { appendChronicle, isConfluxPlot, scoreChronicleStats, scorePairChronicleStats } from '../world/legacyHooks.js';
 import { createLoreFact } from './models.js';
 import { newId } from './ids.js';
 import { plotHostId, plotConcerns } from './confluxBoard.js';
-import { isConfluxPlot } from './plotlines.js';
 import { gameDateFromDay } from './gameClock.js';
 import { getLogger } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';
 import { afterPairLoreWrite } from './confluxForecast.js';
-import { scoreChronicleStats, scorePairChronicleStats } from './statJudge.js';
 export const PLACE_PAIR = 'pair';
 export const FROZEN_SYNOPSIS_PREFIX = 'Что случилось в этой истории на данный момент:';
 

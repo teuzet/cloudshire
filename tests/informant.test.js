@@ -5,7 +5,7 @@ import {
   formatNeighborPlotList,
   askInformant,
 } from '../src/game/informant.js';
-import { createPlotline } from '../src/game/plotlines.js';
+import { createPlotline } from '../src/world/legacyHooks.js';
 import { createLoreFact } from '../src/game/models.js';
 
 function city(id, name, extra = {}) {

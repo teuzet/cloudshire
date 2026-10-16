@@ -16,8 +16,7 @@ import {
 import { getLogger, requestLogger, truncate } from '../../log.js';
 import { statEpithet } from '../../game/stats.js';
 import { chronicleEntries, castRecords } from '../../game/models.js';
-import { stripPlotSecrets } from '../../game/plotlines.js';
-import { FINISH_SHORT } from '../../game/rolls.js';
+import { stripPlotSecrets } from '../../world/legacyHooks.js';
 import { resolveIslandImage } from '../../game/islandImage.js';
 import { resolveOfficerPortrait } from '../../game/officerImage.js';
 import { domainHasIslandImage, officerHasPortrait } from '../../storage/r2.js';
@@ -34,43 +33,171 @@ import {
 } from '../../game/scheduler.js';
 import { DAYS_PER_MONTH, gameDateFromDay, parseSkipDays } from '../../game/gameClock.js';
 import { daysUntilDock, daysUntilUndock } from '../../game/confluxTime.js';
-import { DIFFICULTY_SPEC, DURATION_SPEC, normalizeDifficultyBand } from '../../game/bands.js';
-import { deedDurationBand, deedRemainingBand, deedRemainingDays } from '../../game/deeds.js';
-import { paceLabel } from '../../game/deedMath.js';
 import { blessManaCost } from '../../game/mana.js';
-import { stageScale } from '../../game/threats.js';
-import { pressureAt, fillDay } from '../../game/pressure.js';
 import { priestOrders } from '../../game/priestOrders.js';
 import { visibleDialogHistory } from '../../game/memory.js';
 import { notifySettings } from '../../game/notify.js';
 import { canDropPlayStory } from '../../game/playDev.js';
-import { mountFreeformLab } from './freeformLab.js';
 import {
   validateTelegramInitData,
   telegramBotToken,
 } from '../telegram/initData.js';
 import { isTelegramAllowed, closedTestReply } from '../telegram/access.js';
 
+const FINISH_SHORT = { fail: 'провал', ok: 'успех', crit: 'крит' };
+
 /**
  * Дело для инспектора: сырое поле плюс то, что считает движок.
  * Считать полосы и цену благословения в браузере — значит завести вторую
  * реализацию правил, которая тихо разойдётся с первой.
  */
+const DURATION_SPEC = {
+  INSTANT: { label: 'мгновенно', max: 3 },
+  DAYS: { label: 'дни', max: 15 },
+  WEEKS: { label: 'недели', max: 60 },
+  SEASON: { label: 'сезон', max: 150 },
+  YEAR: { label: 'год', max: 360 },
+  YEARS: { label: 'годы', max: 1080 },
+};
+
+function bandOfDays(days) {
+  const value = Math.max(0, Number(days) || 0);
+  for (const [band, spec] of Object.entries(DURATION_SPEC)) {
+    if (value <= spec.max) return band;
+  }
+  return 'YEARS';
+}
+
+const DIFFICULTY_SPEC = {
+  TRIVIAL: 'по силам любому',
+  PLAIN: 'обычное',
+  HARD: 'трудное',
+  SEVERE: 'очень трудное',
+  EXTREME: 'на пределе',
+  IMPOSSIBLE: 'невозможное',
+};
+
+function paceLabel(shift) {
+  const s = Math.max(-1, Math.min(1, Math.round(Number(shift) || 0)));
+  if (s < 0) return 'спешка';
+  if (s > 0) return 'обстоятельно';
+  return 'обычно';
+}
+
 function inspectProcess(process, day) {
   if (!process) return process;
   const active = !process.status || process.status === 'active';
   const paused = process.status === 'paused';
+  const due = Number(process.dueDay);
+  const remainingDays = active && Number.isFinite(due) ? Math.max(0, Math.round(due - day)) : null;
+  const durationBand = DURATION_SPEC[process.durationBand] ? process.durationBand : bandOfDays(process.objectiveDays || process.totalDays);
+  const remainingBand = remainingDays == null ? durationBand : bandOfDays(remainingDays);
   return {
     ...process,
-    // Инспектор — отладочный экран, поэтому здесь, в отличие от справочника
-    // игрока, дни показываем прямо: иначе нечем проверять сроки.
-    remainingLabel: active ? DURATION_SPEC[deedRemainingBand(process, day)].label : null,
-    remainingDays: active ? deedRemainingDays(process, day) : null,
+    remainingLabel: active ? DURATION_SPEC[remainingBand].label : null,
+    remainingDays,
     pausedRemainingDays: paused ? Math.round(Number(process.pausedRemainingDays) || 0) : null,
-    durationLabel: DURATION_SPEC[deedDurationBand(process)].label,
-    difficultyLabel: DIFFICULTY_SPEC[normalizeDifficultyBand(process.difficulty)].label,
+    durationLabel: DURATION_SPEC[durationBand].label,
+    difficultyLabel: DIFFICULTY_SPEC[String(process.difficulty || '').trim().toUpperCase()] || null,
     paceLabel: paceLabel(process.paceShift),
     blessCost: blessManaCost(process),
+  };
+}
+
+function slimStake(stake) {
+  if (!stake || typeof stake !== 'object') return null;
+  if (stake.create) {
+    return {
+      form: 'создать',
+      text: [stake.create.type, stake.create.name].filter(Boolean).join(' · '),
+      detail: stake.create.description || '',
+    };
+  }
+  if (stake.modify) {
+    return {
+      form: 'изменить',
+      text: stake.modify.name || stake.modify.target || '',
+      detail: stake.modify.description || stake.modify.note || '',
+    };
+  }
+  if (stake.delete) {
+    return { form: 'убрать', text: stake.delete.name || stake.delete.target || '', detail: '' };
+  }
+  if (stake.stats) {
+    return { form: 'статы', text: '', detail: '' };
+  }
+  if (stake.reveal) {
+    return { form: 'открыть', text: stake.reveal.text || stake.reveal.fact || '', detail: '' };
+  }
+  return null;
+}
+
+function inspectFront(front) {
+  return {
+    id: front.id,
+    description: front.description || '',
+    status: front.status || null,
+    progress: front.progress ?? 0,
+    effort: front.effort ?? 0,
+    progressDay: front.progressDay ?? 0,
+    driftBand: front.driftBand || null,
+    ratePerDay: front.ratePerDay ?? 0,
+    beatCount: front.beatCount ?? 0,
+    beatsFired: front.beatsFired || [],
+    alignment: front.alignment || '',
+    refs: front.refs || [],
+    createdDay: front.createdDay ?? null,
+    resolvedDay: front.resolvedDay ?? null,
+    stake: slimStake(front.stake),
+    events: (front.events || []).map((event) => ({
+      id: event.id,
+      description: event.description || '',
+      status: event.status || null,
+    })),
+    clues: (front.clues || []).map((clue) => ({
+      id: clue.id,
+      fact: clue.fact || '',
+      status: clue.status || null,
+    })),
+  };
+}
+
+function inspectObject(obj) {
+  const versions = Array.isArray(obj.versions) ? obj.versions : [];
+  return {
+    id: obj.id,
+    type: obj.type,
+    name: obj.name,
+    description: obj.description || '',
+    status: obj.status || 'active',
+    protected: Boolean(obj.protected),
+    statEffect: obj.statEffect || {},
+    refs: obj.refs || [],
+    version: obj.version ?? versions.length,
+    versions: versions.slice(-6).map((version) => ({
+      version: version.version,
+      description: version.description || '',
+      createdDay: version.createdDay ?? null,
+      statEffect: version.statEffect || {},
+    })),
+  };
+}
+
+function inspectAssignment(item) {
+  return {
+    id: item.id,
+    frontId: item.frontId || null,
+    officerId: item.officerId || null,
+    office: item.office || null,
+    text: item.text || item.summary || '',
+    direction: item.direction || null,
+    efficiency: item.efficiency || null,
+    risk: item.risk || null,
+    status: item.status || null,
+    stopWhen: item.stopWhen || null,
+    startDay: item.startDay ?? null,
+    endDay: item.endDay ?? null,
+    effortDone: item.effortDone ?? 0,
   };
 }
 
@@ -126,21 +253,15 @@ function inspectPlot(plot, day, lore = []) {
   return {
     ...bare,
     ...plotSecrets(plot),
-    threats: (plot.threats || []).map((t) => ({
-      id: t.id,
-      text: t.text,
-      status: t.status,
-      stage: t.stage ?? null,
-      final: Boolean(t.final),
-      scale: stageScale(plot),
+    threats: (plot.threats || []).map((threat) => ({
+      id: threat.id,
+      text: threat.text,
+      status: threat.status,
+      stage: threat.stage ?? null,
+      final: Boolean(threat.final),
+      scale: threat.scale || null,
     })),
-    pressure: plot.pressure
-      ? {
-          value: Math.round(pressureAt(plot, day)),
-          fillDays: plot.pressure.fillDays,
-          fillDay: fillDay(plot),
-        }
-      : null,
+    pressure: null,
     stage: plot.stage ?? 0,
     chronicles: inspectPlotChronicles(plot, lore),
   };
@@ -761,6 +882,15 @@ export function createWebServer({ config, app, runtime, storage }) {
             mana: domain.state?.mana ?? 0,
             tags: (domain.tags || []).map((t) => t.tagName || t.tagId),
             processes: (domain.state?.pendingActions || []).map((p) => inspectProcess(p, day)),
+            officers: (domain.officers || []).map((officer) => ({
+              id: officer.id,
+              office: officer.office,
+              title: officer.title,
+              name: officer.name,
+              nature: officer.nature || '',
+            })),
+            objects: (domain.worldObjects || []).map(inspectObject),
+            assignments: (domain.assignments || []).map(inspectAssignment),
             standingRules: cityRules(domain),
             proxyText: proxyText(domain) || null,
             priestOrders: priestOrders(domain),
@@ -770,6 +900,7 @@ export function createWebServer({ config, app, runtime, storage }) {
               ...inspectPlot(p, day, lore),
               canDrop: canDropPlayStory(domain, p),
             })),
+            fronts: (domain.fronts || []).map(inspectFront),
             closedPlotlines: (domain.closedPlotlines || []).map((p) => ({
               ...inspectPlot(p, day, lore),
               canDrop: false,
@@ -1131,9 +1262,7 @@ export function createWebServer({ config, app, runtime, storage }) {
   }
 
   const onPaaS = Boolean(process.env.DYNO || process.env.RAILWAY_ENVIRONMENT);
-  if (playEnabled || !onPaaS) {
-    mountFreeformLab(server, { config, runtime });
-  }
+  void onPaaS;
 
   // ------------------------------------------------------------------
   // Админка: всё ниже за Basic auth, включается WEB_ADMIN.

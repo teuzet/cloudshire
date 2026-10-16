@@ -1,6 +1,6 @@
 /**
- * Один нарастающий лог агентов на живой город: полный промпт, вызовы tools, результаты.
- * Онбординг и генезис сюда не пишутся — только после того, как город уже играет.
+ * Один нарастающий лог агентов на город: полный промпт, вызовы tools, результаты.
+ * Сюда попадает и генезис, если у прогона уже есть id города.
  */
 
 import fs from 'node:fs';
@@ -13,26 +13,6 @@ import { formatAgentPrompt } from './agentPrompt.js';
 
 const RULE = '════════════════════════════════════════════════════════════════';
 const THIN = '────────────────────────────────────────────────────────────────';
-
-const GENESIS_AGENTS = new Set([
-  'onboarding',
-  'genesis',
-  'genesisConcept',
-  'cityStrengths',
-  'cityBrief',
-  'cityEntities',
-  'officerNature',
-  'islandImage',
-]);
-
-const GENESIS_SCENES = new Set([
-  'onboarding',
-  'city_brief',
-  'city_strengths',
-  'officer_nature',
-  'city_entities',
-  'island_image_prompt',
-]);
 
 const writeLocks = new Map();
 
@@ -64,12 +44,9 @@ export function shouldCaptureAgentLog(payload = {}) {
   return shouldLogLiveCityAgent(payload) || shouldLogAgentToMongo(payload);
 }
 
-export function shouldLogLiveCityAgent({ config, domainId, agentId, scene } = {}) {
+export function shouldLogLiveCityAgent({ config, domainId } = {}) {
   if (!cityAgentLogEnabled(config)) return false;
   if (!String(domainId || '').trim()) return false;
-  if (GENESIS_AGENTS.has(String(agentId || ''))) return false;
-  const sc = String(scene || '');
-  if (GENESIS_SCENES.has(sc) || sc.startsWith('genesis_')) return false;
   return true;
 }
 
@@ -217,7 +194,7 @@ export function formatCityAgentTranscript(payload = {}) {
 
 function fileBanner({ domainId, domainName, worldId, at }) {
   return [
-    '# Лог агентов живого города (после генезиса и онбординга)',
+    '# Лог агентов города, включая генезис',
     domainName ? `# город: ${domainName}` : null,
     `# domain: ${domainId}`,
     worldId ? `# мир: ${worldId}` : null,

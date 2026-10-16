@@ -12,8 +12,23 @@
 
 import { loadConfig } from '../src/config.js';
 import { createStorage } from '../src/storage/index.js';
-import { plotConfig, plotlineAge, isOverdue, plotTypeOf } from '../src/game/plotlines.js';
 import { activeProcesses } from '../src/game/processes.js';
+
+function plotConfig() {
+  return { board: { maxOpen: 4 } };
+}
+function plotlineAge() {
+  return null;
+}
+function isOverdue() {
+  return false;
+}
+function plotTypeOf(plot) {
+  const type = String(plot?.type || plot?.kind || '').toLowerCase();
+  if (type === 'errand') return 'errand';
+  if (type === 'conflux' || plot?.isMainConflux) return 'conflux';
+  return 'story';
+}
 
 const GOOD = 'OK  ';
 const WARN = 'WARN';

@@ -18,8 +18,14 @@ import {
   plotChronicleTail,
   writeChronicle,
 } from '../src/game/chronicler.js';
-import { FINISH_LABELS } from '../src/game/rolls.js';
 import { loadConfig } from '../src/config.js';
+
+const FINISH_LABELS = {
+  fail: '[ПРОВАЛ]: цель не достигнута, негативные последствия',
+  ok: '[УСПЕХ]: цель достигнут, нейтральные или слабые негативные побочные эффекты',
+  crit: '[КРИТИЧЕСКИЙ УСПЕХ]: цель достигнута триумфально',
+  blessed: 'Благословение покровителя сдвинуло исход на ступень вверх (провал→успех, успех→крит).',
+};
 
 const silentLog = {
   child: () => silentLog,
@@ -557,12 +563,8 @@ test('финальная запись режется по расширенном
   assert.equal(calls[0].scene, 'chronicle_развязка');
 });
 
-test('конфиг: у финального хрониста свой контракт, у обычного — запрет тянуть срок в прошедшее', () => {
+test('конфиг: хронист не тянет срок в прошедшее', () => {
   const agents = loadConfig().agents;
-  assert.ok(agents.chronicleFinale, 'финальную запись пишет отдельный агент');
-  assert.match(agents.chronicleFinale.instructions, /ПОСЛЕДНЮЮ запись/);
-  assert.match(agents.chronicleFinale.instructions, /больше не пишут/);
-  assert.match(agents.chronicleFinale.instructions, /к зиме/);
   assert.match(agents.chronicler.instructions, /СРОК ИЗ ВВОДА НЕ ПЕРЕНОСИ В ПРОШЕДШЕЕ ВРЕМЯ/);
   assert.match(agents.chronicler.instructions, /«К зиме начали разрушаться» — бессмыслица/);
   assert.match(agents.herald.instructions, /ПОВОД «РАЗВЯЗКА»/);

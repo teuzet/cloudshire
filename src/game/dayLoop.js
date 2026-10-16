@@ -19,23 +19,20 @@ import {
 import { StaleWriteError } from '../storage/revision.js';
 import { armFrontSchedule } from '../world/frontJobs.js';
 import {
-  armDomainSchedule,
   askForEvent,
   attachReport,
   drainDomainJobs,
-  scheduleDeedJob,
   sweepOrphanJobs,
 } from './worldLoop.js';
 import { narrateEvent } from './herald.js';
 import { markPushed, shouldPush } from './notify.js';
-import { scoreChronicleStats, factsForStatJudge } from './statJudge.js';
-import { keepStories } from './storyteller.js';
 import { formatRulerVoiceForPrompt } from './rulerMemory.js';
 import { runOfficerAct, stewardOffCooldown, markStewardRan } from './steward.js';
 import { maybeMatchmakeConfluxes } from './conflux.js';
 import { drainConfluxJobs } from './confluxJobs.js';
 import { emitConfluxAnnouncements } from './tick.js';
 import { maybeRewriteCityGenesis } from './genesisRewrite.js';
+import { recomputeStats } from '../world/statSum.js';
 import { otherDomainId, overlayConfluxView, stampNewBoardItems, stripConfluxView } from './confluxBoard.js';
 import { maybeNudgeProxy } from './proxyJudge.js';
 import { getLogger } from '../log.js';
@@ -151,13 +148,9 @@ export async function settleEvents({
 
   for (const event of list) attachReport(domain, event, { day });
 
-  const facts = factsForStatJudge(list.map((e) => e.fact).filter(Boolean));
-  const scored = facts.length
-    ? await scoreChronicleStats({ config, runtime, domain, world, chronicleAdds: facts, log })
-    : { scored: 0, catastrophe: null };
-
-  const plotIds = [...new Set(list.map((e) => e.plotId).filter(Boolean))];
-  if (plotIds.length) {
+  const facts = list.map((event) => event.fact).filter(Boolean);
+  const frontIds = [...new Set(list.map((event) => event.frontId).filter(Boolean))];
+  if (frontIds.length) {
     await maybeNudgeProxy({
       runtime,
       config,
@@ -165,24 +158,8 @@ export async function settleEvents({
       day,
       domains: [domain],
       trigger: 'plot_tick',
-      context: `Сдвинулись нити: ${plotIds.join(', ')}`,
+      context: `Сдвинулись фронты: ${frontIds.join(', ')}`,
       rng,
-      log,
-    });
-  }
-
-  // Синопсис обновляем только у тех нитей, которые сегодня сдвинулись.
-  const moved = plotIds
-    .map((id) => (domain.plotlines || []).find((p) => p.id === id))
-    .filter(Boolean);
-  if (moved.length) {
-    await keepStories({
-      config,
-      runtime,
-      domain,
-      world,
-      chronicleAdds: facts,
-      plots: moved,
       log,
     });
   }
@@ -196,14 +173,8 @@ export async function settleEvents({
     log,
   });
 
-  if (domain.stats && typeof domain.stats === 'object') {
-    for (const key of Object.keys(domain.stats)) {
-      const n = Number(domain.stats[key]);
-      if (!Number.isFinite(n)) continue;
-      domain.stats[key] = Math.max(0, Math.min(100, n));
-    }
-  }
-  return scored;
+  recomputeStats(domain, config);
+  return { scored: 0, catastrophe: null };
 }
 
 /**
@@ -228,8 +199,7 @@ export async function stepDomain({
   startClock(world);
   if (conflux) overlayConfluxView(domain, conflux, partner);
 
-  await armDomainSchedule({ runtime, domain, world, day, rng, log });
-  armFrontSchedule(config, domain, world, day);
+  await armFrontSchedule(config, domain, world, day);
   const events = await drainDomainJobs({
     config,
     runtime,
@@ -250,8 +220,6 @@ export async function stepDomain({
     if (acted?.act?.kind === 'process') {
       markStewardRan(domain, day);
       stewardAct = acted.act;
-      const started = (domain.state?.pendingActions || []).find((a) => a.id === acted.act.id);
-      if (started) scheduleDeedJob(world, domain, started);
     }
   }
 

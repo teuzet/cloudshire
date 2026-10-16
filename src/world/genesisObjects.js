@@ -8,14 +8,7 @@ import { getLogger } from '../log.js';
 import { statBudgetConfig, clipToBudget } from '../game/stats.js';
 import { STAT_IDS } from './objects.js';
 import { createWorldObject } from './objects.js';
-import {
-  genesisObjectBounds,
-  impactLevels,
-  impactRawBudget,
-  objectLimits,
-  objectTypes,
-  parseImpact,
-} from './scales.js';
+import { objectTypes, genesisObjectBounds, impactLevels, impactRawBudget, parseImpact } from './scales.js';
 
 function statIds(config) {
   const fromConfig = (config?.stats || []).map((def) => def?.id).filter(Boolean);
@@ -39,7 +32,7 @@ export function objectContribution(config, weight, statProfile) {
   return contrib;
 }
 
-export function buildGenesisObjects({ drafts, config, cityName, day = 0 } = {}) {
+export function buildGenesisObjects({ drafts, config, day = 0 } = {}) {
   const ids = statIds(config);
   const contributions = (drafts || []).map((draft) => objectContribution(config, draft.weight, draft.stat_profile || draft.statProfile));
   const total = contributions.reduce(
@@ -58,12 +51,7 @@ export function buildGenesisObjects({ drafts, config, cityName, day = 0 } = {}) 
   }
   const derived = ids.map((id) => Math.round(kScale * summed[id]));
   const final = clipToBudget(derived, { budget, min, max });
-  const residual = {};
-  ids.forEach((id, i) => {
-    residual[id] = (final[i] - derived[i]) / kScale;
-  });
 
-  const limits = objectLimits(config);
   const objects = (drafts || []).map((draft, i) =>
     createWorldObject(config, {
       type: draft.type,
@@ -73,26 +61,44 @@ export function buildGenesisObjects({ drafts, config, cityName, day = 0 } = {}) 
       day,
     }),
   );
-  objects.push(
-    createWorldObject(config, {
-      id: limits.baselineId,
-      type: 'settlement',
-      name: cityName || 'Город',
-      description: 'Город как таковой: его люди, быт и привычный уклад',
-      statEffect: residual,
-      day,
-      protected: true,
-    }),
-  );
+
+  const ledger = {};
+  ids.forEach((id, i) => {
+    ledger[id] = final[i] - derived[i];
+  });
 
   const stats = {};
   ids.forEach((id, i) => {
     stats[id] = final[i];
   });
-  return { objects, statScale: kScale, stats };
+  return { objects, statScale: kScale, stats, ledger };
 }
 
-export async function requestWorldObjects({ runtime, config, description, frozenConcept, log: parentLog } = {}) {
+/** Старые города хранили остаток бюджета отдельным объектом самого города. */
+export function retireCityBaseline(domain) {
+  if (!domain || !Array.isArray(domain.worldObjects)) return domain;
+  const at = domain.worldObjects.findIndex((obj) => obj?.id === 'city-baseline');
+  if (at < 0) return domain;
+  const baseline = domain.worldObjects[at];
+  const scale = Number(domain.statScale) || 1;
+  if (!domain.statLedger || typeof domain.statLedger !== 'object') domain.statLedger = {};
+  for (const id of statIds(null)) {
+    const raw = Number(baseline.statEffect?.[id]) || 0;
+    if (!raw) continue;
+    domain.statLedger[id] = (Number(domain.statLedger[id]) || 0) + scale * raw;
+  }
+  domain.worldObjects.splice(at, 1);
+  return domain;
+}
+
+export async function requestWorldObjects({
+  runtime,
+  config,
+  description,
+  frozenConcept,
+  log: parentLog,
+  domainId = null,
+} = {}) {
   const log = (parentLog || getLogger()).child({ scope: 'world_objects_genesis' });
   if (!runtime) throw new Error('нет runtime для объектов города');
   const ids = statIds(config);
@@ -183,6 +189,7 @@ export async function requestWorldObjects({ runtime, config, description, frozen
     toolChoice: { type: 'function', function: { name: 'submit_world_objects' } },
     log,
     scene: 'world_objects_genesis',
+    domainId,
     extraSystem: [
       frozenConcept?.name ? `Город «${frozenConcept.name}».` : '',
       frozenConcept ? JSON.stringify(frozenConcept) : '',

@@ -2,15 +2,47 @@
  * Дела через проход: ускорение, окно, сдвиг от чужого стата, исход на обрыв.
  */
 
-import {
-  shiftDurationBand,
-  shiftDifficultyBand,
-  rollDurationDays,
-  normalizeDurationBand,
-  DURATION_SPEC,
-} from './bands.js';
 import { remainingDockDays, confluxConfig, hoursToGameDays } from './confluxTime.js';
 import { spanBandLabel } from './gameClock.js';
+
+const DURATION_BANDS = ['INSTANT', 'DAYS', 'WEEKS', 'SEASON', 'YEAR', 'YEARS'];
+const DURATION_SPEC = {
+  INSTANT: { min: 1, max: 3 },
+  DAYS: { min: 5, max: 15 },
+  WEEKS: { min: 20, max: 60 },
+  SEASON: { min: 60, max: 150 },
+  YEAR: { min: 150, max: 360 },
+  YEARS: { min: 360, max: 1080 },
+};
+const DIFFICULTY_BANDS = ['TRIVIAL', 'PLAIN', 'HARD', 'SEVERE', 'EXTREME', 'IMPOSSIBLE'];
+
+function normalizeDurationBand(raw, fallback = 'WEEKS') {
+  const key = String(raw || '').trim().toUpperCase();
+  return DURATION_BANDS.includes(key) ? key : fallback;
+}
+
+function shiftDurationBand(band, steps) {
+  const i = DURATION_BANDS.indexOf(normalizeDurationBand(band));
+  const next = Math.max(0, Math.min(DURATION_BANDS.length - 1, i + Math.round(Number(steps) || 0)));
+  return DURATION_BANDS[next];
+}
+
+function rollDurationDays(band, rng = Math.random) {
+  const spec = DURATION_SPEC[normalizeDurationBand(band)];
+  const span = spec.max - spec.min;
+  return spec.min + Math.round(rng() * span);
+}
+
+function normalizeDifficultyBand(raw, fallback = 'PLAIN') {
+  const key = String(raw || '').trim().toUpperCase();
+  return DIFFICULTY_BANDS.includes(key) ? key : fallback;
+}
+
+function shiftDifficultyBand(band, steps) {
+  const i = DIFFICULTY_BANDS.indexOf(normalizeDifficultyBand(band));
+  const next = Math.max(0, Math.min(DIFFICULTY_BANDS.length - 1, i + Math.round(Number(steps) || 0)));
+  return DIFFICULTY_BANDS[next];
+}
 
 export function isCrossIslandDeed(process, conflux, domainId) {
   if (!process || !conflux || conflux.status !== 'docked') return false;

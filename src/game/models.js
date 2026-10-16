@@ -1,8 +1,9 @@
 import { newId } from './ids.js';
 import { seedWorldNamePool, normalizeNamePool } from './names.js';
 import { stampPersonAge } from './ages.js';
-import { normalizeCityEntities } from './cityEntities.js';
+import { normalizeCityEntities } from '../world/legacyHooks.js';
 import { normalizeWorldObjects } from '../world/objects.js';
+import { retireCityBaseline } from '../world/genesisObjects.js';
 import { normalizeFronts } from '../world/front.js';
 import { normalizeAssignments } from '../world/assignment.js';
 import { applyClockAlignedCalendar } from './tickClock.js';
@@ -100,6 +101,7 @@ export function normalizeDomain(domain, config = null) {
     domain.statLedger = { prosperity: 0, influence: 0, knowledge: 0, security: 0 };
   }
   if (!Number.isFinite(Number(domain.statScale))) domain.statScale = 1;
+  retireCityBaseline(domain);
   if (!Array.isArray(domain.fronts)) domain.fronts = [];
   domain.fronts = normalizeFronts(domain.fronts, config);
   if (!Array.isArray(domain.assignments)) domain.assignments = [];

@@ -139,7 +139,10 @@ export function matchCosmologyHeuristic(text) {
 }
 
 export function worldContractCoversCanonBans(config = {}) {
-  const blob = `${config?.canon?.world || ''}\n${config?.canon?.patron || ''}`.toLowerCase();
+  const blob = Object.values(config?.canon || {})
+    .filter((value) => typeof value === 'string')
+    .join('\n')
+    .toLowerCase();
   return {
     humans: /люд|человек/.test(blob),
     noFlight: /не летают|воздушн/.test(blob),

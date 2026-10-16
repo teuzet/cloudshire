@@ -15,11 +15,6 @@ import {
 } from './stats.js';
 import { askLoremaster } from './loremaster.js';
 import { askInformant } from './informant.js';
-import {
-  applyCrossIslandJudged,
-  remainingWindowBand,
-  isConflictOfInterestDeed,
-} from './deedConflux.js';
 import { newId } from './ids.js';
 import {
   overlayConfluxView,
@@ -30,29 +25,12 @@ import {
   plotHostId,
   findPlotByChronicleId,
 } from './confluxBoard.js';
-import {
-  DURATION_SPEC,
-  DIFFICULTY_SPEC,
-  normalizeDurationBand,
-  normalizeDifficultyBand,
-  durationBandIndex,
-  difficultyBandIndex,
-} from './bands.js';
-import { paceLabel, normalizePaceShift } from './deedMath.js';
-import {
-  applyPace,
-  deedRemainingBand,
-  deedElapsedDays,
-  normalizeDeed,
-  pauseDeedClock,
-  resumeDeedClock,
-  startDeed,
-} from './deeds.js';
-import { judgeDeed } from './deedJudge.js';
-import { scheduleDeedJob, cancelDeedJobs } from './worldLoop.js';
 import { assignToFront } from '../world/assignment.js';
+import { closeAssignment } from '../world/assignment.js';
 import { recomputeRate } from '../world/front.js';
 import { scheduleFrontJob } from '../world/frontJobs.js';
+import { openPlayerMutation } from '../world/mutation.js';
+import { isStoryPlot } from '../world/legacyHooks.js';
 import {
   cityRules,
   isRuleDeed,
@@ -82,19 +60,6 @@ import {
   pausedProcesses,
 } from './processes.js';
 import {
-  plotsForPriest,
-  warmPlotlines,
-  plotConfig,
-  findPlotline,
-  findVisiblePlot,
-  clipPlotText,
-  PLOT_TITLE_MAX,
-  PLOT_SUMMARY_MAX,
-  isStakedStory,
-  isErrandPlot,
-  isConfluxPlot,
-} from './plotlines.js';
-import {
   findOfficer,
   listOfficers,
   officeById,
@@ -108,16 +73,19 @@ import {
   officerBusyAgentMessage,
   ensureOfficersFromLore,
 } from './officers.js';
-import {
-  ensureErrandForProcess,
-  linkProcessToPlotline,
-  rehomeUnrelatedProcess,
-  detachProcessFromPlots,
-} from './plotEngine.js';
-import { judgeProcessAlignment, engagementOf } from './plotAlign.js';
 import { stableCityProse, formatCityModifiersForPrompt } from './cityContext.js';
 import { writeRulerMemory, forgetRulerMemory, formatRulerVoiceForPrompt } from './rulerMemory.js';
 import { toolFail } from '../agents/toolResult.js';
+
+function findLiveAssignment(domain, processId) {
+  const raw = String(processId || '').trim().toLowerCase();
+  const list = (domain?.assignments || []).filter((item) => item && item.status === 'active');
+  return (
+    list.find((item) => item.id === processId) ||
+    (raw ? list.find((item) => String(item.text || item.summary || '').toLowerCase().includes(raw)) : null) ||
+    null
+  );
+}
 
 /** Полоса срока словами — единственное, что жрец знает о времени дела. */
 function bandWord(band) {
@@ -225,23 +193,16 @@ function deedsTiedToPlot(actions, plot) {
   );
 }
 
-function deedPhrase(action, day) {
-  const remaining = DURATION_SPEC[deedRemainingBand(action, day)].label;
-  const pace = paceLabel(action.paceShift);
-  const hard = DIFFICULTY_SPEC[normalizeDifficultyBand(action.difficulty)].label;
-  const moved = processIsFresh(action, day) ? 'ещё не сдвинулось' : 'уже идёт';
-  const hurry =
-    normalizePaceShift(action.paceShift) === 0
-      ? 'темп ещё можно сдвинуть один раз'
-      : 'темп уже задан, второй раз не сдвинуть';
-  const blessed = action.blessed ? ' Покровитель это дело благословил.' : '';
-  const started =
-    action.initiative === 'ruler'
-      ? ' Ты завёл это сам, пока покровитель молчал.'
-      : action.initiative === 'officer'
-        ? ' Сановник начал это сам, пока покровитель молчал.'
-        : '';
-  return `«${action.summary}» (id ${action.id}): ждать ещё ${remaining}, трудность ${hard}, темп ${pace}, ${moved}, ${hurry}.${blessed}${started}`;
+function plotsForPriest(plots = [], { partner = null } = {}) {
+  const own = (Array.isArray(plots) ? plots : []).filter((plot) => plot && isStoryPlot(plot));
+  if (!partner) return own;
+  const seen = new Set(own.map((plot) => plot.id).filter(Boolean));
+  const extra = (partner.plotlines || []).filter((plot) => plot && isStoryPlot(plot) && plot.id && !seen.has(plot.id));
+  return [...own, ...extra];
+}
+
+function deedPhrase(action) {
+  return `«${action.summary}»`;
 }
 
 function officerDeedShownOnStory(deedId, plots) {
@@ -358,9 +319,9 @@ function officerParagraph(officer, day) {
     .join(' ');
 }
 
-function pausedParagraph(action, day) {
+function pausedParagraph(action) {
   const where = action.plotlineId ? `, история ${action.plotlineId}` : '';
-  return `«${action.summary}» (id ${action.id}${where}), осталось ${DURATION_SPEC[deedRemainingBand(action, day)].label}.`;
+  return `«${action.summary}» (id ${action.id}${where}).`;
 }
 
 const PRIEST_CHRONICLE_LIMIT = 10;
@@ -888,11 +849,10 @@ export function buildRulerTools(domain, storage, character, ctx) {
             reason: 'duplicate',
             existingProcessId: dup.id,
             existingSummary: dup.summary,
-            remaining: bandWord(deedRemainingBand(dup, day)),
             agentMessage:
               'ОТКАЗ: похожее дело уже идёт — «' +
               dup.summary +
-              `» (id ${dup.id}, ждать ещё ${bandWord(deedRemainingBand(dup, day))}). ` +
+              `» (id ${dup.id}). ` +
               'Это НЕ нехватка слотов и НЕ общая занятость города. ' +
               'Покровитель, скорее всего, уточняет его: вызови update_process с этим id, ' +
               'допиши новый вопрос (addDetail) и при нужде pace. commitment=process. ' +
@@ -950,6 +910,44 @@ export function buildRulerTools(domain, storage, character, ctx) {
               'Поручение принято. Срок и шанс не называй: сановник работает, пока фронт не дойдёт до ставки или пока поручение не снимут.',
           };
         }
+        const opened = await openPlayerMutation({
+          config: ctx.config,
+          runtime: ctx.runtime,
+          domain,
+          intent: [summary, detail, goal].filter(Boolean).join('\n'),
+          day,
+          log: ctx.log,
+        });
+        if (opened?.status === 'impossible') {
+          return toolFail('impossible', opened.reason || 'Этого городу не сделать.');
+        }
+        if (opened?.status === 'locked') {
+          return toolFail('locked', opened.missing || 'Пока не хватает условия.');
+        }
+        if (opened?.front) {
+          const again = await assignToFront({
+            runtime: ctx.runtime,
+            config: ctx.config,
+            domain,
+            officer,
+            text: [summary, detail].filter(Boolean).join('\n'),
+            day,
+            log: ctx.log,
+          });
+          if (again?.front) {
+            recomputeRate(ctx.config, again.front, domain, day);
+            scheduleFrontJob(world, domain, again.front);
+          }
+          await save();
+          return {
+            ok: true,
+            frontId: opened.front.id,
+            assignmentId: again?.assignment?.id || null,
+            status: opened.status,
+            agentMessage: 'Воля стала делом города. Срок и шанс не называй.',
+          };
+        }
+        return toolFail('no_front', 'Воля не легла в дело города. Не обещай работу.');
         const mismatch = isOffPortfolio(officer, linkedStat);
         if (mismatch && named && !insistOffPortfolio && !randomOfficer) {
           return toolFail(
@@ -1260,6 +1258,30 @@ export function buildRulerTools(domain, storage, character, ctx) {
         goal,
         plotId,
       }) => {
+        const assignment = findLiveAssignment(domain, processId);
+        if (!assignment) {
+          return {
+            ok: false,
+            error: 'process not found',
+            agentMessage: 'Такого поручения нет. Не обещай, что работа идёт.',
+          };
+        }
+        const extra = [summary, detail, addDetail, goal, characterNote].filter(Boolean).join(' ');
+        if (extra) {
+          assignment.text = `${assignment.text} ${extra}`.trim();
+          assignment.summary = assignment.text;
+        }
+        const front = (domain.fronts || []).find((item) => item.id === assignment.frontId);
+        if (front) {
+          recomputeRate(ctx.config, front, domain, day);
+          scheduleFrontJob(world, domain, front);
+        }
+        await save();
+        return {
+          ok: true,
+          assignmentId: assignment.id,
+          hint: 'Поручение дополнено. Срок не называй.',
+        };
         const { process: action, candidates } = resolveActiveProcess(domain, processId, ctx.config);
         if (!action) {
           return {
@@ -1405,6 +1427,29 @@ export function buildRulerTools(domain, storage, character, ctx) {
         },
       },
       handler: async ({ processId, reason }) => {
+        const assignment = findLiveAssignment(domain, processId);
+        if (!assignment) {
+          return {
+            ok: false,
+            error: 'process not found',
+            agentMessage: 'Такого поручения нет. Не говори, что приказа не было, если сам его не искал.',
+          };
+        }
+        closeAssignment(domain, assignment.id, day, 'cancelled');
+        const front = (domain.fronts || []).find((item) => item.id === assignment.frontId);
+        if (front && front.status === 'active') {
+          recomputeRate(ctx.config, front, domain, day);
+          scheduleFrontJob(world, domain, front);
+        }
+        await save();
+        return {
+          ok: true,
+          revokedId: assignment.id,
+          summary: assignment.summary,
+          hint: reason
+            ? 'Поручение снято. В речи назови причину своими словами, без id.'
+            : 'Поручение снято. В речи без id.',
+        };
         const { process: action, candidates } = resolveActiveProcess(domain, processId, ctx.config);
         if (!action) {
           return {
@@ -1448,6 +1493,10 @@ export function buildRulerTools(domain, storage, character, ctx) {
         },
       },
       handler: async ({ processId }) => {
+        return toolFail(
+          'no_pause',
+          'Поручение не ставится на паузу. Если работу надо остановить — вызови revoke_process.',
+        );
         const { process: action, candidates } = resolveActiveProcess(domain, processId, ctx.config);
         if (!action) {
           return {
@@ -1481,6 +1530,7 @@ export function buildRulerTools(domain, storage, character, ctx) {
         },
       },
       handler: async ({ processId }) => {
+        return toolFail('no_pause', 'Паузы у поручений нет.');
         const paused = pausedProcesses(domain, ctx.config);
         const raw = String(processId || '').trim().toLowerCase();
         const action =

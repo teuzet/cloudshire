@@ -7,7 +7,7 @@ import { createLoreFact, formatCastForPrompt, chronicleEntries } from './models.
 import { findActiveConfluxForDomain } from './conflux.js';
 import { cityRules } from './cityRules.js';
 import { parseCityBrief, normalizeCanonicalUnknowns } from './cityContext.js';
-import { isStoryPlot } from './plotlines.js';
+import { isStoryPlot } from '../world/legacyHooks.js';
 import { formatPairArchive } from './confluxCanon.js';
 import { getLogger, truncate } from '../log.js';
 import { toolFail } from '../agents/toolResult.js';

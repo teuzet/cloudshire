@@ -19,12 +19,49 @@
 
 import { getLogger, truncate } from '../log.js';
 import { chronicleEntries } from './models.js';
-import { FINISH_LABELS } from './rolls.js';
 import { findOfficer, officerGender } from './officers.js';
-import { livesLeft, firedThreatScale } from './threats.js';
-import { formatFreeformGravityForPrompt } from './freeform.js';
 import { formatStoryFactsBlock, storyLinkedFacts } from './memory.js';
 import { toolFail } from '../agents/toolResult.js';
+
+const FINISH_LABELS = {
+  fail: '[ПРОВАЛ]: цель не достигнута, негативные последствия',
+  ok: '[УСПЕХ]: цель достигнут, нейтральные или слабые негативные побочные эффекты',
+  crit: '[КРИТИЧЕСКИЙ УСПЕХ]: цель достигнута триумфально',
+  blessed: 'Благословение покровителя сдвинуло исход на ступень вверх (провал→успех, успех→крит).',
+};
+
+function livesLeft(plot) {
+  const left = Number(plot?.livesLeft);
+  return Number.isFinite(left) ? left : null;
+}
+
+const SCALE_LADDER = ['SITUATION', 'EPISODE', 'CRISIS', 'RUPTURE'];
+
+function firedThreatScale(plot, threat) {
+  if (threat?.final) return String(plot?.gravity || 'SITUATION').trim().toUpperCase();
+  const stage = Math.max(0, Math.round(Number(threat?.stage) || 0));
+  return SCALE_LADDER[Math.min(stage, SCALE_LADDER.length - 1)];
+}
+
+function formatFreeformGravityForPrompt(gravity, config) {
+  const id = String(gravity || '').trim().toUpperCase();
+  const catalog = config?.tick?.plot?.freeform?.gravity || {};
+  const levels = catalog.levels && typeof catalog.levels === 'object' ? catalog.levels : catalog;
+  const entry = levels[id];
+  if (!entry || typeof entry !== 'object') return `GRAVITY: ${id}`;
+  const examples = Array.isArray(entry.examples) ? entry.examples : [];
+  const lead = String(catalog.examplesLead || 'Примеры масштаба — якоря, не сюжеты для копирования:').trim();
+  const lines = examples.map((item) => {
+    if (typeof item === 'string') return `- ${item}`;
+    if (item && typeof item === 'object') {
+      return `- ${Object.entries(item).map(([key, value]) => `${key}: ${value}`).join(' ')}`;
+    }
+    return '';
+  }).filter(Boolean);
+  return [`GRAVITY: ${id}`, String(entry.about || '').trim(), lines.length ? lead : null, ...lines]
+    .filter(Boolean)
+    .join('\n');
+}
 
 export const CHRONICLE_ENTRY_MAX = 400;
 /** Финальную запись пишет отдельный агент, и ей нужно место на всю развязку. */

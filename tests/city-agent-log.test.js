@@ -33,7 +33,7 @@ function packedPrompt() {
   };
 }
 
-test('живой город логируется, онбординг и генезис — нет', () => {
+test('живой город логируется вместе с генезисом, прогон без города — нет', () => {
   const config = { logging: { file: true, dir: '/tmp', cityAgent: true } };
   assert.equal(
     shouldLogLiveCityAgent({ config, domainId: 'domain_1', agentId: 'chronicler', scene: 'chronicle_deed' }),
@@ -81,15 +81,19 @@ test('живой город логируется, онбординг и гене
   );
   assert.equal(
     shouldLogLiveCityAgent({ config, domainId: 'domain_1', agentId: 'onboarding', scene: 'onboarding' }),
-    false,
+    true,
   );
   assert.equal(
     shouldLogLiveCityAgent({ config, domainId: 'domain_1', agentId: 'genesis', scene: 'genesis_core' }),
-    false,
+    true,
   );
   assert.equal(
     shouldLogLiveCityAgent({ config, domainId: 'domain_1', agentId: 'cityBrief', scene: 'city_brief' }),
-    false,
+    true,
+  );
+  assert.equal(
+    shouldLogLiveCityAgent({ config, domainId: 'domain_1', agentId: 'worldObjectsGenesis', scene: 'world_objects_genesis' }),
+    true,
   );
   assert.equal(
     shouldLogLiveCityAgent({ config, domainId: 'domain_1', agentId: 'cityGenesisRewrite', scene: 'city_genesis_rewrite' }),
@@ -186,13 +190,13 @@ test('пара городов даёт два id, запись идёт в об�
     const b = await readFile(cityAgentLogPath(config, { domainId: 'domain_b', worldId: 'world_test' }), 'utf8');
     assert.match(a, /stat_judge_pair/);
     assert.match(b, /submit_stats/);
-    assert.match(a, /# Лог агентов живого города/);
+    assert.match(a, /# Лог агентов города/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test('runtime пишет лог живого города и молчит на генезисе', async () => {
+test('runtime пишет в лог и игру, и генезис', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'cloudshire-city-log-rt-'));
   const config = {
     logging: { file: true, dir, cityAgent: true },
@@ -252,10 +256,11 @@ test('runtime пишет лог живого города и молчит на �
       agentId: 'genesis',
       domainId: 'domain_live',
       scene: 'genesis_core',
-      userMessages: [{ role: 'user', content: 'Собери ядро города. Этого в логе быть не должно.' }],
+      userMessages: [{ role: 'user', content: 'Собери ядро города. Эта строка должна попасть в лог.' }],
     });
     const after = await readFile(filePath, 'utf8');
-    assert.doesNotMatch(after, /этого в логе быть не должно/i);
+    assert.match(after, /Эта строка должна попасть в лог/);
+    assert.match(after, /genesis_core/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

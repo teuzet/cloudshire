@@ -26,6 +26,8 @@ test('явный reasoningEffort агента перекрывает дефол�
 
 test('литературные судьи без reasoningEffort', () => {
   const config = loadConfig();
-  assert.equal(config.agents.freeformEndingsJudge.model, 'gpt-5.6-luna');
-  assert.equal(config.agents.freeformBeatJudge.model, 'gpt-5.6-luna');
+  assert.equal(config.agents.beatResolver.model, 'gpt-5.6-luna');
+  assert.equal(config.agents.frontChronicle.model, 'gpt-5.6-luna');
+  assert.equal(config.agents.beatResolver.reasoningEffort, undefined);
+  assert.equal(config.agents.frontChronicle.reasoningEffort, undefined);
 });

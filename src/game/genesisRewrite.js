@@ -12,7 +12,7 @@ import {
   formatCityModifiersForPrompt,
   normalizeCityModifiers,
 } from './cityContext.js';
-import { isStakedStory, parseFreeformGravity } from './plotlines.js';
+import { isStakedStory } from '../world/legacyHooks.js';
 
 const BIG_GRAVITY = new Set(['CRISIS', 'RUPTURE']);
 const FIND_MIN = 16;
@@ -39,7 +39,7 @@ export function monthClosedBigStories(domain, tick) {
   return (domain?.closedPlotlines || []).filter((p) => {
     if (Number(p?.closedTick) !== t) return false;
     if (!isStakedStory(p)) return false;
-    return BIG_GRAVITY.has(parseFreeformGravity(p.gravity, ''));
+    return BIG_GRAVITY.has(String(p.gravity || '').trim().toUpperCase());
   });
 }
 
@@ -55,7 +55,7 @@ export function closedBigStoriesFromAdds(domain, chronicleAdds = []) {
   return (domain?.closedPlotlines || []).filter((p) => {
     if (!ids.has(String(p?.id))) return false;
     if (!isStakedStory(p)) return false;
-    return BIG_GRAVITY.has(parseFreeformGravity(p.gravity, ''));
+    return BIG_GRAVITY.has(String(p.gravity || '').trim().toUpperCase());
   });
 }
 

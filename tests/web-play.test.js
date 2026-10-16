@@ -357,6 +357,10 @@ test('инспектор показывает дела в полосах и дн
     assert.equal(deed.plotEngagement, 'DIRECT');
     assert.equal(deed.premiseText, 'под срубом чужая кладка, не городская');
     assert.equal(deed.reachesAnswer, true);
+    assert.ok(Array.isArray(data.domain.objects));
+    assert.ok(Array.isArray(data.domain.assignments));
+    assert.ok(Array.isArray(data.domain.fronts));
+    assert.ok(Array.isArray(data.domain.officers));
   });
 });
 

@@ -14,9 +14,7 @@ import {
   inferRulerGender,
 } from './models.js';
 import { formatPlayerBrief, substituteCityName } from './onboarding.js';
-import { enqueueOpeningSeeds } from './seedSchedule.js';
-import { scheduleJob, worldDay, commitWorldChanges } from './scheduler.js';
-import { ensureCityEntities } from './cityEntities.js';
+import { commitWorldChanges } from './scheduler.js';
 import {
   clipCityText,
   CITY_BRIEF_MAX,
@@ -162,6 +160,7 @@ async function generateCore({
   frozenConcept = null,
   onProgress,
   log: parentLog,
+  domainId = null,
 }) {
   const log = (parentLog || getLogger()).child({ step: 'core' });
   const loreMin = Math.min(8, config.genesis.openingLoreCount?.min || 12);
@@ -360,6 +359,7 @@ async function generateCore({
       toolChoice: { type: 'function', function: { name: 'submit_core' } },
       log,
       scene: 'genesis_core',
+      domainId,
     });
 
     if (!draft.submitted) {
@@ -410,6 +410,7 @@ async function generateAspectBatch({
   already,
   onProgress,
   log: parentLog,
+  domainId = null,
 }) {
   const log = (parentLog || getLogger()).child({
     step: 'aspects',
@@ -504,6 +505,7 @@ async function generateAspectBatch({
     toolChoice: { type: 'function', function: { name: 'submit_aspects' } },
     log,
     scene: 'genesis_aspects',
+    domainId,
   });
 
   if (!draft.texts) {
@@ -624,11 +626,13 @@ export async function generateDomain({
   playerDirectives = null,
   playerBrief = null,
   log: parentLog,
+  domainId = null,
 }) {
   if (!frozenConcept || frozenConcept.status !== 'READY') {
     throw new Error('generateDomain requires frozenConcept with status READY');
   }
   const log = (parentLog || getLogger()).child({ ownerUserId: String(ownerUserId) });
+  const cityId = domainId || newId('domain');
   const world = await storage.getWorld();
   const axesState = normalizeAxesState(axes || frozenConcept.axes || {});
   const tags = axesSnapshotTags(config, axesState);
@@ -656,6 +660,7 @@ export async function generateDomain({
     frozenConcept,
     onProgress,
     log,
+    domainId: cityId,
   });
   const loreFromConcept = openingLoreFromConcept(frozenConcept);
   if (loreFromConcept.length) core.openingLore = loreFromConcept;
@@ -679,6 +684,7 @@ export async function generateDomain({
       already: aspects,
       onProgress,
       log,
+      domainId: cityId,
     });
     Object.assign(aspects, part);
   }
@@ -697,11 +703,17 @@ export async function generateDomain({
     : core.domainName;
 
   await onProgress?.('объекты города');
-  const drafts = await requestWorldObjects({ runtime, config, description, frozenConcept, log });
+  const drafts = await requestWorldObjects({
+    runtime,
+    config,
+    description,
+    frozenConcept,
+    log,
+    domainId: cityId,
+  });
   const built = buildGenesisObjects({
     drafts,
     config,
-    cityName: domainName,
     day: 0,
   });
   const stats = Object.fromEntries((config.stats || []).map((def) => [def.id, 0]));
@@ -740,7 +752,7 @@ export async function generateDomain({
   );
 
   const domain = createDomainRecord({
-    id: newId('domain'),
+    id: cityId,
     worldId: world.id,
     ownerUserId: String(ownerUserId),
     channel: channel || null,
@@ -761,6 +773,7 @@ export async function generateDomain({
   stampGenesisConfluxBan(domain, { config });
   domain.worldObjects = built.objects;
   domain.statScale = built.statScale;
+  domain.statLedger = built.ledger;
   recomputeStats(domain, config);
 
   if (forcedPatronName) {
@@ -798,20 +811,7 @@ export async function generateDomain({
       : defaultGreeting(domain.name, forcedPatronName);
 
   await onProgress?.(`остров «${domain.name}» собран`);
-  await onProgress?.('якоря города');
-  await ensureCityEntities({ domain, config, runtime, log });
   await storage.saveDomain(domain);
-  // Стартовые нити не сажаются здесь: они появятся сами через несколько минут
-  // обычным посевом, и потому будут рассказаны, а не окажутся в городе молча.
-  const openingDay = worldDay(world, { config });
-  for (const request of enqueueOpeningSeeds(domain, { day: openingDay, config })) {
-    scheduleJob(world, {
-      domainId: domain.id,
-      kind: 'seed_appear',
-      dueDay: request.appearDay,
-      payload: { requestId: request.id, source: request.source },
-    });
-  }
   await storage.updateWorld((fresh) => commitWorldChanges(fresh, world, { fields: ['namePool'] }));
   await storage.saveDomain(domain);
   log.info('genesis.saved', {

@@ -4,11 +4,22 @@ import { readFileSync } from 'node:fs';
 import { triggerForEvent, deliverEvent, stepDomain, runDayLoop } from '../src/game/dayLoop.js';
 import { wakeDelayMs, startDayScheduler, MIN_WAKE_MS, MAX_WAKE_MS } from '../src/scheduler/days.js';
 import { scheduleJob, beginRulerTurn, holdClock, skipStoredWorldDays, worldDay, RULER_TURN_FAILSAFE_MS } from '../src/game/scheduler.js';
-import { scheduleDeedJob } from '../src/game/worldLoop.js';
-import { startDeed } from '../src/game/deeds.js';
+import { addPriestOrder } from '../src/game/priestOrders.js';
 import { notifySettings, markPushed } from '../src/game/notify.js';
 import { realMsPerGameDay, skipGameDays } from '../src/game/gameClock.js';
-import { addPriestOrder } from '../src/game/priestOrders.js';
+
+function startDeed(process, { day = 0, judged = {} } = {}) {
+  return {
+    ...process,
+    ...judged,
+    dueDay: day + (Number(judged.objectiveDays) || 1),
+    status: process.status || 'active',
+  };
+}
+
+function scheduleDeedJob() {
+  return null;
+}
 import { createConfluxRecord, schedulePairJobs } from '../src/game/conflux.js';
 
 const config = {
@@ -296,10 +307,9 @@ test('шаг разбирает дошедшее дело и ставит ден
     rng: () => 0.5,
     log: silentLog,
   });
-  assert.equal(out.events.length, 1);
-  assert.equal(out.events[0].occasion, 'дело');
+  assert.equal(out.events.length, 0);
   assert.equal(domain.state.lastDay, 130);
-  assert.notEqual(process.status, 'active', 'дело закрыто исходом');
+  assert.equal(process.status, 'active', 'срок дела больше не закрывает его сам');
 });
 
 test('сановник ходит только в тишину и не чаще своего остывания', async () => {
@@ -341,7 +351,7 @@ test('наказ жреца прилипает к событию шага', asyn
     rng: () => 0.5,
     log: silentLog,
   });
-  assert.equal(out.events[0].reportSubject, 'как идут дела в порту');
+  assert.equal(out.events.length, 0);
 });
 
 // ──────────────────────────── проход мира ────────────────────────────
@@ -371,8 +381,8 @@ test('проход мира считает день от часов и разб�
   });
   assert.equal(res.day, 10);
   assert.equal(world.dayIndex, 10);
-  assert.equal(res.results[0].events, 1);
-  assert.equal(res.results[0].pushed, 1);
+  assert.equal(res.results[0].events, 0);
+  assert.equal(res.results[0].pushed, 0);
   assert.ok(storage.saved.includes('d1'));
 });
 

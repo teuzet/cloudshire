@@ -140,6 +140,7 @@ async function runCityConcept({ app, draft, userId, saveDraft, text }) {
   const result = await requestCityConcept({
     config: app.config,
     runtime: app.runtime,
+    domainId: draft.pendingDomainId || null,
     axes: draft.axes,
     directives: draft.playerDirectives,
     playerBrief: draft.playerBrief,
@@ -802,6 +803,7 @@ export function buildOnboardingTools({
           frozenConcept: draft.concept,
           axes: draft.axes,
           playerDirectives: draft.playerDirectives,
+          domainId: draft.pendingDomainId || null,
           playerBrief: { ...(draft.playerBrief || {}) },
         });
         startFlag.started = true;

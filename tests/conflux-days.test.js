@@ -8,7 +8,7 @@ import { hourInTimeZone, noteRulerActivity, emptyActivity } from '../src/game/ac
 import { inQuietHours, setQuietHours, pushVerdict } from '../src/game/notify.js';
 import { applyCrossIslandJudged, secretRevealTexts, isCrossIslandDeed, deedMentionsPartner, isConflictOfInterestDeed } from '../src/game/deedConflux.js';
 import { takeDomainBoardIntoConflux, overlayConfluxView, stripConfluxView } from '../src/game/confluxBoard.js';
-import { createPlotline } from '../src/game/plotlines.js';
+import { createPlotline } from '../src/world/legacyHooks.js';
 import { confluxEvent, writePairChronicle } from '../src/game/confluxCanon.js';
 import { crystallizeContainer } from '../src/game/confluxJobs.js';
 import { clampPassageState, passageCanShut } from '../src/game/passage.js';

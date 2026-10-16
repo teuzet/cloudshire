@@ -16,7 +16,6 @@ import {
   seedStartingMana,
 } from '../src/game/mana.js';
 import { DAYS_PER_YEAR } from '../src/game/gameClock.js';
-import { deedDurationBand } from '../src/game/deeds.js';
 
 function domain(faith = 50, mana = 0) {
   return { id: 'd1', state: { faith, mana } };
@@ -141,14 +140,10 @@ test('цена благословения выводится из дней, ес
   assert.equal(blessManaCost({}), MANA_BLESS_BY_BAND.WEEKS, 'разумный дефолт');
 });
 
-test('цена и восстановленная полоса согласны между собой у старой записи', () => {
-  for (const days of [2, 10, 40, 90, 200, 900]) {
-    const deed = { objectiveDays: days };
-    assert.equal(
-      blessManaCost(deed),
-      MANA_BLESS_BY_BAND[deedDurationBand(deed)],
-      `${days} дн.: цена и подпись «работы на …» должны сходиться`,
-    );
+test('цена благословения растёт вместе со сроком в днях', () => {
+  const costs = [2, 10, 40, 90, 200, 900].map((days) => blessManaCost({ objectiveDays: days }));
+  for (let i = 1; i < costs.length; i += 1) {
+    assert.ok(costs[i] >= costs[i - 1]);
   }
 });
 

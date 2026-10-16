@@ -22,7 +22,7 @@
         </span>
         <button type="button" id="btnSeed" class="ghost hidden" title="Посеять историю: описание, хроника или пустота">посев</button>
         <button type="button" id="btnCity" class="ghost" title="Справочник города — то же, что мини-аппка в Telegram">город</button>
-        <button type="button" id="btnInspect" class="ghost" title="Все данные города, включая скрытые">данные</button>
+        <button type="button" id="btnInspect" class="ghost" title="Город, фронты, объекты, дела и хроника">доска</button>
         <button type="button" id="btnSlots" class="ghost" title="Слоты и вайп">слоты</button>
       </div>
     </header>
@@ -84,15 +84,13 @@
 
   <aside id="inspector" class="inspector hidden">
     <header class="inspector-top">
-      <strong>Данные города</strong>
+      <strong>Доска</strong>
       <div class="row tabs" id="inspectTabs">
         <button type="button" class="ghost tab" data-tab="city">город</button>
-        <button type="button" class="ghost tab" data-tab="conflux">сопряжение</button>
-        <button type="button" class="ghost tab" data-tab="plots">нити</button>
-        <button type="button" class="ghost tab" data-tab="processes">дела</button>
+        <button type="button" class="ghost tab" data-tab="fronts">фронты</button>
+        <button type="button" class="ghost tab" data-tab="objects">объекты</button>
+        <button type="button" class="ghost tab" data-tab="deeds">дела</button>
         <button type="button" class="ghost tab" data-tab="chronicle">хроника</button>
-        <button type="button" class="ghost tab" data-tab="facts">факты</button>
-        <button type="button" class="ghost tab" data-tab="cast">люди</button>
         <button type="button" class="ghost tab" data-tab="raw">json</button>
       </div>
       <button type="button" id="btnInspectClose" class="ghost" title="Закрыть">✕</button>
