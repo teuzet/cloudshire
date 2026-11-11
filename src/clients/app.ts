@@ -26,7 +26,7 @@ import type { Storage } from '../ports/storage.js';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
-function readYaml(file: string): unknown {
+export function readYaml(file: string): unknown {
   return yaml.load(fs.readFileSync(path.join(ROOT, file), 'utf8'));
 }
 
@@ -45,7 +45,7 @@ export const consoleLog: FlowLog = {
   },
 };
 
-function buildLlm(env: NodeJS.ProcessEnv): Llm {
+export function buildLlm(env: NodeJS.ProcessEnv): Llm {
   const providers: Record<string, Llm> = {};
   if (env.OPENAI_API_KEY) providers.openai = new OpenAiLlm({ apiKey: env.OPENAI_API_KEY });
   if (env.ANTHROPIC_API_KEY) providers.anthropic = new AnthropicLlm({ apiKey: env.ANTHROPIC_API_KEY });

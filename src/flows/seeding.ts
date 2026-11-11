@@ -28,7 +28,8 @@ export function storyCount(city: City): number {
   return activeFronts(city).filter((f) => f.origin === 'story').length;
 }
 
-async function plantOne(deps: FlowDeps, city: City, day: number): Promise<OutboundMessage | null> {
+/** Посадить одну историю: заготовку из deps.scenarios, которая тут ещё не играла, или по зерну. */
+export async function plantStory(deps: FlowDeps, city: City, day: number): Promise<OutboundMessage | null> {
   const template = shuffled(deps.scenarios, deps.random.rng).find((s) => !city.scenariosUsed.includes(s.id)) ?? null;
   const names = await takeNames(deps, deps.rules.seeding.namesPerCall);
   const scenario: Scenario | null = await tryAgent(
@@ -66,7 +67,7 @@ export async function seedStories(deps: FlowDeps, city: City, day: number): Prom
   const out: OutboundMessage[] = [];
   const need = Math.max(0, deps.rules.seeding.activeStories - storyCount(city));
   for (let i = 0; i < need; i++) {
-    const msg = await plantOne(deps, city, day);
+    const msg = await plantStory(deps, city, day);
     if (msg) out.push(msg);
   }
   scheduleJob(city, { id: newId(deps, 'job'), kind: 'seed', dueDay: day + deps.rules.seeding.checkEveryDays });
