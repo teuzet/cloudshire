@@ -61,6 +61,7 @@ export function buildMutationFront(
     alignment: args.alignment,
     refs: args.draft.kind === 'create' ? [] : [args.draft.target],
     pendingConsequences: args.consequences,
+    origin: 'mutation',
     day: args.day,
   });
 }
@@ -77,6 +78,7 @@ export function releaseNextConsequence(rules: Rules, city: City, parent: Front, 
     driftBand: next.drift,
     beatCount: 0,
     refs: [parent.id],
+    origin: 'consequence',
     day: args.day,
   });
   city.fronts.push(side);

@@ -11,7 +11,7 @@
 - `src/ports/` — интерфейсы Llm, Storage, Clock, Random, Notifier.
 - `src/adapters/` — реализации портов. Только здесь импортируются SDK, Mongo и Telegram. LLM: openai, anthropic, router, fake (тесты), cassette.
 - `src/agents/<name>/` — LLM-агенты: prompt.md, schema.ts, run.ts, README.md. Список и правила — src/agents/README.md.
-- `src/flows/` — сценарии, склеивающие core и агентов (шаг 3, ещё нет).
+- `src/flows/` — игровые потоки: онбординг, генезис, ход жреца, день города, посев. Список — src/flows/README.md.
 - `src/clients/` — Telegram, mini-app, dev-клиент (шаг 4, ещё нет).
 - `config/agents.yaml` — модели агентов (`провайдер:модель`).
 - `config/game.yaml` — все игровые числа. Проверяется `parseRules`, отсутствие ключа — ошибка.

@@ -5,7 +5,7 @@
  */
 
 import type { DriftBand, Rules } from '../rules.js';
-import type { City, Clue, ConsequenceDraft, Front, FrontEvent, Stake } from '../city.js';
+import type { City, Clue, ConsequenceDraft, Front, FrontEvent, FrontOrigin, Stake } from '../city.js';
 import { assignmentRate, activeAssignmentsForFront } from './assignments.js';
 import { beatThresholds, driftPerDay } from './scales.js';
 
@@ -25,12 +25,14 @@ export function createFront(
     alignment?: string;
     refs?: string[];
     pendingConsequences?: ConsequenceDraft[];
+    origin?: FrontOrigin;
     day: number;
   },
 ): Front {
   const day = Math.max(0, Math.round(args.day));
   return {
     id: args.id,
+    origin: args.origin ?? 'story',
     description: args.description.trim(),
     stake: args.stake,
     effort: Math.max(0, args.effort),

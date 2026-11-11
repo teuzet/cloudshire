@@ -84,6 +84,7 @@ export const rulesSchema = z.object({
     name: z.string(),
     about: z.string(),
     max: z.number().positive(),
+    start: z.number().nonnegative(),
     turnCost: z.number().nonnegative(),
     turnCostWithAction: z.number().nonnegative(),
   }),
@@ -119,6 +120,13 @@ export const rulesSchema = z.object({
     }),
     cascade: z.object({ maxSteps: z.number().int().positive() }),
   }),
+  seeding: z.object({
+    activeStories: z.number().int().nonnegative(),
+    checkEveryDays: z.number().int().positive(),
+    firstStoryDay: z.number().int().nonnegative(),
+    namesPerCall: z.number().int().nonnegative(),
+  }),
+  priest: z.object({ dialogDepth: z.number().int().positive() }),
 });
 
 export type Rules = z.infer<typeof rulesSchema>;

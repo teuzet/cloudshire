@@ -37,7 +37,8 @@ export function stakeNeedsVersion(front: Front): ModifyStake['modify'] | null {
   return null;
 }
 
-function finishFront(city: City, front: Front, day: number, status: 'resolved' | 'invalid'): void {
+/** Закрыть фронт и снять с него все поручения. */
+export function finishFront(city: City, front: Front, day: number, status: 'resolved' | 'invalid'): void {
   front.status = status;
   front.resolvedDay = Math.max(0, Math.round(day));
   for (const a of activeAssignmentsForFront(city, front.id)) closeAssignment(city, a.id, day, 'done');

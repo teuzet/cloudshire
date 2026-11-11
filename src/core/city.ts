@@ -115,8 +115,12 @@ export interface ConsequenceDraft {
   stake: Stake | null;
 }
 
+/** Откуда фронт: посаженная история, воля игрока или её последствие. */
+export type FrontOrigin = 'story' | 'mutation' | 'consequence';
+
 export interface Front {
   id: string;
+  origin: FrontOrigin;
   description: string;
   stake: Stake | null;
   /** Цена полного прохождения. */
@@ -266,4 +270,50 @@ export interface City {
   scenariosUsed: string[];
   createdDay: number;
   revision: number;
+}
+
+// ───────────────────────────── конструктор ─────────────────────────────
+
+/** Новый город из готовых частей генезиса. Статы уже собраны ядром (genesisStats). */
+export function newCity(args: {
+  id: string;
+  worldId: string;
+  ownerId: string;
+  name: string;
+  patronName: string;
+  brief: string;
+  priest: Priest;
+  officers: Officer[];
+  objects: WorldObject[];
+  stats: StatMap;
+  statScale: number;
+  statLedger: StatMap;
+  manaStart: number;
+  day: number;
+}): City {
+  const day = Math.max(0, Math.round(args.day));
+  return {
+    id: args.id,
+    worldId: args.worldId,
+    ownerId: args.ownerId,
+    name: args.name,
+    patronName: args.patronName,
+    brief: args.brief,
+    priest: args.priest,
+    officers: args.officers,
+    stats: { ...args.stats },
+    statScale: args.statScale,
+    statLedger: { ...args.statLedger },
+    mana: { value: args.manaStart, day },
+    objects: args.objects,
+    fronts: [],
+    assignments: [],
+    chronicle: [],
+    dialog: [],
+    notes: [],
+    jobs: [],
+    scenariosUsed: [],
+    createdDay: day,
+    revision: 0,
+  };
 }
