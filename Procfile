@@ -1,1 +1,1 @@
-web: node src/index.js
+worker: npm run bot

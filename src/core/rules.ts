@@ -1,0 +1,168 @@
+/**
+ * Игровые числа и справочники. Источник — config/game.yaml, но core не читает файлы:
+ * сюда приходит уже распарсенный объект, а parseRules проверяет его целиком.
+ * Отсутствие ключа — ошибка с точным путём, а не молчаливый запасной вариант.
+ */
+
+import { z } from 'zod';
+
+export const STAT_IDS = ['prosperity', 'security', 'knowledge', 'influence'] as const;
+export type StatId = (typeof STAT_IDS)[number];
+export type StatMap = Record<StatId, number>;
+
+export const IMPACT_LEVELS = ['NONE', 'MINOR', 'SIGNIFICANT', 'MAJOR', 'DEFINING'] as const;
+export type Impact = (typeof IMPACT_LEVELS)[number];
+
+export const DRIFT_BANDS = ['NONE', 'SLOW', 'STEADY', 'FAST'] as const;
+export type DriftBand = (typeof DRIFT_BANDS)[number];
+
+export const EFFICIENCY_LEVELS = ['weak', 'normal', 'strong'] as const;
+export type Efficiency = (typeof EFFICIENCY_LEVELS)[number];
+
+export const RISK_LEVELS = ['LOW', 'MEDIUM', 'HIGH'] as const;
+export type Risk = (typeof RISK_LEVELS)[number];
+
+export const OBJECT_TYPES = [
+  'building',
+  'structure',
+  'landmark',
+  'district',
+  'settlement',
+  'site',
+  'object',
+  'resource',
+  'organization',
+  'community',
+  'person',
+  'practice',
+  'capability',
+  'policy',
+  'threat',
+  'mystery',
+] as const;
+export type ObjectType = (typeof OBJECT_TYPES)[number];
+
+export const OFFICES = ['treasurer', 'marshal', 'keeper', 'chancellor'] as const;
+export type Office = (typeof OFFICES)[number];
+
+const statId = z.enum(STAT_IDS);
+/** Таблица «уровень → значение» с обязательным ключом на каждый уровень. */
+function table<K extends string, V extends z.ZodTypeAny>(keys: readonly K[], value: V): z.ZodType<Record<K, z.infer<V>>> {
+  return z.object(Object.fromEntries(keys.map((k) => [k, value]))) as unknown as z.ZodType<Record<K, z.infer<V>>>;
+}
+
+const byImpact = table(IMPACT_LEVELS, z.number());
+const byDrift = table(DRIFT_BANDS, z.number());
+const byEfficiency = table(EFFICIENCY_LEVELS, z.number());
+const byRisk = table(RISK_LEVELS, z.number().min(0).max(1));
+const capByRisk = table(RISK_LEVELS, z.enum(IMPACT_LEVELS));
+
+const statDef = z.object({
+  id: statId,
+  name: z.string().min(1),
+  about: z.string().default(''),
+  covers: z.string().default(''),
+  changeWhen: z.string().default(''),
+  scale: z.record(z.string(), z.string()).default({}),
+});
+
+const officeDef = z.object({
+  office: z.enum(OFFICES),
+  statId,
+  title: z.string().min(1),
+  titleGen: z.string().min(1),
+  focus: z.string().default(''),
+  strategy: z.string().default(''),
+});
+
+export const rulesSchema = z.object({
+  time: z.object({ realHoursPerYear: z.number().positive() }),
+  stats: z.array(statDef).length(STAT_IDS.length),
+  statEpithets: z.record(z.string(), z.string()),
+  faith: z.object({ name: z.string(), about: z.string() }),
+  mana: z.object({
+    name: z.string(),
+    about: z.string(),
+    max: z.number().positive(),
+    start: z.number().nonnegative(),
+    turnCost: z.number().nonnegative(),
+    turnCostWithAction: z.number().nonnegative(),
+  }),
+  genesis: z.object({
+    statBudget: z.number().int().positive(),
+    statMin: z.number().int(),
+    statMax: z.number().int(),
+  }),
+  officers: z.array(officeDef).length(OFFICES.length),
+  fronts: z.object({
+    impact: z.object({
+      rawBudget: byImpact,
+      effort: byImpact,
+      consequences: byImpact,
+    }),
+    drift: z.object({ perMonth: byDrift }),
+    assignment: z.object({
+      baseRate: z.number().positive(),
+      statFloor: z.number().nonnegative(),
+      efficiency: byEfficiency,
+      evaluatorCandidates: z.number().int().positive(),
+    }),
+    risk: z.object({ perEffort: byRisk, impactCap: capByRisk }),
+    consequences: z.object({ overdraft: z.number().int().nonnegative() }),
+    objects: z.object({
+      nameMax: z.number().int().positive(),
+      descriptionMax: z.number().int().positive(),
+    }),
+    genesisObjects: z.object({
+      minCount: z.number().int().positive(),
+      maxCount: z.number().int().positive(),
+      profileRange: z.number().positive(),
+    }),
+    cascade: z.object({ maxSteps: z.number().int().positive() }),
+  }),
+  seeding: z.object({
+    activeStories: z.number().int().nonnegative(),
+    checkEveryDays: z.number().int().positive(),
+    firstStoryDay: z.number().int().nonnegative(),
+    namesPerCall: z.number().int().nonnegative(),
+  }),
+  priest: z.object({ dialogDepth: z.number().int().positive() }),
+});
+
+export type Rules = z.infer<typeof rulesSchema>;
+export type StatDef = Rules['stats'][number];
+export type OfficeDef = Rules['officers'][number];
+
+/** Проверить сырой объект правил. Бросает ошибку с путём до первого кривого ключа. */
+export function parseRules(raw: unknown): Rules {
+  const parsed = rulesSchema.safeParse(raw);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const where = issue ? issue.path.join('.') : '?';
+    throw new Error(`правила игры: ${where}: ${issue?.message ?? 'неверно'}`);
+  }
+  const rules = parsed.data;
+  const ids = new Set(rules.stats.map((s) => s.id));
+  if (ids.size !== STAT_IDS.length) throw new Error('правила игры: stats: id статов повторяются');
+  const offices = new Set(rules.officers.map((o) => o.office));
+  if (offices.size !== OFFICES.length) throw new Error('правила игры: officers: должности повторяются');
+  const g = rules.genesis;
+  if (g.statMin * STAT_IDS.length > g.statBudget || g.statMax * STAT_IDS.length < g.statBudget) {
+    throw new Error('правила игры: genesis: бюджет не влезает в коридор statMin..statMax');
+  }
+  const go = rules.fronts.genesisObjects;
+  if (go.minCount > go.maxCount) throw new Error('правила игры: fronts.genesisObjects: minCount > maxCount');
+  return rules;
+}
+
+export function emptyStatMap(): StatMap {
+  return { prosperity: 0, security: 0, knowledge: 0, influence: 0 };
+}
+
+export function isImpact(raw: unknown): raw is Impact {
+  return typeof raw === 'string' && (IMPACT_LEVELS as readonly string[]).includes(raw);
+}
+
+export function impactRank(level: Impact): number {
+  return IMPACT_LEVELS.indexOf(level);
+}

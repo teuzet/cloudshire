@@ -1,37 +1,27 @@
 # Cloudshire
 
-Текстовая мультиплеерная god-sim для Telegram: игрок — покровитель острова, говорит со жрецом.
+Текстовый годсим в Telegram. Ты бог-покровитель летающего города и говоришь
+с его верховным жрецом. Город живёт сам: в нём идут истории (фронты), сановники
+двигают их по твоим поручениям, а ты приходишь по вестям и решаешь, куда
+направить веру.
 
-Документация:
+Это ветка v2 — пересборка с нуля. Ядро мира, агенты, игровые потоки, Telegram-бот и dev-клиент готовы; на настоящих моделях ещё не гонялось.
 
-- [Продукт](docs/PROJECT.md)
-- [Архитектура](docs/ARCHITECTURE.md)
-- [Генезис](docs/GENESIS.md) · [Аннотации](docs/ANNOTATIONS.md)
-- [Сопряжение](docs/CONFLUX.md) · [План: канон пары](docs/REFACTOR_CONFLUX_CANON.md) · [Непрерывное время](docs/REFACTOR_CONTINUOUS_TIME.md)
-- [Деплой](docs/DEPLOY.md) · [Playtest](docs/PLAYTEST_AGENT.md)
-
-## Быстрый старт
-
-```bash
-cp .env.example .env
-# OPENAI_API_KEY; для генезиса longform — ключ Anthropic
-
+```
 npm install
-npm start
+npm run check          # типы, слои, тесты (без сети и без моделей)
+npm run dev            # игра в браузере: http://localhost:3000 — ходит в настоящие модели
+npm run bot            # Telegram-бот
 ```
 
-Открой http://127.0.0.1:3000 — локальная имитация чата.
+Ключи и хранилище — переменные окружения, см. `.env.example`. Модели агентов — `config/agents.yaml`,
+игровые числа — `config/game.yaml`, заготовки историй — `scenarios/`.
 
-```bash
-npm run cli -- status
-npm run cli -- agent-ping
-npm run cli -- chat -u local-user "Хочу начать игру"
-npm run cli -- tick
-npm test
-```
+Устройство: [CLAUDE.md](CLAUDE.md). Механика фронтов: [docs/design/fronts.md](docs/design/fronts.md).
 
-Хранилище по умолчанию — YAML в `data/`. Mongo: `STORAGE_DRIVER=mongo` (см. `.env.example`).
+## План пересборки
 
-Telegram: `TELEGRAM_BOT_TOKEN` в `.env`. Веб на :3000 остаётся админкой.
-
-Playtest: `npm run playtest` — см. [docs/PLAYTEST_AGENT.md](docs/PLAYTEST_AGENT.md).
+1. Ядро мира, порты и адаптеры, конфиг, тесты.
+2. Агенты: промпты, схемы ответов, LLM-адаптеры, fake LLM.
+3. Потоки: ход жреца, дневной цикл, онбординг, генезис, посев историй, вести.
+4. Клиенты: Telegram, dev-клиент, Mongo. ← здесь; mini-app — следующим заходом.

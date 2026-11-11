@@ -1,0 +1,39 @@
+# Модели агентов. Формат модели: «провайдер:модель».
+# Агент без своей строки берёт default. Числа здесь — только про вызов модели,
+# игровые числа живут в game.yaml.
+default:
+  model: openai:gpt-5.6-luna
+  maxOutputTokens: 1500
+
+agents:
+  priest:
+    maxOutputTokens: 4000
+  herald:
+    maxOutputTokens: 2000
+  loremaster:
+    maxOutputTokens: 2000
+  onboarding-guide:
+    maxOutputTokens: 2000
+  city-genesis:
+    model: anthropic:claude-sonnet-4-6
+    maxOutputTokens: 12000
+  officer-nature:
+    maxOutputTokens: 1500
+  city-brief:
+    maxOutputTokens: 3000
+  world-objects-genesis:
+    maxOutputTokens: 16000
+  scenario-writer:
+    maxOutputTokens: 4000
+  consequences-generator:
+    maxOutputTokens: 2000
+  beat-resolver:
+    maxOutputTokens: 800
+  feasibility-judge:
+    maxOutputTokens: 800
+  impact-judge:
+    maxOutputTokens: 800
+  consequence-judge:
+    maxOutputTokens: 800
+  local-world-updater:
+    maxOutputTokens: 800

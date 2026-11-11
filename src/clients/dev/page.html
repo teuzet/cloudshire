@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cloudshire dev</title>
+<style>
+  :root { --bg:#f6f4ef; --panel:#fff; --ink:#1e1d1a; --muted:#77736b; --line:#e2ddd2; --accent:#5b4bb7; --priest:#efeaff; --news:#fff4dc; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#16151a; --panel:#1f1e25; --ink:#ece9f2; --muted:#9a96a6; --line:#33313d; --accent:#a99bff; --priest:#2a2540; --news:#3a2f17; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 system-ui, sans-serif; }
+  header { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--line); background:var(--panel); }
+  header b { margin-right:auto; }
+  input, button, textarea { font:inherit; color:inherit; }
+  input, textarea { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:6px 10px; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:6px 12px; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line); }
+  button:disabled { opacity:.5; cursor:wait; }
+  main { display:grid; grid-template-columns: minmax(0,1fr) minmax(0,420px); gap:16px; padding:16px; max-width:1300px; margin:0 auto; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; min-width:0; }
+  #log { height:60vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px; }
+  .msg { padding:8px 12px; border-radius:10px; white-space:pre-wrap; max-width:85%; cursor:pointer; }
+  .patron { align-self:flex-end; background:var(--bg); border:1px solid var(--line); }
+  .priest { background:var(--priest); }
+  .news { background:var(--news); }
+  .system { color:var(--muted); font-size:13px; align-self:center; }
+  .quote { font-size:13px; color:var(--muted); margin:6px 0; }
+  form { display:flex; gap:8px; margin-top:10px; }
+  form textarea { flex:1; resize:vertical; min-height:44px; }
+  pre { white-space:pre-wrap; word-break:break-word; margin:0; font-size:13px; }
+  details { margin-top:8px; } summary { cursor:pointer; color:var(--muted); }
+  .bar { height:6px; background:var(--line); border-radius:3px; overflow:hidden; margin:4px 0 10px; }
+  .bar i { display:block; height:100%; background:var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <b>Cloudshire dev</b>
+  <span id="date"></span>
+  <label>игрок <input id="owner" value="dev" size="8"></label>
+  <button class="ghost" data-skip="1">+1 день</button>
+  <button class="ghost" data-skip="7">+7</button>
+  <button class="ghost" data-skip="30">+30</button>
+  <button class="ghost" id="reset">Сброс</button>
+</header>
+<main>
+  <section>
+    <div id="log"></div>
+    <div class="quote" id="quote" hidden></div>
+    <form id="form"><textarea id="text" placeholder="Слово покровителя… (Enter — отправить, клик по сообщению — ответить на него)"></textarea><button id="send">→</button></form>
+  </section>
+  <section>
+    <pre id="status">Города ещё нет: начни разговор слева.</pre>
+    <div id="fronts"></div>
+    <details><summary>Город целиком (JSON)</summary><pre id="json"></pre></details>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const owner = () => $('owner').value.trim() || 'dev';
+let quote = null;
+
+function add(kind, text) {
+  const el = document.createElement('div');
+  el.className = 'msg ' + kind;
+  el.textContent = text;
+  el.onclick = () => { quote = text; $('quote').hidden = false; $('quote').textContent = '↩ ' + text.slice(0, 120); };
+  $('log').appendChild(el);
+  $('log').scrollTop = $('log').scrollHeight;
+}
+
+async function api(path, body) {
+  const url = path + (path.includes('?') ? '&' : '?') + 'owner=' + encodeURIComponent(owner());
+  const res = await fetch(url, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {});
+  return res.json();
+}
+
+function renderFronts(city, day) {
+  const box = $('fronts');
+  box.innerHTML = '';
+  if (!city) return;
+  for (const f of city.fronts.filter((x) => x.status === 'active')) {
+    const progress = Math.min(f.effort, f.progress + f.ratePerDay * Math.max(0, day - f.progressDay));
+    const share = f.effort ? progress / f.effort : 0;
+    const row = document.createElement('div');
+    row.innerHTML = '<div></div><div class="bar"><i></i></div>';
+    row.firstChild.textContent = '[' + f.origin + '] ' + f.description + ' — ' + Math.round(share * 100) + '%, ' + f.ratePerDay.toFixed(3) + '/день';
+    row.querySelector('i').style.width = Math.round(share * 100) + '%';
+    box.appendChild(row);
+  }
+}
+
+let seen = -1;
+async function refresh() {
+  const s = await api('/api/state');
+  $('date').textContent = s.date;
+  $('status').textContent = s.status || (s.draft ? 'Онбординг: ' + s.draft.status : 'Города ещё нет: начни разговор слева.');
+  $('json').textContent = JSON.stringify(s.city || s.draft, null, 2);
+  renderFronts(s.city, s.day);
+  for (const m of s.inbox) add(m.kind === 'news' ? 'news' : 'system', m.text);
+  if (s.city && seen < 0) {
+    $('log').innerHTML = '';
+    for (const d of s.city.dialog) add(d.role === 'patron' ? 'patron' : d.kind === 'news' ? 'news' : 'priest', d.text);
+    seen = s.city.dialog.length;
+  }
+}
+
+$('form').onsubmit = async (e) => {
+  e.preventDefault();
+  const text = $('text').value.trim();
+  if (!text) return;
+  $('text').value = '';
+  $('send').disabled = true;
+  add('patron', text);
+  try {
+    const r = await api('/api/say', { text, quote });
+    if (r.reply) add('priest', r.reply);
+    if (r.kind === 'genesis') { add('system', 'Город поднялся.'); seen = -1; }
+    if (r.kind === 'genesis_failed') add('system', 'Генезис не удался.');
+    if (r.error) add('system', r.error);
+  } finally {
+    quote = null; $('quote').hidden = true; $('send').disabled = false;
+    await refresh();
+  }
+};
+$('text').onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('form').requestSubmit(); } };
+for (const b of document.querySelectorAll('[data-skip]')) {
+  b.onclick = async () => { b.disabled = true; try { await api('/api/skip', { days: Number(b.dataset.skip) }); } finally { b.disabled = false; await refresh(); } };
+}
+$('reset').onclick = async () => { if (!confirm('Стереть город игрока ' + owner() + '?')) return; await api('/api/reset', {}); $('log').innerHTML = ''; seen = -1; await refresh(); };
+$('owner').onchange = () => { $('log').innerHTML = ''; seen = -1; refresh(); };
+refresh();
+setInterval(refresh, 4000);
+</script>
+</body>
+</html>
