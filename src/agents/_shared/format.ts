@@ -5,7 +5,7 @@
 
 import type { Rules, StatMap } from '../../core/rules.js';
 import { STAT_IDS } from '../../core/rules.js';
-import type { ChronicleEntry, Front, Officer, WorldObject } from '../../core/city.js';
+import type { ChronicleEntry, Front, Officer, PoolName, WorldObject } from '../../core/city.js';
 import { gameDate } from '../../core/time.js';
 
 export function bullets(lines: Array<string | null | undefined | false>): string {
@@ -53,6 +53,9 @@ export function statProfileLine(rules: Rules, profile: Partial<StatMap>): string
     .join(', ');
 }
 
-export function namesBlock(names: readonly string[]): string {
-  return names.length ? section('ИМЕНА', names.join(', ')) : 'ИМЕНА: списка нет, новых людей не заводи.';
+/** Список имён для новых людей. Пол задан списком: ж — женщина, м — мужчина. */
+export function namesBlock(names: readonly PoolName[]): string {
+  return names.length
+    ? section('ИМЕНА (пол задан: ж — женщина, м — мужчина; согласуй род)', names.map((n) => `${n.name} (${n.gender === 'female' ? 'ж' : 'м'})`).join(', '))
+    : 'ИМЕНА: списка нет, новых людей не заводи.';
 }

@@ -7,7 +7,6 @@ export const OPENING_LORE_MAX = 20;
 export const coreSchema = z.object({
   city_name: z.string().trim().min(2).max(40),
   priest_name: z.string().trim().min(1).describe('Одно имя из списка ИМЕНА, без фамилии и отчества.'),
-  priest_gender: z.enum(['female', 'male']),
   priest_description: z.string().trim().min(1).describe('Характер верховного жреца-связного; учти пожелания игрока.'),
   greeting: z.string().trim().min(1).max(600),
   opening_lore: z.array(z.string().trim().min(1)).min(OPENING_LORE_MIN).max(OPENING_LORE_MAX).describe(`Массив из ≥${OPENING_LORE_MIN} сухих постоянных фактов.`),

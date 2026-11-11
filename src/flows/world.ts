@@ -2,7 +2,7 @@
  * Мир: часы, сезон, пул имён. Создаётся один раз.
  */
 
-import type { World } from '../core/city.js';
+import type { PoolName, World } from '../core/city.js';
 import { newClock, skipDays } from '../core/time.js';
 import { newId, type FlowDeps } from './context.js';
 
@@ -21,15 +21,21 @@ function shuffle<T>(items: readonly T[], rng: () => number): T[] {
 }
 
 /** Женские и мужские имена вперемешку, чтобы любая выборка была смешанной. */
-export function buildNamePool(names: NamesFile, rng: () => number): string[] {
+export function buildNamePool(names: NamesFile, rng: () => number): PoolName[] {
   const f = shuffle(names.female, rng);
   const m = shuffle(names.male, rng);
-  const out: string[] = [];
+  const out: PoolName[] = [];
+  const seen = new Set<string>();
+  const push = (name: string | undefined, gender: PoolName['gender']) => {
+    if (!name || seen.has(name)) return;
+    seen.add(name);
+    out.push({ name, gender });
+  };
   for (let i = 0; i < Math.max(f.length, m.length); i++) {
-    if (f[i]) out.push(f[i] as string);
-    if (m[i]) out.push(m[i] as string);
+    push(f[i], 'female');
+    push(m[i], 'male');
   }
-  return [...new Set(out)];
+  return out;
 }
 
 export async function ensureWorld(

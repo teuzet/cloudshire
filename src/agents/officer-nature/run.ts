@@ -2,7 +2,7 @@
  * Сановники: имена из пула мира и характер каждого в 1–2 предложениях.
  */
 
-import type { Gender } from '../../core/city.js';
+import type { Gender, PoolName } from '../../core/city.js';
 import { OFFICES, type Office, type Rules } from '../../core/rules.js';
 import { composeSystem, loadPrompt } from '../_shared/canon.js';
 import { namesBlock } from '../_shared/format.js';
@@ -19,7 +19,7 @@ export interface OfficerNatureInput {
   rules: Rules;
   cityName: string;
   description: string;
-  names: readonly string[];
+  names: readonly PoolName[];
   /** Имена, уже занятые в этом городе (жрец). */
   taken: readonly string[];
 }
@@ -50,11 +50,13 @@ export const officerNature: StructuredAgent<OfficerNatureInput, OfficerNaturesRa
     if (new Set(used).size !== used.length) return 'имена сановников повторяются';
     const clash = used.filter((n) => taken.includes(n));
     if (clash.length) return `имя уже занято: ${clash.join(', ')}`;
-    const foreign = used.filter((n) => names.length && !names.includes(n));
+    const foreign = used.filter((n) => names.length && !names.some((p) => p.name === n));
     return foreign.length ? `имён нет в списке: ${foreign.join(', ')}` : null;
   },
-  finish: (raw) =>
-    Object.fromEntries(raw.officers.map((o) => [o.office, { name: o.name, gender: o.gender, nature: o.nature }])) as Record<Office, OfficerPerson>,
+  finish: (raw, { names }) =>
+    Object.fromEntries(
+      raw.officers.map((o) => [o.office, { name: o.name, gender: names.find((n) => n.name === o.name)?.gender ?? 'male', nature: o.nature }]),
+    ) as Record<Office, OfficerPerson>,
 };
 
 export async function writeOfficerNatures(deps: AgentDeps, input: OfficerNatureInput): Promise<Record<Office, OfficerPerson>> {

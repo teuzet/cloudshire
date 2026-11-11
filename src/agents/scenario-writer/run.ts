@@ -3,7 +3,7 @@
  * Ответ проверяется той же схемой, что и заготовки в scenarios/*.yaml.
  */
 
-import type { CanonicalUnknown, WorldObject } from '../../core/city.js';
+import type { CanonicalUnknown, PoolName, WorldObject } from '../../core/city.js';
 import { scenarioSchema, touchedMysteries, type Scenario } from '../../core/world/scenario.js';
 import { composeSystem, loadPrompt } from '../_shared/canon.js';
 import { bullets, namesBlock, objectsBlock, section } from '../_shared/format.js';
@@ -16,7 +16,7 @@ export interface ScenarioWriterInput {
   template: Scenario | null;
   /** Зерно, если заготовки нет: одна-две фразы. */
   seed: string | null;
-  names: readonly string[];
+  names: readonly PoolName[];
   /** Тайны острова: их объекты новая история не трогает. */
   unknowns: readonly CanonicalUnknown[];
 }

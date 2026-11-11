@@ -20,11 +20,10 @@ const tower = () =>
 
 describe('генезис и онбординг', () => {
   const seed = { cityName: 'Мерв', patronName: 'Алаэр', patronGender: 'female' as const, pitch: 'Город каменотёсов' };
-  const pool = ['Таэн', 'Иса', 'Орм', 'Лиэ', 'Кайр', 'Вэс'];
+  const pool = ['Таэн', 'Иса', 'Орм', 'Лиэ', 'Кайр', 'Вэс'].map((name, i) => ({ name, gender: i % 2 ? ('male' as const) : ('female' as const) }));
   const core = (over: Record<string, unknown> = {}) => ({
     city_name: 'Мерв',
     priest_name: 'Таэн',
-    priest_gender: 'female',
     priest_description: 'Тиха и внимательна к знамениям.',
     greeting: 'Алаэр, город слышит тебя.',
     opening_lore: Array.from({ length: 8 }, (_, i) => `Факт ${i + 1}.`),
@@ -47,6 +46,7 @@ describe('генезис и онбординг', () => {
   test('city-genesis ядро: правила сезона в контексте, факты и жрец в ответе', async () => {
     const llm = new FakeLlm().script('city-genesis', toolReply('submit_core', core()));
     const c = await writeGenesisCore(deps(llm), { seed, names: pool, seasonRules: ['Через месяц придут драконы'] });
+    // Пол жреца — из пула мира, не от модели.
     expect(c).toMatchObject({ cityName: 'Мерв', priest: { name: 'Таэн', gender: 'female' } });
     expect(c.openingLore).toHaveLength(8);
     expect(llm.requests[0]?.system).toContain('драконы');
@@ -81,7 +81,9 @@ describe('генезис и онбординг', () => {
       toolReply('submit_officer_natures', { officers: [row('treasurer', 'Иса'), row('marshal', 'Орм'), row('keeper', 'Лиэ'), row('chancellor', 'Кайр')] }),
     );
     const out = await writeOfficerNatures(deps(llm), { rules: r, cityName: 'Мерв', description: 'Город', names: pool, taken: ['Таэн'] });
-    expect(out.treasurer.name).toBe('Иса');
+    expect(out.treasurer).toMatchObject({ name: 'Иса', gender: 'male' });
+    expect(out.keeper).toMatchObject({ name: 'Лиэ', gender: 'male' });
+    expect(out.marshal).toMatchObject({ name: 'Орм', gender: 'female' });
     expect(JSON.stringify(llm.requests[1]?.messages)).toContain('уже занято: Таэн');
   });
 

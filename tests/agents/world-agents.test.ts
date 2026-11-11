@@ -77,9 +77,9 @@ describe('agents мира', () => {
 
   test('front-chronicle: имена приходят в system', async () => {
     const llm = new FakeLlm().script('front-chronicle', toolReply('submit_chronicle', { text: 'Лестница рухнула.' }));
-    const text = await writeChronicle(deps(llm), { cityName: 'Мерв', fact: 'Обвал', history: [], names: ['Таэн'] });
+    const text = await writeChronicle(deps(llm), { cityName: 'Мерв', fact: 'Обвал', history: [], names: [{ name: 'Таэн', gender: 'female' }] });
     expect(text).toBe('Лестница рухнула.');
-    expect(llm.requests[0]?.system).toContain('Таэн');
+    expect(llm.requests[0]?.system).toContain('Таэн (ж)');
   });
 
   test('object-version-writer: длинное описание отбивается', async () => {

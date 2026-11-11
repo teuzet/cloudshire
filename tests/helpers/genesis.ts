@@ -6,8 +6,11 @@ import type { LlmRequest } from '../../src/ports/llm.js';
 /** Список ИМЕНА из системного промпта запроса. */
 export function poolFrom(req: LlmRequest): string[] {
   const lines = req.system.split('\n');
-  const i = lines.findIndex((l) => l.startsWith('ИМЕНА:'));
-  return (lines[i + 1] ?? '').split(', ').filter(Boolean);
+  const i = lines.findIndex((l) => l.startsWith('ИМЕНА (пол'));
+  return (lines[i + 1] ?? '')
+    .split(', ')
+    .map((n) => n.replace(/ \([жм]\)$/, ''))
+    .filter(Boolean);
 }
 
 export function aspectText(id: string): string {
@@ -27,7 +30,6 @@ export function scriptGenesis(
         return toolReply('submit_core', {
           city_name: opts.cityName,
           priest_name: poolFrom(req)[0],
-          priest_gender: 'female',
           priest_description: 'Тиха и внимательна к знамениям.',
           greeting: `${opts.patronName}, город слышит тебя.`,
           opening_lore: Array.from({ length: 8 }, (_, i) => `Постоянный факт ${i + 1}.`),

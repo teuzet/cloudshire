@@ -7,7 +7,6 @@ export const officerNaturesSchema = z.object({
       z.object({
         office: z.enum(OFFICES),
         name: z.string().trim().min(1),
-        gender: z.enum(['female', 'male']),
         nature: z.string().trim().min(20).max(400),
       }),
     )

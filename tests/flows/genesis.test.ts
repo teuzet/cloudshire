@@ -45,7 +45,11 @@ describe('онбординг → генезис', () => {
     // Пять человек взяли имена из пула мира, остальные имена вернулись.
     const world = await s.deps.storage.getWorld();
     const people = [city!.priest.name, ...city!.officers.map((o) => o.name)];
-    for (const n of people) expect(world!.namePool).not.toContain(n);
+    for (const n of people) expect(world!.namePool.map((p) => p.name)).not.toContain(n);
+    // Пол людей — из пула имён.
+    const female = new Set(s.names.female);
+    expect(city!.priest.gender).toBe(female.has(city!.priest.name) ? 'female' : 'male');
+    for (const o of city!.officers) expect(o.gender).toBe(female.has(o.name) ? 'female' : 'male');
     expect(world!.namePool.length + people.length).toBe(10);
     expect(await onboardingMessage(s.deps, { ownerId: 'u1', text: 'ещё' })).toEqual({ kind: 'has_city' });
   });

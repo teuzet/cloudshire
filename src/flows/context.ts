@@ -2,7 +2,7 @@
  * Зависимости потоков. Поток знает порты и агентов, но не провайдеров и не транспорт.
  */
 
-import type { City, World } from '../core/city.js';
+import type { City, PoolName, World } from '../core/city.js';
 import { makeId } from '../core/random.js';
 import type { Rules } from '../core/rules.js';
 import { dayAt } from '../core/time.js';
@@ -57,7 +57,7 @@ export async function tryAgent<T>(deps: Pick<FlowDeps, 'log'>, what: string, run
  * Вынуть имена из пула мира. Пул общий для всех городов, поэтому запись
  * с проверкой ревизии и повтором: два города не получат одно имя.
  */
-export async function takeNames(deps: Pick<FlowDeps, 'storage'>, count: number): Promise<string[]> {
+export async function takeNames(deps: Pick<FlowDeps, 'storage'>, count: number): Promise<PoolName[]> {
   if (count <= 0) return [];
   for (let attempt = 0; attempt < 5; attempt++) {
     const world = await requireWorld(deps);
@@ -74,7 +74,7 @@ export async function takeNames(deps: Pick<FlowDeps, 'storage'>, count: number):
 }
 
 /** Имена, которые агент не взял, возвращаются в пул (в конец). */
-export async function returnNames(deps: Pick<FlowDeps, 'storage'>, names: string[]): Promise<void> {
+export async function returnNames(deps: Pick<FlowDeps, 'storage'>, names: PoolName[]): Promise<void> {
   if (!names.length) return;
   for (let attempt = 0; attempt < 5; attempt++) {
     const world = await requireWorld(deps);
@@ -88,9 +88,9 @@ export async function returnNames(deps: Pick<FlowDeps, 'storage'>, names: string
 }
 
 /** Имена, которые реально появились в тексте. */
-export function namesUsed(names: string[], ...texts: string[]): string[] {
+export function namesUsed(names: PoolName[], ...texts: string[]): PoolName[] {
   const all = texts.join('\n');
-  return names.filter((n) => all.includes(n));
+  return names.filter((n) => all.includes(n.name));
 }
 
 export async function sendAll(deps: Pick<FlowDeps, 'notifier' | 'log'>, messages: OutboundMessage[]): Promise<void> {

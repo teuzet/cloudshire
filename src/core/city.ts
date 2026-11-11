@@ -27,12 +27,18 @@ export interface Season {
   startedDay: number;
 }
 
+/** Имя из пула мира. Пол задан пулом: агенты его не придумывают. */
+export interface PoolName {
+  name: string;
+  gender: Gender;
+}
+
 export interface World {
   id: string;
   clock: ClockState;
   season: Season;
-  /** Пул имён людей; вынимается по одному, чтобы имена не повторялись. */
-  namePool: string[];
+  /** Пул имён людей с полом; вынимается по одному, чтобы имена не повторялись. */
+  namePool: PoolName[];
   revision: number;
 }
 

@@ -97,7 +97,7 @@ export async function runGenesis(deps: FlowDeps, ownerId: string): Promise<City 
       rules: deps.rules,
       cityName: core.cityName,
       description,
-      names: names.filter((n) => n !== core.priest.name),
+      names: names.filter((n) => n.name !== core.priest.name),
       taken: [core.priest.name],
     });
     // 5. Бриф и канонические неизвестности, привязанные к объектам.
@@ -139,7 +139,7 @@ export async function runGenesis(deps: FlowDeps, ownerId: string): Promise<City 
     scheduleJob(city, { id: newId(deps, 'job'), kind: 'seed', dueDay: day + deps.rules.seeding.firstStoryDay });
 
     const used = new Set([core.priest.name, ...Object.values(officers).map((p) => p.name)]);
-    await returnNames(deps, names.filter((n) => !used.has(n)));
+    await returnNames(deps, names.filter((n) => !used.has(n.name)));
     const saved = await deps.storage.saveCity(city);
     await deps.storage.deleteDraft(ownerId);
     await sendAll(deps, [{ ownerId, text: core.greeting, kind: 'news', cityId: saved.id }]);

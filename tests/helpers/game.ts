@@ -60,7 +60,8 @@ export async function stand(seed = 7) {
     notifier: inbox,
     scenarios: [lanternIsle()],
   };
-  await ensureWorld(deps, { names: { female: ['Айра', 'Вена', 'Ирма', 'Лира', 'Мэа'], male: ['Орм', 'Кайр', 'Тэн', 'Вэс', 'Дар'] } });
+  const names = { female: ['Айра', 'Вена', 'Ирма', 'Лира', 'Мэа'], male: ['Орм', 'Кайр', 'Тэн', 'Вэс', 'Дар'] };
+  await ensureWorld(deps, { names });
   const passDays = (days: number) => clock.advance(Math.round(days * msPerGameDay(r)));
-  return { r, llm, clock, inbox, deps, locks: new CityLocks(), passDays };
+  return { r, llm, clock, inbox, deps, names, locks: new CityLocks(), passDays };
 }

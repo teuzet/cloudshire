@@ -2,7 +2,7 @@
  * Хронист: из сухого факта — одна запись хроники.
  */
 
-import type { ChronicleEntry } from '../../core/city.js';
+import type { ChronicleEntry, PoolName } from '../../core/city.js';
 import { composeSystem, loadPrompt } from '../_shared/canon.js';
 import { chronicleBlock, namesBlock, section } from '../_shared/format.js';
 import { runStructured, type AgentDeps, type StructuredAgent } from '../_shared/runtime.js';
@@ -13,7 +13,7 @@ export interface FrontChronicleInput {
   fact: string;
   /** Что уже записано по этой истории — чтобы не противоречить. */
   history: ChronicleEntry[];
-  names: readonly string[];
+  names: readonly PoolName[];
 }
 
 const prompt = loadPrompt(import.meta.url);

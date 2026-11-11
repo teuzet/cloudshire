@@ -5,7 +5,7 @@
  * Объекты мира, сановники и бриф — отдельные агенты; порядок держит поток генезиса.
  */
 
-import type { CitySeed, Gender } from '../../core/city.js';
+import type { CitySeed, Gender, PoolName } from '../../core/city.js';
 import { composeSystem, loadPrompt } from '../_shared/canon.js';
 import { namesBlock } from '../_shared/format.js';
 import { runStructured, type AgentDeps, type StructuredAgent } from '../_shared/runtime.js';
@@ -21,7 +21,7 @@ export interface GenesisCore {
 
 export interface GenesisCoreInput {
   seed: CitySeed;
-  names: readonly string[];
+  names: readonly PoolName[];
   /** Мировые правила сезона, если есть: город о них знает. */
   seasonRules: readonly string[];
 }
@@ -36,7 +36,7 @@ export interface GenesisAspectsInput {
 
 const prompt = loadPrompt(import.meta.url);
 
-function system(seasonRules: readonly string[], names: readonly string[] | null): string {
+function system(seasonRules: readonly string[], names: readonly PoolName[] | null): string {
   return composeSystem(
     ['world', 'patron', 'style-names'],
     prompt,
@@ -93,7 +93,7 @@ export const genesisCore: StructuredAgent<GenesisCoreInput, CoreRaw, GenesisCore
       '',
       `opening_lore: минимум 8 коротких ПОСТОЯННЫХ фактов (не новости месяца). Не выдумывай цистерны и прочий канон «по умолчанию».`,
       'Учти изоляцию острова: без паломников/торговцев «из соседних регионов».',
-      'priest_name — одно имя из списка ИМЕНА.',
+      'priest_name — одно имя из списка ИМЕНА. Пол жреца задан списком: держись его.',
       '',
       `Имя покровителя УЖЕ дано: «${patron}». Храм и культ города — его. Это данное, не отвергай из-за звучания.`,
       seed.patronGender === 'female'
@@ -107,12 +107,12 @@ export const genesisCore: StructuredAgent<GenesisCoreInput, CoreRaw, GenesisCore
   },
   check: (raw, { seed, names }) => {
     if (seed.cityName && raw.city_name !== seed.cityName) return `city_name должно быть ровно «${seed.cityName}»`;
-    if (names.length && !names.includes(raw.priest_name)) return `имени ${raw.priest_name} нет в списке ИМЕНА`;
+    if (names.length && !names.some((n) => n.name === raw.priest_name)) return `имени ${raw.priest_name} нет в списке ИМЕНА`;
     return greetingProblem(raw.greeting, seed.patronName);
   },
-  finish: (raw) => ({
+  finish: (raw, { names }) => ({
     cityName: raw.city_name,
-    priest: { name: raw.priest_name, gender: raw.priest_gender, nature: raw.priest_description },
+    priest: { name: raw.priest_name, gender: names.find((n) => n.name === raw.priest_name)?.gender ?? 'male', nature: raw.priest_description },
     greeting: raw.greeting,
     openingLore: raw.opening_lore,
   }),
