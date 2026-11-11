@@ -2,7 +2,8 @@
  * Онбординг и генезис.
  *
  *   onboardingMessage — разговор с проводником до готовой «рыбы»;
- *   runGenesis        — из «рыбы» город: описание, люди, объекты, статы, первое слово жреца.
+ *   runGenesis        — из «рыбы» город: ядро → аспекты описания → объекты и статы → сановники →
+ *                       бриф с каноническими неизвестностями; первое слово жреца.
  *
  * Генезис долгий (несколько вызовов модели), поэтому клиент запускает его отдельно
  * и показывает игроку, что город собирается.
@@ -16,8 +17,12 @@ import { createObject } from '../core/world/objects.js';
 import { genesisStats, objectContribution } from '../core/world/stats.js';
 import type { OnboardingDraft } from '../ports/storage.js';
 import { guideOnboarding } from '../agents/onboarding-guide/run.js';
-import { writeCityGenesis } from '../agents/city-genesis/run.js';
+import { writeGenesisAspects, writeGenesisCore } from '../agents/city-genesis/run.js';
+import { aspectBatches, assembleDescription } from '../agents/city-genesis/aspects.js';
+import { writeOfficerNatures } from '../agents/officer-nature/run.js';
+import { writeCityBrief } from '../agents/city-brief/run.js';
 import { extractWorldObjects } from '../agents/world-objects-genesis/run.js';
+import { newFact } from '../core/lore.js';
 import { newId, requireWorld, returnNames, sendAll, takeNames, today, tryAgent, type FlowDeps } from './context.js';
 
 export type OnboardingReply =
@@ -65,9 +70,17 @@ export async function runGenesis(deps: FlowDeps, ownerId: string): Promise<City 
   const names = await takeNames(deps, PEOPLE + 3);
 
   try {
-    const genesis = await writeCityGenesis(deps.agents, { seed: draft.seed, names, seasonRules: world.season.rules });
-    const drafts = await extractWorldObjects(deps.agents, { rules: deps.rules, cityName: genesis.cityName, description: genesis.description });
-
+    const seed = draft.seed;
+    // 1. Ядро: имя, жрец, первое слово, стартовые факты.
+    const core = await writeGenesisCore(deps.agents, { seed, names, seasonRules: world.season.rules });
+    // 2. Описание города: аспекты пачками.
+    const aspects: Record<string, string> = {};
+    for (const batch of aspectBatches()) {
+      Object.assign(aspects, await writeGenesisAspects(deps.agents, { seed, core, batch, already: aspects }));
+    }
+    const description = assembleDescription(aspects);
+    // 3. Объекты мира из описания — из них же статы.
+    const drafts = await extractWorldObjects(deps.agents, { rules: deps.rules, cityName: core.cityName, description });
     const objects = drafts.map((d) =>
       createObject(deps.rules, {
         id: newId(deps, 'obj'),
@@ -79,15 +92,41 @@ export async function runGenesis(deps: FlowDeps, ownerId: string): Promise<City 
       }),
     );
     const stats = genesisStats(deps.rules, objects.map((o) => o.statEffect));
+    // 4. Сановники.
+    const officers = await writeOfficerNatures(deps.agents, {
+      rules: deps.rules,
+      cityName: core.cityName,
+      description,
+      names: names.filter((n) => n !== core.priest.name),
+      taken: [core.priest.name],
+    });
+    // 5. Бриф и канонические неизвестности, привязанные к объектам.
+    const brief = await tryAgent(
+      deps,
+      'city-brief',
+      () =>
+        writeCityBrief(deps.agents, {
+          cityName: core.cityName,
+          patronName: seed.patronName,
+          patronGender: seed.patronGender,
+          description,
+          objects,
+        }),
+      { brief: description.slice(0, 3500), unknowns: [] },
+    );
+
     const city = newCity({
       id: newId(deps, 'city'),
       worldId: world.id,
       ownerId,
-      name: genesis.cityName,
-      patronName: draft.seed.patronName,
-      brief: genesis.brief,
-      priest: genesis.priest,
-      officers: createOfficers(deps.rules, genesis.officers),
+      name: core.cityName,
+      patronName: seed.patronName,
+      description,
+      brief: brief.brief,
+      unknowns: brief.unknowns,
+      facts: core.openingLore.map((text) => newFact({ id: newId(deps, 'fact'), text, day, author: 'genesis' })),
+      priest: core.priest,
+      officers: createOfficers(deps.rules, officers),
       objects,
       stats: stats.stats,
       statScale: stats.statScale,
@@ -96,14 +135,14 @@ export async function runGenesis(deps: FlowDeps, ownerId: string): Promise<City 
       day,
     });
     appendChronicle(city, { id: newId(deps, 'chr'), day, text: `Основан город ${city.name}.`, source: 'genesis', frontId: null });
-    appendDialog(city, { role: 'priest', text: genesis.greeting, day, kind: 'news' });
+    appendDialog(city, { role: 'priest', text: core.greeting, day, kind: 'news' });
     scheduleJob(city, { id: newId(deps, 'job'), kind: 'seed', dueDay: day + deps.rules.seeding.firstStoryDay });
 
-    const used = new Set([genesis.priest.name, ...Object.values(genesis.officers).map((p) => p.name)]);
+    const used = new Set([core.priest.name, ...Object.values(officers).map((p) => p.name)]);
     await returnNames(deps, names.filter((n) => !used.has(n)));
     const saved = await deps.storage.saveCity(city);
     await deps.storage.deleteDraft(ownerId);
-    await sendAll(deps, [{ ownerId, text: genesis.greeting, kind: 'news', cityId: saved.id }]);
+    await sendAll(deps, [{ ownerId, text: core.greeting, kind: 'news', cityId: saved.id }]);
     return saved;
   } catch (err) {
     deps.log?.warn('genesis_failed', { ownerId, error: String(err) });

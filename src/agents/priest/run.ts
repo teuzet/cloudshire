@@ -8,6 +8,7 @@ import type { City, DialogEntry } from '../../core/city.js';
 import type { Rules } from '../../core/rules.js';
 import { activeAssignments } from '../../core/world/assignments.js';
 import { activeFronts } from '../../core/world/fronts.js';
+import { activeFacts } from '../../core/lore.js';
 import { qualitativeStats } from '../../core/world/stats.js';
 import { gameDate } from '../../core/time.js';
 import type { LlmMessage, LlmUsage } from '../../ports/llm.js';
@@ -16,11 +17,13 @@ import { bullets, chronicleBlock, officerLine, section } from '../_shared/format
 import { runToolLoop, type AgentDeps, type LoopTool } from '../_shared/runtime.js';
 import {
   assignOfficerSchema,
+  consultSchema,
   noteSchema,
   orderChangeSchema,
   replySchema,
   withdrawSchema,
   type AssignOfficerArgs,
+  type ConsultArgs,
   type NoteArgs,
   type OrderChangeArgs,
   type WithdrawArgs,
@@ -34,6 +37,7 @@ export interface PriestHandlers {
   orderChange(args: OrderChangeArgs): Promise<ToolOutcome>;
   withdraw(args: WithdrawArgs): Promise<ToolOutcome>;
   writeNote(args: NoteArgs): Promise<ToolOutcome>;
+  consultLoremaster(args: ConsultArgs): Promise<ToolOutcome>;
 }
 
 export interface PriestTurnInput {
@@ -65,14 +69,16 @@ export function priestTurnBlock(rules: Rules, city: City, day: number): string {
     const a = assignments.find((x) => x.id === o.assignmentId);
     return `${officerLine(o)} — ${a ? `занят: ${a.text}` : 'свободен'}`;
   });
-  const fronts = activeFronts(city).map((f) => f.description);
+  const fronts = activeFronts(city).map((f) => `${f.id}: ${f.description}`);
+  const facts = activeFacts(city).slice(-30).map((f) => f.text);
   return [
     section('ОПИСАНИЕ ГОРОДА', city.brief),
     `Город: ${city.name}. Покровитель: ${city.patronName}. Сегодня: ${gameDate(day).label}.`,
     `Ты: ${city.priest.name} (${city.priest.gender === 'female' ? 'она' : 'он'}), ${city.priest.nature}`,
     section('Состояние города', qualitativeStats(rules, city.stats)),
     section('Сановники', bullets(officers)),
-    section('Что сейчас идёт в городе', bullets(fronts)),
+    section('Что сейчас идёт в городе (id: что идёт)', bullets(fronts)),
+    section('Известные факты', bullets(facts)),
     section('Последние записи хроники', chronicleBlock(city.chronicle.slice(-5))),
     section('Память', bullets(city.notes.map((n) => n.text))),
   ]
@@ -99,6 +105,12 @@ const TOOLS: LoopTool<PriestHandlers>[] = [
   tool<OrderChangeArgs>('order_change', 'Воля изменить сам город: построить, учредить, снести.', orderChangeSchema, (h, a) => h.orderChange(a)),
   tool<WithdrawArgs>('withdraw_assignment', 'Снять сановника с его дела.', withdrawSchema, (h, a) => h.withdraw(a)),
   tool<NoteArgs>('write_note', 'Постоянная заметка памяти.', noteSchema, (h, a) => h.writeNote(a)),
+  tool<ConsultArgs>(
+    'consult_loremaster',
+    'Спросить лормастера о конкретике мира, которой нет в блоке хода. Один вопрос за вызов.',
+    consultSchema,
+    (h, a) => h.consultLoremaster(a),
+  ),
 ];
 
 export async function runPriestTurn(deps: AgentDeps, input: PriestTurnInput, handlers: PriestHandlers): Promise<PriestTurn> {
@@ -115,7 +127,7 @@ export async function runPriestTurn(deps: AgentDeps, input: PriestTurnInput, han
     tools: TOOLS,
     final: { name: 'submit_reply', description: 'Речь жреца покровителю. Только её он увидит.', schema: replySchema },
     ctx: handlers,
-    maxSteps: 6,
+    maxSteps: 8,
   });
   const acted = result.calls.some((c) => ACTIONS.has(c.name) && (c.result as ToolOutcome).ok);
   return { reply: result.final.text, acted, calls: result.calls, usage: result.usage };

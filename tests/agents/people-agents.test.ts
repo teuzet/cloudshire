@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'vitest';
 import { FakeLlm, textReply, toolReply, toolsReply } from '../../src/adapters/llm/fake.js';
 import { fixedSettings } from '../../src/agents/_shared/settings.js';
-import { writeCityGenesis } from '../../src/agents/city-genesis/run.js';
+import { writeGenesisAspects, writeGenesisCore } from '../../src/agents/city-genesis/run.js';
+import { aspectBatches } from '../../src/agents/city-genesis/aspects.js';
+import { writeOfficerNatures } from '../../src/agents/officer-nature/run.js';
+import { writeCityBrief } from '../../src/agents/city-brief/run.js';
+import { createObject } from '../../src/core/world/objects.js';
+import { aspectText } from '../helpers/genesis.js';
 import { guideOnboarding } from '../../src/agents/onboarding-guide/run.js';
 import { writeNews } from '../../src/agents/herald/run.js';
 import { priestTurnBlock, runPriestTurn, type PriestHandlers } from '../../src/agents/priest/run.js';
@@ -10,42 +15,87 @@ import { blankCity, rules } from '../helpers/fixtures.js';
 
 const r = rules();
 const deps = (llm: FakeLlm) => ({ llm, settings: fixedSettings() });
+const tower = () =>
+  createObject(r, { id: 'tower', type: 'structure', name: 'Башня', description: 'Старая башня.', statEffect: { prosperity: 0, security: 0, knowledge: 1, influence: 0 }, day: 0 });
 
 describe('генезис и онбординг', () => {
-  const person = (name: string) => ({ name, gender: 'female', nature: 'тиха' });
-  const genesis = (names: string[]) => ({
-    city_name: 'Мерв',
-    description: 'Город на краю. '.repeat(30),
-    brief: 'Бриф города Мерв. '.repeat(10),
-    priest: person(names[0]!),
-    officers: { treasurer: person(names[1]!), marshal: person(names[2]!), keeper: person(names[3]!), chancellor: person(names[4]!) },
-    greeting: 'Покровительница, город слышит тебя.',
-  });
   const seed = { cityName: 'Мерв', patronName: 'Алаэр', patronGender: 'female' as const, pitch: 'Город каменотёсов' };
   const pool = ['Таэн', 'Иса', 'Орм', 'Лиэ', 'Кайр', 'Вэс'];
-
-  test('city-genesis: имена только из пула и без повторов, имя города — как дал игрок', async () => {
-    const llm = new FakeLlm().script(
-      'city-genesis',
-      toolReply('submit_genesis', genesis(['Таэн', 'Таэн', 'Орм', 'Лиэ', 'Кайр'])),
-      toolReply('submit_genesis', genesis(['Таэн', 'Чужой', 'Орм', 'Лиэ', 'Кайр'])),
-      toolReply('submit_genesis', genesis(pool)),
-    );
-    const g = await writeCityGenesis(deps(llm), { seed, names: pool, seasonRules: ['Через месяц придут драконы'] });
-    expect(g.cityName).toBe('Мерв');
-    expect(g.officers.keeper.name).toBe('Лиэ');
-    expect(llm.requests).toHaveLength(3);
-    expect(llm.requests[0]?.system).toContain('драконы');
+  const core = (over: Record<string, unknown> = {}) => ({
+    city_name: 'Мерв',
+    priest_name: 'Таэн',
+    priest_gender: 'female',
+    priest_description: 'Тиха и внимательна к знамениям.',
+    greeting: 'Алаэр, город слышит тебя.',
+    opening_lore: Array.from({ length: 8 }, (_, i) => `Факт ${i + 1}.`),
+    ...over,
   });
 
-  test('city-genesis: имя города, данное игроком, не подменяется', async () => {
+  test('city-genesis ядро: имя жреца из пула, имя города как дал игрок, приветствие слуги по имени', async () => {
     const llm = new FakeLlm().script(
       'city-genesis',
-      toolReply('submit_genesis', { ...genesis(pool), city_name: 'Другое' }),
-      toolReply('submit_genesis', genesis(pool)),
+      toolReply('submit_core', core({ city_name: 'Другое' })),
+      toolReply('submit_core', core({ priest_name: 'Чужой' })),
+      toolReply('submit_core', core({ greeting: 'Добро пожаловать в Мерв!' })),
     );
-    expect((await writeCityGenesis(deps(llm), { seed, names: pool, seasonRules: [] })).cityName).toBe('Мерв');
-    expect(JSON.stringify(llm.requests[1]?.messages)).toContain('ровно «Мерв»');
+    await expect(writeGenesisCore(deps(llm), { seed, names: pool, seasonRules: [] })).rejects.toThrow(/greeting/);
+    const sent = JSON.stringify(llm.requests.map((q) => q.messages));
+    expect(sent).toContain('ровно «Мерв»');
+    expect(sent).toContain('Чужой нет в списке');
+  });
+
+  test('city-genesis ядро: правила сезона в контексте, факты и жрец в ответе', async () => {
+    const llm = new FakeLlm().script('city-genesis', toolReply('submit_core', core()));
+    const c = await writeGenesisCore(deps(llm), { seed, names: pool, seasonRules: ['Через месяц придут драконы'] });
+    expect(c).toMatchObject({ cityName: 'Мерв', priest: { name: 'Таэн', gender: 'female' } });
+    expect(c.openingLore).toHaveLength(8);
+    expect(llm.requests[0]?.system).toContain('драконы');
+    expect(llm.requests[0]?.messages[0]?.content).toContain('ИЗОЛЯЦИЯ ДЛЯ ГЕНЕЗИСА');
+  });
+
+  test('city-genesis аспекты: короткий или повторённый раздел отбивается', async () => {
+    const batch = aspectBatches()[0]!;
+    const good = Object.fromEntries(batch.map((a) => [a.id, aspectText(a.id)]));
+    const dup = Object.fromEntries(batch.map((a) => [a.id, aspectText('одно')]));
+    const llm = new FakeLlm().script(
+      'city-genesis',
+      toolReply('submit_aspects', { ...good, [batch[0]!.id]: 'коротко' }),
+      toolReply('submit_aspects', dup),
+      toolReply('submit_aspects', good),
+    );
+    const out = await writeGenesisAspects(deps(llm), {
+      seed,
+      core: { cityName: 'Мерв', priest: { name: 'Таэн', gender: 'female', nature: '' }, greeting: '', openingLore: [] },
+      batch,
+      already: {},
+    });
+    expect(Object.keys(out)).toEqual(batch.map((a) => a.id));
+    expect(JSON.stringify(llm.requests[2]?.messages)).toContain('повторяют');
+  });
+
+  test('officer-nature: четыре должности, имена из пула без жреца и повторов', async () => {
+    const row = (office: string, name: string) => ({ office, name, gender: 'male', nature: 'Решает быстро и не выносит пустых слов.' });
+    const llm = new FakeLlm().script(
+      'officer-nature',
+      toolReply('submit_officer_natures', { officers: [row('treasurer', 'Таэн'), row('marshal', 'Орм'), row('keeper', 'Лиэ'), row('chancellor', 'Кайр')] }),
+      toolReply('submit_officer_natures', { officers: [row('treasurer', 'Иса'), row('marshal', 'Орм'), row('keeper', 'Лиэ'), row('chancellor', 'Кайр')] }),
+    );
+    const out = await writeOfficerNatures(deps(llm), { rules: r, cityName: 'Мерв', description: 'Город', names: pool, taken: ['Таэн'] });
+    expect(out.treasurer.name).toBe('Иса');
+    expect(JSON.stringify(llm.requests[1]?.messages)).toContain('уже занято: Таэн');
+  });
+
+  test('city-brief: неизвестности привязаны только к настоящим объектам', async () => {
+    const objects = [tower()];
+    const brief = 'Мерв живёт камнем. '.repeat(10);
+    const llm = new FakeLlm().script(
+      'city-brief',
+      toolReply('submit_city_brief', { brief, unknowns: [{ text: 'Кто построил башню, не установлено.', object_ids: ['nowhere'] }] }),
+      toolReply('submit_city_brief', { brief, unknowns: [{ text: '- Кто построил башню, не установлено.', object_ids: ['tower'] }, { text: 'нет' }] }),
+    );
+    const out = await writeCityBrief(deps(llm), { cityName: 'Мерв', patronName: 'Алаэр', patronGender: 'female', description: 'Город', objects });
+    expect(out.unknowns).toEqual([{ text: 'Кто построил башню, не установлено.', objectIds: ['tower'] }]);
+    expect(llm.requests[0]?.system).toContain('ОБЪЕКТЫ');
   });
 
   test('onboarding-guide: seed появляется, только когда агент его дал', async () => {
@@ -85,6 +135,7 @@ describe('голос жреца', () => {
       orderChange: async (a) => (log.push(`change:${a.intent}`), { ok: false, error: 'busy', say: 'Казначей занят.' }),
       withdraw: async (a) => (log.push(`withdraw:${a.office}`), { ok: true, say: 'Снят.' }),
       writeNote: async (a) => (log.push(`note:${a.text}`), { ok: true, say: 'Запомнил.' }),
+      consultLoremaster: async (a) => (log.push(`lore:${a.question}:${a.story_id ?? ''}`), { ok: true, say: 'В: что\nО: так' }),
     };
   }
 
@@ -113,6 +164,19 @@ describe('голос жреца', () => {
     expect(turn.acted).toBe(false);
     expect(log).toEqual(['change:Построить мост', 'note:Звать Алаэр']);
     expect(llm.requests[2]?.messages.at(-1)).toMatchObject({ role: 'user', content: expect.stringContaining('submit_reply') });
+  });
+
+  test('priest: лормастер за конкретикой, ответ уходит жрецу результатом тула', async () => {
+    const log: string[] = [];
+    const llm = new FakeLlm().script(
+      'priest',
+      toolReply('consult_loremaster', { question: 'Кто построил башню?', story_id: 'f1' }),
+      toolReply('submit_reply', { text: 'Так говорят старые записи.' }),
+    );
+    const turn = await runPriestTurn(deps(llm), { rules: r, city: blankCity(), day: 1, message: 'Кто построил башню?', quote: null }, handlers(log));
+    expect(log).toEqual(['lore:Кто построил башню?:f1']);
+    expect(turn.acted).toBe(false);
+    expect(JSON.stringify(llm.requests[1]?.messages.at(-1))).toContain('О: так');
   });
 
   test('priest: цитата и разговор уходят сообщениями, разговор начинается с user', async () => {

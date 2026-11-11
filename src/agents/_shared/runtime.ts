@@ -223,6 +223,8 @@ export async function runToolLoop<C, F>(
     final: { name: string; description: string; schema: z.ZodType<F, z.ZodTypeDef, unknown> };
     ctx: C;
     maxSteps?: number;
+    /** Тул, который модель обязана вызвать первым (например, чтение сведений). */
+    first?: string;
     signal?: AbortSignal;
   },
 ): Promise<ToolLoopResult<F>> {
@@ -247,7 +249,7 @@ export async function runToolLoop<C, F>(
         system: args.system,
         messages: [...messages],
         tools: llmTools,
-        toolChoice: lastStep ? { name: args.final.name } : 'required',
+        toolChoice: lastStep ? { name: args.final.name } : step === 1 && args.first ? { name: args.first } : 'required',
         ...(settings.maxOutputTokens ? { maxOutputTokens: settings.maxOutputTokens } : {}),
         ...(settings.effort ? { effort: settings.effort } : {}),
         ...(args.signal ? { signal: args.signal } : {}),

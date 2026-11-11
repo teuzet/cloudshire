@@ -136,3 +136,20 @@ export function plantScenario(
   city.scenariosUsed.push(scenario.id);
   return { objects, fronts };
 }
+
+/** Объекты тайн острова, которых коснулась история: ссылкой или целью ставки. */
+export function touchedMysteries(raw: Scenario, mystery: ReadonlySet<string>): string[] {
+  const touched = new Set<string>();
+  const see = (id: string | null | undefined) => {
+    if (id && mystery.has(id)) touched.add(id);
+  };
+  for (const o of raw.objects) o.refs.forEach(see);
+  for (const f of raw.fronts) {
+    f.refs.forEach(see);
+    const s = f.stake;
+    if (s && 'modify' in s) see(s.modify.target);
+    if (s && 'delete' in s) see(s.delete.target);
+    if (s && 'create' in s) (s.create.refs ?? []).forEach(see);
+  }
+  return [...touched];
+}

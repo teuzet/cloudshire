@@ -175,7 +175,7 @@ describe('посев и генезис объектов', () => {
     broken.fronts[0]!.refs = ['nowhere'];
     const adapted = { ...structuredClone(template), id: 'renamed', title: 'Островок у Мерва' };
     const llm = new FakeLlm().script('scenario-writer', toolReply('submit_scenario', broken), toolReply('submit_scenario', adapted));
-    const s = await writeScenario(deps(llm), { cityBrief: 'Мерв', objects: [], template, seed: null, names: [] });
+    const s = await writeScenario(deps(llm), { cityBrief: 'Мерв', objects: [], template, seed: null, names: [], unknowns: [] });
     expect(s.id).toBe('lantern-isle');
     expect(s.title).toBe('Островок у Мерва');
     expect(JSON.stringify(llm.requests[1]?.messages)).toContain('nowhere');
@@ -184,8 +184,19 @@ describe('посев и генезис объектов', () => {
   test('scenario-writer: можно ссылаться на живой объект города', async () => {
     const s = { id: 'x', title: 'x', fronts: [{ id: 'f', description: 'Трещина в башне', impact: 'MINOR', refs: ['tower'], stake: { delete: { target: 'tower' } } }] };
     const llm = new FakeLlm().script('scenario-writer', toolReply('submit_scenario', s));
-    const out = await writeScenario(deps(llm), { cityBrief: '', objects: [tower()], template: null, seed: 'трещина', names: [] });
+    const out = await writeScenario(deps(llm), { cityBrief: '', objects: [tower()], template: null, seed: 'трещина', names: [], unknowns: [] });
     expect(out.fronts[0]?.refs).toEqual(['tower']);
+  });
+
+  test('scenario-writer: объект тайны острова закрыт для посадки', async () => {
+    const touching = { id: 'x', title: 'x', fronts: [{ id: 'f', description: 'Трещина в башне', impact: 'MINOR', refs: ['tower'], stake: null }] };
+    const clean = { id: 'x', title: 'x', fronts: [{ id: 'f', description: 'Спор на рынке', impact: 'MINOR', stake: null }] };
+    const llm = new FakeLlm().script('scenario-writer', toolReply('submit_scenario', touching), toolReply('submit_scenario', clean));
+    const unknowns = [{ text: 'Кто построил башню, не установлено.', objectIds: ['tower'] }];
+    const out = await writeScenario(deps(llm), { cityBrief: '', objects: [tower()], template: null, seed: 'что-нибудь', names: [], unknowns });
+    expect(out.fronts[0]?.description).toBe('Спор на рынке');
+    expect(llm.requests[0]?.system).toContain('ТАЙНЫ ОСТРОВА');
+    expect(JSON.stringify(llm.requests[1]?.messages)).toContain('касается тайны острова: tower');
   });
 
   test('world-objects-genesis: число объектов из правил', async () => {

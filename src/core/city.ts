@@ -214,6 +214,32 @@ export interface DialogEntry {
   kind: 'reply' | 'news';
 }
 
+/**
+ * Каноническая неизвестность: то, что в мире официально не установлено.
+ * Позже такая тайна «выстрелит»; до тех пор её объекты закрыты для посадок историй.
+ */
+export interface CanonicalUnknown {
+  text: string;
+  /** Объекты острова, на которых держится тайна. */
+  objectIds: string[];
+}
+
+/**
+ * Факт мира: сухое утверждение о том, что есть. Пишут генезис и лормастер.
+ * Снятый факт не удаляется: он помечен retired и в промпты больше не идёт.
+ */
+export interface LoreFact {
+  id: string;
+  text: string;
+  day: number;
+  /** Факт дописан по вопросу о конкретной истории. */
+  frontId: string | null;
+  author: 'genesis' | 'loremaster';
+  status: 'active' | 'retired';
+  previousText: string | null;
+  reason: string | null;
+}
+
 /** Заметка жреца: «называть только Алаэр», «не будить по мелочам». */
 export interface PriestNote {
   id: string;
@@ -249,8 +275,14 @@ export interface City {
   ownerId: string;
   name: string;
   patronName: string;
-  /** Литературное описание города для агентов. */
+  /** Полное описание города из генезиса: аспекты подряд. */
+  description: string;
+  /** Компактный фактический бриф города для агентов. */
   brief: string;
+  /** Канонические неизвестности: установленные пробелы мира. Их не раскрывает лормастер и не трогают посадки. */
+  unknowns: CanonicalUnknown[];
+  /** Факты мира: стартовые из генезиса и дописанные лормастером. */
+  facts: LoreFact[];
   priest: Priest;
   officers: Officer[];
   stats: StatMap;
@@ -281,7 +313,10 @@ export function newCity(args: {
   ownerId: string;
   name: string;
   patronName: string;
+  description: string;
   brief: string;
+  unknowns: CanonicalUnknown[];
+  facts: LoreFact[];
   priest: Priest;
   officers: Officer[];
   objects: WorldObject[];
@@ -298,7 +333,10 @@ export function newCity(args: {
     ownerId: args.ownerId,
     name: args.name,
     patronName: args.patronName,
+    description: args.description,
     brief: args.brief,
+    unknowns: args.unknowns.map((u) => ({ text: u.text, objectIds: [...u.objectIds] })),
+    facts: args.facts,
     priest: args.priest,
     officers: args.officers,
     stats: { ...args.stats },

@@ -10,11 +10,17 @@ agents:
     maxOutputTokens: 4000
   herald:
     maxOutputTokens: 2000
+  loremaster:
+    maxOutputTokens: 2000
   onboarding-guide:
     maxOutputTokens: 2000
   city-genesis:
     model: anthropic:claude-sonnet-4-6
     maxOutputTokens: 12000
+  officer-nature:
+    maxOutputTokens: 1500
+  city-brief:
+    maxOutputTokens: 3000
   world-objects-genesis:
     maxOutputTokens: 16000
   scenario-writer:

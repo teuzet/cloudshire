@@ -7,7 +7,8 @@
 import type { City } from '../core/city.js';
 import { scheduleJob } from '../core/jobs.js';
 import { activeFronts } from '../core/world/fronts.js';
-import { plantScenario, type Scenario } from '../core/world/scenario.js';
+import { mysteryObjectIds } from '../core/lore.js';
+import { plantScenario, touchedMysteries, type Scenario } from '../core/world/scenario.js';
 import type { OutboundMessage } from '../ports/notifier.js';
 import { writeScenario } from '../agents/scenario-writer/run.js';
 import { record } from './chronicle.js';
@@ -40,12 +41,14 @@ async function plantOne(deps: FlowDeps, city: City, day: number): Promise<Outbou
         template,
         seed: null,
         names,
+        unknowns: city.unknowns,
       }),
     template,
   );
   // История по зерну получает свой id: заготовки он не повторит.
   if (scenario && !template) scenario.id = newId(deps, 'story');
-  if (!scenario || city.scenariosUsed.includes(scenario.id)) {
+  // Тайны острова закрыты для посадок: это проверяет и агент, но запасная заготовка идёт мимо него.
+  if (!scenario || city.scenariosUsed.includes(scenario.id) || touchedMysteries(scenario, mysteryObjectIds(city)).length) {
     await returnNames(deps, names);
     return null;
   }
