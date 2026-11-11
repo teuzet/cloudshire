@@ -12,11 +12,14 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint:deps": "depcruise src --config .dependency-cruiser.cjs",
-    "check": "npm run typecheck && npm run lint:deps && npm test"
+    "check": "npm run typecheck && npm run lint:deps && npm test",
+    "bot": "tsx src/clients/telegram/main.ts",
+    "dev": "tsx src/clients/dev/main.ts"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.19.43",
+    "@types/node-telegram-bot-api": "^0.64.15",
     "dependency-cruiser": "^16.10.4",
     "typescript": "^5.9.3",
     "vitest": "^2.1.9"
@@ -24,7 +27,10 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
     "js-yaml": "^4.3.2",
+    "mongodb": "^6.22.0",
+    "node-telegram-bot-api": "^0.66.0",
     "openai": "^7.55.0",
+    "tsx": "^4.23.15",
     "zod": "^3.25.76",
     "zod-to-json-schema": "^3.25.2"
   }

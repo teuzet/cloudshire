@@ -12,7 +12,7 @@
 - `src/adapters/` — реализации портов. Только здесь импортируются SDK, Mongo и Telegram. LLM: openai, anthropic, router, fake (тесты), cassette.
 - `src/agents/<name>/` — LLM-агенты: prompt.md, schema.ts, run.ts, README.md. Список и правила — src/agents/README.md.
 - `src/flows/` — игровые потоки: онбординг, генезис, ход жреца, день города, посев. Список — src/flows/README.md.
-- `src/clients/` — Telegram, mini-app, dev-клиент (шаг 4, ещё нет).
+- `src/clients/` — точки входа: `telegram/main.ts` (бот), `dev/main.ts` (игра в браузере), `app.ts` (сборка из окружения). Mini-app ещё нет.
 - `config/agents.yaml` — модели агентов (`провайдер:модель`).
 - `config/game.yaml` — все игровые числа. Проверяется `parseRules`, отсутствие ключа — ошибка.
 - `scenarios/*.yaml` — заготовки историй, схема в `src/core/world/scenario.ts`.
@@ -30,3 +30,4 @@
 
 - `npm run check` — typecheck + lint:deps + тесты. Гоняй перед каждым коммитом.
 - `npm test`, `npm run test:watch`.
+- `npm run dev` / `npm run bot` — ходят в настоящие модели: только по просьбе Ника.

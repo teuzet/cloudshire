@@ -4,12 +4,18 @@ import path from 'node:path';
 import { afterAll, describe, expect, test } from 'vitest';
 import { FileStorage } from '../../src/adapters/storage/file.js';
 import { MemoryStorage } from '../../src/adapters/storage/memory.js';
+import { MongoStorage } from '../../src/adapters/storage/mongo.js';
 import { StaleWriteError, type Storage } from '../../src/ports/storage.js';
 import { blankCity } from '../helpers/fixtures.js';
 
 const tmpDirs: string[] = [];
+const mongos: MongoStorage[] = [];
 afterAll(async () => {
   for (const dir of tmpDirs) await fs.rm(dir, { recursive: true, force: true });
+  for (const m of mongos) {
+    await m.dropDatabase();
+    await m.close();
+  }
 });
 
 const makers: Array<[string, () => Promise<Storage>]> = [
@@ -23,6 +29,20 @@ const makers: Array<[string, () => Promise<Storage>]> = [
     },
   ],
 ];
+
+// Mongo проходит тот же контракт, если есть база: MONGODB_TEST_URI=mongodb://localhost:27017 npm test
+const mongoUri = process.env.MONGODB_TEST_URI;
+if (mongoUri) {
+  let n = 0;
+  makers.push([
+    'mongo',
+    async () => {
+      const m = await MongoStorage.connect(mongoUri, `cloudshire_test_${process.pid}_${n++}`);
+      mongos.push(m);
+      return m;
+    },
+  ]);
+}
 
 // Один контракт на все адаптеры: Mongo потом пройдёт его же.
 describe.each(makers)('хранилище: %s', (_name, make) => {
