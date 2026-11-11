@@ -1,12 +1,8 @@
 node_modules/
+dist/
+coverage/
 .env
 data/
-data-test/
-artifacts/
 logs/
 *.log
 .DS_Store
-data-prepivot/
-data-prod-snapshot-*/
-data-freeform/
-*.deb
