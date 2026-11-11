@@ -27,10 +27,10 @@ export function ids(seed = 1): (prefix?: string) => string {
 export function blankCity(overrides: Partial<City> = {}): City {
   const r = rules();
   const officers = createOfficers(r, {
-    treasurer: { name: 'Ада', nature: 'скупа' },
-    marshal: { name: 'Борислав', nature: 'резок' },
-    keeper: { name: 'Вета', nature: 'медлит' },
-    chancellor: { name: 'Гордей', nature: 'любезен' },
+    treasurer: { name: 'Ада', gender: 'female', nature: 'скупа' },
+    marshal: { name: 'Борислав', gender: 'male', nature: 'резок' },
+    keeper: { name: 'Вета', gender: 'female', nature: 'медлит' },
+    chancellor: { name: 'Гордей', gender: 'male', nature: 'любезен' },
   });
   return {
     id: 'city_test',
@@ -39,7 +39,7 @@ export function blankCity(overrides: Partial<City> = {}): City {
     name: 'Туманск',
     patronName: 'Астра',
     brief: 'Туманный торговый город у края обрыва.',
-    priest: { name: 'Илан', nature: 'тих и внимателен' },
+    priest: { name: 'Илан', gender: 'male', nature: 'тих и внимателен' },
     officers,
     stats: { prosperity: 50, security: 50, knowledge: 50, influence: 50 },
     statScale: 1,

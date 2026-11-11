@@ -3,16 +3,17 @@
  */
 
 import type { Office, Rules } from './rules.js';
-import type { City, Officer } from './city.js';
+import type { City, Gender, Officer } from './city.js';
 import type { Rng } from './random.js';
 import { pickOne } from './random.js';
 
-export function createOfficers(rules: Rules, people: Record<Office, { name: string; nature: string }>): Officer[] {
+export function createOfficers(rules: Rules, people: Record<Office, { name: string; gender: Gender; nature: string }>): Officer[] {
   return rules.officers.map((def) => ({
     office: def.office,
     statId: def.statId,
     title: def.title,
     name: people[def.office].name,
+    gender: people[def.office].gender,
     nature: people[def.office].nature,
     assignmentId: null,
   }));

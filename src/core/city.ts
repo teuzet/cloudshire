@@ -171,13 +171,25 @@ export interface Officer {
   statId: StatId;
   title: string;
   name: string;
+  gender: Gender;
   /** Характер человека: пара фраз для промптов. */
   nature: string;
   assignmentId: string | null;
 }
 
+export type Gender = 'female' | 'male';
+
+/** «Рыба» города: что собрал онбординг и из чего генезис строит город. */
+export interface CitySeed {
+  cityName: string | null;
+  patronName: string;
+  patronGender: Gender;
+  pitch: string;
+}
+
 export interface Priest {
   name: string;
+  gender: Gender;
   nature: string;
 }
 

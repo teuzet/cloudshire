@@ -12,7 +12,13 @@ export interface ToolCall {
 
 export type LlmMessage =
   | { role: 'user'; content: string }
-  | { role: 'assistant'; content: string; toolCalls?: ToolCall[] }
+  | {
+      role: 'assistant';
+      content: string;
+      toolCalls?: ToolCall[];
+      /** Сырой ответ провайдера (например, блоки мышления). Адаптер того же провайдера отдаёт его назад как есть. */
+      providerContent?: { provider: string; blocks: unknown };
+    }
   | { role: 'tool'; toolCallId: string; content: string };
 
 export interface LlmTool {
@@ -32,6 +38,8 @@ export interface LlmRequest {
   /** required — модель обязана вызвать какой-то тул; объект — конкретный. */
   toolChoice?: 'auto' | 'required' | { name: string };
   maxOutputTokens?: number;
+  /** Глубина рассуждения, если модель это умеет. */
+  effort?: 'low' | 'medium' | 'high';
   signal?: AbortSignal;
 }
 
@@ -46,6 +54,9 @@ export interface LlmResponse {
   toolCalls: ToolCall[];
   usage: LlmUsage;
   model: string;
+  /** Ответ оборван лимитом или отказом — разбирать его не надо. */
+  stop: 'done' | 'length' | 'refusal';
+  providerContent?: { provider: string; blocks: unknown };
 }
 
 export interface Llm {

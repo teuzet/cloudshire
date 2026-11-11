@@ -9,10 +9,11 @@
 
 - `src/core/` — чистая логика мира: правила, время, объекты, фронты, статы, очередь, мана. Без IO, LLM и `process.env`.
 - `src/ports/` — интерфейсы Llm, Storage, Clock, Random, Notifier.
-- `src/adapters/` — реализации портов. Только здесь импортируются SDK, Mongo и Telegram.
-- `src/agents/<name>/` — LLM-агенты (шаг 2, ещё нет).
+- `src/adapters/` — реализации портов. Только здесь импортируются SDK, Mongo и Telegram. LLM: openai, anthropic, router, fake (тесты), cassette.
+- `src/agents/<name>/` — LLM-агенты: prompt.md, schema.ts, run.ts, README.md. Список и правила — src/agents/README.md.
 - `src/flows/` — сценарии, склеивающие core и агентов (шаг 3, ещё нет).
 - `src/clients/` — Telegram, mini-app, dev-клиент (шаг 4, ещё нет).
+- `config/agents.yaml` — модели агентов (`провайдер:модель`).
 - `config/game.yaml` — все игровые числа. Проверяется `parseRules`, отсутствие ключа — ошибка.
 - `scenarios/*.yaml` — заготовки историй, схема в `src/core/world/scenario.ts`.
 

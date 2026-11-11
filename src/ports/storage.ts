@@ -1,4 +1,4 @@
-import type { City, World } from '../core/city.js';
+import type { City, CitySeed, World } from '../core/city.js';
 
 /**
  * Хранилище. Каждый документ несёт revision: запись поверх чужой, более
@@ -16,7 +16,7 @@ export interface OnboardingDraft {
   ownerId: string;
   messages: Array<{ role: 'patron' | 'guide'; text: string }>;
   /** Готовая «рыба» для генезиса, когда игрок её подтвердил. */
-  seed: { cityName: string; patronName: string; pitch: string } | null;
+  seed: CitySeed | null;
   status: 'talking' | 'generating' | 'failed';
   revision: number;
 }
