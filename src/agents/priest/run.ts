@@ -18,12 +18,14 @@ import { runToolLoop, type AgentDeps, type LoopTool } from '../_shared/runtime.j
 import {
   assignOfficerSchema,
   consultSchema,
+  existenceCheckSchema,
   noteSchema,
   orderChangeSchema,
   replySchema,
   withdrawSchema,
   type AssignOfficerArgs,
   type ConsultArgs,
+  type ExistenceCheckArgs,
   type NoteArgs,
   type OrderChangeArgs,
   type WithdrawArgs,
@@ -38,6 +40,7 @@ export interface PriestHandlers {
   withdraw(args: WithdrawArgs): Promise<ToolOutcome>;
   writeNote(args: NoteArgs): Promise<ToolOutcome>;
   consultLoremaster(args: ConsultArgs): Promise<ToolOutcome>;
+  checkExistence(args: ExistenceCheckArgs): Promise<ToolOutcome>;
 }
 
 export interface PriestTurnInput {
@@ -115,6 +118,12 @@ const TOOLS: LoopTool<PriestHandlers>[] = [
     'Спросить лормастера о конкретике мира, которой нет в блоке хода. Один вопрос за вызов.',
     consultSchema,
     (h, a) => h.consultLoremaster(a),
+  ),
+  tool<ExistenceCheckArgs>(
+    'check_existence',
+    'Есть ли такое в мире. Зови, когда покровитель называет место, людей, вещь или обычай, которых нет в блоке хода, до того как отказать или поручить дело. Ответ скажет: уже есть, теперь записано, неизвестно (можно поручить поиск) или такого нет.',
+    existenceCheckSchema,
+    (h, a) => h.checkExistence(a),
   ),
 ];
 

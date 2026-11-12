@@ -23,6 +23,7 @@ import { sealKey } from '../../src/agents/key-sealer/run.js';
 import { resolveEvent } from '../../src/agents/resolver/run.js';
 import { appraiseRisk } from '../../src/agents/risk-appraiser/run.js';
 import { fitRole } from '../../src/agents/role-fitter/run.js';
+import { judgeExistence } from '../../src/agents/existence-judge/run.js';
 import { planStages } from '../../src/agents/stage-planner/run.js';
 import { tagThemes } from '../../src/agents/theme-tagger/run.js';
 import { interpretWill } from '../../src/agents/will-interpreter/run.js';
@@ -41,7 +42,7 @@ const masons: ObjectBrief = { id: 'o2', type: 'community', name: 'Артель �
 const fronts = [{ id: 'f1', title: 'Стройка башни', kind: 'дело', description: 'Артель кладёт цоколь.', lead: 'казначей Ада', hindrances: [{ name: 'Грозовые птицы', description: 'Стая вьёт гнёзда на лесах.' }] }];
 
 const GENERATORS = ['stage-planner', 'key-sealer', 'costumer', 'dynamics-composer', 'beat-writer', 'resolver', 'description-rewriter', 'chronicler'];
-const EVALUATORS = ['will-interpreter', 'canon-warden', 'contribution-appraiser', 'risk-appraiser', 'footprint-mapper', 'alignment-judge', 'role-fitter', 'faith-appraiser', 'theme-tagger'];
+const EVALUATORS = ['existence-judge', 'will-interpreter', 'canon-warden', 'contribution-appraiser', 'risk-appraiser', 'footprint-mapper', 'alignment-judge', 'role-fitter', 'faith-appraiser', 'theme-tagger'];
 
 describe('гигиена промптов системы фронтов', () => {
   const read = (agent: string) => fs.readFileSync(path.join(ROOT, 'src/agents', agent, 'prompt.md'), 'utf8');
@@ -182,6 +183,17 @@ describe('воля игрока', () => {
 });
 
 describe('веха, осложнение, развязка', () => {
+  test('existence-judge: незнакомый id части отбивается', async () => {
+    const llm = new FakeLlm().script(
+      'existence-judge',
+      toolReply('submit_existence', { verdict: 'exists', object_id: 'nope', reason: 'Есть' }),
+      toolReply('submit_existence', { verdict: 'unknown', object_id: null, reason: 'Можно только найти' }),
+    );
+    const out = await judgeExistence(deps(llm), { thing: 'катакомбы', context: 'Иди в катакомбы', objects: [masons], facts: [] });
+    expect(out).toEqual({ verdict: 'unknown', objectId: null, reason: 'Можно только найти' });
+    expect(JSON.stringify(llm.requests[1]?.messages)).toContain('object_id nope');
+  });
+
   test('role-fitter: да или нет', async () => {
     const llm = new FakeLlm().script('role-fitter', toolReply('submit_fit', { fits: true, reason: 'Тянут стройку' }));
     expect(await fitRole(deps(llm), { question: 'Им стало тяжелее?', subject: 'Артель каменщиков', context: 'Спешная стройка' })).toEqual({ fits: true, reason: 'Тянут стройку' });

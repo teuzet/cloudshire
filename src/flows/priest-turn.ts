@@ -9,8 +9,10 @@ import { appendDialog } from '../core/chronicle.js';
 import { canAfford, spendMana, turnCost } from '../core/mana.js';
 import { runPriestTurn, type PriestHandlers, type ToolOutcome } from '../agents/priest/run.js';
 import { askLoremaster } from '../agents/loremaster/run.js';
+import { judgeExistence } from '../agents/existence-judge/run.js';
+import { activeFacts } from '../core/lore.js';
 import type { CityLocks } from './city-lock.js';
-import { newId, requireWorld, sendAll, today, type FlowDeps } from './context.js';
+import { newId, requireWorld, sendAll, today, tryAgent, type FlowDeps } from './context.js';
 import { processDue } from './day.js';
 import { playerWill, withdraw } from './will.js';
 
@@ -58,6 +60,46 @@ function handlersFor(deps: FlowDeps, city: City, day: number): PriestHandlers {
       } catch (err) {
         deps.log?.warn('loremaster_failed', { cityId: city.id, error: String(err) });
         return { ok: false, error: 'loremaster_failed', say: 'Сейчас это не припомнить. Отвечай из того, что знаешь, или скажи, что не знаешь.' };
+      }
+    },
+    async checkExistence({ thing, context }) {
+      const ruling = await tryAgent(
+        deps,
+        'existence-judge',
+        () =>
+          judgeExistence(deps.agents, {
+            thing,
+            context,
+            objects: city.objects.filter((o) => o.status === 'active' && !o.hidden),
+            facts: activeFacts(city),
+          }),
+        { verdict: 'unknown' as const, objectId: null, reason: '' },
+      );
+      if (ruling.verdict === 'exists') {
+        const obj = ruling.objectId ? city.objects.find((o) => o.id === ruling.objectId) : null;
+        return { ok: true, say: obj ? `Это есть в городе: ${obj.name}. ${obj.description}` : `Это есть в городе. ${ruling.reason}` };
+      }
+      if (ruling.verdict === 'absent') return { ok: true, say: `Такого в мире нет: ${ruling.reason}` };
+      if (ruling.verdict === 'unknown') {
+        return {
+          ok: true,
+          say: `Есть ли «${thing}», неизвестно. Узнать это можно только поиском: если покровитель велит, это поручение искать (order_change «найти …»).`,
+        };
+      }
+      // Подробность без пользы сама по себе: лормастер дописывает её в канон.
+      try {
+        const lore = await askLoremaster(deps.agents, {
+          city,
+          day,
+          questions: [`Что такое «${thing}» в нашем городе? Опиши коротко, как это устроено. Повод: ${context}`],
+          asker: 'priest',
+          frontId: null,
+          newFactId: () => newId(deps, 'fact'),
+        });
+        return { ok: true, say: `Это есть в городе. ${lore.text}` };
+      } catch (err) {
+        deps.log?.warn('loremaster_failed', { cityId: city.id, error: String(err) });
+        return { ok: true, say: `Это есть в городе: ${thing}. ${ruling.reason}` };
       }
     },
   };

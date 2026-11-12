@@ -138,6 +138,7 @@ describe('голос жреца', () => {
       withdraw: async (a) => (log.push(`withdraw:${a.office}`), { ok: true, say: 'Снят.' }),
       writeNote: async (a) => (log.push(`note:${a.text}`), { ok: true, say: 'Запомнил.' }),
       consultLoremaster: async (a) => (log.push(`lore:${a.question}:${a.story_id ?? ''}`), { ok: true, say: 'В: что\nО: так' }),
+      checkExistence: async (a) => (log.push(`exists:${a.thing}`), { ok: true, say: 'Неизвестно.' }),
     };
   }
 
