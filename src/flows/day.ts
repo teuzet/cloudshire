@@ -58,7 +58,16 @@ function resultWords(city: City, front: Front): string | null {
     if (op.op === 'create') return `${op.object.name}. ${op.object.description}`;
     if (op.op === 'fact') return op.text;
     if (op.op === 'attach') return `делу помогут: ${op.object.name}. ${op.object.description}`;
-    if (op.op === 'progress') return `дело «${findFront(city, op.frontId)?.title ?? ''}» продвинется`;
+    if (op.op === 'reveal') {
+      const hidden = findObject(city, op.target);
+      if (hidden) return `откроется: ${hidden.name}. ${hidden.description}`;
+      continue;
+    }
+    if (op.op === 'progress') {
+      const pushed = findFront(city, op.frontId);
+      if (!pushed || pushed.status !== 'active') continue;
+      return pushed.form === 'threat' || pushed.form === 'tension' ? `беда «${pushed.title}» ослабнет` : `дело «${pushed.title}» продвинется`;
+    }
     if (op.op === 'revalue' || op.op === 'modify' || op.op === 'delete') {
       const target = findObject(city, op.target);
       if (!target) continue;
