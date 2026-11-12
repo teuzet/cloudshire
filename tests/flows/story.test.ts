@@ -5,7 +5,7 @@ import { findFront } from '../../src/core/world/fronts.js';
 import { patronMessage } from '../../src/flows/priest-turn.js';
 import { runDueCities } from '../../src/flows/scheduler.js';
 import { blankCity } from '../helpers/fixtures.js';
-import { lanternIsle, stand } from '../helpers/game.js';
+import { lanternIsle, lastUser, scriptFrontAgents, stand } from '../helpers/game.js';
 
 async function plantedCity() {
   const s = await stand();
@@ -14,11 +14,16 @@ async function plantedCity() {
   scheduleJob(city, { id: 'job_seed', kind: 'seed', dueDay: 3 });
   await s.deps.storage.saveCity(city);
   s.llm.always('scenario-writer', toolReply('submit_scenario', { ...lanternIsle(), title: 'Островок у Мерва' }));
+  scriptFrontAgents(s.llm);
+  s.llm.always(
+    'stage-planner',
+    toolReply('submit_stages', { stages: [{ title: 'Дозор у края', work: 'Стража встаёт в дозор.', result: { kind: 'new_object', type: 'organization', name: 'Дозор у края', description: 'Постоянный дозор.' }, site: null, outcome_known: true }] }),
+  );
   return { ...s, cityId: city.id };
 }
 
 describe('история от посева до развязки', () => {
-  test('посев → поручение → биты → ставка → развязка', async () => {
+  test('посев → стратегия → вехи с уликами → ставка → развязка', async () => {
     const s = await plantedCity();
     s.passDays(2);
     expect((await runDueCities(s.deps, s.locks)).cities).toBe(0);
@@ -31,41 +36,47 @@ describe('история от посева до развязки', () => {
     expect(city.scenariosUsed[0]).toBe('lantern-isle');
     expect(city.scenariosUsed[1]).toMatch(/^story_/);
     expect(s.llm.callsTo('scenario-writer')[1]?.messages[0]?.content).toContain('Зерно истории');
-    expect(story.ratePerDay).toBe(0);
+    expect(story).toMatchObject({ form: 'find', capacity: s.r.seeding.capacity.SIGNIFICANT, milestones: 3, ratePerDay: 0 });
     expect(city.objects.map((o) => o.name)).toContain('Башня на островке');
     expect(s.inbox.sent).toHaveLength(2);
     expect(city.fronts.filter((f) => f.origin === 'story')).toHaveLength(2);
     expect(city.jobs.find((j) => j.kind === 'seed' && j.state === 'pending')?.dueDay).toBe(3 + s.r.seeding.checkEveryDays);
 
-    // Жрец поручает хранителю надписи; оценщик видит, что это двигает историю.
+    // Жрец поручает хранителю надписи; Толкователь видит в этом стратегию для идущей истории.
     s.llm
       .script('priest', toolsReply(['assign_officer', { office: 'keeper', task: 'Разобрать надписи на башне' }], ['submit_reply', { text: 'Вета возьмётся.' }]))
-      .always('assignment-evaluator', toolReply('submit_assignment_eval', { direction: 'forward', efficiency: 'strong', blocks: [], stop_when: 'stake' }))
-      .always('beat-resolver', (req) => {
-        const clue = /- (\w+): /.exec(req.system.split('Улики:\n')[1] ?? '')?.[1];
-        return toolReply('submit_beat_pick', { clue_id: clue });
-      });
+      .script('will-interpreter', toolReply('submit_will', { label: 'strategy', front_id: story.id, goal: 'Разобрать надписи на башне', manner: 'Расшифровать надписи на башне' }))
+      .script('alignment-judge', toolReply('submit_alignment', { verdict: 'spot_on', matched_move: 4 }));
     const reply = await patronMessage(s.deps, s.locks, { ownerId: 'u1', text: 'Пусть хранитель разберёт надписи' });
     expect(reply).toMatchObject({ kind: 'reply', text: 'Вета возьмётся.', acted: true });
     city = (await s.deps.storage.getCity(s.cityId))!;
     expect(city.mana.value).toBeCloseTo(50 - s.r.mana.turnCostWithAction, 0);
-    expect(findFront(city, story.id)!.ratePerDay).toBeGreaterThan(0);
+    expect(findFront(city, story.id)!.ratePerDay * 30).toBeCloseTo(4 * 1.5 * 0.9);
     const keeper = city.officers.find((o) => o.office === 'keeper')!;
     expect(keeper.assignmentId).not.toBeNull();
+    // Судья сверял стратегию со скрытой логикой заготовки и подходами к уликам.
+    const judged = lastUser(s.llm.callsTo('alignment-judge')[0]!);
+    expect(judged).toContain('Расшифровка надписей, языков и символов.');
+    expect(judged).toContain('Предложено: «Расшифровать надписи на башне»');
 
-    // Время идёт: два порога, потом ставка.
+    // Время идёт: две вехи открывают улики, третья приносит ставку.
     for (let i = 0; i < 400 && findFront(city, story.id)!.status === 'active'; i++) {
       s.passDays(1);
       await runDueCities(s.deps, s.locks);
       city = (await s.deps.storage.getCity(s.cityId))!;
     }
     const done = findFront(city, story.id)!;
-    expect(done.status).toBe('resolved');
-    expect(done.beatsFired).toEqual([0, 1]);
-    expect(done.clues.every((c) => c.status === 'revealed')).toBe(true);
+    expect(done).toMatchObject({ status: 'done', milestonesFired: 3 });
+    expect(done.script?.clues.every((c) => c.revealed)).toBe(true);
     const storyEntries = city.chronicle.filter((e) => e.frontId === story.id).map((e) => e.source);
-    expect(storyEntries).toEqual(['scenario', 'beat', 'beat', 'stake']);
-    expect(city.chronicle.at(-1)?.text).toContain('Рецепт был способом удерживать островок на месте');
+    expect(storyEntries).toEqual(['scenario', 'milestone', 'milestone', 'completion']);
+    const known = city.facts.filter((f) => f.frontId === story.id).map((f) => f.text);
+    expect(known).toEqual([
+      'Надписи описывают изменение направления движения острова.',
+      'Центральный механизм башни связан с подъёмной силой островка.',
+      'Рецепт был способом удерживать островок на месте.',
+    ]);
+    expect(lastUser(s.llm.callsTo('chronicler').at(-1)!)).toContain('Стало известно: Рецепт был способом удерживать островок на месте.');
     expect(city.officers.find((o) => o.office === 'keeper')!.assignmentId).toBeNull();
     expect(s.inbox.sent).toHaveLength(5);
     expect(s.llm.callsTo('herald').at(-1)?.messages[0]?.content).toContain('развязка');
@@ -84,11 +95,14 @@ describe('история от посева до развязки', () => {
     const s = await plantedCity();
     s.llm
       .always('priest', toolReply('assign_officer', { office: 'marshal', task: 'Дозор у края' }))
-      .always('assignment-evaluator', toolReply('submit_assignment_eval', { direction: 'none', efficiency: 'normal', blocks: [], stop_when: 'stake' }));
+      .always('will-interpreter', toolReply('submit_will', { label: 'project', goal: 'Поставить дозор у края' }));
     const reply = await patronMessage(s.deps, s.locks, { ownerId: 'u1', text: 'Дозор!' });
     expect(reply.kind).toBe('failed');
+    expect(s.llm.callsTo('stage-planner').length).toBeGreaterThan(0);
     const city = (await s.deps.storage.getCity(s.cityId))!;
     expect(city.assignments).toHaveLength(0);
+    expect(city.fronts).toHaveLength(0);
+    expect(city.projects).toHaveLength(0);
     expect(city.officers.every((o) => !o.assignmentId)).toBe(true);
     expect(city.mana.value).toBe(50);
   });
@@ -99,16 +113,16 @@ describe('история от посева до развязки', () => {
       .script(
         'priest',
         toolsReply(['assign_officer', { office: 'marshal', task: 'Дозор у края' }], ['submit_reply', { text: 'Маршал выйдет.' }]),
-        toolsReply(['assign_officer', { office: 'marshal', task: 'Ещё дозор' }], ['submit_reply', { text: 'Маршал занят.' }]),
+        toolsReply(['order_change', { office: 'marshal', intent: 'Ещё один дозор' }], ['submit_reply', { text: 'Маршал занят.' }]),
       )
-      .always('assignment-evaluator', toolReply('submit_assignment_eval', { direction: 'none', efficiency: 'normal', blocks: [], stop_when: 'stake' }));
-    await patronMessage(s.deps, s.locks, { ownerId: 'u1', text: 'Дозор!' });
+      .always('will-interpreter', toolReply('submit_will', { label: 'project', goal: 'Поставить дозор у края' }));
+    const first = await patronMessage(s.deps, s.locks, { ownerId: 'u1', text: 'Дозор!' });
+    expect(first).toMatchObject({ acted: true });
     const second = await patronMessage(s.deps, s.locks, { ownerId: 'u1', text: 'Ещё дозор!' });
     expect(second).toMatchObject({ acted: false });
-    const toolResult = s.llm.callsTo('priest')[1]; // второй ход сдан с первого ответа
-    expect(toolResult).toBeDefined();
     const city = (await s.deps.storage.getCity(s.cityId))!;
     expect(city.assignments).toHaveLength(1);
+    expect(city.fronts.filter((f) => f.origin === 'player')).toHaveLength(1);
     expect(city.dialog.filter((d) => d.kind === 'reply')).toHaveLength(4);
   });
 });

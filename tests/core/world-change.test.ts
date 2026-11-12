@@ -2,110 +2,47 @@ import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
 import { describe, expect, test } from 'vitest';
-import { runCascade, subscribersOf } from '../../src/core/world/cascade.js';
-import { createFront } from '../../src/core/world/fronts.js';
-import { buildMutationFront, consequenceAsk, releaseNextConsequence } from '../../src/core/world/mutation.js';
-import { createObject } from '../../src/core/world/objects.js';
+import { changedObjectIds, describeChanges, isNotable, type Change } from '../../src/core/world/changes.js';
+import { nextEventDay } from '../../src/core/world/fronts.js';
 import { parseScenario, plantScenario } from '../../src/core/world/scenario.js';
 import { blankCity, ids, rules } from '../helpers/fixtures.js';
 
 const r = rules();
+const zero = { prosperity: 0, security: 0, knowledge: 0, influence: 0 };
 
-describe('каскад по refs', () => {
-  function islandCity() {
-    const city = blankCity();
-    city.objects.push(
-      createObject(r, { id: 'island', type: 'site', name: 'Островок', description: '', day: 0 }),
-      createObject(r, { id: 'tower', type: 'structure', name: 'Башня', description: '', refs: ['island'], day: 0 }),
-    );
-    city.fronts.push(
-      createFront(r, { id: 'recipe', description: 'Рецепт', stake: null, effort: 5, driftBand: 'NONE', beatCount: 0, refs: ['tower'], day: 0 }),
-    );
-    return city;
-  }
+describe('перемены события: «дифф» для летописца', () => {
+  const changes: Change[] = [
+    { kind: 'object_created', objectId: 'b', name: 'Баллиста', type: 'structure', points: { ...zero, security: 12, prosperity: -2 }, temporary: false, hidden: false },
+    { kind: 'object_created', objectId: 'h', name: 'Тайный сговор', type: 'community', points: zero, temporary: false, hidden: true },
+    { kind: 'object_changed', objectId: 'g', name: 'Гильдия', delta: { ...zero, prosperity: -3 }, description: 'Гильдия в обиде' },
+    { kind: 'object_removed', objectId: 's', name: 'Стройка', points: zero, hidden: false },
+    { kind: 'front_opened', frontId: 'f', title: 'Ропот квартала', form: 'tension', plus: false },
+    { kind: 'front_closed', frontId: 'p', title: 'Баллиста', outcome: 'done' },
+    { kind: 'front_moved', frontId: 'p', title: 'Баллиста', how: 'frozen' },
+  ];
 
-  test('подписчики — только прямые', () => {
-    const city = islandCity();
-    expect(subscribersOf(city, 'island').map((s) => s.entity.id)).toEqual(['tower']);
+  test('словами и без чисел; скрытое в список не попадает', () => {
+    const lines = describeChanges(r, changes);
+    expect(lines).toEqual([
+      'Появилось: Баллиста (большое сооружение). Для города: благосостояние заметно ниже, безопасность резко выше',
+      'Изменилось: Гильдия. Теперь: Гильдия в обиде. Для города: благосостояние заметно ниже',
+      'Исчезло: Стройка',
+      'Началось: «Ропот квартала» (растущее напряжение)',
+      'Завершено: «Баллиста»',
+      'Дело «Баллиста» встало, пока не снята угроза',
+    ]);
+    expect(lines.join(' ')).not.toMatch(/\d/);
   });
 
-  test('удаление идёт волной: остров → башня → фронт', async () => {
-    const city = islandCity();
-    const seen: string[] = [];
-    await runCascade(city, [{ id: 'island', kind: 'deleted' }], {
-      day: 5,
-      maxSteps: 10,
-      judge: async (_change, target) => {
-        seen.push(target.entity.id);
-        return { verdict: 'invalid' };
-      },
-    });
-    expect(seen).toEqual(['tower', 'recipe']);
-    expect(city.objects.find((o) => o.id === 'tower')?.status).toBe('deleted');
-    expect(city.fronts[0]?.status).toBe('invalid');
+  test('эхо и обновление идут от объектов, чьё существование или вклад изменились', () => {
+    expect(changedObjectIds(changes)).toEqual(['b', 'h', 'g', 's']);
+    expect(changedObjectIds([{ kind: 'object_created', objectId: 't', name: 'Леса', type: 'site', points: zero, temporary: true, hidden: false }])).toEqual([]);
   });
 
-  test('потолок шагов держит каскад', async () => {
-    const city = islandCity();
-    const applied = await runCascade(city, [{ id: 'island', kind: 'deleted' }], {
-      day: 5,
-      maxSteps: 1,
-      judge: async () => ({ verdict: 'invalid' }),
-    });
-    expect(applied).toHaveLength(1);
-  });
-
-  test('unchanged дальше не идёт', async () => {
-    const city = islandCity();
-    const applied = await runCascade(city, [{ id: 'island', kind: 'modified' }], {
-      day: 5,
-      maxSteps: 10,
-      judge: async () => ({ verdict: 'unchanged' }),
-    });
-    expect(applied.map((a) => a.id)).toEqual(['tower']);
-  });
-});
-
-describe('воля игрока как фронт', () => {
-  test('бюджет последствий задаёт код', () => {
-    expect(consequenceAsk(r, 'MINOR')).toEqual({ budget: 0, ask: 0 });
-    expect(consequenceAsk(r, 'MAJOR')).toEqual({ budget: 2, ask: 2 + r.fronts.consequences.overdraft });
-  });
-
-  test('фронт стройки без дрейфа, effort по весу, порог на каждое последствие', () => {
-    const f = buildMutationFront(r, {
-      id: 'front_b',
-      intent: 'Построить баллисту',
-      draft: { kind: 'create', type: 'structure', name: 'Великая баллиста', description: 'Строительство Великой баллисты' },
-      assessment: { impact: 'MAJOR', statProfile: { security: 4, prosperity: -1 } },
-      consequences: [
-        { description: 'Дефицит камня', impact: 'MINOR', drift: 'SLOW', stake: { stats: { prosperity: -2 } } },
-        { description: 'Тревога соседей', impact: 'MINOR', drift: 'SLOW', stake: null },
-      ],
-      alignment: 'Двигают стройка, подвоз камня и мастера.',
-      day: 0,
-    });
-    expect(f.driftBand).toBe('NONE');
-    expect(f.effort).toBe(r.fronts.impact.effort.MAJOR);
-    expect(f.beatCount).toBe(2);
-    expect(f.stake && 'create' in f.stake ? f.stake.create.statEffect?.security : 0).toBeGreaterThan(0);
-  });
-
-  test('последствие открывается отдельным фронтом со ссылкой на родителя', () => {
-    const city = blankCity();
-    const parent = buildMutationFront(r, {
-      id: 'p',
-      intent: 'x',
-      draft: { kind: 'create', type: 'structure', name: 'Б', description: 'Б' },
-      assessment: { impact: 'SIGNIFICANT', statProfile: { security: 1 } },
-      consequences: [{ description: 'Дефицит камня', impact: 'MINOR', drift: 'SLOW', stake: null }],
-      alignment: '',
-      day: 0,
-    });
-    const side = releaseNextConsequence(r, city, parent, { id: 'side', day: 4 });
-    expect(side?.refs).toEqual(['p']);
-    expect(parent.pendingConsequences).toHaveLength(0);
-    expect(releaseNextConsequence(r, city, parent, { id: 'x', day: 5 })).toBeNull();
+  test('запись хроники нужна, когда в переменах есть видимое', () => {
+    expect(isNotable([])).toBe(false);
+    expect(isNotable([changes[1]!])).toBe(false);
+    expect(isNotable(changes)).toBe(true);
   });
 });
 
@@ -126,6 +63,22 @@ describe('сценарий', () => {
     expect(tower?.refs).toEqual([island?.id]);
     expect(fronts[0]?.refs).toContain(tower?.id);
     expect(city.scenariosUsed).toEqual([scenario.id]);
+  });
+
+  test('история ложится на новую модель: поиск без срока или угроза со сроком, скрытая логика уходит в ключ', () => {
+    const scenario = parseScenario(raw);
+    const city = blankCity();
+    const { fronts } = plantScenario(r, city, scenario, { day: 3, newId: ids(9) });
+    for (const [i, front] of fronts.entries()) {
+      const source = scenario.fronts[i]!;
+      const drifting = source.drift !== 'NONE';
+      expect(front).toMatchObject({ origin: 'story', form: drifting ? 'threat' : 'find', capacity: r.seeding.capacity[source.impact] });
+      expect(front.deadlineDay == null).toBe(!drifting);
+      expect(drifting ? front.failStake.length : front.stake.length).toBe(source.stake ? 1 : 0);
+      expect(front.script?.clues.map((c) => c.fact)).toEqual(source.clues.map((c) => c.fact));
+      if (source.alignment) expect(front.key?.moves.length).toBeGreaterThan(0);
+      if (drifting && source.events.length) expect(nextEventDay(front)).toBe(front.pulseDay);
+    }
   });
 
   test('кривая заготовка падает с путём', () => {

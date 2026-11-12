@@ -6,16 +6,7 @@
  */
 
 import type { ClockState } from './time.js';
-import type {
-  DriftBand,
-  Efficiency,
-  Impact,
-  ObjectType,
-  Office,
-  Risk,
-  StatId,
-  StatMap,
-} from './rules.js';
+import type { FrontForm, ObjectType, Office, Relation, RiskStep, StatId, StatMap, Temper, Tempo, Verdict } from './rules.js';
 
 // ───────────────────────────── мир ─────────────────────────────
 
@@ -56,7 +47,9 @@ export interface WorldObject {
   type: ObjectType;
   name: string;
   description: string;
+  /** Вклад в статы в сырых единицах города: пункты стата = сырое × city.statScale. */
   statEffect: StatMap;
+  /** Связи с другими объектами. По ним идёт эхо. */
   refs: string[];
   version: number;
   versions: ObjectVersion[];
@@ -65,113 +58,184 @@ export interface WorldObject {
   deletedDay: number | null;
   /** Нельзя удалить ставкой. */
   protected: boolean;
+  /** Буквальная вложенность: удаление родителя уносит детей. */
+  parentId: string | null;
+  /** Скрытый объект: его видят агенты, но не жрец и не игрок. */
+  hidden: boolean;
+  /** Фронт, который занял объект. Занятый объект даёт только часть вклада. */
+  occupiedBy: string | null;
+  /** Временный объект: живёт, пока жив фронт, к которому привязан. */
+  temporary: boolean;
+  /** Помощник (rate > 0) или помеха (rate < 0) фронта: единиц работы в игровой месяц. */
+  attach: { frontId: string; rate: number } | null;
+  /** Одна или две темы города. */
+  themes: string[];
+  /** День создания или последней перемены: год после него объект «свежий» для подбора ролей. */
+  freshDay: number;
 }
 
 // ───────────────────────────── фронты ─────────────────────────────
 
-export interface FrontEvent {
-  id: string;
-  description: string;
-  status: 'live' | 'blocked' | 'fired';
+/** Операция ставки. Вклады здесь в пунктах стата, в сырые единицы их переводит core. */
+export type StakeOp =
+  | {
+      op: 'create';
+      object: {
+        type: ObjectType;
+        name: string;
+        description: string;
+        points: StatMap;
+        parentId?: string | null;
+        refs?: string[];
+        hidden?: boolean;
+      };
+      /** Этот объект и есть результат этапа: к нему привяжутся связи отпечатка. */
+      result?: boolean;
+    }
+  /** Переоценить вклад объекта: новые пункты целиком. */
+  | { op: 'revalue'; target: string; points: StatMap; description?: string | null }
+  /** Переписать и переоценить по намерению: поток заранее превращает её в revalue. */
+  | { op: 'modify'; target: string; intent: string }
+  | { op: 'delete'; target: string }
+  | { op: 'reveal'; target: string }
+  | { op: 'fact'; text: string }
+  | { op: 'link'; a: string; b: string }
+  | { op: 'progress'; frontId: string; amount: number }
+  | { op: 'rollback'; frontId: string }
+  | { op: 'cancel'; frontId: string }
+  /** Помощник (rate > 0) или помеха (rate < 0) на фронте. */
+  | { op: 'attach'; frontId: string; rate: number; object: { type: ObjectType; name: string; description: string; points: StatMap } }
+  /** Изменение статов без носителя в мире. */
+  | { op: 'stats'; points: Partial<StatMap> };
+
+export interface FootprintEntry {
+  objectId: string;
+  relation: Relation;
+  reason: string;
 }
 
-export interface Clue {
-  id: string;
-  fact: string;
-  alignment: string;
-  status: 'hidden' | 'revealed';
+/** Запечатанное знание о фронте: игрок и жрец его не видят. */
+export interface FrontKey {
+  /** Ходы, которые двигают фронт в нужную сторону. */
+  moves: string[];
+  /** Подвох исхода, если исход этапа не известен заранее и жребий выпал «с подвохом». */
+  twist: string | null;
 }
 
-export interface CreateStake {
-  create: {
-    type: ObjectType;
-    name: string;
-    description: string;
-    /** Готовый вклад в сырых единицах. Если нет — считается из weight и statProfile. */
-    statEffect?: StatMap;
-    weight?: Impact;
-    statProfile?: Partial<StatMap>;
-    refs?: string[];
-  };
-}
-export interface ModifyStake {
-  modify: {
-    target: string;
-    /** Если версия задана заранее, писатель версий не нужен. */
-    proposed?: { description: string; statEffect?: StatMap; weight?: Impact; statProfile?: Partial<StatMap> };
-    intent?: string;
-  };
-}
-export interface DeleteStake {
-  delete: { target: string };
-}
-export interface StatsStake {
-  stats: Partial<StatMap>;
-}
-export interface RevealStake {
-  reveal: { text: string };
-}
-export type Stake = CreateStake | ModifyStake | DeleteStake | StatsStake | RevealStake;
+/** Откуда фронт: проект игрока, атомарное дело, осложнение, эхо по связям, посаженная история. */
+export type FrontOrigin = 'player' | 'deed' | 'complication' | 'echo' | 'story';
 
-/** Побочный фронт, который откроется на очередном пороге родителя. */
-export interface ConsequenceDraft {
-  description: string;
-  impact: Impact;
-  drift: DriftBand;
-  stake: Stake | null;
-}
-
-/** Откуда фронт: посаженная история, воля игрока или её последствие. */
-export type FrontOrigin = 'story' | 'mutation' | 'consequence';
+export type DeedKind = 'push' | 'helper' | 'clear';
 
 export interface Front {
   id: string;
+  form: FrontForm;
   origin: FrontOrigin;
+  title: string;
   description: string;
-  stake: Stake | null;
-  /** Цена полного прохождения. */
-  effort: number;
+  /** Единиц работы до конца. У часов ноль. */
+  capacity: number;
   /** Прогресс на день progressDay; дальше растёт линейно со скоростью ratePerDay. */
   progress: number;
   progressDay: number;
-  driftBand: DriftBand;
   ratePerDay: number;
-  beatCount: number;
-  /** Индексы уже сработавших порогов. Порог одноразовый. */
-  beatsFired: number[];
-  events: FrontEvent[];
-  clues: Clue[];
-  /** Скрытое описание того, какие действия двигают фронт. */
-  alignment: string;
+  /** Вехи делят шкалу поровну; последняя веха — завершение. */
+  milestones: number;
+  milestonesFired: number;
+  /** Срок: у угроз, часов, возможностей; у напряжения это день прорыва. */
+  deadlineDay: number | null;
+  /** День следующего месячного броска: у дел «невозможно» и недостижимых. */
+  pulseDay: number | null;
+  /** Что случится, когда шкала заполнена (у часов — когда выйдет срок). */
+  stake: StakeOp[];
+  /** Что случится, если срок вышел раньше. */
+  failStake: StakeOp[];
+  risk: RiskStep;
+  /** Темп проекта: один из трёх рычагов. */
+  tempo: Tempo;
+  key: FrontKey | null;
+  footprint: FootprintEntry[];
+  /** Объекты-участники: роль осложнения, цели ставки. */
   refs: string[];
-  pendingConsequences: ConsequenceDraft[];
-  status: 'active' | 'resolved' | 'invalid';
+  parentId: string | null;
+  /** Чем привязанное осложнение грозит родителю. */
+  bound: 'slow' | 'rollback' | 'cancel' | null;
+  /** Сколько стоит на кону (в единицах работы): из этого считается ёмкость угрозы и напряжения. */
+  atStake: number;
+  /** Плюсовой фронт: срок истёк — просто исчез. */
+  plus: boolean;
+  /** Причина, по которой цель недостижима. Такое дело идёт до краха. */
+  unattainable: string | null;
+  /** Сколько бросков риска сработало: каждый N-й отдаётся плюсовой записи. */
+  rollsFired: number;
+  projectId: string | null;
+  /** Промежуточный объект, пока идёт работа («Стройка башни»). */
+  siteId: string | null;
+  /** Стат, к которому дело относится сильнее всего: для поправки сановника. */
+  profile: StatId | null;
+  /** Атомарное дело: вид и вердикт Судьи на его формулировку. */
+  deed: { kind: DeedKind; verdict: Verdict; targetId: string | null } | null;
+  /** Материал посаженной истории. */
+  script: {
+    events: Array<{ id: string; description: string; fired: boolean }>;
+    clues: Array<{ id: string; fact: string; revealed: boolean }>;
+  } | null;
+  /** Что случится, если не вмешаться: слова Костюмера. */
+  outburst: string | null;
+  /** Запись словаря динамик, из которой фронт собран. */
+  dynamicId: string | null;
+  status: 'active' | 'done' | 'failed' | 'cancelled';
   createdDay: number;
   resolvedDay: number | null;
 }
 
 // ───────────────────────────── поручения ─────────────────────────────
 
-export type Direction = 'forward' | 'backward' | 'none';
-export type StopWhen = 'next_result' | 'stake' | 'cancelled';
-
+/** Сановник ведёт один фронт: стратегией или как исполнитель атомарного дела. */
 export interface Assignment {
   id: string;
-  frontId: string | null;
+  frontId: string;
   office: Office;
+  /** Стратегия словами игрока. Пусто — сановник работает без особого наказа. */
   text: string;
-  direction: Direction;
-  efficiency: Efficiency;
-  blocks: string[];
-  stopWhen: StopWhen;
-  risk: Risk | null;
-  status: 'active' | 'done' | 'cancelled';
+  /** Вердикт Судьи соответствия: хранится, чтобы одни слова всегда стоили одинаково. */
+  verdict: Verdict;
+  /** Темп поручения: второй рычаг. */
+  tempo: Tempo;
+  status: 'active' | 'ended';
   startDay: number;
   endDay: number | null;
-  /** Сколько effort сановник уже вложил (по модулю), на день effortDay. */
-  effortDone: number;
-  effortDay: number;
-  riskCheckedAtEffort: number;
+}
+
+// ───────────────────────────── проекты ─────────────────────────────
+
+export interface ProjectStage {
+  title: string;
+  work: string;
+  result: {
+    kind: 'new_object' | 'change_object' | 'remove_object' | 'fact';
+    objectId: string | null;
+    type: ObjectType | null;
+    name: string;
+    description: string;
+    parentId: string | null;
+  };
+  site: { name: string; description: string } | null;
+  outcomeKnown: boolean;
+}
+
+/** Цепочка этапов. Идёт один этап за раз; следующий ждёт слова игрока. */
+export interface Project {
+  id: string;
+  title: string;
+  goal: string;
+  stages: ProjectStage[];
+  /** Этап, который идёт сейчас или ждёт запуска. */
+  stageIndex: number;
+  frontId: string | null;
+  unattainable: string | null;
+  status: 'running' | 'waiting' | 'done' | 'cancelled';
+  createdDay: number;
 }
 
 // ───────────────────────────── люди и речь ─────────────────────────────
@@ -184,6 +248,8 @@ export interface Officer {
   gender: Gender;
   /** Характер человека: пара фраз для промптов. */
   nature: string;
+  /** Собственный темп: третий рычаг. Бросается при рождении города, от должности не зависит. */
+  temper: Temper;
   assignmentId: string | null;
 }
 
@@ -207,8 +273,8 @@ export interface ChronicleEntry {
   id: string;
   day: number;
   text: string;
-  /** Откуда запись: порог фронта, ставка, генезис, сценарий. */
-  source: 'genesis' | 'beat' | 'stake' | 'scenario' | 'mutation';
+  /** Откуда запись: генезис, веха, завершение или срок фронта, осложнение, посадка истории, воля игрока. */
+  source: 'genesis' | 'milestone' | 'completion' | 'deadline' | 'complication' | 'scenario' | 'will';
   frontId: string | null;
 }
 
@@ -240,7 +306,8 @@ export interface LoreFact {
   day: number;
   /** Факт дописан по вопросу о конкретной истории. */
   frontId: string | null;
-  author: 'genesis' | 'loremaster';
+  /** event — факт, который закрепила ставка или развязка события. */
+  author: 'genesis' | 'loremaster' | 'event';
   status: 'active' | 'retired';
   previousText: string | null;
   reason: string | null;
@@ -255,7 +322,8 @@ export interface PriestNote {
 
 // ───────────────────────────── очередь ─────────────────────────────
 
-export type JobKind = 'front_beat' | 'front_stake' | 'seed';
+/** front_event — ближайшее событие фронта: веха, срок или месячный бросок. */
+export type JobKind = 'front_event' | 'seed';
 
 export interface Job {
   id: string;
@@ -272,6 +340,12 @@ export interface Job {
 export interface Mana {
   value: number;
   /** День последнего начисления. */
+  day: number;
+}
+
+/** Вера: пятая ось города. Лениво тянется к среднему статов и получает импульсы от событий. */
+export interface Faith {
+  value: number;
   day: number;
 }
 
@@ -297,9 +371,15 @@ export interface City {
   /** Прямые изменения статов без носителя в мире. */
   statLedger: StatMap;
   mana: Mana;
+  faith: Faith;
   objects: WorldObject[];
   fronts: Front[];
   assignments: Assignment[];
+  projects: Project[];
+  /** Когда каждая запись словаря динамик срабатывала в последний раз. */
+  dynamicsUsed: Record<string, number>;
+  /** Предупреждение о недостижимой цели: повторный приказ в срок запускает дело. */
+  unattainableWarning: { goal: string; day: number } | null;
   chronicle: ChronicleEntry[];
   dialog: DialogEntry[];
   notes: PriestNote[];
@@ -349,9 +429,13 @@ export function newCity(args: {
     statScale: args.statScale,
     statLedger: { ...args.statLedger },
     mana: { value: args.manaStart, day },
+    faith: { value: (args.stats.prosperity + args.stats.security + args.stats.knowledge + args.stats.influence) / 4, day },
     objects: args.objects,
     fronts: [],
     assignments: [],
+    projects: [],
+    dynamicsUsed: {},
+    unattainableWarning: null,
     chronicle: [],
     dialog: [],
     notes: [],

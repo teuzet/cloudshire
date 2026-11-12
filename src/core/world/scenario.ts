@@ -8,10 +8,11 @@
 
 import { z } from 'zod';
 import { DRIFT_BANDS, IMPACT_LEVELS, OBJECT_TYPES, STAT_IDS, type Rules } from '../rules.js';
-import type { City, Front, Stake, WorldObject } from '../city.js';
+import type { City, Front, StakeOp, WorldObject } from '../city.js';
 import { createFront } from './fronts.js';
+import { monthsToDays, rawToPoints, scaleOf } from './numbers.js';
 import { createObject } from './objects.js';
-import { impactEffort } from './scales.js';
+import { objectContribution } from './stats.js';
 
 const statPartial = z.object(Object.fromEntries(STAT_IDS.map((id) => [id, z.number().optional()])));
 
@@ -77,13 +78,28 @@ export function parseScenario(raw: unknown): Scenario {
   return parsed.data;
 }
 
-function remapStake(stake: Scenario['fronts'][number]['stake'], ids: Map<string, string>): Stake | null {
-  if (!stake) return null;
+/** Ставка заготовки на языке операций новой системы. */
+function stakeOps(rules: Rules, city: Pick<City, 'statScale'>, stake: Scenario['fronts'][number]['stake'], ids: Map<string, string>): StakeOp[] {
+  if (!stake) return [];
   const map = (id: string) => ids.get(id) ?? id;
-  if ('create' in stake) return { create: { ...stake.create, refs: (stake.create.refs ?? []).map(map) } };
-  if ('modify' in stake) return { modify: { ...stake.modify, target: map(stake.modify.target) } };
-  if ('delete' in stake) return { delete: { target: map(stake.delete.target) } };
-  return stake;
+  if ('create' in stake) {
+    const c = stake.create;
+    const points = rawToPoints(city, objectContribution(rules, c.weight ?? 'NONE', c.statProfile ?? {}));
+    return [{ op: 'create', object: { type: c.type, name: c.name, description: c.description, points, refs: (c.refs ?? []).map(map) }, result: true }];
+  }
+  if ('modify' in stake) return [{ op: 'modify', target: map(stake.modify.target), intent: stake.modify.intent ?? '' }];
+  if ('delete' in stake) return [{ op: 'delete', target: map(stake.delete.target) }];
+  if ('stats' in stake) return [{ op: 'stats', points: stake.stats }];
+  return [{ op: 'fact', text: stake.reveal.text }];
+}
+
+/** Ходы ключа из скрытой логики заготовки: по фразе на ход, плюс подходы к уликам. */
+function keyMoves(alignment: string, clues: ReadonlyArray<{ alignment: string }>): string[] {
+  const lines = alignment
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 3);
+  return [...new Set([...lines, ...clues.map((c) => c.alignment.trim()).filter(Boolean)])].slice(0, 8);
 }
 
 /**
@@ -116,21 +132,38 @@ export function plantScenario(
       day: args.day,
     }),
   );
-  const fronts = scenario.fronts.map((f) =>
-    createFront(rules, {
+  // История ложится на новую модель: без дрейфа это поиск (работа доводит до ставки),
+  // с дрейфом — угроза со сроком (ставка сработает, если не успеть).
+  const fronts = scenario.fronts.map((f) => {
+    const capacity = rules.seeding.capacity[f.impact];
+    const ops = stakeOps(rules, city, f.stake, ids);
+    const drifting = f.drift !== 'NONE';
+    const driftDays = monthsToDays(rules.seeding.driftMonths[f.drift]);
+    const moves = keyMoves(f.alignment, f.clues);
+    const description = tweak[f.id]?.description ?? f.description;
+    return createFront({
       id: map(f.id),
-      description: tweak[f.id]?.description ?? f.description,
-      stake: remapStake(f.stake, ids),
-      effort: impactEffort(rules, f.impact),
-      driftBand: f.drift,
-      beatCount: f.beatCount,
-      events: f.events,
-      clues: f.clues,
-      alignment: f.alignment,
+      form: drifting ? 'threat' : 'find',
+      origin: 'story',
+      title: description.split(/[.!?]/)[0]?.trim().slice(0, 80) || scenario.title,
+      description,
+      capacity,
+      milestones: Math.max(scaleOf(rules, capacity).milestones, Math.min(4, f.beatCount + 1)),
+      deadlineDay: drifting ? args.day + driftDays : null,
+      // События истории наступают сами, через равные доли срока.
+      pulseDay: drifting && f.events.length ? args.day + Math.max(1, Math.floor(driftDays / (f.events.length + 1))) : null,
+      stake: drifting ? [] : ops,
+      failStake: drifting ? ops : [],
+      key: moves.length ? { moves, twist: null } : null,
       refs: f.refs.map(map),
+      atStake: capacity,
+      script: {
+        events: f.events.map((e) => ({ id: e.id, description: e.description, fired: false })),
+        clues: f.clues.map((c) => ({ id: c.id, fact: c.fact, revealed: false })),
+      },
       day: args.day,
-    }),
-  );
+    });
+  });
   city.objects.push(...objects);
   city.fronts.push(...fronts);
   city.scenariosUsed.push(scenario.id);

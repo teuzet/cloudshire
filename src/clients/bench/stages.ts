@@ -36,14 +36,17 @@ export const STAGE_AGENTS: Record<StageName, string[]> = {
   will: [
     'priest',
     'loremaster',
-    'assignment-evaluator',
-    'mutation-drafter',
-    'feasibility-judge',
-    'impact-judge',
-    'consequences-generator',
-    'consequence-judge',
+    'will-interpreter',
+    'canon-warden',
+    'stage-planner',
+    'contribution-appraiser',
+    'footprint-mapper',
+    'risk-appraiser',
+    'key-sealer',
+    'alignment-judge',
+    'chronicler',
   ],
-  seeding: ['scenario-writer', 'front-chronicle', 'herald'],
+  seeding: ['scenario-writer', 'chronicler', 'herald'],
 };
 
 export const OWNER = 'bench';

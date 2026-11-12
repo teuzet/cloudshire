@@ -6,7 +6,9 @@
 
 import type { City } from '../core/city.js';
 import { scheduleJob } from '../core/jobs.js';
+import type { Change } from '../core/world/changes.js';
 import { activeFronts } from '../core/world/fronts.js';
+import { rawToPoints } from '../core/world/numbers.js';
 import { mysteryObjectIds } from '../core/lore.js';
 import { plantScenario, touchedMysteries, type Scenario } from '../core/world/scenario.js';
 import type { OutboundMessage } from '../ports/notifier.js';
@@ -58,8 +60,17 @@ export async function plantStory(deps: FlowDeps, city: City, day: number): Promi
 
   const { objects, fronts } = plantScenario(deps.rules, city, scenario, { day, newId: (p) => newId(deps, p) });
   for (const front of fronts) refreshFront(deps, city, front, day);
-  const fact = [...objects.map((o) => `${o.name}. ${o.description}`), ...(objects.length ? [] : fronts.map((f) => f.description))].join('\n');
-  return record(deps, city, { fact: fact || scenario.pitch || scenario.title, source: 'scenario', frontId: fronts[0]?.id ?? null, day, kind: 'beat', officer: null, announce: true });
+  const gist = [...objects.map((o) => `${o.name}. ${o.description}`), ...(objects.length ? [] : fronts.map((f) => f.description))].join('\n');
+  const changes: Change[] = objects.map((o) => ({
+    kind: 'object_created',
+    objectId: o.id,
+    name: o.name,
+    type: o.type,
+    points: rawToPoints(city, o.statEffect),
+    temporary: false,
+    hidden: o.hidden,
+  }));
+  return record(deps, city, { gist: gist || scenario.pitch || scenario.title, changes, source: 'scenario', frontId: fronts[0]?.id ?? null, day, kind: 'beat', officer: null, announce: true });
 }
 
 /** Задание seed: досадить историй и поставить следующую проверку. */

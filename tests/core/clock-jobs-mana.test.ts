@@ -65,13 +65,13 @@ describe('очередь заданий', () => {
 
   test('на фронт одно ожидающее задание', () => {
     const city = blankCity();
-    const front = createFront(r, { id: 'f', description: 'd', stake: null, effort: 10, driftBand: 'STEADY', beatCount: 1, day: 0 });
+    const front = createFront({ id: 'f', form: 'threat', origin: 'story', title: 't', description: 'd', capacity: 10, deadlineDay: 40, day: 0 });
     const next = ids(1);
     scheduleFrontJob(city, front, () => next('job'));
     scheduleFrontJob(city, front, () => next('job'));
     const pending = city.jobs.filter((j) => j.state === 'pending');
     expect(pending).toHaveLength(1);
-    expect(pending[0]?.kind).toBe('front_beat');
+    expect(pending[0]).toMatchObject({ kind: 'front_event', dueDay: 40 });
   });
 
   test('очередь не растёт вечно', () => {

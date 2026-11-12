@@ -1,0 +1,154 @@
+/**
+ * Перемены состояния города — «дифф», который код собирает за одно событие.
+ * Летописец оформляет его в запись хроники, эхо и обновление ищут по нему задетое.
+ */
+
+import { STAT_IDS, type FrontForm, type ObjectType, type Rules, type StatMap } from '../rules.js';
+import { magnitude } from './numbers.js';
+
+export type Change =
+  | { kind: 'object_created'; objectId: string; name: string; type: ObjectType; points: StatMap; temporary: boolean; hidden: boolean }
+  | { kind: 'object_changed'; objectId: string; name: string; delta: StatMap; description: string | null }
+  | { kind: 'object_removed'; objectId: string; name: string; points: StatMap; hidden: boolean }
+  | { kind: 'object_revealed'; objectId: string; name: string }
+  | { kind: 'fact'; text: string }
+  | { kind: 'linked'; a: string; b: string; names: [string, string] }
+  | { kind: 'stats'; points: Partial<StatMap> }
+  | { kind: 'front_opened'; frontId: string; title: string; form: FrontForm; plus: boolean }
+  | { kind: 'front_closed'; frontId: string; title: string; outcome: 'done' | 'averted' | 'failed' | 'cancelled' | 'expired' }
+  | { kind: 'front_moved'; frontId: string; title: string; how: 'rollback' | 'pushed' | 'frozen' | 'slowed' | 'helped' | 'setback' | 'burst' };
+
+const TYPE_WORDS: Record<ObjectType, string> = {
+  building: 'здание',
+  structure: 'большое сооружение',
+  landmark: 'достопримечательность',
+  district: 'квартал',
+  settlement: 'поселение',
+  site: 'место',
+  object: 'вещь',
+  resource: 'запас',
+  organization: 'учреждение',
+  community: 'группа людей',
+  person: 'человек',
+  practice: 'обычай',
+  capability: 'умение',
+  policy: 'закон',
+  threat: 'опасность',
+  mystery: 'тайна',
+};
+
+function strength(abs: number): string {
+  if (abs < 1.5) return 'чуть';
+  if (abs < 4) return 'заметно';
+  if (abs < 9) return 'сильно';
+  return 'резко';
+}
+
+/** Сдвиг статов словами: агенты и игрок не видят чисел. */
+export function statShiftWords(rules: Pick<Rules, 'stats'>, delta: Partial<StatMap>): string {
+  const parts: string[] = [];
+  for (const id of STAT_IDS) {
+    const v = Number(delta[id]) || 0;
+    if (Math.abs(v) < 0.5) continue;
+    const name = rules.stats.find((s) => s.id === id)?.name ?? id;
+    parts.push(`${name.toLowerCase()} ${strength(Math.abs(v))} ${v > 0 ? 'выше' : 'ниже'}`);
+  }
+  return parts.join(', ');
+}
+
+const FORM_WORDS: Record<FrontForm, string> = {
+  deed: 'дело',
+  tension: 'растущее напряжение',
+  threat: 'угроза со сроком',
+  clock: 'отложенная перемена',
+  find: 'поиск',
+};
+
+const CLOSED_WORDS = {
+  done: 'Завершено',
+  averted: 'Беда отведена',
+  failed: 'Беда случилась',
+  cancelled: 'Прекращено',
+  expired: 'Случай упущен',
+} as const;
+
+const MOVED_WORDS = {
+  rollback: 'откатилось на шаг назад',
+  pushed: 'получило разовый толчок',
+  frozen: 'встало, пока не снята угроза',
+  slowed: 'идёт медленнее из-за помехи',
+  helped: 'получило помощников',
+  setback: 'потеряло часть сделанного',
+  burst: 'прорвалось бедой',
+} as const;
+
+/** Перемены словами для Летописца. Скрытое в список не попадает. */
+export function describeChanges(rules: Pick<Rules, 'stats'>, changes: readonly Change[]): string[] {
+  const out: string[] = [];
+  for (const c of changes) {
+    switch (c.kind) {
+      case 'object_created': {
+        if (c.hidden) break;
+        const shift = statShiftWords(rules, c.points);
+        out.push(`Появилось: ${c.name} (${TYPE_WORDS[c.type]}${c.temporary ? ', на время' : ''})${shift ? `. Для города: ${shift}` : ''}`);
+        break;
+      }
+      case 'object_changed': {
+        const shift = statShiftWords(rules, c.delta);
+        out.push(`Изменилось: ${c.name}${c.description ? `. Теперь: ${c.description}` : ''}${shift ? `. Для города: ${shift}` : ''}`);
+        break;
+      }
+      case 'object_removed': {
+        if (c.hidden) break;
+        const shift = statShiftWords(rules, negate(c.points));
+        out.push(`Исчезло: ${c.name}${shift ? `. Для города: ${shift}` : ''}`);
+        break;
+      }
+      case 'object_revealed':
+        out.push(`Открылось: ${c.name}`);
+        break;
+      case 'fact':
+        out.push(`Стало известно: ${c.text}`);
+        break;
+      case 'linked':
+        out.push(`Теперь связаны: ${c.names[0]} и ${c.names[1]}`);
+        break;
+      case 'stats': {
+        const shift = statShiftWords(rules, c.points);
+        if (shift) out.push(`Для города: ${shift}`);
+        break;
+      }
+      case 'front_opened':
+        out.push(`Началось: «${c.title}» (${c.plus ? 'удобный случай со сроком' : FORM_WORDS[c.form]})`);
+        break;
+      case 'front_closed':
+        out.push(`${CLOSED_WORDS[c.outcome]}: «${c.title}»`);
+        break;
+      case 'front_moved':
+        out.push(`Дело «${c.title}» ${MOVED_WORDS[c.how]}`);
+        break;
+    }
+  }
+  return out;
+}
+
+function negate(points: StatMap): StatMap {
+  return { prosperity: -points.prosperity, security: -points.security, knowledge: -points.knowledge, influence: -points.influence };
+}
+
+/** Объекты, чей вклад или существование изменились: от них идут эхо и обновление. */
+export function changedObjectIds(changes: readonly Change[]): string[] {
+  const ids = new Set<string>();
+  for (const c of changes) {
+    if (c.kind === 'object_created' && !c.temporary) ids.add(c.objectId);
+    if (c.kind === 'object_changed' && (magnitude(c.delta) > 0 || c.description)) ids.add(c.objectId);
+    if (c.kind === 'object_removed') ids.add(c.objectId);
+    if (c.kind === 'object_revealed') ids.add(c.objectId);
+  }
+  return [...ids];
+}
+
+/** Есть ли в переменах то, что обязано попасть в хронику. */
+export function isNotable(changes: readonly Change[]): boolean {
+  return changes.some((c) => !(c.kind === 'object_created' && c.hidden) && !(c.kind === 'object_removed' && c.hidden));
+}

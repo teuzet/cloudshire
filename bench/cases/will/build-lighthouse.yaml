@@ -1,5 +1,5 @@
 title: Стройка — маяк на краю острова
-note: Воля игрока как фронт. Смотрим цепочку mutation-drafter → feasibility → impact → consequences и как жрец говорит о деле.
+note: Воля игрока как дело. Смотрим цепочку will-interpreter → canon-warden → stage-planner → contribution-appraiser → footprint-mapper → risk-appraiser → key-sealer и как жрец говорит об условиях.
 state: fishers-day0
 messages:
   - Пусть казначей построит на краю острова маяк, чтобы рыбаки в тумане находили дорогу домой.

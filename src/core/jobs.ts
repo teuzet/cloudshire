@@ -5,7 +5,7 @@
  */
 
 import type { City, Front, Job, JobKind } from './city.js';
-import { nextFrontEvent } from './world/fronts.js';
+import { nextEventDay } from './world/fronts.js';
 
 export const MAX_JOB_ATTEMPTS = 3;
 const KEEP_SETTLED = 100;
@@ -93,10 +93,10 @@ export function pruneJobs(city: Pick<City, 'jobs'>): void {
   city.jobs = city.jobs.filter((j) => !drop.has(j));
 }
 
-/** Одно ожидающее задание на фронт: ближайший порог или ставка. */
+/** Одно ожидающее задание на фронт: ближайшая веха, срок или месячный бросок. */
 export function scheduleFrontJob(city: Pick<City, 'jobs'>, front: Front, newId: () => string): Job | null {
   cancelJobs(city, (job) => job.payload.frontId === front.id);
-  const next = nextFrontEvent(front);
-  if (!next) return null;
-  return scheduleJob(city, { id: newId(), kind: next.kind, dueDay: next.day, payload: { frontId: front.id } });
+  const day = nextEventDay(front);
+  if (day == null) return null;
+  return scheduleJob(city, { id: newId(), kind: 'front_event', dueDay: day, payload: { frontId: front.id } });
 }

@@ -25,15 +25,15 @@ agents:
     maxOutputTokens: 16000
   scenario-writer:
     maxOutputTokens: 4000
-  consequences-generator:
+  # Узкие агенты системы фронтов. Все на модели по умолчанию; своя строка нужна только там,
+  # где ответ длиннее обычного.
+  stage-planner:
+    maxOutputTokens: 3000
+  costumer:
     maxOutputTokens: 2000
-  beat-resolver:
-    maxOutputTokens: 800
-  feasibility-judge:
-    maxOutputTokens: 800
-  impact-judge:
-    maxOutputTokens: 800
-  consequence-judge:
-    maxOutputTokens: 800
-  local-world-updater:
-    maxOutputTokens: 800
+  beat-writer:
+    maxOutputTokens: 2000
+  resolver:
+    maxOutputTokens: 2000
+  chronicler:
+    maxOutputTokens: 2000

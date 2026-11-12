@@ -5,8 +5,10 @@
 
 import type { Rules, StatMap } from '../../core/rules.js';
 import { STAT_IDS } from '../../core/rules.js';
-import type { ChronicleEntry, Front, Officer, PoolName, WorldObject } from '../../core/city.js';
-import { gameDate } from '../../core/time.js';
+import type { ChronicleEntry, City, Front, Officer, PoolName, WorldObject } from '../../core/city.js';
+import { gameDate, spanBand } from '../../core/time.js';
+import { leadOf, officerOf } from '../../core/world/assignments.js';
+import { daysLeft, isFrozen, shareDone } from '../../core/world/fronts.js';
 
 export function bullets(lines: Array<string | null | undefined | false>): string {
   return lines.filter((l): l is string => typeof l === 'string' && l.length > 0).map((l) => `- ${l}`).join('\n');
@@ -25,18 +27,39 @@ export function objectsBlock(objects: Array<Pick<WorldObject, 'id' | 'type' | 'n
   return bullets(objects.map(objectLine));
 }
 
-/** Фронт для судей: описание, скрытая логика, живые события и скрытые улики. */
-export function frontBlock(front: Front): string {
-  const events = front.events.filter((e) => e.status !== 'fired');
-  const clues = front.clues.filter((c) => c.status === 'hidden');
-  return [
-    `Фронт ${front.id}: ${front.description}`,
-    section('Скрытая логика фронта', front.alignment),
-    events.length ? section('События', bullets(events.map((e) => `${e.id} [${e.status}]: ${e.description}`))) : 'Событий нет.',
-    clues.length ? section('Улики', bullets(clues.map((c) => `${c.id}: ${c.fact}`))) : '',
-  ]
-    .filter(Boolean)
-    .join('\n\n');
+const FRONT_FORM_WORDS: Record<Front['form'], string> = {
+  deed: 'дело',
+  tension: 'растёт напряжение',
+  threat: 'угроза',
+  clock: 'ждёт своего часа',
+  find: 'поиск',
+};
+
+function shareWords(share: number): string {
+  if (share <= 0.05) return 'в самом начале';
+  if (share < 0.4) return 'пройдена меньшая часть';
+  if (share < 0.65) return 'пройдена примерно половина';
+  if (share < 0.95) return 'пройдена большая часть';
+  return 'почти готово';
+}
+
+/**
+ * Идущий фронт одной строкой для жреца: что это, далеко ли зашло, сколько осталось, кто ведёт.
+ * Числа жрец не видит: срок приходит словесной полосой.
+ */
+export function frontLine(city: Pick<City, 'assignments' | 'officers' | 'fronts'>, front: Front, day: number): string {
+  const lead = leadOf(city, front.id);
+  const officer = lead ? officerOf(city, lead) : null;
+  const left = daysLeft(front, day);
+  const parts: string[] = [front.plus ? 'удобный случай' : FRONT_FORM_WORDS[front.form]];
+  if (front.capacity > 0) parts.push(shareWords(shareDone(front, day)));
+  if (isFrozen(city, front)) parts.push('стоит, пока не снята угроза');
+  else if (front.capacity > 0 && left == null) parts.push('никто не ведёт, дело стоит');
+  else if (front.capacity > 0 && left != null) parts.push(`работы осталось: ${spanBand(left)}`);
+  if (front.deadlineDay != null) parts.push(`срок: ${spanBand(Math.max(0, front.deadlineDay - day))}`);
+  if (officer) parts.push(`ведёт ${officer.title.toLowerCase()} ${officer.name}`);
+  const text = front.description && front.description !== front.title ? `${front.title}. ${front.description}` : front.title;
+  return `${front.id}: ${text} (${parts.join('; ')})`;
 }
 
 export function officerLine(officer: Officer): string {

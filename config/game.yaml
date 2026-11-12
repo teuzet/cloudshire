@@ -71,6 +71,30 @@ faith:
   about: >-
     Насколько город ещё верит, что ты — его бог. Когда вера слабеет, обряд становится привычкой, а
     привычка — забвением.
+  # Вера тянется к среднему четырёх статов: такая доля разрыва уходит за игровой месяц.
+  pullPerMonth: 0.1
+  # Импульсы от событий: случай выбирает Оценщик веры, число даёт эта таблица.
+  impulses:
+    minor:
+      harm_willed: -1
+      harm_unguarded: 0
+      harm_averted: 1
+      boon_willed: 1
+    notable:
+      harm_willed: -3
+      harm_unguarded: -1
+      harm_averted: 2
+      boon_willed: 2
+    grave:
+      harm_willed: -6
+      harm_unguarded: -3
+      harm_averted: 4
+      boon_willed: 4
+    shock:
+      harm_willed: -12
+      harm_unguarded: -6
+      harm_averted: 8
+      boon_willed: 8
 mana:
   name: Мана
   about: >-
@@ -114,7 +138,10 @@ officers:
     titleGen: канцлера
     focus: переговоры, гильдия, слух, дипломатия сопряжения, суд чести, указ в народе
     strategy: В основном интересуется людьми и наплевательски относится к ресурсам и собственности.
+# Система фронтов. Все значения условные: баланс сводится позже.
+# Единица работы — труд одного сановника за игровую неделю. Описание: docs/design/fronts.md.
 fronts:
+  # Вес объектов генезиса и посаженных историй (не новая система оценки).
   impact:
     levels:
       - NONE
@@ -128,52 +155,118 @@ fronts:
       SIGNIFICANT: 3
       MAJOR: 6
       DEFINING: 10
-    effort:
-      NONE: 0
-      MINOR: 2
-      SIGNIFICANT: 5
-      MAJOR: 9
-      DEFINING: 14
-    consequences:
-      NONE: 0
-      MINOR: 0
-      SIGNIFICANT: 1
-      MAJOR: 2
-      DEFINING: 3
-  drift:
-    bands:
-      - NONE
-      - SLOW
-      - STEADY
-      - FAST
-    perMonth:
-      NONE: 0
-      SLOW: 0.5
-      STEADY: 1
-      FAST: 2
-  assignment:
-    baseRate: 0.1
-    statFloor: 0.5
-    efficiency:
-      weak: 0.4
-      normal: 1
-      strong: 1.8
-    evaluatorCandidates: 3
+  work:
+    # Выработка сановника за игровой месяц.
+    unitsPerMonth: 4
+    # Поправка сановника: fitFloor + fitSpan * стат/100, плюс profileBonus за дело своего профиля.
+    fitFloor: 0.75
+    fitSpan: 0.3
+    profileBonus: 0.15
+  # Класс вклада в пунктах стата.
+  contribution:
+    small: 2
+    medium: 5
+    large: 12
+    huge: 30
+  basePrice:
+    edit: 1
+    fact: 1
+    byType:
+      policy: 2
+      practice: 2
+      object: 2
+      resource: 2
+      landmark: 2
+      community: 3
+      person: 3
+      capability: 3
+      mystery: 3
+      threat: 3
+      organization: 4
+      site: 4
+      district: 4
+      building: 4
+      structure: 8
+      settlement: 8
+  # Масштаб по ёмкости: до какой ёмкости и сколько вех. Последняя строка без верхней границы.
+  scale:
+    - id: minor
+      upTo: 6
+      milestones: 1
+    - id: medium
+      upTo: 15
+      milestones: 2
+    - id: major
+      upTo: 35
+      milestones: 3
+    - id: grand
+      upTo: null
+      milestones: 4
+  # Доля вклада занятого объекта, пока идёт дело.
+  occupiedShare: 0.75
+  verdict:
+    spot_on: 1.5
+    fits: 1
+    'off': 0.5
+  # Шаг одного рычага темпа: к скорости и к шансу осложнения.
+  tempoStep: 0.2
+  helper:
+    unitsPerMonth: 2
+  hindrance:
+    unitsPerMonth: -2
+    removalShare: 0.15
+    removalMin: 2
+  # Атомарное дело «разовый вклад»: доля ёмкости родителя.
+  push:
+    share: 0.15
+    min: 2
+  threat:
+    capacityShare: 0.4
+    capacityMin: 2
+  tension:
+    quenchShare: 0.2
+    quenchMin: 1
+    burstMonthsMin: 2
+    burstMonthsMax: 4
+  opportunity:
+    capacityShare: 0.5
+    capacityMin: 1
+  deadlines:
+    ownRiskMonths: 1
+    worldMonths: 4
   risk:
-    levels:
-      - LOW
-      - MEDIUM
-      - HIGH
-    perEffort:
-      LOW: 0.02
-      MEDIUM: 0.06
-      HIGH: 0.14
-    impactCap:
-      LOW: MINOR
-      MEDIUM: SIGNIFICANT
-      HIGH: SIGNIFICANT
-  consequences:
-    overdraft: 2
+    chance:
+      safe: 0
+      normal: 0.15
+      hard: 0.35
+      risky: 0.6
+      impossible: 1
+    # Доля тяжёлых осложнений среди выпавших.
+    heavyShare:
+      safe: 0
+      normal: 0
+      hard: 0.5
+      risky: 1
+      impossible: 1
+    # Каждый N-й сработавший бросок отдаётся плюсовой записи, если она подходит.
+    plusEvery: 3
+    # Авария: какая доля набранного прогресса теряется.
+    accidentLoss: 0.25
+  # Исход этапа, который не известен заранее: веса жребия.
+  outcome:
+    asPlanned: 0.6
+    twist: 0.4
+  director:
+    freshWeight: 3
+    freshDays: 360
+    # Сколько пар «запись и объект» Примерщик проверяет за одно осложнение.
+    fitterCalls: 6
+  echo:
+    maxPerChange: 2
+  refresh:
+    maxFronts: 3
+  # Сколько дней действует предупреждение о недостижимой цели: повторный приказ запускает дело.
+  unattainableWarnDays: 60
   objects:
     types:
       - building
@@ -198,8 +291,273 @@ fronts:
     minCount: 20
     maxCount: 100
     profileRange: 5
-  cascade:
-    maxSteps: 24
+  # Словарь динамик: скелеты осложнений без конкретики города.
+  #   class    — bound (бьёт по делу), side (бьёт по объекту), plus (удобный случай);
+  #   when     — на вехе или при завершении;
+  #   light / heavy — во что выливается лёгкое и тяжёлое осложнение (null: такой тяжести нет);
+  #   from     — откуда берётся объект в роль: отношения отпечатка, helper, site, result, nearby, same-type;
+  #   hits     — по чему бьёт: parent, role, result;
+  #   condition — вопрос Примерщику (пустой: подходит всегда);
+  #   needsNew — Костюмер обязан описать нового участника; newHidden — он скрыт от игрока;
+  #   requires — noLead (дело без ведущего) или null; minStep — с какой ступени риска.
+  dynamics:
+    - id: key-refuse
+      title: Ключевые отказывают
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [occupies, helper]
+      types: [community, organization, person]
+      hits: parent
+      condition: Этим людям от работы стало заметно тяжелее?
+      skeleton: Люди, без которых работа не идёт, устали или обижены и готовы её бросить.
+      helps: уступка в оплате или отдыхе, уважение к старшим мастерам
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+    - id: touched-resist
+      title: Задетые сопротивляются
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [pressures]
+      types: [community, organization, person]
+      hits: parent
+      condition: У этих людей есть сила и причина сопротивляться?
+      skeleton: Те, чьи интересы работа задевает, открыто или тайно мешают ей.
+      helps: договориться с задетыми, дать им долю или показать твёрдость
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+    - id: touched-revenge
+      title: Задетые сопротивляются (после завершения)
+      enabled: true
+      class: side
+      when: [completion]
+      light: tension
+      heavy: threat
+      from: [pressures]
+      types: [community, organization, person]
+      hits: result
+      condition: У этих людей есть сила и причина сопротивляться?
+      skeleton: Те, кого готовый результат задел, подтачивают его и мешают им пользоваться.
+      helps: уступка задетым, общее дело с ними или защита результата
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+    - id: squatters
+      title: Заняли бесхозное
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: hindrance
+      heavy: hindrance
+      from: [site]
+      types: []
+      hits: parent
+      condition: ''
+      skeleton: Место работ осталось без присмотра, и его заняли чужие, люди или существа.
+      helps: прогнать, выкупить или переселить занявших
+      needsNew: true
+      newHidden: false
+      requires: noLead
+      minStep: normal
+    - id: occupied-strained
+      title: Занятое надорвалось
+      enabled: true
+      class: side
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [occupies]
+      types: []
+      hits: role
+      condition: Это может надорваться или истощиться от такой работы?
+      skeleton: То, что работа заняла, не выдерживает нагрузки и приходит в упадок.
+      helps: дать передышку, подменить другим источником, вложиться в починку
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+    - id: bystanders
+      title: Пострадали посторонние
+      enabled: true
+      class: side
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [nearby]
+      types: []
+      hits: role
+      condition: Это место или эти люди могут пострадать от работ по соседству?
+      skeleton: Работа вредит тем, кто рядом и кого она прямо не касалась.
+      helps: отвести вред от соседей, возместить ущерб, изменить порядок работ
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+    - id: accident
+      title: Авария
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: null
+      heavy: accident
+      from: [site]
+      types: []
+      hits: parent
+      condition: ''
+      skeleton: На месте работ случилось несчастье, часть сделанного потеряна, после него осталась помеха.
+      helps: разобрать последствия и наладить надзор
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: risky
+    - id: find-at-works
+      title: Находка при работах
+      enabled: true
+      class: plus
+      when: [milestone]
+      light: opportunity
+      heavy: opportunity
+      from: [site]
+      types: []
+      hits: role
+      condition: ''
+      skeleton: На месте работ нашли то, чего никто не ждал, и это можно обратить на пользу городу, пока есть время.
+      helps: быстро изучить находку и приставить к ней знающих людей
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: safe
+    - id: rival
+      title: Соперник за плоды
+      enabled: true
+      class: side
+      when: [completion]
+      light: tension
+      heavy: tension
+      from: [linked, benefits]
+      types: [community, organization, person]
+      hits: result
+      condition: У этих людей есть влияние и желание прибрать результат к рукам?
+      skeleton: Влиятельные люди хотят забрать готовый результат под себя.
+      helps: закрепить результат за городом, поделить выгоду или найти противовес
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+    - id: abuse
+      title: Злоупотребление новым
+      enabled: true
+      class: side
+      when: [completion]
+      light: tension
+      heavy: tension
+      from: [result]
+      types: []
+      hits: result
+      condition: ''
+      skeleton: Кто-то тайно пользуется новым во вред городу, виновник пока неизвестен.
+      helps: розыск виновника, надзор и ясные правила пользования
+      needsNew: true
+      newHidden: true
+      requires: null
+      minStep: normal
+    - id: displacement
+      title: Вытеснение старого
+      enabled: true
+      class: side
+      when: [completion]
+      light: clock
+      heavy: clock
+      from: [same-type]
+      types: []
+      hits: role
+      condition: Новое делает это старое ненужным?
+      skeleton: Новое вытесняет старое той же службы, оно пустеет и теряет значение.
+      helps: найти старому новое применение или слить его с новым
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+    - id: imitators
+      title: Подражатели
+      enabled: true
+      class: plus
+      when: [completion]
+      light: opportunity
+      heavy: opportunity
+      from: [benefits]
+      types: [community, organization, person]
+      hits: role
+      condition: ''
+      skeleton: Те, кому результат выгоден, готовы сами продолжить начатое, если их поддержать.
+      helps: дать разрешение, место или малую помощь подражателям
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: safe
+    - id: party
+      title: Партия нового
+      enabled: true
+      class: side
+      when: [completion]
+      light: tension
+      heavy: tension
+      from: [result]
+      types: []
+      hits: result
+      condition: ''
+      skeleton: Вокруг результата сложилась группа, она требует продолжения и грозит обидой.
+      helps: дать группе дело и место или твёрдо очертить её права
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: normal
+    # Ждёт сопряжения: запись в словаре есть, но не тянется.
+    - id: outside-gaze
+      title: Взгляд извне
+      enabled: false
+      class: side
+      when: [completion]
+      light: clock
+      heavy: clock
+      from: [result]
+      types: []
+      hits: result
+      condition: ''
+      skeleton: Заметный результат увидят соседи при сближении островов и ответят спросом или страхом.
+      helps: подготовить город к встрече с соседями
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+    # Исполняется кодом завершения этапа с неизвестным исходом, жребием не тянется.
+    - id: hidden-property
+      title: Неожиданное свойство
+      enabled: false
+      class: side
+      when: [completion]
+      light: tension
+      heavy: tension
+      from: [result]
+      types: []
+      hits: result
+      condition: ''
+      skeleton: У результата открылось свойство, которого никто не ждал.
+      helps: изучить свойство и найти ему применение
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
 
 # Посев историй: сколько живых историй держать в городе (без строек игрока)
 # и как часто проверять. Первая история приходит вскоре после генезиса.
@@ -209,6 +567,19 @@ seeding:
   firstStoryDay: 3
   # Сколько имён из пула мира давать агенту, который может завести людей.
   namesPerCall: 6
+  # Посаженная история на новой модели: ёмкость по масштабу заготовки
+  # и срок (в игровых месяцах), если история движется сама.
+  capacity:
+    NONE: 2
+    MINOR: 4
+    SIGNIFICANT: 9
+    MAJOR: 16
+    DEFINING: 34
+  driftMonths:
+    NONE: 0
+    SLOW: 8
+    STEADY: 4
+    FAST: 2
 
 priest:
   # Сколько последних реплик разговора видит жрец.
