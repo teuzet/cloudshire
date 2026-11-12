@@ -18,7 +18,7 @@ import { parseAgentSettings } from '../../agents/_shared/settings.js';
 import { parseRules } from '../../core/rules.js';
 import type { NamesFile } from '../../flows/world.js';
 import type { Llm } from '../../ports/llm.js';
-import { buildLlm, loadScenarios, readYaml, ROOT } from '../app.js';
+import { buildLlm, loadDotEnv, loadScenarios, readYaml, ROOT } from '../app.js';
 import { compareRuns, isStage, listBench, runStage, saveState, type BenchConfig } from './bench.js';
 
 function parseArgs(argv: string[]): { positional: string[]; flags: Record<string, string[]> } {
@@ -49,12 +49,6 @@ function liveLlm(): Llm | null {
   } catch {
     return null;
   }
-}
-
-/** Локально ключи удобно держать в .env (он в .gitignore). В облаке они приходят из секретов окружения. */
-function loadDotEnv(): void {
-  const file = path.join(ROOT, '.env');
-  if (fs.existsSync(file) && typeof process.loadEnvFile === 'function') process.loadEnvFile(file);
 }
 
 function config(): BenchConfig {

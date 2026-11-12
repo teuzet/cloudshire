@@ -26,6 +26,12 @@ import type { Storage } from '../ports/storage.js';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
+/** Локально ключи удобно держать в .env (он в .gitignore). В облаке они приходят из секретов окружения. */
+export function loadDotEnv(): void {
+  const file = path.join(ROOT, '.env');
+  if (fs.existsSync(file) && typeof process.loadEnvFile === 'function') process.loadEnvFile(file);
+}
+
 export function readYaml(file: string): unknown {
   return yaml.load(fs.readFileSync(path.join(ROOT, file), 'utf8'));
 }

@@ -14,7 +14,7 @@ import { patronMessage } from '../../flows/priest-turn.js';
 import { runDueCities } from '../../flows/scheduler.js';
 import { skipWorldDays } from '../../flows/world.js';
 import { gameDate } from '../../core/time.js';
-import { buildApp } from '../app.js';
+import { buildApp, loadDotEnv } from '../app.js';
 import { cityStatus } from '../views.js';
 import { PAGE } from './page.js';
 
@@ -31,6 +31,7 @@ function send(res: http.ServerResponse, status: number, body: unknown, type = 'a
 }
 
 async function main(): Promise<void> {
+  loadDotEnv();
   const inbox = new MemoryNotifier();
   const app = await buildApp(process.env, inbox);
   const { deps, locks } = app;

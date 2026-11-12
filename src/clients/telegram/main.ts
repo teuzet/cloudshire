@@ -13,12 +13,13 @@ import { onboardingMessage, resetPlayer, runGenesis } from '../../flows/onboardi
 import { patronMessage } from '../../flows/priest-turn.js';
 import { runDueCities } from '../../flows/scheduler.js';
 import { requireWorld, today } from '../../flows/context.js';
-import { buildApp } from '../app.js';
+import { buildApp, loadDotEnv } from '../app.js';
 import { cityStatus } from '../views.js';
 
 const TICK_MS = 20_000;
 
 async function main(): Promise<void> {
+  loadDotEnv();
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error('нет TELEGRAM_BOT_TOKEN');
   const allow = new Set((process.env.TELEGRAM_ALLOW_IDS ?? '').split(',').map((s) => s.trim()).filter(Boolean));

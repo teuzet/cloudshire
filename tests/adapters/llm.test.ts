@@ -5,7 +5,7 @@ import { describe, expect, test } from 'vitest';
 import { anthropicToolChoice, toAnthropicMessages } from '../../src/adapters/llm/anthropic.js';
 import { RecordingLlm, ReplayLlm, requestKey } from '../../src/adapters/llm/cassette.js';
 import { FakeLlm, toolReply } from '../../src/adapters/llm/fake.js';
-import { toOpenAiMessages } from '../../src/adapters/llm/openai.js';
+import { openAiToolChoice, toOpenAiInput } from '../../src/adapters/llm/openai.js';
 import { RoutingLlm, splitModel } from '../../src/adapters/llm/router.js';
 import type { LlmMessage, LlmRequest } from '../../src/ports/llm.js';
 
@@ -28,11 +28,24 @@ describe('роутер', () => {
 });
 
 describe('перевод сообщений', () => {
-  test('OpenAI: system первым, вызовы тулов и их результаты', () => {
-    const out = toOpenAiMessages('sys', turn);
-    expect(out[0]).toEqual({ role: 'system', content: 'sys' });
-    expect(out[2]).toMatchObject({ role: 'assistant', tool_calls: [{ id: 't1', function: { name: 'add', arguments: '{"n":1}' } }] });
-    expect(out[3]).toEqual({ role: 'tool', tool_call_id: 't1', content: '{"ok":true}' });
+  test('OpenAI: вызовы тулов и их результаты — отдельные элементы', () => {
+    const out = toOpenAiInput(turn);
+    expect(out).toHaveLength(4);
+    expect(out[0]).toEqual({ role: 'user', content: 'привет' });
+    expect(out[1]).toEqual({ type: 'function_call', call_id: 't1', name: 'add', arguments: '{"n":1}' });
+    expect(out[2]).toEqual({ type: 'function_call_output', call_id: 't1', output: '{"ok":true}' });
+  });
+
+  test('OpenAI: свои элементы (с рассуждением) возвращаются как есть', () => {
+    const blocks = [{ type: 'reasoning', id: 'r1', summary: [], encrypted_content: 'enc' }, { type: 'function_call', call_id: 't1', name: 'add', arguments: '{}' }];
+    const out = toOpenAiInput([{ role: 'user', content: 'u' }, { role: 'assistant', content: '', providerContent: { provider: 'openai', blocks } }]);
+    expect(out.slice(1)).toEqual(blocks);
+  });
+
+  test('OpenAI: выбор тула', () => {
+    expect(openAiToolChoice({ name: 'x' })).toEqual({ type: 'function', name: 'x' });
+    expect(openAiToolChoice('required')).toBe('required');
+    expect(openAiToolChoice(undefined)).toBeUndefined();
   });
 
   test('Anthropic: результат тула и следующий текст — один user-ход', () => {

@@ -1,40 +1,42 @@
 /**
- * Адаптер OpenAI (Chat Completions). Один запрос — один ответ, без ретраев:
+ * Адаптер OpenAI (Responses API). Один запрос — один ответ, без ретраев:
  * повтор решает вызывающий.
+ *
+ * Responses, а не Chat Completions: у моделей с рассуждением (gpt-5.x) Chat Completions
+ * не принимает тулы вместе с рассуждением. Запросы не хранятся на стороне OpenAI (store: false),
+ * поэтому элементы ответа, включая зашифрованное рассуждение, лежат в providerContent
+ * и в следующем ходе того же агента отдаются назад как есть.
  */
 
 import OpenAI from 'openai';
 import type { Llm, LlmMessage, LlmRequest, LlmResponse } from '../../ports/llm.js';
 
-type ChatMessage = OpenAI.Chat.Completions.ChatCompletionMessageParam;
+type InputItem = OpenAI.Responses.ResponseInputItem;
 
-export function toOpenAiMessages(system: string, messages: LlmMessage[]): ChatMessage[] {
-  const out: ChatMessage[] = [{ role: 'system', content: system }];
+const PROVIDER = 'openai';
+
+export function isReasoningModel(model: string): boolean {
+  return /^(gpt-5|o\d)/i.test(model);
+}
+
+export function toOpenAiInput(messages: LlmMessage[]): InputItem[] {
+  const out: InputItem[] = [];
   for (const m of messages) {
     if (m.role === 'user') out.push({ role: 'user', content: m.content });
-    else if (m.role === 'tool') out.push({ role: 'tool', tool_call_id: m.toolCallId, content: m.content });
-    else
-      out.push({
-        role: 'assistant',
-        content: m.content || null,
-        ...(m.toolCalls?.length
-          ? {
-              tool_calls: m.toolCalls.map((c) => ({
-                id: c.id,
-                type: 'function' as const,
-                function: { name: c.name, arguments: c.arguments },
-              })),
-            }
-          : {}),
-      });
+    else if (m.role === 'tool') out.push({ type: 'function_call_output', call_id: m.toolCallId, output: m.content });
+    else if (m.providerContent?.provider === PROVIDER) out.push(...(m.providerContent.blocks as InputItem[]));
+    else {
+      if (m.content) out.push({ role: 'assistant', content: m.content });
+      for (const c of m.toolCalls ?? []) out.push({ type: 'function_call', call_id: c.id, name: c.name, arguments: c.arguments });
+    }
   }
   return out;
 }
 
-function toolChoice(choice: LlmRequest['toolChoice']): OpenAI.Chat.Completions.ChatCompletionToolChoiceOption | undefined {
+export function openAiToolChoice(choice: LlmRequest['toolChoice']): OpenAI.Responses.ResponseCreateParams['tool_choice'] {
   if (!choice) return undefined;
   if (choice === 'auto' || choice === 'required') return choice;
-  return { type: 'function', function: { name: choice.name } };
+  return { type: 'function', name: choice.name };
 }
 
 export class OpenAiLlm implements Llm {
@@ -45,44 +47,61 @@ export class OpenAiLlm implements Llm {
   }
 
   async complete(request: LlmRequest): Promise<LlmResponse> {
-    const reasoning = /^(gpt-5|o\d)/i.test(request.model);
-    const completion = await this.client.chat.completions.create(
+    const reasoning = isReasoningModel(request.model);
+    const response = await this.client.responses.create(
       {
         model: request.model,
-        messages: toOpenAiMessages(request.system, request.messages),
+        instructions: request.system,
+        input: toOpenAiInput(request.messages),
+        store: false,
         ...(request.tools?.length
           ? {
               tools: request.tools.map((t) => ({
                 type: 'function' as const,
-                function: { name: t.name, description: t.description, parameters: t.parameters },
+                name: t.name,
+                description: t.description,
+                parameters: t.parameters,
+                strict: false,
               })),
-              tool_choice: toolChoice(request.toolChoice),
+              tool_choice: openAiToolChoice(request.toolChoice),
             }
           : {}),
-        ...(request.maxOutputTokens
-          ? reasoning
-            ? { max_completion_tokens: request.maxOutputTokens }
-            : { max_tokens: request.maxOutputTokens }
+        ...(request.maxOutputTokens ? { max_output_tokens: request.maxOutputTokens } : {}),
+        ...(reasoning
+          ? {
+              include: ['reasoning.encrypted_content' as const],
+              ...(request.effort ? { reasoning: { effort: request.effort } } : {}),
+            }
           : {}),
-        ...(reasoning && request.effort ? { reasoning_effort: request.effort } : {}),
       },
       request.signal ? { signal: request.signal } : undefined,
     );
-    const choice = completion.choices[0];
-    const message = choice?.message;
-    const toolCalls = (message?.tool_calls ?? []).flatMap((c) =>
-      c.type === 'function' ? [{ id: c.id, name: c.function.name, arguments: c.function.arguments }] : [],
-    );
+
+    let text = '';
+    let refusal = false;
+    const toolCalls: LlmResponse['toolCalls'] = [];
+    for (const item of response.output) {
+      if (item.type === 'message') {
+        for (const part of item.content) {
+          if (part.type === 'output_text') text += part.text;
+          else if (part.type === 'refusal') refusal = true;
+        }
+      } else if (item.type === 'function_call') {
+        toolCalls.push({ id: item.call_id, name: item.name, arguments: item.arguments });
+      }
+    }
+    const truncated = response.status === 'incomplete' && response.incomplete_details?.reason === 'max_output_tokens';
     return {
-      text: message?.content ?? '',
+      text,
       toolCalls,
       usage: {
-        inputTokens: completion.usage?.prompt_tokens ?? 0,
-        outputTokens: completion.usage?.completion_tokens ?? 0,
-        cachedInputTokens: completion.usage?.prompt_tokens_details?.cached_tokens ?? 0,
+        inputTokens: response.usage?.input_tokens ?? 0,
+        outputTokens: response.usage?.output_tokens ?? 0,
+        cachedInputTokens: response.usage?.input_tokens_details?.cached_tokens ?? 0,
       },
-      model: completion.model,
-      stop: choice?.finish_reason === 'length' ? 'length' : message?.refusal ? 'refusal' : 'done',
+      model: response.model,
+      stop: truncated ? 'length' : refusal ? 'refusal' : 'done',
+      providerContent: { provider: PROVIDER, blocks: response.output },
     };
   }
 }
