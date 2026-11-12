@@ -16,7 +16,7 @@ export type Change =
   | { kind: 'stats'; points: Partial<StatMap> }
   | { kind: 'front_opened'; frontId: string; title: string; form: FrontForm; plus: boolean }
   | { kind: 'front_closed'; frontId: string; title: string; outcome: 'done' | 'averted' | 'failed' | 'cancelled' | 'expired' }
-  | { kind: 'front_moved'; frontId: string; title: string; how: 'rollback' | 'pushed' | 'frozen' | 'slowed' | 'helped' | 'setback' | 'burst' };
+  | { kind: 'front_moved'; frontId: string; title: string; how: 'rollback' | 'pushed' | 'frozen' | 'slowed' | 'helped' | 'cleared' | 'setback' | 'burst' };
 
 const TYPE_WORDS: Record<ObjectType, string> = {
   building: 'здание',
@@ -56,7 +56,7 @@ export function statShiftWords(rules: Pick<Rules, 'stats'>, delta: Partial<StatM
   return parts.join(', ');
 }
 
-const FORM_WORDS: Record<FrontForm, string> = {
+export const FORM_WORDS: Record<FrontForm, string> = {
   deed: 'дело',
   tension: 'растущее напряжение',
   threat: 'угроза со сроком',
@@ -78,6 +78,7 @@ const MOVED_WORDS = {
   frozen: 'встало, пока не снята угроза',
   slowed: 'идёт медленнее из-за помехи',
   helped: 'получило помощников',
+  cleared: 'избавилось от помехи и идёт дальше',
   setback: 'потеряло часть сделанного',
   burst: 'прорвалось бедой',
 } as const;

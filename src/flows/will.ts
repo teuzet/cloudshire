@@ -6,6 +6,7 @@
  * шанс беды из ступени риска и темпа. Сановник из приказа сразу становится ведущим.
  */
 
+import { FORM_WORDS } from '../core/world/changes.js';
 import { clipWords } from '../core/text.js';
 import type { City, Front, Officer, Project, ProjectStage, StakeOp, WorldObject } from '../core/city.js';
 import { activeFacts } from '../core/lore.js';
@@ -76,6 +77,7 @@ function willInput(city: City) {
     fronts: activeFronts(city).map((f) => ({
       id: f.id,
       title: f.title,
+      kind: f.plus ? 'удобный случай со сроком' : FORM_WORDS[f.form],
       description: f.description,
       lead: leadLabel(city, f).label,
       hindrances: attachedTo(city, f.id)

@@ -243,10 +243,13 @@ async function completeDeed(deps: FlowDeps, city: City, front: Front, day: numbe
   const rolled = target && target.origin === 'player' ? rollFor(deps, city, front, target) : null;
   const changes = closeFront(deps.rules, city, front, 'done', day);
   changes.push(...applyStake(deps.rules, city, front.stake, stakeCtx(deps, target ?? front, day)).changes);
+  // Задание — часть большого дела: в списке перемен и в сути видно, что большое дело идёт дальше.
+  if (target) changes.push({ kind: 'front_moved', frontId: target.id, title: target.title, how: front.stake.some((op) => op.op === 'progress') ? 'pushed' : front.stake.some((op) => op.op === 'delete') ? 'cleared' : 'helped' });
+  const description = target ? `${front.description}. Это задание помогает большому делу «${target.title}», и оно идёт дальше.` : front.description;
   const beat = await tryAgent<Beat>(
     deps,
     'beat-writer',
-    () => writeBeat(deps.agents, { title: front.title, description: front.description, share: 1, lead: lead.label, manner: lead.manner, result, reveal: null, allowed: ['none'] }),
+    () => writeBeat(deps.agents, { title: front.title, description, share: 1, lead: lead.label, manner: lead.manner, result, reveal: null, allowed: ['none'] }),
     { text: `Задание выполнено: ${front.title}.`, effect: 'none' },
   );
   const trouble = target ? await complicateRolled(deps, city, target, rolled, { moment: 'milestone' }, day) : null;
