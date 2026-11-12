@@ -346,7 +346,7 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
     { kind: 'object_created', objectId: site.id, name: site.name, type: site.type, points: emptyStatMap(), temporary: true, hidden: false },
   ];
   await record(deps, city, {
-    gist: `${title(deps, officer)} ${officer.gender === 'female' ? 'начала' : 'начал'} дело по воле покровителя: ${front.title}. ${front.description}`,
+    gist: `${title(deps, officer)} по воле покровителя ${officer.gender === 'female' ? 'взялась' : 'взялся'} за работу. ${front.description}`,
     changes,
     source: 'will',
     frontId: front.id,

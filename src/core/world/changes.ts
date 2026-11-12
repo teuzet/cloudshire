@@ -66,7 +66,7 @@ export const FORM_WORDS: Record<FrontForm, string> = {
 
 /** Как началось, словами мира: летописец и глашатай видят события, а не устройство игры. */
 const OPENED_WORDS: Record<FrontForm, string> = {
-  deed: 'впереди работа',
+  deed: 'это предстоит сделать',
   tension: 'растёт недовольство',
   threat: 'надвигается беда',
   clock: 'скоро это случится',
@@ -101,7 +101,7 @@ export function describeChanges(rules: Pick<Rules, 'stats'>, changes: readonly C
       case 'object_created': {
         if (c.hidden) break;
         const shift = statShiftWords(rules, c.points);
-        out.push(`Появилось: ${c.name} (${TYPE_WORDS[c.type]}${c.temporary ? ', на время' : ''})${shift ? `. Для города: ${shift}` : ''}`);
+        out.push(c.temporary ? `Там, где идёт работа: ${c.name}` : `Появилось: ${c.name} (${TYPE_WORDS[c.type]})${shift ? `. Для города: ${shift}` : ''}`);
         break;
       }
       case 'object_changed': {
