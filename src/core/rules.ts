@@ -251,6 +251,7 @@ export const rulesSchema = z.object({
     activeStories: z.number().int().nonnegative(),
     checkEveryDays: z.number().int().positive(),
     firstStoryDay: z.number().int().nonnegative(),
+    dormantDays: z.number().int().positive(),
     namesPerCall: z.number().int().nonnegative(),
     capacity: byImpact,
     driftMonths: byDrift,

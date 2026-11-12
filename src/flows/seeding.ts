@@ -7,7 +7,7 @@
 
 import { scheduleJob } from '../core/jobs.js';
 import type { Change } from '../core/world/changes.js';
-import { activeFronts } from '../core/world/fronts.js';
+import { activeFronts, closeFront } from '../core/world/fronts.js';
 import { leadOf } from '../core/world/assignments.js';
 import { rawToPoints } from '../core/world/numbers.js';
 import { mysteryObjectIds } from '../core/lore.js';
@@ -95,9 +95,19 @@ export async function plantStory(deps: FlowDeps, city: City, day: number): Promi
   return record(deps, city, { gist: gist || scenario.pitch || scenario.title, changes, source: 'scenario', frontId: fronts[0]?.id ?? null, day, kind: 'beat', officer: null, announce: true });
 }
 
+/** Нетронутые поиски и дела историй, за которые так никто и не взялся, тихо уходят из дел города. */
+function fadeDormant(deps: FlowDeps, city: City, day: number): void {
+  for (const f of activeFronts(city)) {
+    if (f.origin !== 'story' || (f.form !== 'find' && f.form !== 'deed') || leadOf(city, f.id)) continue;
+    if (f.progress > 0 || day - f.createdDay < deps.rules.seeding.dormantDays) continue;
+    closeFront(deps.rules, city, f, 'cancelled', day);
+  }
+}
+
 /** Задание seed: досадить историй и поставить следующую проверку. */
 export async function seedStories(deps: FlowDeps, city: City, day: number): Promise<OutboundMessage[]> {
   const out: OutboundMessage[] = [];
+  fadeDormant(deps, city, day);
   const room = roomForTrouble(deps.rules, city) > 0;
   const need = room ? Math.max(0, Math.floor(deps.rules.seeding.activeStories - storyCount(city))) : 0;
   for (let i = 0; i < need; i++) {

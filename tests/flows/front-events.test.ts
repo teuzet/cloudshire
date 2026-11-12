@@ -120,7 +120,7 @@ describe('баллиста: от приказа до результата', () =
     expect(fitter).toContain('Гильдия каменщиков');
     expect(lastUser(s.llm.callsTo('costumer')[0]!)).toContain('Род события: ');
     expect(lastUser(s.llm.callsTo('key-sealer').at(-1)!)).toContain('Обычно помогает: уступка в оплате или отдыхе');
-    expect(lastUser(s.llm.callsTo('chronicler').at(-1)!)).toContain('Дело «Постройка баллисты» встало, пока не снята угроза');
+    expect(lastUser(s.llm.callsTo('chronicler').at(-1)!)).toContain('Работа над «Постройка баллисты» встала, пока опасность рядом');
 
     // Хранительница берёт угрозу стратегией «в точку» и успевает до срока.
     s.deps.rules.fronts.risk.chance.hard = 0;

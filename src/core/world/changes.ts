@@ -64,25 +64,34 @@ export const FORM_WORDS: Record<FrontForm, string> = {
   find: 'поиск',
 };
 
+/** Как началось, словами мира: летописец и глашатай видят события, а не устройство игры. */
+const OPENED_WORDS: Record<FrontForm, string> = {
+  deed: 'впереди работа',
+  tension: 'растёт недовольство',
+  threat: 'надвигается беда',
+  clock: 'скоро это случится',
+  find: 'предстоит разузнать',
+};
+
 const CLOSED_WORDS = {
-  done: 'Завершено',
-  averted: 'Беда отведена',
-  failed: 'Беда случилась',
-  cancelled: 'Прекращено',
-  expired: 'Случай упущен',
+  done: 'Сделано',
+  averted: 'Обошлось',
+  failed: 'Случилось',
+  cancelled: 'Брошено',
+  expired: 'Упущено',
 } as const;
 
-const MOVED_WORDS = {
-  rollback: 'откатилось на шаг назад',
-  pushed: 'заметно продвинулось',
-  eased: 'ослабло, но беда ещё не снята: без дальнейшей работы она случится в срок',
-  frozen: 'встало, пока не снята угроза',
-  slowed: 'идёт медленнее из-за помехи',
-  helped: 'получило помощников',
-  cleared: 'избавилось от помехи и идёт дальше',
-  setback: 'потеряло часть сделанного',
-  burst: 'прорвалось бедой',
-} as const;
+const MOVED_WORDS: Record<Extract<Change, { kind: 'front_moved' }>['how'], (t: string) => string> = {
+  rollback: (t) => `Работу над «${t}» отбросило назад`,
+  pushed: (t) => `Работа над «${t}» сильно продвинулась`,
+  eased: (t) => `«${t}» ещё не позади`,
+  frozen: (t) => `Работа над «${t}» встала, пока опасность рядом`,
+  slowed: (t) => `Работа над «${t}» идёт медленнее из-за помехи`,
+  helped: (t) => `У работы над «${t}» появились помощники`,
+  cleared: (t) => `Помеху убрали, работа над «${t}» идёт дальше`,
+  setback: (t) => `Часть сделанного для «${t}» потеряна`,
+  burst: (t) => `«${t}» вылилось в открытую беду`,
+};
 
 /** Перемены словами для Летописца. Скрытое в список не попадает. */
 export function describeChanges(rules: Pick<Rules, 'stats'>, changes: readonly Change[]): string[] {
@@ -123,15 +132,15 @@ export function describeChanges(rules: Pick<Rules, 'stats'>, changes: readonly C
       case 'front_opened':
         out.push(
           c.plus
-            ? `Открылась возможность: «${c.title}». Город пока ею не воспользовался; если никто не возьмётся вовремя, она пропадёт`
-            : `Началось: «${c.title}» (${FORM_WORDS[c.form]})`,
+            ? `Выпал случай: «${c.title}». Если никто не возьмётся вовремя, он уйдёт`
+            : `Началось: «${c.title}» — ${OPENED_WORDS[c.form]}`,
         );
         break;
       case 'front_closed':
         out.push(`${CLOSED_WORDS[c.outcome]}: «${c.title}»`);
         break;
       case 'front_moved':
-        out.push(`Дело «${c.title}» ${MOVED_WORDS[c.how]}`);
+        out.push(MOVED_WORDS[c.how](c.title));
         break;
     }
   }

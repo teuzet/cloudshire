@@ -66,7 +66,7 @@ function resultWords(city: City, front: Front): string | null {
     if (op.op === 'progress') {
       const pushed = findFront(city, op.frontId);
       if (!pushed || pushed.status !== 'active') continue;
-      return pushed.form === 'threat' || pushed.form === 'tension' ? `беда «${pushed.title}» ослабнет` : `дело «${pushed.title}» продвинется`;
+      return `шаг к развязке «${pushed.title}»`;
     }
     if (op.op === 'revalue' || op.op === 'modify' || op.op === 'delete') {
       const target = findObject(city, op.target);
@@ -174,7 +174,7 @@ async function onMilestone(deps: FlowDeps, city: City, front: Front, day: number
         reveal,
         allowed: reveal ? ['none', 'reveal'] : ['none'],
       }),
-    { text: reveal ?? `Дело движется: ${front.title}.`, effect: reveal ? 'reveal' : 'none' },
+    { text: reveal ?? `Работа идёт: ${front.title}.`, effect: reveal ? 'reveal' : 'none' },
   );
   const changes: Change[] = [];
   if (beat.effect === 'reveal') {
@@ -234,7 +234,7 @@ async function avert(deps: FlowDeps, city: City, front: Front, day: number, out:
         manner: lead.manner,
         allowed: ['none', 'fact', ...(people.length >= 2 ? (['link'] as const) : []), ...(helpers.length ? (['keep'] as const) : [])],
       }),
-    { text: `Беду отвели: ${front.title}.`, effect: 'none' },
+    { text: `Обошлось: ${front.title}.`, effect: 'none' },
   );
   const changes: Change[] = [...unmasked];
   // Того, кого решено оставить городу, надо отвязать до закрытия фронта: иначе он исчезнет вместе с ним.
@@ -267,13 +267,13 @@ async function completeDeed(deps: FlowDeps, city: City, front: Front, day: numbe
   if (target && !changes.some((c) => c.kind === 'front_moved' && c.frontId === target.id)) changes.push({ kind: 'front_moved', frontId: target.id, title: target.title, how: front.stake.some((op) => op.op === 'progress') ? 'pushed' : front.stake.some((op) => op.op === 'delete') ? 'cleared' : 'helped' });
   // Задание приближает большое дело, но не решает его: найденное и узнанное приходит только с вехами большого дела.
   const description = target
-    ? `${front.description}. Это задание помогает большому делу «${target.title}»: работа сделана и приблизила его, а ответа и итога большого дела пока нет.`
+    ? `${front.description}. Это шаг в работе над «${target.title}»: ответ и итог «${target.title}» ещё впереди.`
     : front.description;
   const beat = await tryAgent<Beat>(
     deps,
     'beat-writer',
     () => writeBeat(deps.agents, { title: front.title, description, share: 1, lead: lead.label, manner: lead.manner, result, reveal: null, allowed: ['none'] }),
-    { text: `Задание выполнено: ${front.title}.`, effect: 'none' },
+    { text: `Сделано: ${front.title}.`, effect: 'none' },
   );
   const trouble = target ? await complicateRolled(deps, city, target, rolled, { moment: 'milestone' }, day) : null;
   await finish(
@@ -400,7 +400,7 @@ async function complete(deps: FlowDeps, city: City, front: Front, day: number, o
         reveal: twist,
         allowed: twist ? ['reveal'] : ['none'],
       }),
-    { text: `Дело завершено: ${front.title}.${twist ? ` ${twist}` : ''}`, effect: 'none' },
+    { text: `Сделано: ${front.title}.${twist ? ` ${twist}` : ''}`, effect: 'none' },
   );
   await faithEvent(deps, city, { event: beat.text, will, day });
   const trouble = await complicateRolled(deps, city, front, rolled, { moment: 'completion', resultId: applied.resultId }, day);
