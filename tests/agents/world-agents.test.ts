@@ -60,7 +60,7 @@ describe('посев и генезис объектов', () => {
     expect(s.fronts.map((f) => f.id)).toEqual(template.fronts.map((f) => f.id));
     expect(s.fronts[0]).toMatchObject({ impact: template.fronts[0]!.impact, drift: 'NONE', description: 'Пробраться в башню у Мерва.' });
     expect(s.objects[0]!.statProfile).toEqual(template.objects[0]!.statProfile);
-    expect(s.objects.find((o) => o.id === 'decor')).not.toHaveProperty('weight');
+    expect(s.objects.find((o) => o.id === 'decor')).toBeUndefined();
   });
 
   test('scenario-writer: переименованные id узнаются по месту', async () => {

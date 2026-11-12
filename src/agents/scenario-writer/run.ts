@@ -55,19 +55,24 @@ function checkIds(raw: Scenario, existing: Set<string>): string | null {
 }
 
 /**
- * Подгонка меняет слова, а не устройство: числа, род и срок фронтов, вклад и скрытость объектов
- * берутся из заготовки. Новые объекты-декорации можно, но без вклада в статы; новых фронтов нельзя.
+ * Подгонка меняет слова, а не устройство: состав объектов, числа, род и срок фронтов, вклад и
+ * скрытость объектов берутся из заготовки. Новых объектов и фронтов нет: дописанные писателем
+ * объекты забегали вперёд истории (готовый результат, разгадка тайны) и выдавали её с первого дня.
  */
 function keepTemplate(raw: Scenario, template: Scenario): Scenario {
   const tObjects = new Map(template.objects.map((o) => [o.id, o]));
   // Писатель иногда переименовывает id: тогда объект заготовки узнаём по месту и типу.
-  const objects = raw.objects.map((o, i) => {
+  const objects = raw.objects.flatMap((o, i) => {
     const byPlace = template.objects[i];
     const t = tObjects.get(o.id) ?? (byPlace && byPlace.type === o.type && !raw.objects.some((x) => x.id === byPlace.id) ? byPlace : undefined);
+    if (!t) return [];
     const { weight: _w, statProfile: _p, hidden: _h, ...rest } = o;
-    if (!t) return rest;
-    return { ...rest, type: t.type, ...(t.weight ? { weight: t.weight } : {}), ...(t.statProfile ? { statProfile: t.statProfile } : {}), ...(t.hidden ? { hidden: true } : {}) };
+    return [{ ...rest, type: t.type, ...(t.weight ? { weight: t.weight } : {}), ...(t.statProfile ? { statProfile: t.statProfile } : {}), ...(t.hidden ? { hidden: true } : {}) }];
   });
+  // Объект заготовки, который писатель потерял, возвращается как есть.
+  const kept = new Set(objects.map((o) => o.id));
+  const matched = new Set(raw.objects.flatMap((o, i) => (tObjects.has(o.id) ? [o.id] : template.objects[i] && template.objects[i]!.type === o.type ? [template.objects[i]!.id] : [])));
+  for (const t of template.objects) if (!kept.has(t.id) && !matched.has(t.id)) objects.push(t);
   // Писатель мог переименовать объект заготовки: его слово главнее, заново объект не добавляем.
   const present = new Set(objects.map((o) => o.id));
   const targetOf = (st: Scenario['fronts'][number]['stake']) =>
