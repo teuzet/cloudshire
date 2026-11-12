@@ -25,7 +25,7 @@ import { rewriteDescription } from '../agents/description-rewriter/run.js';
 import { composeDynamic } from '../agents/dynamics-composer/run.js';
 import { appraiseRisk } from '../agents/risk-appraiser/run.js';
 import { fitRole } from '../agents/role-fitter/run.js';
-import { appraise, briefOf, seal, situationOf, touchesOf } from './briefs.js';
+import { appraise, briefOf, seal, situationOf, touchesOf, workWords } from './briefs.js';
 import { record } from './chronicle.js';
 import { namesUsed, newId, returnNames, takeNames, tryAgent, type FlowDeps } from './context.js';
 import { faithEvent, willWords } from './fronts.js';
@@ -155,7 +155,7 @@ export async function complicate(
       dressEvent(deps.agents, {
         skeleton: plan.skeleton,
         shape: plan.shape,
-        cause: `${parent.title}. ${parent.description}`,
+        cause: `${parent.title}. ${workWords(parent)}`,
         actor: role ? { object: briefOf(role), touch: plan.touch } : null,
         themes: themeNames(city),
         names: names.map((n) => `${n.name} (${n.gender === 'female' ? 'ж' : 'м'})`),
@@ -377,7 +377,7 @@ export async function echo(deps: FlowDeps, city: City, changes: readonly Change[
     const before = rawToPoints(city, target.statEffect);
     const appraised = await appraise(deps, city, briefOf(target), { points: before, event });
     const delta = diffPoints(appraised.points, before);
-    if (!appraised.ok || magnitude(delta) === 0) continue;
+    if (!appraised.ok || magnitude(delta) < Math.max(deps.rules.fronts.echo.minPoints, 1e-9)) continue;
     const plus = delta.prosperity + delta.security + delta.knowledge + delta.influence > 0;
     const costume = await tryAgent(
       deps,

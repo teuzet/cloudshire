@@ -211,7 +211,7 @@ export const rulesSchema = z.object({
       freshDays: z.number().int().positive(),
       fitterCalls: z.number().int().positive(),
     }),
-    echo: z.object({ maxPerChange: z.number().int().nonnegative() }),
+    echo: z.object({ maxPerChange: z.number().int().nonnegative(), minPoints: z.number().nonnegative() }),
     refresh: z.object({ maxFronts: z.number().int().nonnegative() }),
     unattainableWarnDays: z.number().int().positive(),
     objects: z.object({

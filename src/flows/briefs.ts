@@ -143,3 +143,9 @@ export async function seal(
     null,
   );
 }
+
+/** Описание дела для агентов. У недостижимого дела к нему приписано, что цели оно не достигнет. */
+export function workWords(front: Pick<Front, 'description' | 'unattainable'>): string {
+  if (!front.unattainable) return front.description;
+  return `${front.description} Цель этой работы недостижима: ${front.unattainable} Люди трудятся всерьёз, но к самой цели работа не приближает: всё, что выходит, — попытки, потери и побочные находки.`;
+}

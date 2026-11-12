@@ -25,7 +25,7 @@ import { writeBeat, type Beat } from '../agents/beat-writer/run.js';
 import { rewriteDescription } from '../agents/description-rewriter/run.js';
 import { resolveEvent, type Resolution } from '../agents/resolver/run.js';
 import { tagThemes } from '../agents/theme-tagger/run.js';
-import { appraise, briefOf, leadLabel, situationOf } from './briefs.js';
+import { appraise, briefOf, leadLabel, situationOf, workWords } from './briefs.js';
 import { record, type Happening } from './chronicle.js';
 import { complicateRolled, describeHits, echo, refreshAfterChange, resolveModify, rollFor } from './complications.js';
 import { newId, requireWorld, sendAll, today, tryAgent, type FlowDeps } from './context.js';
@@ -157,11 +157,11 @@ async function onMilestone(deps: FlowDeps, city: City, front: Front, day: number
     () =>
       writeBeat(deps.agents, {
         title: front.title,
-        description: front.description,
+        description: workWords(front),
         share: shareDone(front, day),
         lead: lead.label,
         manner: lead.manner,
-        result: resultWords(city, front),
+        result: front.unattainable ? null : resultWords(city, front),
         reveal,
         allowed: reveal ? ['none', 'reveal'] : ['none'],
       }),
