@@ -3,7 +3,7 @@
  */
 
 import type { PoolName, World } from '../core/city.js';
-import { newClock, skipDays } from '../core/time.js';
+import { holdClock, newClock, releaseClock, skipDays } from '../core/time.js';
 import { newId, type FlowDeps } from './context.js';
 
 export interface NamesFile {
@@ -59,4 +59,24 @@ export async function skipWorldDays(deps: FlowDeps, days: number): Promise<World
   const world = await deps.storage.getWorld();
   if (!world) throw new Error('мир не создан');
   return deps.storage.saveWorld({ ...world, clock: skipDays(world.clock, days, deps.rules) });
+}
+
+/** Dev: остановить мировые часы. Пока стоят, игровой день не меняется и задания не наступают. */
+export async function pauseWorld(deps: FlowDeps): Promise<World> {
+  const world = await deps.storage.getWorld();
+  if (!world) throw new Error('мир не создан');
+  if (world.clock.heldAtMs != null) return world;
+  return deps.storage.saveWorld({ ...world, clock: holdClock(world.clock, deps.clock.now()) });
+}
+
+/** Dev: пустить часы дальше с того же игрового момента. */
+export async function resumeWorld(deps: FlowDeps): Promise<World> {
+  const world = await deps.storage.getWorld();
+  if (!world) throw new Error('мир не создан');
+  if (world.clock.heldAtMs == null) return world;
+  return deps.storage.saveWorld({ ...world, clock: releaseClock(world.clock, deps.clock.now()) });
+}
+
+export function isPaused(world: World): boolean {
+  return world.clock.heldAtMs != null;
 }

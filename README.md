@@ -10,11 +10,12 @@
 ```
 npm install
 npm run check          # типы, слои, тесты (без сети и без моделей)
-npm run dev            # игра в браузере: http://localhost:3000 — ходит в настоящие модели
+npm run dev            # игра в браузере: http://localhost:3000 — ходит в настоящие модели;
+                       # пауза часов, промотка дней, сохранения в saves/ (SAVES_DIR)
 npm run bot            # Telegram-бот
 ```
 
-Ключи и хранилище — переменные окружения, см. `.env.example`. Модели агентов — `config/agents.yaml`,
+Ключи и хранилище — переменные окружения или файл `.env` в корне (его читают dev, bot и bench), см. `.env.example`. Модели агентов — `config/agents.yaml`,
 игровые числа — `config/game.yaml`, заготовки историй — `scenarios/`.
 
 Устройство: [CLAUDE.md](CLAUDE.md). Механика фронтов: [docs/design/fronts.md](docs/design/fronts.md).
