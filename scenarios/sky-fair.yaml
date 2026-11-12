@@ -1,0 +1,27 @@
+id: sky-fair
+title: Летняя ярмарка островов
+pitch: Соседние острова ищут место для большой ярмарки; если город успеет подготовиться, ярмарка придёт к нему.
+
+objects:
+  - id: fair-envoys
+    type: organization
+    name: Совет ярмарки
+    description: Старшины соседних островов, которые каждый год выбирают, где пройдёт ярмарка.
+
+fronts:
+  - id: host-fair
+    title: Принять ярмарку
+    form: deed
+    description: Чтобы ярмарка пришла, городу нужны причалы, торговые ряды и угощение для гостей. Совет ярмарки ждёт ответа до конца сезона.
+    impact: SIGNIFICANT
+    refs: [fair-envoys]
+    alignment: |
+      Двигают дело подготовка причалов и торговых рядов, щедрый приём старшин, обещания торговых льгот.
+    stake:
+      create:
+        type: practice
+        name: Ярмарка островов
+        description: Каждое лето в город съезжаются торговцы с соседних островов.
+        weight: SIGNIFICANT
+        statProfile: { prosperity: 2, influence: 1 }
+        refs: [fair-envoys]

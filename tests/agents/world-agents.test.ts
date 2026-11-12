@@ -47,6 +47,22 @@ describe('посев и генезис объектов', () => {
     expect(JSON.stringify(llm.requests[1]?.messages)).toContain('nowhere');
   });
 
+  test('scenario-writer: подгонка меняет слова, устройство остаётся из заготовки', async () => {
+    const drifted = structuredClone(template);
+    drifted.fronts[0]!.impact = 'DEFINING';
+    drifted.fronts[0]!.drift = 'FAST';
+    drifted.fronts[0]!.description = 'Пробраться в башню у Мерва.';
+    drifted.fronts.push({ ...structuredClone(drifted.fronts[0]!), id: 'extra' });
+    drifted.objects[0]!.statProfile = { security: 5 };
+    drifted.objects.push({ id: 'decor', type: 'policy', name: 'Запрет', description: '', refs: [], weight: 'MAJOR', statProfile: { influence: 3 } });
+    const llm = new FakeLlm().script('scenario-writer', toolReply('submit_scenario', drifted));
+    const s = await writeScenario(deps(llm), { cityBrief: 'Мерв', objects: [], template, seed: null, names: [], unknowns: [] });
+    expect(s.fronts.map((f) => f.id)).toEqual(template.fronts.map((f) => f.id));
+    expect(s.fronts[0]).toMatchObject({ impact: template.fronts[0]!.impact, drift: 'NONE', description: 'Пробраться в башню у Мерва.' });
+    expect(s.objects[0]!.statProfile).toEqual(template.objects[0]!.statProfile);
+    expect(s.objects.find((o) => o.id === 'decor')).not.toHaveProperty('weight');
+  });
+
   test('scenario-writer: можно ссылаться на живой объект города', async () => {
     const s = { id: 'x', title: 'x', fronts: [{ id: 'f', description: 'Трещина в башне', impact: 'MINOR', refs: ['tower'], stake: { delete: { target: 'tower' } } }] };
     const llm = new FakeLlm().script('scenario-writer', toolReply('submit_scenario', s));

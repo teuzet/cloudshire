@@ -60,8 +60,10 @@ export async function plantStory(deps: FlowDeps, city: City, day: number): Promi
 
   const { objects, fronts } = plantScenario(deps.rules, city, scenario, { day, newId: (p) => newId(deps, p) });
   for (const front of fronts) refreshFront(deps, city, front, day);
-  const gist = [...objects.map((o) => `${o.name}. ${o.description}`), ...(objects.length ? [] : fronts.map((f) => f.description))].join('\n');
-  const changes: Change[] = objects.map((o) => ({
+  // Скрытое в истории город пока не видел: оно не идёт ни в весть, ни в хронику.
+  const seen = objects.filter((o) => !o.hidden);
+  const gist = [...seen.map((o) => `${o.name}. ${o.description}`), ...(seen.length ? [] : fronts.map((f) => f.description))].join('\n');
+  const changes: Change[] = seen.map((o) => ({
     kind: 'object_created',
     objectId: o.id,
     name: o.name,

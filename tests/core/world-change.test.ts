@@ -81,6 +81,29 @@ describe('сценарий', () => {
     }
   });
 
+  test('заготовка задаёт заголовок, род фронта, вклад и скрытость объектов', () => {
+    const scenario = parseScenario({
+      id: 'x',
+      title: 'x',
+      objects: [
+        { id: 'a', type: 'community', name: 'Слушатели', weight: 'MINOR', statProfile: { influence: 1 } },
+        { id: 'b', type: 'object', name: 'Груз', hidden: true },
+      ],
+      fronts: [
+        { id: 'f', title: 'Толпа', form: 'tension', drift: 'FAST', description: 'Толпа растёт. Скоро выйдет на улицы.', impact: 'MINOR', stake: { stats: { security: -2 } } },
+        { id: 'g', form: 'deed', description: 'Вскрыть груз.', impact: 'MINOR', stake: { uncover: { target: 'b' } } },
+      ],
+    });
+    const city = blankCity();
+    const { objects, fronts } = plantScenario(r, city, scenario, { day: 3, newId: ids(9) });
+    expect(objects[0]!.statEffect.influence).toBeGreaterThan(0);
+    expect(objects[1]!.hidden).toBe(true);
+    expect(fronts[0]).toMatchObject({ title: 'Толпа', form: 'tension' });
+    expect(fronts[0]!.deadlineDay).not.toBeNull();
+    expect(fronts[1]).toMatchObject({ form: 'deed', stake: [{ op: 'reveal', target: objects[1]!.id }] });
+    expect(() => parseScenario({ id: 'x', title: 'x', fronts: [{ id: 'f', form: 'tension', description: 'd', impact: 'MINOR' }] })).toThrow(/fronts\.0\.form/);
+  });
+
   test('кривая заготовка падает с путём', () => {
     expect(() => parseScenario({ id: 'x', title: 'x', fronts: [{ id: 'f', description: 'd', impact: 'HUGE' }] })).toThrow(
       /fronts\.0\.impact/,

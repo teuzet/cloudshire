@@ -74,13 +74,25 @@ async function pick(deps: FlowDeps, city: City, parent: Front, order: Candidate[
   return null;
 }
 
+/** Что уже мешает работе: живые беды при ней и помехи на ней. */
+function runningAround(city: City, parent: Front): string[] {
+  const fronts = city.fronts.filter((f) => f.status === 'active' && f.parentId === parent.id && f.origin === 'complication').map((f) => f.title);
+  const hindrances = city.objects.filter((o) => o.status === 'active' && o.attach?.frontId === parent.id && o.attach.rate < 0).map((o) => `помеха: ${o.name}`);
+  return [...fronts, ...hindrances];
+}
+
 /** Словарь не подошёл: Сочинитель динамики пишет свободную. Случай идёт в лог как пробел словаря. */
 async function freePlan(deps: FlowDeps, city: City, parent: Front, q: { moment: Moment; sideOnly?: boolean }, day: number): Promise<Plan | null> {
   deps.log?.warn('dictionary_gap', { cityId: city.id, frontId: parent.id, moment: q.moment });
   const free = await tryAgent(
     deps,
     'dynamics-composer',
-    () => composeDynamic(deps.agents, { work: `${parent.title}. ${parent.description}`, share: shareDone(parent, day), touches: touchesOf(city, parent) }),
+    () => composeDynamic(deps.agents, {
+        work: `${parent.title}. ${parent.description}`,
+        share: shareDone(parent, day),
+        touches: touchesOf(city, parent),
+        running: runningAround(city, parent),
+      }),
     null,
   );
   if (!free) return null;

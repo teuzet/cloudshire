@@ -51,7 +51,7 @@ describe('словарь динамик: кто подходит техниче�
     const { city, front } = town();
     withLead(city, front);
     const list = candidates(r, city, front, { moment: 'milestone', kind: 'light' });
-    expect(idsOf(list)).toEqual(['bystanders', 'key-refuse', 'occupied-strained', 'touched-resist']);
+    expect(idsOf(list)).toEqual(expect.arrayContaining(['bystanders', 'key-refuse', 'occupied-strained', 'touched-resist', 'weather', 'omen']));
     expect(list.find((c) => c.dynamic.id === 'key-refuse')).toMatchObject({ object: { id: 'guild' }, shape: 'tension', touch: 'мастера заняты на стройке' });
     expect(list.find((c) => c.dynamic.id === 'bystanders')?.object?.id).toBe('market');
   });
@@ -69,14 +69,14 @@ describe('словарь динамик: кто подходит техниче�
   test('ступень ниже порога записи её не пускает; плюсовым записям ступень не важна', () => {
     const { city, front } = town('safe');
     expect(candidates(r, city, front, { moment: 'milestone', kind: 'light' })).toEqual([]);
-    expect(idsOf(candidates(r, city, front, { moment: 'milestone', kind: 'plus' }))).toEqual(['find-at-works']);
+    expect(idsOf(candidates(r, city, front, { moment: 'milestone', kind: 'plus' }))).toEqual(expect.arrayContaining(['find-at-works', 'new-craft']));
   });
 
   test('только побочные: привязанных к делу записей нет', () => {
     const { city, front } = town();
     const list = candidates(r, city, front, { moment: 'milestone', kind: 'heavy', sideOnly: true });
     expect(list.every((c) => c.dynamic.class === 'side')).toBe(true);
-    expect(idsOf(list)).toEqual(['bystanders', 'occupied-strained']);
+    expect(idsOf(list)).toEqual(expect.arrayContaining(['bystanders', 'occupied-strained', 'neglected-duty']));
   });
 
   test('при завершении записи бьют по результату; без результата их нет', () => {

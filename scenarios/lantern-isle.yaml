@@ -7,6 +7,8 @@ objects:
     type: site
     name: Островок с горящими фонарями
     description: Малое тело, прибившееся к краю острова. Ночью вдоль его кромки сами зажигаются фонари.
+    weight: MINOR
+    statProfile: { knowledge: 1, influence: 1 }
   - id: tower
     type: structure
     name: Башня на островке
@@ -15,6 +17,7 @@ objects:
 
 fronts:
   - id: obtain-recipe
+    title: Тайна башни на островке
     description: Добраться до рецепта, который спрятан в башне.
     impact: SIGNIFICANT
     drift: NONE

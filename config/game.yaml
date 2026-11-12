@@ -527,6 +527,346 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+    - id: weather
+      title: Непогода на высоте
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: hindrance
+      heavy: hindrance
+      from: [site]
+      types: []
+      hits: parent
+      condition: ''
+      skeleton: "Ветер, туман или холод на высоте мешают работать на месте: дело движется только в погожие окна."
+      helps: "укрыть место работ, работать в затишье, позвать тех, кто читает погоду"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: normal
+    - id: omen
+      title: Дурное знамение
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: tension
+      from: [site]
+      types: []
+      hits: parent
+      condition: ''
+      skeleton: "Во время работ случилось странное, и люди увидели в этом гнев или предупреждение покровителя; многие боятся продолжать."
+      helps: "провести обряд, спросить жрецов, показать людям, что работа угодна покровителю"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+    - id: shortage
+      title: Не хватает нужного
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [occupies]
+      types: [resource, building, structure, site, object, practice, capability]
+      hits: parent
+      condition: "Работа расходует это быстрее, чем оно пополняется?"
+      skeleton: "Работе перестало хватать того, на чём она держится: запас тает, а замены пока нет."
+      helps: "найти другой источник, урезать расход, договориться с теми, кто держит запас"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+    - id: suppliers-press
+      title: Поставщики давят
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [occupies, linked]
+      types: [organization, person, community, settlement, district]
+      hits: parent
+      condition: "Работа зависит от того, что эти люди дают или продают?"
+      skeleton: "Те, от кого работа получает нужное, поняли свою силу и требуют больше, грозя прекратить поставки."
+      helps: "найти других поставщиков, заключить долгий уговор, напомнить о долге перед городом"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+    - id: poached-hands
+      title: Переманили руки
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [helper, occupies]
+      types: [community, organization, district, settlement]
+      hits: parent
+      condition: "У этих людей есть другое место, где им предложат больше?"
+      skeleton: "Лучших работников переманивают на другое дело, и работа теряет руки."
+      helps: "поднять плату, дать почёт старшим мастерам, договориться с тем, кто переманивает"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+    - id: bad-rumor
+      title: Дурная молва
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [benefits, linked, pressures]
+      types: [community, district, settlement]
+      hits: parent
+      condition: "Эти люди могут поверить, что работа приносит беду?"
+      skeleton: "По городу пошёл слух, что работа приносит беду; люди сторонятся её и тех, кто в ней занят."
+      helps: "открыто показать работу, позвать уважаемых свидетелей, найти, кто пустил слух"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+    - id: saboteur
+      title: Тайный вредитель
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [site]
+      types: []
+      hits: parent
+      condition: ''
+      skeleton: "Кто-то тайно портит сделанное по ночам; кто это и зачем, пока неизвестно."
+      helps: "поставить стражу, расспросить работников, искать, кому работа мешает"
+      needsNew: true
+      newHidden: true
+      requires: null
+      minStep: hard
+    - id: botched
+      title: Брак
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: null
+      heavy: accident
+      from: [site]
+      types: []
+      hits: parent
+      condition: ''
+      skeleton: "Часть сделанного оказалась негодной: её разбирают и делают заново, а негодные остатки загромождают место работ."
+      helps: "проверить сделанное, сменить мастеров или способ работы"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: hard
+    - id: collapse
+      title: Обрушение
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: null
+      heavy: accident
+      from: [site]
+      types: []
+      hits: parent
+      condition: ''
+      skeleton: "Подмости, своды или опоры не выдержали: часть сделанного рухнула, обломки завалили место работ, есть раненые."
+      helps: "разобрать завал, помочь раненым, поставить надёжные опоры"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: hard
+    - id: neglected-duty
+      title: Заброшенная служба
+      enabled: true
+      class: side
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [occupies, helper]
+      types: [organization, community, person, building, structure, district, settlement]
+      hits: role
+      condition: "Пока это занято работой, его обычное дело в городе стоит?"
+      skeleton: "То, что занято работой, забросило свою обычную службу, и в городе это начали замечать."
+      helps: "вернуть часть сил на обычную службу, найти подмену на время"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+    - id: price-rise
+      title: Подорожание у соседей
+      enabled: true
+      class: side
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [pressures, nearby]
+      types: [community, district, settlement]
+      hits: role
+      condition: "Эти люди живут на том же, что расходует работа?"
+      skeleton: "Работа скупает нужное, и у соседей оно подорожало; простым людям это бьёт по карману."
+      helps: "поделиться запасом, ввести меру, привезти нужное со стороны"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+    - id: disturbed-creatures
+      title: Потревоженные существа
+      enabled: true
+      class: side
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [nearby]
+      types: [site, resource, landmark, district, structure]
+      hits: role
+      condition: "Рядом с этим живут птицы, звери или иные существа, которых работы могут потревожить?"
+      skeleton: "Работы потревожили тех, кто жил рядом, птиц, зверей или иных существ, и теперь они бедокурят у соседнего."
+      helps: "отвадить или переселить существ, оградить соседнее, позвать знающих"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: normal
+    - id: patron
+      title: Покровитель дела
+      enabled: true
+      class: plus
+      when: [milestone]
+      light: opportunity
+      heavy: opportunity
+      from: [benefits, linked, nearby]
+      types: [person, organization, community, settlement]
+      hits: role
+      condition: "У этих людей есть средства или влияние, чтобы поддержать работу?"
+      skeleton: "Те, кому работа выгодна, готовы вложиться в неё деньгами, людьми или словом, если к ним вовремя обратиться."
+      helps: "встретиться с ними, предложить долю выгоды или почёта"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+    - id: volunteers
+      title: Добровольцы
+      enabled: true
+      class: plus
+      when: [milestone]
+      light: opportunity
+      heavy: opportunity
+      from: [nearby, benefits]
+      types: [community, district, settlement]
+      hits: role
+      condition: "Этим людям работа по душе и им есть чем помочь?"
+      skeleton: "Соседи сами вызвались помочь работе руками, если им дадут дело и присмотр."
+      helps: "принять помощь, дать добровольцам старшего и понятное дело"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+    - id: new-craft
+      title: Новый приём
+      enabled: true
+      class: plus
+      when: [milestone]
+      light: opportunity
+      heavy: opportunity
+      from: [site]
+      types: []
+      hits: role
+      condition: ''
+      skeleton: "В ходе работы мастера нашли новый приём, который пригодится и в других делах города, если его закрепить."
+      helps: "записать приём, дать мастерам учеников, опробовать его на другом деле"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: safe
+    - id: upkeep
+      title: Бремя содержания
+      enabled: true
+      class: side
+      when: [completion]
+      light: tension
+      heavy: threat
+      from: [result]
+      types: []
+      hits: result
+      condition: "Готовому нужен постоянный уход, люди или средства?"
+      skeleton: "Готовое требует постоянного ухода, а за ним никто не закреплён; без присмотра оно начинает ветшать."
+      helps: "назначить хранителей, выделить постоянную долю, передать в руки общины"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+    - id: overdemand
+      title: Наплыв желающих
+      enabled: true
+      class: side
+      when: [completion]
+      light: tension
+      heavy: tension
+      from: [result]
+      types: []
+      hits: result
+      condition: "Готовым захотят пользоваться больше людей, чем оно выдержит?"
+      skeleton: "Готовым хотят пользоваться все разом: растут очереди, ссоры и износ."
+      helps: "ввести порядок и очередь, расширить готовое, назначить плату"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+    - id: envy
+      title: Обида обделённых
+      enabled: true
+      class: side
+      when: [completion]
+      light: tension
+      heavy: threat
+      from: [nearby]
+      types: [community, district, settlement]
+      hits: role
+      condition: "Этим людям ничего не досталось от нового, хотя они рядом?"
+      skeleton: "Соседи, которым от нового ничего не досталось, считают себя обделёнными, и обида растёт."
+      helps: "дать им долю, сделать что-то и для них, позвать их старших на открытие"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+    - id: fame
+      title: Слава нового
+      enabled: true
+      class: plus
+      when: [completion]
+      light: opportunity
+      heavy: opportunity
+      from: [result]
+      types: []
+      hits: role
+      condition: ''
+      skeleton: "О готовом заговорили далеко за пределами квартала; это можно обратить в торговлю, союзников или почёт, пока слава свежа."
+      helps: "устроить праздник, позвать гостей, рассказать о деле соседям"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+    - id: unexpected-use
+      title: Неожиданная польза
+      enabled: true
+      class: plus
+      when: [completion]
+      light: opportunity
+      heavy: opportunity
+      from: [nearby, benefits]
+      types: []
+      hits: role
+      condition: "Готовое может пригодиться этому так, как при начале не думали?"
+      skeleton: "Готовое пригодилось тем, о ком при начале не думали; если им помочь, польза разойдётся шире."
+      helps: "показать им готовое, дать доступ и малую помощь"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
     # Ждёт сопряжения: запись в словаре есть, но не тянется.
     - id: outside-gaze
       title: Взгляд извне

@@ -1,0 +1,63 @@
+id: grey-blight
+title: Серая ржа
+pitch: На садах и полях города появляется серый налёт, урожай гибнет, люди ищут виноватых.
+
+objects:
+  - id: blight
+    type: threat
+    name: Серая ржа
+    description: Серый налёт на листьях и стеблях. За неделю растение сохнет, налёт расходится дальше.
+    weight: MINOR
+    statProfile: { prosperity: -1 }
+  - id: source
+    type: site
+    name: Очаг ржи
+    description: Место, откуда пошла зараза. Пока его никто не нашёл.
+    refs: [blight]
+    hidden: true
+
+fronts:
+  - id: blight-spreads
+    title: Ржа съедает урожай
+    description: Ржа ползёт от сада к саду. Если её не остановить, город останется без большой части урожая.
+    impact: SIGNIFICANT
+    drift: STEADY
+    refs: [blight]
+    alignment: |
+      Сдерживают ржу выжигание поражённого, запреты на перенос земли и семян, отбор здоровых ростков.
+      Помогают знающие садоводы и травники.
+    stake:
+      stats: { prosperity: -6, security: -1 }
+    events:
+      - id: market
+        description: На рынке подскочили цены на зерно, люди запасаются впрок.
+      - id: blame
+        description: В квартале садоводов ищут виноватого, соседи косятся на чужаков.
+  - id: find-source
+    title: Откуда пришла ржа
+    description: Найти, откуда пошла зараза, и закрыть очаг.
+    impact: MINOR
+    beatCount: 2
+    refs: [blight]
+    alignment: |
+      Двигает дело обход садов, расспросы садоводов, сличение, где ржа появилась раньше.
+    stake:
+      uncover: { target: source }
+    clues:
+      - id: water
+        fact: Первые пятна появились там, где сады поливают из одного источника.
+        alignment: Проверка воды и полива.
+      - id: seeds
+        fact: Зараза пришла с семенами, купленными у заезжего торговца.
+        alignment: Расспросы торговцев и проверка купленных семян.
+  - id: blame-tension
+    title: Поиск виноватых
+    form: tension
+    description: Люди злы и напуганы, им нужен виноватый. Если ничего не сделать, злость выльется на тех, кто под рукой.
+    impact: MINOR
+    drift: FAST
+    refs: [blight]
+    alignment: |
+      Успокаивают людей ясные вести о том, что делается, помощь пострадавшим, защита тех, на кого показывают.
+    stake:
+      stats: { influence: -3, security: -2 }

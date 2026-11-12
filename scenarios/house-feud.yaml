@@ -1,0 +1,53 @@
+id: house-feud
+title: Раздор в знатном доме
+pitch: Глава влиятельного рода умирает, не назвав наследника, и двое его детей делят дом, людей и место в городском совете.
+
+objects:
+  - id: house
+    type: organization
+    name: Знатный дом
+    description: Старый и богатый род, держит мастерские и голос в совете города.
+    weight: MINOR
+    statProfile: { prosperity: 1, influence: 1 }
+  - id: elder
+    type: person
+    name: Старшая наследница
+    description: Строгая и расчётливая, держит счета дома и хочет, чтобы всё шло по старому порядку.
+    refs: [house]
+  - id: younger
+    type: person
+    name: Младший наследник
+    description: Любимец мастеровых, щедрый и горячий, хочет открыть дом новому.
+    refs: [house]
+
+fronts:
+  - id: feud-burst
+    title: Наследники делят дом
+    form: tension
+    description: Каждый наследник собирает своих людей. Если их не примирить, раздор расколет дом и выплеснется на улицы.
+    impact: SIGNIFICANT
+    drift: STEADY
+    refs: [house, elder, younger]
+    alignment: |
+      Унимают раздор посредник, которого уважают оба, раздел по закону, общее дело для обоих наследников.
+      Помощь одному без другого раздувает вражду.
+    stake:
+      stats: { prosperity: -3, influence: -3, security: -2 }
+    events:
+      - id: brawl
+        description: Люди наследников подрались у ворот мастерских.
+  - id: true-will
+    title: Последняя воля главы дома
+    description: Говорят, глава дома оставил завещание. Найти его.
+    impact: MINOR
+    beatCount: 1
+    refs: [house]
+    alignment: |
+      Двигает дело расспрос слуг и старых друзей покойного, поиск в его бумагах.
+    stake:
+      reveal:
+        text: Глава дома завещал разделить дом поровну и велел наследникам вести совет по очереди.
+    clues:
+      - id: servant
+        fact: Старый слуга видел, как глава дома прятал бумаги перед смертью.
+        alignment: Расспросы слуг.

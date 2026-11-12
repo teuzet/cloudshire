@@ -43,7 +43,7 @@ function checkIds(raw: Scenario, existing: Set<string>): string | null {
   for (const f of raw.fronts) {
     for (const r of f.refs) if (!known(r)) return `фронт ${f.id}: нет ссылки ${r}`;
     const s = f.stake;
-    const target = s && 'modify' in s ? s.modify.target : s && 'delete' in s ? s.delete.target : null;
+    const target = s && 'modify' in s ? s.modify.target : s && 'delete' in s ? s.delete.target : s && 'uncover' in s ? s.uncover.target : null;
     if (target && !known(target)) return `фронт ${f.id}: нет цели ставки ${target}`;
     const sub = new Set<string>();
     for (const id of [...f.events.map((e) => e.id), ...f.clues.map((c) => c.id)]) {
@@ -52,6 +52,51 @@ function checkIds(raw: Scenario, existing: Set<string>): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Подгонка меняет слова, а не устройство: числа, род и срок фронтов, вклад и скрытость объектов
+ * берутся из заготовки. Новые объекты-декорации можно, но без вклада в статы; новых фронтов нельзя.
+ */
+function keepTemplate(raw: Scenario, template: Scenario): Scenario {
+  const tObjects = new Map(template.objects.map((o) => [o.id, o]));
+  const objects = raw.objects.map((o) => {
+    const t = tObjects.get(o.id);
+    const { weight: _w, statProfile: _p, hidden: _h, ...rest } = o;
+    if (!t) return rest;
+    return { ...rest, type: t.type, ...(t.weight ? { weight: t.weight } : {}), ...(t.statProfile ? { statProfile: t.statProfile } : {}), ...(t.hidden ? { hidden: true } : {}) };
+  });
+  // Писатель мог переименовать объект заготовки: его слово главнее, заново объект не добавляем.
+  const present = new Set(objects.map((o) => o.id));
+  const targetOf = (st: Scenario['fronts'][number]['stake']) =>
+    st && 'modify' in st ? st.modify.target : st && 'delete' in st ? st.delete.target : st && 'uncover' in st ? st.uncover.target : null;
+  const written = new Map(raw.fronts.map((f) => [f.id, f]));
+  const fronts = template.fronts.map((t) => {
+    const w = written.get(t.id);
+    if (!w) return t;
+    const sameKind = (a: Scenario['fronts'][number]['stake'], b: Scenario['fronts'][number]['stake']) =>
+      Boolean(a && b && Object.keys(a)[0] === Object.keys(b)[0]);
+    // Ставку-создание и раскрытие писатель может переназвать; числа и цели остаются из заготовки.
+    const lost = targetOf(t.stake);
+    const stake =
+      (t.stake && w.stake && sameKind(t.stake, w.stake) && ('create' in t.stake || 'reveal' in t.stake)) || (lost && !present.has(lost))
+        ? w.stake
+        : t.stake;
+    const fixed = stake && t.stake && 'create' in t.stake && 'create' in stake
+      ? { create: { ...stake.create, type: t.stake.create.type, weight: t.stake.create.weight, statProfile: t.stake.create.statProfile } }
+      : stake;
+    return {
+      ...w,
+      impact: t.impact,
+      drift: t.drift,
+      beatCount: t.beatCount,
+      ...(t.form ? { form: t.form } : { form: undefined }),
+      stake: fixed,
+      events: w.events.length === t.events.length ? w.events : t.events,
+      clues: w.clues.length === t.clues.length ? w.clues : t.clues,
+    };
+  });
+  return { ...raw, id: template.id, objects, fronts };
 }
 
 export const scenarioWriter: StructuredAgent<ScenarioWriterInput, Scenario, Scenario> = {
@@ -75,7 +120,7 @@ export const scenarioWriter: StructuredAgent<ScenarioWriterInput, Scenario, Scen
     if (touched.length) return `история касается тайны острова: ${touched.join(', ')}. Эти объекты не трогай`;
     return checkIds(raw, new Set(objects.filter((o) => o.status === 'active').map((o) => o.id)));
   },
-  finish: (raw, { template }) => (template ? { ...raw, id: template.id } : raw),
+  finish: (raw, { template }) => (template ? keepTemplate(raw, template) : raw),
 };
 
 export async function writeScenario(deps: AgentDeps, input: ScenarioWriterInput): Promise<Scenario> {

@@ -32,6 +32,8 @@ const stakeSchema = z.union([
   z.object({ delete: z.object({ target: z.string() }) }),
   z.object({ stats: statPartial }),
   z.object({ reveal: z.object({ text: z.string() }) }),
+  /** Открыть игроку скрытый объект истории. */
+  z.object({ uncover: z.object({ target: z.string() }) }),
 ]);
 
 export const scenarioSchema = z.object({
@@ -47,6 +49,11 @@ export const scenarioSchema = z.object({
         name: z.string().min(1),
         description: z.string().default(''),
         refs: z.array(z.string()).default([]),
+        /** Вклад объекта в статы: уровень значимости и профиль. Без них объект ничего не даёт. */
+        weight: z.enum(IMPACT_LEVELS).optional(),
+        statProfile: statPartial.optional(),
+        /** Скрыт от игрока, пока его не откроет фронт. */
+        hidden: z.boolean().optional(),
       }),
     )
     .default([]),
@@ -54,6 +61,14 @@ export const scenarioSchema = z.object({
     .array(
       z.object({
         id: z.string().min(1),
+        /** Короткое имя фронта, как его назовёт город. Без него берётся первая фраза описания. */
+        title: z.string().optional(),
+        /**
+         * Род фронта. Без дрейфа: find (поиск, исход раскрывается работой) или deed (дело с известной целью).
+         * С дрейфом: threat (беда случится к сроку) или tension (недовольство прорвётся к сроку).
+         * Без поля: find без дрейфа, threat с дрейфом.
+         */
+        form: z.enum(['find', 'deed', 'threat', 'tension']).optional(),
         description: z.string().min(1),
         impact: z.enum(IMPACT_LEVELS),
         drift: z.enum(DRIFT_BANDS).default('NONE'),
@@ -66,6 +81,14 @@ export const scenarioSchema = z.object({
       }),
     )
     .min(1),
+}).superRefine((s, ctx) => {
+  s.fronts.forEach((f, i) => {
+    if (!f.form) return;
+    const drifting = f.drift !== 'NONE';
+    if (drifting !== (f.form === 'threat' || f.form === 'tension')) {
+      ctx.addIssue({ code: 'custom', path: ['fronts', i, 'form'], message: drifting ? 'у фронта с дрейфом род threat или tension' : 'у фронта без дрейфа род find или deed' });
+    }
+  });
 });
 
 export type Scenario = z.infer<typeof scenarioSchema>;
@@ -91,6 +114,7 @@ function stakeOps(rules: Rules, city: Pick<City, 'statScale'>, stake: Scenario['
   if ('modify' in stake) return [{ op: 'modify', target: map(stake.modify.target), intent: stake.modify.intent ?? '' }];
   if ('delete' in stake) return [{ op: 'delete', target: map(stake.delete.target) }];
   if ('stats' in stake) return [{ op: 'stats', points: stake.stats }];
+  if ('uncover' in stake) return [{ op: 'reveal', target: map(stake.uncover.target) }];
   return [{ op: 'fact', text: stake.reveal.text }];
 }
 
@@ -130,6 +154,8 @@ export function plantScenario(
       name: tweak[o.id]?.name ?? o.name,
       description: tweak[o.id]?.description ?? o.description,
       refs: o.refs.map(map),
+      statEffect: objectContribution(rules, o.weight ?? 'NONE', o.statProfile ?? {}),
+      hidden: o.hidden ?? false,
       day: args.day,
     }),
   );
@@ -142,11 +168,12 @@ export function plantScenario(
     const driftDays = monthsToDays(rules.seeding.driftMonths[f.drift]);
     const moves = keyMoves(f.alignment, f.clues);
     const description = tweak[f.id]?.description ?? f.description;
+    const form = f.form ?? (drifting ? 'threat' : 'find');
     return createFront({
       id: map(f.id),
-      form: drifting ? 'threat' : 'find',
+      form,
       origin: 'story',
-      title: clipWords(description.split(/[.!?]/)[0] ?? '', 80) || scenario.title,
+      title: clipWords(tweak[f.id]?.name ?? f.title ?? description.split(/[.!?]/)[0] ?? '', 80) || scenario.title,
       description,
       capacity,
       milestones: Math.max(scaleOf(rules, capacity).milestones, Math.min(4, f.beatCount + 1)),
@@ -183,6 +210,7 @@ export function touchedMysteries(raw: Scenario, mystery: ReadonlySet<string>): s
     const s = f.stake;
     if (s && 'modify' in s) see(s.modify.target);
     if (s && 'delete' in s) see(s.delete.target);
+    if (s && 'uncover' in s) see(s.uncover.target);
     if (s && 'create' in s) (s.create.refs ?? []).forEach(see);
   }
   return [...touched];
