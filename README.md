@@ -10,7 +10,8 @@
 ```
 npm install
 npm run check          # типы, слои, тесты (без сети и без моделей)
-npm run dev            # игра в браузере: http://localhost:3000 — ходит в настоящие модели
+npm run dev            # игра в браузере: http://localhost:3000 — ходит в настоящие модели;
+                       # пауза часов, промотка дней, сохранения в saves/ (SAVES_DIR)
 npm run bot            # Telegram-бот
 ```
 

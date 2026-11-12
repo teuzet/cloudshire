@@ -3,6 +3,7 @@ dist/
 coverage/
 .env
 data/
+saves/
 logs/
 *.log
 .DS_Store

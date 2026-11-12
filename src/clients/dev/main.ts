@@ -6,15 +6,18 @@
  *   PORT, DATA_DIR / MONGODB_URI, OPENAI_API_KEY / ANTHROPIC_API_KEY
  */
 
+import fs from 'node:fs';
 import http from 'node:http';
+import path from 'node:path';
 import { MemoryNotifier } from '../../adapters/notifier/memory.js';
 import { requireWorld, today } from '../../flows/context.js';
 import { onboardingMessage, resetPlayer, runGenesis } from '../../flows/onboarding.js';
 import { patronMessage } from '../../flows/priest-turn.js';
 import { runDueCities } from '../../flows/scheduler.js';
-import { skipWorldDays } from '../../flows/world.js';
+import { exportGame, importGame, type GameSave } from '../../flows/save.js';
+import { isPaused, pauseWorld, resumeWorld, skipWorldDays } from '../../flows/world.js';
 import { gameDate } from '../../core/time.js';
-import { buildApp, loadDotEnv } from '../app.js';
+import { buildApp, loadDotEnv, ROOT } from '../app.js';
 import { cityStatus } from '../views.js';
 import { PAGE } from './page.js';
 
@@ -30,11 +33,31 @@ function send(res: http.ServerResponse, status: number, body: unknown, type = 'a
   res.end(type === 'application/json' ? JSON.stringify(body) : String(body));
 }
 
+/** Имя сохранения → безопасное имя файла. */
+function saveFile(dir: string, name: string): string {
+  const clean = name.trim().replace(/[^\p{L}\p{N}_ .-]+/gu, '_').slice(0, 80);
+  if (!clean) throw new Error('пустое имя сохранения');
+  return path.join(dir, `${clean}.json`);
+}
+
+function listSaves(dir: string) {
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir)
+    .filter((f) => f.endsWith('.json'))
+    .map((f) => {
+      const save = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) as GameSave;
+      return { name: f.slice(0, -5), savedAt: new Date(save.savedAtMs).toISOString(), date: gameDate(save.day).label, city: save.city?.name ?? null };
+    })
+    .sort((a, b) => b.savedAt.localeCompare(a.savedAt));
+}
+
 async function main(): Promise<void> {
   loadDotEnv();
   const inbox = new MemoryNotifier();
   const app = await buildApp(process.env, inbox);
   const { deps, locks } = app;
+  const savesDir = path.resolve(process.env.SAVES_DIR ?? path.join(ROOT, 'saves'));
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -50,6 +73,7 @@ async function main(): Promise<void> {
         return send(res, 200, {
           day,
           date: gameDate(day).label,
+          paused: isPaused(world),
           status: city ? cityStatus(deps.rules, city, day) : null,
           city,
           draft,
@@ -78,6 +102,31 @@ async function main(): Promise<void> {
         await skipWorldDays(deps, Math.max(0, Math.min(3600, Number(body.days) || 0)));
         const ran = await runDueCities(deps, locks);
         return send(res, 200, ran);
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/pause') {
+        const body = await readJson(req);
+        const world = body.paused ? await pauseWorld(deps) : await resumeWorld(deps);
+        return send(res, 200, { paused: isPaused(world) });
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/saves') return send(res, 200, listSaves(savesDir));
+
+      if (req.method === 'POST' && url.pathname === '/api/save') {
+        const body = await readJson(req);
+        const file = saveFile(savesDir, String(body.name ?? ''));
+        fs.mkdirSync(savesDir, { recursive: true });
+        fs.writeFileSync(file, JSON.stringify(await exportGame(deps, owner), null, 2));
+        return send(res, 200, { ok: true, file: path.relative(ROOT, file) });
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/load') {
+        const body = await readJson(req);
+        const file = saveFile(savesDir, String(body.name ?? ''));
+        if (!fs.existsSync(file)) return send(res, 404, { error: 'нет такого сохранения' });
+        await importGame(deps, owner, JSON.parse(fs.readFileSync(file, 'utf8')) as GameSave);
+        inbox.drain(owner);
+        return send(res, 200, { ok: true });
       }
 
       if (req.method === 'POST' && url.pathname === '/api/reset') {

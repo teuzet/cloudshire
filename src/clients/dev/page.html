@@ -42,6 +42,9 @@
   <button class="ghost" data-skip="1">+1 день</button>
   <button class="ghost" data-skip="7">+7</button>
   <button class="ghost" data-skip="30">+30</button>
+  <button class="ghost" id="pause">⏸ Пауза</button>
+  <button class="ghost" id="save">Сохранить</button>
+  <select id="saves"><option value="">Загрузить…</option></select>
   <button class="ghost" id="reset">Сброс</button>
 </header>
 <main>
@@ -94,9 +97,12 @@ function renderFronts(city, day) {
 }
 
 let seen = -1;
+let paused = false;
 async function refresh() {
   const s = await api('/api/state');
-  $('date').textContent = s.date;
+  paused = !!s.paused;
+  $('date').textContent = s.date + (paused ? ' · время стоит' : '');
+  $('pause').textContent = paused ? '▶ Продолжить' : '⏸ Пауза';
   $('status').textContent = s.status || (s.draft ? 'Онбординг: ' + s.draft.status : 'Города ещё нет: начни разговор слева.');
   $('json').textContent = JSON.stringify(s.city || s.draft, null, 2);
   renderFronts(s.city, s.day);
@@ -131,6 +137,36 @@ for (const b of document.querySelectorAll('[data-skip]')) {
   b.onclick = async () => { b.disabled = true; try { await api('/api/skip', { days: Number(b.dataset.skip) }); } finally { b.disabled = false; await refresh(); } };
 }
 $('reset').onclick = async () => { if (!confirm('Стереть город игрока ' + owner() + '?')) return; await api('/api/reset', {}); $('log').innerHTML = ''; seen = -1; await refresh(); };
+$('pause').onclick = async () => { await api('/api/pause', { paused: !paused }); await refresh(); };
+
+async function refreshSaves() {
+  const list = await api('/api/saves');
+  const sel = $('saves');
+  sel.innerHTML = '<option value="">Загрузить…</option>';
+  for (const x of list) {
+    const o = document.createElement('option');
+    o.value = x.name;
+    o.textContent = x.name + ' — ' + (x.city || 'без города') + ', ' + x.date;
+    sel.appendChild(o);
+  }
+}
+$('save').onclick = async () => {
+  const name = prompt('Имя сохранения', new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '-'));
+  if (!name) return;
+  const r = await api('/api/save', { name });
+  add('system', r.error ? 'Не сохранилось: ' + r.error : 'Сохранено: ' + r.file);
+  await refreshSaves();
+};
+$('saves').onchange = async () => {
+  const name = $('saves').value;
+  $('saves').value = '';
+  if (!name || !confirm('Загрузить «' + name + '»? Текущая игра игрока ' + owner() + ' будет заменена.')) return;
+  const r = await api('/api/load', { name });
+  $('log').innerHTML = ''; seen = -1;
+  if (r.error) add('system', 'Не загрузилось: ' + r.error);
+  await refresh();
+};
+refreshSaves();
 $('owner').onchange = () => { $('log').innerHTML = ''; seen = -1; refresh(); };
 refresh();
 setInterval(refresh, 4000);
