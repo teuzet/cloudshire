@@ -60,8 +60,10 @@ function checkIds(raw: Scenario, existing: Set<string>): string | null {
  */
 function keepTemplate(raw: Scenario, template: Scenario): Scenario {
   const tObjects = new Map(template.objects.map((o) => [o.id, o]));
-  const objects = raw.objects.map((o) => {
-    const t = tObjects.get(o.id);
+  // Писатель иногда переименовывает id: тогда объект заготовки узнаём по месту и типу.
+  const objects = raw.objects.map((o, i) => {
+    const byPlace = template.objects[i];
+    const t = tObjects.get(o.id) ?? (byPlace && byPlace.type === o.type && !raw.objects.some((x) => x.id === byPlace.id) ? byPlace : undefined);
     const { weight: _w, statProfile: _p, hidden: _h, ...rest } = o;
     if (!t) return rest;
     return { ...rest, type: t.type, ...(t.weight ? { weight: t.weight } : {}), ...(t.statProfile ? { statProfile: t.statProfile } : {}), ...(t.hidden ? { hidden: true } : {}) };
@@ -71,9 +73,10 @@ function keepTemplate(raw: Scenario, template: Scenario): Scenario {
   const targetOf = (st: Scenario['fronts'][number]['stake']) =>
     st && 'modify' in st ? st.modify.target : st && 'delete' in st ? st.delete.target : st && 'uncover' in st ? st.uncover.target : null;
   const written = new Map(raw.fronts.map((f) => [f.id, f]));
-  const fronts = template.fronts.map((t) => {
-    const w = written.get(t.id);
-    if (!w) return t;
+  const fronts = template.fronts.map((t, i) => {
+    const byPlace = raw.fronts[i];
+    const w = written.get(t.id) ?? (byPlace && !template.fronts.some((x) => x.id === byPlace.id) ? byPlace : undefined);
+    if (!w) return { ...t, refs: t.refs.filter((r) => present.has(r)) };
     const sameKind = (a: Scenario['fronts'][number]['stake'], b: Scenario['fronts'][number]['stake']) =>
       Boolean(a && b && Object.keys(a)[0] === Object.keys(b)[0]);
     // Ставку-создание и раскрытие писатель может переназвать; числа и цели остаются из заготовки.
@@ -114,7 +117,9 @@ export const scenarioWriter: StructuredAgent<ScenarioWriterInput, Scenario, Scen
       namesBlock(names),
     ),
   user: ({ template, seed }) =>
-    template ? `Заготовка:\n${JSON.stringify(template, null, 2)}` : `Зерно истории: ${seed ?? 'на твой выбор, по городу'}`,
+    template
+      ? `Заготовка (id объектов и фронтов сохрани как есть):\n${JSON.stringify(template, null, 2)}`
+      : `Зерно истории: ${seed ?? 'на твой выбор, по городу'}`,
   check: (raw, { objects, unknowns }) => {
     const touched = touchedMysteries(raw, new Set(unknowns.flatMap((u) => u.objectIds)));
     if (touched.length) return `история касается тайны острова: ${touched.join(', ')}. Эти объекты не трогай`;

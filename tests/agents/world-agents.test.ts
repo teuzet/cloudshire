@@ -63,6 +63,21 @@ describe('посев и генезис объектов', () => {
     expect(s.objects.find((o) => o.id === 'decor')).not.toHaveProperty('weight');
   });
 
+  test('scenario-writer: переименованные id узнаются по месту', async () => {
+    const renamed = structuredClone(template);
+    renamed.objects[0]!.id = 'isle_x';
+    renamed.objects[0]!.statProfile = {};
+    renamed.objects[1]!.refs = ['isle_x'];
+    renamed.fronts[0]!.id = 'recipe_x';
+    renamed.fronts[0]!.impact = 'DEFINING';
+    renamed.fronts[0]!.refs = ['isle_x'];
+    const llm = new FakeLlm().script('scenario-writer', toolReply('submit_scenario', renamed));
+    const s = await writeScenario(deps(llm), { cityBrief: 'Мерв', objects: [], template, seed: null, names: [], unknowns: [] });
+    expect(s.objects[0]).toMatchObject({ id: 'isle_x', statProfile: template.objects[0]!.statProfile });
+    expect(s.fronts).toHaveLength(1);
+    expect(s.fronts[0]).toMatchObject({ id: 'recipe_x', impact: template.fronts[0]!.impact, refs: ['isle_x'] });
+  });
+
   test('scenario-writer: можно ссылаться на живой объект города', async () => {
     const s = { id: 'x', title: 'x', fronts: [{ id: 'f', description: 'Трещина в башне', impact: 'MINOR', refs: ['tower'], stake: { delete: { target: 'tower' } } }] };
     const llm = new FakeLlm().script('scenario-writer', toolReply('submit_scenario', s));

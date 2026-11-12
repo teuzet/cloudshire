@@ -333,7 +333,10 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
           )
         ).verdict
       : 'fits';
-  createAssignment(city, { id: newId(deps, 'asg'), front, officer, text: will.manner ?? '', verdict, tempo: will.workTempo ?? 0, day });
+  // Способ из приказа описывает замысел целиком. Пока идёт не последний этап, рассказчики его не видят:
+  // иначе этап «разработать методику» описывают как уже построенную обсерваторию.
+  const lastStage = project.stageIndex >= project.stages.length - 1;
+  createAssignment(city, { id: newId(deps, 'asg'), front, officer, text: lastStage ? (will.manner ?? '') : '', verdict, tempo: will.workTempo ?? 0, day });
   project.frontId = front.id;
   project.status = 'running';
   refreshAllFronts(deps, city, day);
