@@ -391,6 +391,8 @@ describe('этапы, подвох, эхо и обновление', () => {
   test('перемена идёт эхом по связям и обновляет соседние дела', async () => {
     const s = await town([]);
     const { city } = s;
+    // Здесь проверяется сам путь эха, порог заметности перемены снят.
+    s.deps.rules.fronts.echo.minPoints = 0;
     city.objects.push(createObject(s.r, { id: 'market', type: 'district', name: 'Рынок у стены', description: 'Лавки под стеной.', statEffect: { prosperity: 5 }, refs: ['wall'], day: 0 }));
     recomputeStats(city, s.r);
     // Соседнее дело касается стены: у него есть ведущий со стратегией.
