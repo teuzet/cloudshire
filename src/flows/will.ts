@@ -80,7 +80,7 @@ function willInput(city: City) {
       lead: leadLabel(city, f).label,
       hindrances: attachedTo(city, f.id)
         .filter((o) => (o.attach?.rate ?? 0) < 0)
-        .map((o) => o.name),
+        .map((o) => ({ name: o.name, description: o.description })),
     })),
     projects: city.projects
       .filter((p) => p.status === 'waiting')
@@ -434,7 +434,9 @@ async function atomicDeed(deps: FlowDeps, city: City, officer: Officer, will: Wi
     const named = planned?.find((s) => s.result.kind === 'new_object')?.result;
     const helper = { type: named?.type ?? ('community' as const), name: named?.name ?? will.goal.slice(0, 80), description: named?.description ?? will.goal };
     const { points } = await appraise(deps, city, helper);
-    capacity = newObjectCapacity(deps.rules, helper.type, points);
+    // Помощник временный: его цена не больше доли самого дела, иначе помощь дороже работы.
+    const cap = Math.max(deps.rules.fronts.push.min, parent.capacity * deps.rules.fronts.helper.maxShare);
+    capacity = Math.min(newObjectCapacity(deps.rules, helper.type, points), cap);
     stake = [{ op: 'attach', frontId: parent.id, rate: deps.rules.fronts.helper.unitsPerMonth, object: { ...helper, points } }];
   } else {
     capacity = pushCapacity(deps.rules, parent.capacity);

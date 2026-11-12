@@ -38,7 +38,7 @@ const lastUser = (llm: FakeLlm, agent: string) => {
 
 const quarry: ObjectBrief = { id: 'o1', type: 'site', name: 'Каменоломни', description: 'Карьеры на северном склоне.' };
 const masons: ObjectBrief = { id: 'o2', type: 'community', name: 'Артель каменщиков', description: 'Сорок мастеров.' };
-const fronts = [{ id: 'f1', title: 'Стройка башни', description: 'Артель кладёт цоколь.', lead: 'казначей Ада', hindrances: ['Грозовые птицы'] }];
+const fronts = [{ id: 'f1', title: 'Стройка башни', description: 'Артель кладёт цоколь.', lead: 'казначей Ада', hindrances: [{ name: 'Грозовые птицы', description: 'Стая вьёт гнёзда на лесах.' }] }];
 
 const GENERATORS = ['stage-planner', 'key-sealer', 'costumer', 'dynamics-composer', 'beat-writer', 'resolver', 'description-rewriter', 'chronicler'];
 const EVALUATORS = ['will-interpreter', 'canon-warden', 'contribution-appraiser', 'risk-appraiser', 'footprint-mapper', 'alignment-judge', 'role-fitter', 'faith-appraiser', 'theme-tagger'];

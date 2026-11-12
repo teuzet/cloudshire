@@ -28,8 +28,9 @@ export function visibleBriefs(city: City): ObjectBrief[] {
     .map(briefOf);
 }
 
-export function officerLabel(officer: Pick<Officer, 'title' | 'name'>): string {
-  return `${officer.title.toLowerCase()} ${officer.name}`;
+/** Должность и имя; пол в скобках, чтобы агенты верно склоняли глаголы. */
+export function officerLabel(officer: Pick<Officer, 'title' | 'name' | 'gender'>): string {
+  return `${officer.title.toLowerCase()} ${officer.name} (${officer.gender === 'female' ? 'женщина' : 'мужчина'})`;
 }
 
 export function leadLabel(city: City, front: Pick<Front, 'id'>): { label: string | null; manner: string | null; officer: Officer | null } {

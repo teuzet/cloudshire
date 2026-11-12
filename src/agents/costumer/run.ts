@@ -15,6 +15,16 @@ export const SHAPE_WORDS: Record<Shape, string> = {
   clock: 'отложенная перемена',
 };
 
+/** Кем новый участник приходится событию: по роду события. */
+export const NEW_ROLE: Record<Shape, string> = {
+  tension: 'тот, из-за кого растёт недовольство: люди, существа или вещь',
+  threat: 'тот, кто несёт беду: люди, существа или вещь',
+  hindrance: 'сама помеха: то, что стоит на пути работы, пока его не уберут, — завал, поток, порча, чужаки на месте работ',
+  accident: 'то, что осталось после несчастья и мешает работе, пока его не уберут, — завал, пролом, порча',
+  opportunity: 'находка или люди, которых город может обратить себе на пользу',
+  clock: 'тот, кто стоит за переменой: люди, существа или вещь',
+};
+
 export interface CostumeInput {
   /** Скелет записи словаря или свободной динамики. */
   skeleton: string;
@@ -51,7 +61,7 @@ export const costumer: StructuredAgent<CostumeInput, CostumeRaw, Costume> = {
       actor ? `Участник: ${briefLine(actor.object)}\nКак причина его касается: ${actor.touch}` : 'Участник: само место работ и те, кто на нём трудится',
       themes.length ? `Темы города: ${themes.join('; ')}` : null,
       `Имена для новых людей: ${names.length ? names.join(', ') : 'личных имён не давай, называй людей по ремеслу'}`,
-      `Нужен новый участник: ${needsNew ? 'да' : 'нет'}`,
+      needsNew ? `Нужен новый участник: да. Его роль в событии: ${NEW_ROLE[shape]}` : 'Нужен новый участник: нет',
     ),
   check: (raw, input) => (input.needsNew && !raw.new_object ? 'нужен новый участник в поле new_object' : null),
   finish: (raw, input) => ({

@@ -212,6 +212,8 @@ fronts:
   tempoStep: 0.2
   helper:
     unitsPerMonth: 2
+    # Ёмкость дела «собрать помощника» не больше этой доли ёмкости самого дела.
+    maxShare: 0.3
   hindrance:
     unitsPerMonth: -2
     removalShare: 0.15

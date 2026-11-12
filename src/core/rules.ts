@@ -187,7 +187,7 @@ export const rulesSchema = z.object({
     occupiedShare: z.number().min(0).max(1),
     verdict: byVerdict,
     tempoStep: z.number().min(0).max(0.3),
-    helper: z.object({ unitsPerMonth: z.number().positive() }),
+    helper: z.object({ unitsPerMonth: z.number().positive(), maxShare: z.number().positive() }),
     hindrance: z.object({ unitsPerMonth: z.number().negative(), removalShare: z.number().positive(), removalMin: z.number().positive() }),
     push: z.object({ share: z.number().positive(), min: z.number().positive() }),
     threat: z.object({ capacityShare: z.number().positive(), capacityMin: z.number().positive() }),

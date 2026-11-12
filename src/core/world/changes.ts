@@ -119,7 +119,11 @@ export function describeChanges(rules: Pick<Rules, 'stats'>, changes: readonly C
         break;
       }
       case 'front_opened':
-        out.push(`Началось: «${c.title}» (${c.plus ? 'удобный случай со сроком' : FORM_WORDS[c.form]})`);
+        out.push(
+          c.plus
+            ? `Открылась возможность: «${c.title}». Город пока ею не воспользовался; если никто не возьмётся вовремя, она пропадёт`
+            : `Началось: «${c.title}» (${FORM_WORDS[c.form]})`,
+        );
         break;
       case 'front_closed':
         out.push(`${CLOSED_WORDS[c.outcome]}: «${c.title}»`);
