@@ -7,3 +7,4 @@ saves/
 logs/
 *.log
 .DS_Store
+playtest/

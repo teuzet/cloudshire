@@ -54,6 +54,8 @@ function listSaves(dir: string) {
 
 async function main(): Promise<void> {
   loadDotEnv();
+  // Журнал вызовов агентов: logs/agents/<время запуска>/, у каждого вызова свой файл.
+  process.env.AGENT_LOG_DIR ??= path.join(ROOT, 'logs', 'agents', new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-'));
   const inbox = new MemoryNotifier();
   const app = await buildApp(process.env, inbox);
   const { deps, locks } = app;
@@ -142,7 +144,7 @@ async function main(): Promise<void> {
   });
 
   const port = Number(process.env.PORT ?? 3000);
-  server.listen(port, () => console.log(`cloudshire dev: http://localhost:${port}`));
+  server.listen(port, () => console.log(`cloudshire dev: http://localhost:${port}\nжурнал агентов: ${process.env.AGENT_LOG_DIR}`));
   setInterval(() => void runDueCities(deps, locks).catch((err) => console.error('[tick]', err)), 10_000);
 }
 

@@ -10,6 +10,7 @@
  * Прогресс ленивый: хранится значение на день progressDay и скорость, остальное досчитывается.
  */
 
+import { clipWords } from '../text.js';
 import type { FrontForm, RiskStep, Rules, StatId, Tempo } from '../rules.js';
 import type { City, FootprintEntry, Front, FrontKey, FrontOrigin, StakeOp } from '../city.js';
 import { closeAssignment, leadOf, officerOf } from './assignments.js';
@@ -59,7 +60,7 @@ export function createFront(args: {
     id: args.id,
     form: args.form,
     origin: args.origin,
-    title: args.title.trim().slice(0, 120),
+    title: clipWords(args.title, 120),
     description: args.description.trim().slice(0, 900),
     capacity,
     progress: 0,

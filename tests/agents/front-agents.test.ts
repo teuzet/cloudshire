@@ -263,7 +263,7 @@ describe('веха, осложнение, развязка', () => {
       .script('description-rewriter', toolReply('submit_description', { description: 'Каменоломни закрыты после обвала.' }))
       .script('chronicler', toolReply('submit_chronicle', { text: 'Башня достроена. Стража приняла баллисту.' }));
     expect(await rewriteDescription(deps(llm), { name: 'Каменоломни', description: 'Карьеры.', change: 'Обвал' })).toBe('Каменоломни закрыты после обвала.');
-    const text = await writeChronicleEntry(deps(llm), { gist: 'Башня достроена.', changes: ['Появилось: Башня с баллистой'], date: '3-й день' });
+    const text = await writeChronicleEntry(deps(llm), { gist: 'Башня достроена.', changes: ['Появилось: Башня с баллистой'] });
     expect(text).toContain('Башня достроена');
     expect(lastUser(llm, 'chronicler')).toContain('- Появилось: Башня с баллистой');
   });

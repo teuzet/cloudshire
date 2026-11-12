@@ -15,7 +15,8 @@
     "check": "npm run typecheck && npm run lint:deps && npm test",
     "bot": "tsx src/clients/telegram/main.ts",
     "dev": "tsx src/clients/dev/main.ts",
-    "bench": "tsx src/clients/bench/main.ts"
+    "bench": "tsx src/clients/bench/main.ts",
+    "play": "tsx src/clients/playtest/main.ts"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",

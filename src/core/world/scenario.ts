@@ -6,6 +6,7 @@
  * ссылки и цели ставок переписываются на них.
  */
 
+import { clipWords } from '../text.js';
 import { z } from 'zod';
 import { DRIFT_BANDS, IMPACT_LEVELS, OBJECT_TYPES, STAT_IDS, type Rules } from '../rules.js';
 import type { City, Front, StakeOp, WorldObject } from '../city.js';
@@ -145,7 +146,7 @@ export function plantScenario(
       id: map(f.id),
       form: drifting ? 'threat' : 'find',
       origin: 'story',
-      title: description.split(/[.!?]/)[0]?.trim().slice(0, 80) || scenario.title,
+      title: clipWords(description.split(/[.!?]/)[0] ?? '', 80) || scenario.title,
       description,
       capacity,
       milestones: Math.max(scaleOf(rules, capacity).milestones, Math.min(4, f.beatCount + 1)),

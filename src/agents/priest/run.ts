@@ -108,7 +108,7 @@ function tool<A>(name: string, description: string, schema: LoopTool<PriestHandl
 const TOOLS: LoopTool<PriestHandlers>[] = [
   tool<AssignOfficerArgs>('assign_officer', 'Поручить сановнику работу.', assignOfficerSchema, (h, a) => h.assignOfficer(a)),
   tool<OrderChangeArgs>('order_change', 'Воля изменить сам город: построить, учредить, снести.', orderChangeSchema, (h, a) => h.orderChange(a)),
-  tool<WithdrawArgs>('withdraw_assignment', 'Снять сановника с его дела.', withdrawSchema, (h, a) => h.withdraw(a)),
+  tool<WithdrawArgs>('withdraw_assignment', 'Снять сановника с его дела. Дело остаётся стоять без ведущего. Прекратить дело совсем — order_change «отменить дело …».', withdrawSchema, (h, a) => h.withdraw(a)),
   tool<NoteArgs>('write_note', 'Постоянная заметка памяти.', noteSchema, (h, a) => h.writeNote(a)),
   tool<ConsultArgs>(
     'consult_loremaster',

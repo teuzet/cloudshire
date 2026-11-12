@@ -10,8 +10,6 @@ export interface ChronicleInput {
   gist: string;
   /** Перемены списком, уже словами: «Появилось: Башня с баллистой (большое сооружение)…» */
   changes: string[];
-  /** Игровая дата словами. */
-  date: string;
 }
 
 export const chronicler: StructuredAgent<ChronicleInput, ChronicleRaw, string> = {
@@ -20,7 +18,7 @@ export const chronicler: StructuredAgent<ChronicleInput, ChronicleRaw, string> =
   description: 'Запись летописи об одном событии и его переменах.',
   schema: chronicleSchema,
   system: () => composeSystem([], prompt, canon('setting'), canon('style-plain')),
-  user: ({ gist, changes, date }) => join(`Дата: ${date}`, `Суть события: ${gist}`, block('Перемены', changes.map((c) => `- ${c}`).join('\n'))),
+  user: ({ gist, changes }) => join(`Суть события: ${gist}`, block('Перемены', changes.map((c) => `- ${c}`).join('\n'))),
   finish: (raw) => raw.text,
 };
 

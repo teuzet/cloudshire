@@ -6,6 +6,7 @@
  * шанс беды из ступени риска и темпа. Сановник из приказа сразу становится ведущим.
  */
 
+import { clipWords } from '../core/text.js';
 import type { City, Front, Officer, Project, ProjectStage, StakeOp, WorldObject } from '../core/city.js';
 import { activeFacts } from '../core/lore.js';
 import { findOfficer, officeDef } from '../core/officers.js';
@@ -130,7 +131,7 @@ export async function playerWill(deps: FlowDeps, city: City, office: Office, tex
 function doomedStage(goal: string, planned: PlannedStage[] | null): ProjectStage {
   const last = planned?.[planned.length - 1];
   return {
-    title: (last?.title ?? goal).slice(0, 80),
+    title: clipWords(last?.title ?? goal, 80),
     work: goal,
     result: last?.result ?? { kind: 'fact', objectId: null, type: null, name: goal.slice(0, 80), description: goal, parentId: null },
     site: planned?.[0]?.site ?? { name: `Работы: ${goal}`.slice(0, 80), description: '' },
@@ -179,7 +180,7 @@ async function newProject(deps: FlowDeps, city: City, officer: Officer, will: Wi
 
   const project: Project = {
     id: newId(deps, 'proj'),
-    title: ruling.goal.slice(0, 120),
+    title: clipWords(ruling.goal, 120),
     goal: ruling.goal,
     stages,
     stageIndex: 0,
@@ -340,7 +341,7 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
     { kind: 'object_created', objectId: site.id, name: site.name, type: site.type, points: emptyStatMap(), temporary: true, hidden: false },
   ];
   await record(deps, city, {
-    gist: `${title(deps, officer)} начал дело по воле покровителя: ${front.title}. ${front.description}`,
+    gist: `${title(deps, officer)} ${officer.gender === 'female' ? 'начала' : 'начал'} дело по воле покровителя: ${front.title}. ${front.description}`,
     changes,
     source: 'will',
     frontId: front.id,
@@ -447,7 +448,7 @@ async function atomicDeed(deps: FlowDeps, city: City, officer: Officer, will: Wi
     id: newId(deps, 'front'),
     form: 'deed',
     origin: 'deed',
-    title: will.goal,
+    title: clipWords(will.goal, 120),
     description: will.manner ?? will.goal,
     capacity,
     milestones: 1,

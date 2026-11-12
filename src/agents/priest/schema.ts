@@ -3,12 +3,12 @@ import { OFFICES } from '../../core/rules.js';
 
 export const assignOfficerSchema = z.object({
   office: z.enum(OFFICES),
-  task: z.string().trim().min(1).describe('Что поручено, одной-двумя фразами, как приказ сановнику.'),
+  task: z.string().trim().min(1).describe('Что поручено, одной-двумя фразами, как приказ сановнику. Одна работа на вызов: отмена идущего дела — отдельный вызов order_change.'),
 });
 
 export const orderChangeSchema = z.object({
   office: z.enum(OFFICES),
-  intent: z.string().trim().min(1).describe('Что должно появиться, измениться или исчезнуть в городе.'),
+  intent: z.string().trim().min(1).describe('Что должно появиться, измениться или исчезнуть в городе. Отменить идущее дело — тоже сюда, отдельным вызовом: «отменить дело …» с названием дела.'),
 });
 
 export const withdrawSchema = z.object({ office: z.enum(OFFICES) });

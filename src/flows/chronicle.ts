@@ -6,7 +6,6 @@
 
 import type { ChronicleEntry, City, Officer } from '../core/city.js';
 import { appendChronicle, appendDialog } from '../core/chronicle.js';
-import { gameDate } from '../core/time.js';
 import { describeChanges, isNotable, type Change } from '../core/world/changes.js';
 import type { OutboundMessage } from '../ports/notifier.js';
 import { writeChronicleEntry } from '../agents/chronicler/run.js';
@@ -39,7 +38,7 @@ export async function record(deps: FlowDeps, city: City, h: Happening): Promise<
     ? await tryAgent(
         deps,
         'chronicler',
-        () => writeChronicleEntry(deps.agents, { gist: h.gist, changes: lines, date: gameDate(h.day).label }),
+        () => writeChronicleEntry(deps.agents, { gist: h.gist, changes: lines }),
         [h.gist, ...lines].join(' '),
       )
     : h.gist;

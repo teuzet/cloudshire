@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 import { systemClock } from '../adapters/clock/system.js';
 import { AnthropicLlm } from '../adapters/llm/anthropic.js';
+import { LoggingLlm } from '../adapters/llm/logging.js';
 import { OpenAiLlm } from '../adapters/llm/openai.js';
 import { RoutingLlm } from '../adapters/llm/router.js';
 import { systemRandom } from '../adapters/random/system.js';
@@ -56,7 +57,9 @@ export function buildLlm(env: NodeJS.ProcessEnv): Llm {
   if (env.OPENAI_API_KEY) providers.openai = new OpenAiLlm({ apiKey: env.OPENAI_API_KEY });
   if (env.ANTHROPIC_API_KEY) providers.anthropic = new AnthropicLlm({ apiKey: env.ANTHROPIC_API_KEY });
   if (!Object.keys(providers).length) throw new Error('нет ключей моделей: задай OPENAI_API_KEY и/или ANTHROPIC_API_KEY');
-  return new RoutingLlm(providers);
+  const router = new RoutingLlm(providers);
+  // Журнал вызовов агентов: каждый вызов отдельным файлом, см. adapters/llm/logging.ts.
+  return env.AGENT_LOG_DIR ? new LoggingLlm(router, path.resolve(env.AGENT_LOG_DIR)) : router;
 }
 
 async function buildStorage(env: NodeJS.ProcessEnv): Promise<{ storage: Storage; close: () => Promise<void> }> {
