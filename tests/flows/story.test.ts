@@ -142,8 +142,9 @@ test('посев: поиск, за который никто не взялся, 
 
 test('история по зерну: не больше трёх фронтов и одного, что идёт к сроку сам', () => {
   const f = (id: string, drift: string, closes: Array<{ target: string; share: number }> = []) => ({ id, description: id, impact: 'MINOR', drift, closes });
-  const raw = parseScenario({ id: 's', title: 'S', fronts: [f('a', 'FAST'), f('b', 'NONE', [{ target: 'c', share: 0.5 }]), f('c', 'STEADY'), f('d', 'NONE'), f('e', 'NONE')] });
+  const raw = parseScenario({ id: 's', title: 'S', fronts: [{ ...f('a', 'FAST'), impact: 'DEFINING' }, f('b', 'NONE', [{ target: 'c', share: 0.5 }]), f('c', 'STEADY'), f('d', 'NONE'), f('e', 'NONE')] });
   const out = trimFree({ rules: rules() }, raw);
   expect(out.fronts.map((x) => x.id)).toEqual(['a', 'b', 'd']);
   expect(out.fronts[1]!.closes).toEqual([]);
+  expect(out.fronts[0]!.impact).toBe('SIGNIFICANT');
 });

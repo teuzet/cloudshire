@@ -12,6 +12,7 @@ import { leadOf } from '../core/world/assignments.js';
 import { rawToPoints } from '../core/world/numbers.js';
 import { mysteryObjectIds } from '../core/lore.js';
 import type { City, StoryTags } from '../core/city.js';
+import { IMPACT_LEVELS } from '../core/rules.js';
 import { leanOf, markStory, roomForTrouble, varietyWeight } from '../core/world/director.js';
 import { weightedOrder } from '../core/world/dynamics.js';
 import { plantScenario, scenarioTags, touchedMysteries, type Scenario } from '../core/world/scenario.js';
@@ -23,7 +24,8 @@ import { refreshFront } from './fronts.js';
 
 /** История по зерну: не больше freeMaxFronts фронтов и freeMaxDrifting идущих к сроку. */
 export function trimFree(deps: Pick<FlowDeps, 'rules'>, s: Scenario): Scenario {
-  const { freeMaxFronts, freeMaxDrifting } = deps.rules.seeding;
+  const { freeMaxFronts, freeMaxDrifting, freeMaxImpact } = deps.rules.seeding;
+  const cap = IMPACT_LEVELS.indexOf(freeMaxImpact);
   let drifting = 0;
   const fronts = s.fronts.filter((f) => {
     if (f.drift === 'NONE') return true;
@@ -31,7 +33,14 @@ export function trimFree(deps: Pick<FlowDeps, 'rules'>, s: Scenario): Scenario {
     return drifting <= freeMaxDrifting;
   }).slice(0, freeMaxFronts);
   const ids = new Set(fronts.map((f) => f.id));
-  return { ...s, fronts: fronts.map((f) => ({ ...f, closes: f.closes.filter((c) => ids.has(c.target)) })) };
+  return {
+    ...s,
+    fronts: fronts.map((f) => ({
+      ...f,
+      impact: IMPACT_LEVELS.indexOf(f.impact) > cap ? freeMaxImpact : f.impact,
+      closes: f.closes.filter((c) => ids.has(c.target)),
+    })),
+  };
 }
 
 /** Зерно для истории без заготовки: то, чего режиссёр давно не видел, и о другом, чем то, что уже идёт. */

@@ -255,6 +255,7 @@ export const rulesSchema = z.object({
     dormantDays: z.number().int().positive(),
     freeMaxFronts: z.number().int().positive(),
     freeMaxDrifting: z.number().int().nonnegative(),
+    freeMaxImpact: z.enum(IMPACT_LEVELS),
     namesPerCall: z.number().int().nonnegative(),
     capacity: byImpact,
     driftMonths: byDrift,
