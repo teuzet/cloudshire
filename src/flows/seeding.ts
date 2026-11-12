@@ -21,8 +21,22 @@ import { record } from './chronicle.js';
 import { namesUsed, newId, returnNames, takeNames, tryAgent, type FlowDeps } from './context.js';
 import { refreshFront } from './fronts.js';
 
-/** Зерно для истории без заготовки: то, чего режиссёр давно не видел. */
-function seedWords(deps: FlowDeps, tags: StoryTags): string {
+/** История по зерну: не больше freeMaxFronts фронтов и freeMaxDrifting идущих к сроку. */
+export function trimFree(deps: Pick<FlowDeps, 'rules'>, s: Scenario): Scenario {
+  const { freeMaxFronts, freeMaxDrifting } = deps.rules.seeding;
+  let drifting = 0;
+  const fronts = s.fronts.filter((f) => {
+    if (f.drift === 'NONE') return true;
+    drifting += 1;
+    return drifting <= freeMaxDrifting;
+  }).slice(0, freeMaxFronts);
+  const ids = new Set(fronts.map((f) => f.id));
+  return { ...s, fronts: fronts.map((f) => ({ ...f, closes: f.closes.filter((c) => ids.has(c.target)) })) };
+}
+
+/** Зерно для истории без заготовки: то, чего режиссёр давно не видел, и о другом, чем то, что уже идёт. */
+function seedWords(deps: FlowDeps, city: City, tags: StoryTags): string {
+  const running = activeFronts(city).filter((f) => f.origin === 'story' || f.origin === 'complication').map((f) => f.title);
   const d = deps.rules.fronts.director;
   const sphere = tags.sphere ? d.spheres[tags.sphere] : null;
   return [
@@ -30,6 +44,7 @@ function seedWords(deps: FlowDeps, tags: StoryTags): string {
     tags.source ? `Причина: ${d.sources[tags.source]}.` : null,
     sphere ? `Больше всего она касается того, чем город живёт: ${sphere}.` : null,
     tags.mystery ? 'В ней заранее спрятан ключевой объект или факт, который откроется по ходу.' : null,
+    running.length ? `В городе уже идёт: ${running.join('; ')}. Эта история о другом: свои люди, своё место и своя причина.` : null,
   ]
     .filter(Boolean)
     .join(' ');
@@ -60,7 +75,7 @@ export async function plantStory(deps: FlowDeps, city: City, day: number): Promi
         cityBrief: city.brief,
         objects: city.objects.filter((o) => o.status === 'active'),
         template,
-        seed: lean ? seedWords(deps, lean) : null,
+        seed: lean ? seedWords(deps, city, lean) : null,
         names,
         unknowns: city.unknowns,
       }),
@@ -68,17 +83,18 @@ export async function plantStory(deps: FlowDeps, city: City, day: number): Promi
   );
   // История по зерну получает свой id: заготовки он не повторит.
   if (scenario && !template) scenario.id = newId(deps, 'story');
+  const planted = scenario && !template ? trimFree(deps, scenario) : scenario;
   // Тайны острова закрыты для посадок: это проверяет и агент, но запасная заготовка идёт мимо него.
-  if (!scenario || city.scenariosUsed.includes(scenario.id) || touchedMysteries(scenario, mysteryObjectIds(city)).length) {
+  if (!planted || city.scenariosUsed.includes(planted.id) || touchedMysteries(planted, mysteryObjectIds(city)).length) {
     await returnNames(deps, names);
     return null;
   }
-  const used = namesUsed(names, JSON.stringify(scenario));
+  const used = namesUsed(names, JSON.stringify(planted));
   await returnNames(deps, names.filter((n) => !used.includes(n)));
 
-  const tags = scenarioTags(scenario);
+  const tags = scenarioTags(planted);
   markStory(city, lean ? { ...lean, mystery: tags.mystery } : tags, day);
-  const { objects, fronts } = plantScenario(deps.rules, city, scenario, { day, newId: (p) => newId(deps, p) });
+  const { objects, fronts } = plantScenario(deps.rules, city, planted, { day, newId: (p) => newId(deps, p) });
   for (const front of fronts) refreshFront(deps, city, front, day);
   // Скрытое в истории город пока не видел: оно не идёт ни в весть, ни в хронику.
   const seen = objects.filter((o) => !o.hidden);
@@ -92,7 +108,7 @@ export async function plantStory(deps: FlowDeps, city: City, day: number): Promi
     temporary: false,
     hidden: o.hidden,
   }));
-  return record(deps, city, { gist: gist || scenario.pitch || scenario.title, changes, source: 'scenario', frontId: fronts[0]?.id ?? null, day, kind: 'beat', officer: null, announce: true });
+  return record(deps, city, { gist: gist || planted.pitch || planted.title, changes, source: 'scenario', frontId: fronts[0]?.id ?? null, day, kind: 'beat', officer: null, announce: true });
 }
 
 /** Нетронутые поиски и дела историй, за которые так никто и не взялся, тихо уходят из дел города. */

@@ -4,7 +4,9 @@ import { scheduleJob } from '../../src/core/jobs.js';
 import { findFront } from '../../src/core/world/fronts.js';
 import { patronMessage } from '../../src/flows/priest-turn.js';
 import { runDueCities } from '../../src/flows/scheduler.js';
-import { storyCount } from '../../src/flows/seeding.js';
+import { storyCount, trimFree } from '../../src/flows/seeding.js';
+import { parseScenario } from '../../src/core/world/scenario.js';
+import { rules } from '../helpers/fixtures.js';
 import { createFront } from '../../src/core/world/fronts.js';
 import { blankCity } from '../helpers/fixtures.js';
 import { lanternIsle, lastUser, scriptFrontAgents, stand } from '../helpers/game.js';
@@ -136,4 +138,12 @@ test('посев: поиск, за который никто не взялся, 
   expect(storyCount(city)).toBe(1);
   city.fronts.push(make('c', 'threat'));
   expect(storyCount(city)).toBe(2);
+});
+
+test('история по зерну: не больше трёх фронтов и одного, что идёт к сроку сам', () => {
+  const f = (id: string, drift: string, closes: Array<{ target: string; share: number }> = []) => ({ id, description: id, impact: 'MINOR', drift, closes });
+  const raw = parseScenario({ id: 's', title: 'S', fronts: [f('a', 'FAST'), f('b', 'NONE', [{ target: 'c', share: 0.5 }]), f('c', 'STEADY'), f('d', 'NONE'), f('e', 'NONE')] });
+  const out = trimFree({ rules: rules() }, raw);
+  expect(out.fronts.map((x) => x.id)).toEqual(['a', 'b', 'd']);
+  expect(out.fronts[1]!.closes).toEqual([]);
 });
