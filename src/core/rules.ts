@@ -232,6 +232,7 @@ export const rulesSchema = z.object({
       plusMax: z.number().min(0).max(1),
       engines: z.record(z.enum(ENGINES), z.string().min(1)),
       sources: z.record(z.enum(SOURCES), z.string().min(1)),
+      spheres: z.record(z.enum(STAT_IDS), z.string().min(1)),
     }),
     failure: z.object({ chance: z.number().min(0).max(1), heavyShare: z.number().min(0).max(1) }),
     refresh: z.object({ maxFronts: z.number().int().nonnegative() }),

@@ -24,11 +24,11 @@ import { refreshFront } from './fronts.js';
 /** Зерно для истории без заготовки: то, чего режиссёр давно не видел. */
 function seedWords(deps: FlowDeps, tags: StoryTags): string {
   const d = deps.rules.fronts.director;
-  const sphere = tags.sphere ? deps.rules.stats.find((s) => s.id === tags.sphere)?.name : null;
+  const sphere = tags.sphere ? d.spheres[tags.sphere] : null;
   return [
     tags.engine ? `История, в которой ${d.engines[tags.engine]}.` : null,
     tags.source ? `Причина: ${d.sources[tags.source]}.` : null,
-    sphere ? `Больше всего она касается того, что в городе зовут «${sphere}».` : null,
+    sphere ? `Больше всего она касается того, чем город живёт: ${sphere}.` : null,
     tags.mystery ? 'В ней заранее спрятан ключевой объект или факт, который откроется по ходу.' : null,
   ]
     .filter(Boolean)
