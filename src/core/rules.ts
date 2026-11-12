@@ -45,6 +45,55 @@ export type ObjectType = (typeof OBJECT_TYPES)[number];
 export const OFFICES = ['treasurer', 'marshal', 'keeper', 'chancellor'] as const;
 export type Office = (typeof OFFICES)[number];
 
+/** Лестница риска: от полностью предсказуемого дела до затеи против здравого смысла. */
+export const RISK_STEPS = ['safe', 'normal', 'hard', 'risky', 'impossible'] as const;
+export type RiskStep = (typeof RISK_STEPS)[number];
+
+/** Пять механических форм фронта. */
+export const FRONT_FORMS = ['deed', 'tension', 'threat', 'clock', 'find'] as const;
+export type FrontForm = (typeof FRONT_FORMS)[number];
+
+/** Классы вклада в стат. «Нет вклада» — отсутствие записи. */
+export const GRADES = ['small', 'medium', 'large', 'huge'] as const;
+export type Grade = (typeof GRADES)[number];
+
+/** Один эффект объекта на стат: класс и знак. Числа из класса делает только core. */
+export interface StatGrade {
+  stat: StatId;
+  direction: 'up' | 'down';
+  size: Grade;
+}
+
+/** Позиция одного рычага темпа: медлим, обычно, торопимся. */
+export type Tempo = -1 | 0 | 1;
+export const TEMPO_WORDS = ['careful', 'steady', 'hurry'] as const;
+export type TempoWord = (typeof TEMPO_WORDS)[number];
+export function tempoOf(word: TempoWord | null | undefined): Tempo | null {
+  return word === 'hurry' ? 1 : word === 'careful' ? -1 : word === 'steady' ? 0 : null;
+}
+
+/** Характер сановника: его собственный рычаг темпа. */
+export const TEMPERS = ['slow', 'even', 'hasty'] as const;
+export type Temper = (typeof TEMPERS)[number];
+
+/** Вердикт Судьи соответствия на стратегию или дело. */
+export const VERDICTS = ['spot_on', 'fits', 'off'] as const;
+export type Verdict = (typeof VERDICTS)[number];
+
+/** Отношения дела с объектами города (отпечаток). */
+export const RELATIONS = ['occupies', 'linked', 'pressures', 'benefits'] as const;
+export type Relation = (typeof RELATIONS)[number];
+
+/** Во что выливается осложнение: какой род события соберёт код. */
+export const SHAPES = ['tension', 'threat', 'hindrance', 'accident', 'clock', 'opportunity'] as const;
+export type Shape = (typeof SHAPES)[number];
+
+/** Случаи и сила события для веры. */
+export const FAITH_CASES = ['harm_willed', 'harm_unguarded', 'harm_averted', 'boon_willed', 'none'] as const;
+export type FaithCase = (typeof FAITH_CASES)[number];
+export const FAITH_STRENGTHS = ['minor', 'notable', 'grave', 'shock'] as const;
+export type FaithStrength = (typeof FAITH_STRENGTHS)[number];
+
 const statId = z.enum(STAT_IDS);
 /** Таблица «уровень → значение» с обязательным ключом на каждый уровень. */
 function table<K extends string, V extends z.ZodTypeAny>(keys: readonly K[], value: V): z.ZodType<Record<K, z.infer<V>>> {

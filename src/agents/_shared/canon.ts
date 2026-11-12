@@ -16,6 +16,8 @@ export const CANON_PARTS = [
   'style-names',
   'style-priest-voice',
   'style-event-balance',
+  'setting',
+  'style-plain',
 ] as const;
 export type CanonPart = (typeof CANON_PARTS)[number];
 
