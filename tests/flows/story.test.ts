@@ -76,11 +76,11 @@ describe('история от посева до развязки', () => {
     expect(storyEntries).toEqual(['scenario', 'milestone', 'milestone', 'completion']);
     const known = city.facts.filter((f) => f.frontId === story.id).map((f) => f.text);
     expect(known).toEqual([
-      'Надписи описывают изменение направления движения острова.',
-      'Центральный механизм башни связан с подъёмной силой островка.',
-      'Рецепт был способом удерживать островок на месте.',
+      'Надписи перечисляют травы и соли, смешанные в одном котле.',
+      'Механизм башни по трубкам разносит светящийся состав к фонарям.',
+      'Рецепт — состав, который светится без огня; им заправлены фонари островка.',
     ]);
-    expect(lastUser(s.llm.callsTo('chronicler').at(-1)!)).toContain('Стало известно: Рецепт был способом удерживать островок на месте.');
+    expect(lastUser(s.llm.callsTo('chronicler').at(-1)!)).toContain('Стало известно: Рецепт — состав, который светится без огня; им заправлены фонари островка.');
     expect(city.officers.find((o) => o.office === 'keeper')!.assignmentId).toBeNull();
     expect(s.inbox.sent).toHaveLength(5);
     expect(s.llm.callsTo('herald').at(-1)?.messages[0]?.content).toContain('развязка');
