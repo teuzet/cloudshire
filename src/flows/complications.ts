@@ -189,7 +189,12 @@ export async function complicate(
   await returnNames(deps, names.filter((n) => !used.includes(n)));
   if (!costume) return null;
   if (plan.dynamicId) city.dynamicsUsed[plan.dynamicId] = day;
-  markStory(city, plan.tags, day);
+  const tags = plan.tags;
+  // В журнал режиссёра идёт только то, что действительно родилось.
+  const born = (made: Complication): Complication => {
+    markStory(city, tags, day);
+    return made;
+  };
 
   const dress: EventDress = { title: costume.title, description: costume.description, outburst: costume.outburst, newObject: costume.newObject };
   const ctx = { day, newId: (p: string) => newId(deps, p), frontId: parent.id };
@@ -198,7 +203,7 @@ export async function complicate(
   // Помеха: объект с отрицательной скоростью, фронта нет.
   if (plan.shape === 'hindrance') {
     changes.push(...applyStake(deps.rules, city, [hindranceOp(deps.rules, parent, dress)], ctx).changes);
-    return { changes, gist: costume.rumor };
+    return born({ changes, gist: costume.rumor });
   }
 
   // Авария: мгновенный удар, после неё остаётся помеха.
@@ -206,7 +211,7 @@ export async function complicate(
     if (accidentLoss(deps.rules, parent, day) > 0) changes.push({ kind: 'front_moved', frontId: parent.id, title: parent.title, how: 'setback' });
     changes.push(...applyStake(deps.rules, city, [hindranceOp(deps.rules, parent, dress)], ctx).changes);
     await faithEvent(deps, city, { event: costume.description, will: willWords(city, parent), day });
-    return { changes, gist: costume.description };
+    return born({ changes, gist: costume.description });
   }
 
   // Удобный случай: плюсовое дело со сроком.
@@ -229,7 +234,7 @@ export async function complicate(
     front.key = await seal(deps, city, front, { hint: plan.helps });
     city.fronts.push(front);
     changes.push({ kind: 'front_opened', frontId: front.id, title: front.title, form: front.form, plus: true });
-    return { changes, gist: costume.rumor };
+    return born({ changes, gist: costume.rumor });
   }
 
   // Привязанное: бьёт по делу, которое его породило.
@@ -249,7 +254,7 @@ export async function complicate(
     city.fronts.push(front);
     changes.push({ kind: 'front_opened', frontId: front.id, title: front.title, form: front.form, plus: false });
     if (front.form === 'threat') changes.push({ kind: 'front_moved', frontId: parent.id, title: parent.title, how: 'frozen' });
-    return { changes, gist: costume.rumor };
+    return born({ changes, gist: costume.rumor });
   }
 
   // Побочное: бьёт по объекту. На кону разница его вклада.
@@ -287,7 +292,7 @@ export async function complicate(
   if (front.form !== 'clock') front.key = await seal(deps, city, front, { hint: plan.helps });
   city.fronts.push(front);
   changes.push({ kind: 'front_opened', frontId: front.id, title: front.title, form: front.form, plus: false });
-  return { changes, gist: costume.rumor };
+  return born({ changes, gist: costume.rumor });
 }
 
 // ───────────────────────────── бросок риска ─────────────────────────────

@@ -194,9 +194,20 @@ async function onMilestone(deps: FlowDeps, city: City, front: Front, day: number
 // ───────────────────────────── завершение ─────────────────────────────
 
 /** Беду отвели: угроза снята или напряжение погашено до прорыва. */
+function hiddenRefs(city: City, front: Front): WorldObject[] {
+  return front.refs.flatMap((id) => {
+    const o = findObject(city, id);
+    return o && o.status === 'active' && o.hidden ? [o] : [];
+  });
+}
+
 async function avert(deps: FlowDeps, city: City, front: Front, day: number, out: OutboundMessage[]): Promise<void> {
   const lead = leadLabel(city, front);
   const will = willWords(city, front);
+  // Скрытый виновник осложнения открывается, когда беду отвели: тайна осложнения в этом и состоит.
+  const unmasked = front.origin === 'complication' ? applyStake(deps.rules, city, hiddenRefs(city, front).map((o) => ({ op: 'reveal' as const, target: o.id })), stakeCtx(deps, front, day)).changes : [];
+  const culprits = unmasked.flatMap((c) => (c.kind === 'object_revealed' ? [`${c.name}: ${c.description ?? ''}`.trim()] : []));
+  const description = culprits.length ? `${front.description} Выяснилось, кто за этим стоял: ${culprits.join('; ')}.` : front.description;
   const helpers = attachedTo(city, front.id).filter((o) => o.temporary && (o.attach?.rate ?? 0) > 0);
   const people = [...participants(city, front), ...helpers.map(briefOf)];
   const resolution = await tryAgent<Resolution>(
@@ -205,7 +216,7 @@ async function avert(deps: FlowDeps, city: City, front: Front, day: number, out:
     () =>
       resolveEvent(deps.agents, {
         title: front.title,
-        description: front.description,
+        description,
         ending: 'averted',
         consequence: null,
         participants: people,
@@ -216,7 +227,7 @@ async function avert(deps: FlowDeps, city: City, front: Front, day: number, out:
       }),
     { text: `Беду отвели: ${front.title}.`, effect: 'none' },
   );
-  const changes: Change[] = [];
+  const changes: Change[] = [...unmasked];
   // Того, кого решено оставить городу, надо отвязать до закрытия фронта: иначе он исчезнет вместе с ним.
   if (resolution.effect === 'keep') {
     const kept = findObject(city, resolution.objectId);
@@ -244,8 +255,11 @@ async function completeDeed(deps: FlowDeps, city: City, front: Front, day: numbe
   const changes = closeFront(deps.rules, city, front, 'done', day);
   changes.push(...applyStake(deps.rules, city, front.stake, stakeCtx(deps, target ?? front, day)).changes);
   // Задание — часть большого дела: в списке перемен и в сути видно, что большое дело идёт дальше.
-  if (target) changes.push({ kind: 'front_moved', frontId: target.id, title: target.title, how: front.stake.some((op) => op.op === 'progress') ? 'pushed' : front.stake.some((op) => op.op === 'delete') ? 'cleared' : 'helped' });
-  const description = target ? `${front.description}. Это задание помогает большому делу «${target.title}», и оно идёт дальше.` : front.description;
+  if (target && !changes.some((c) => c.kind === 'front_moved' && c.frontId === target.id)) changes.push({ kind: 'front_moved', frontId: target.id, title: target.title, how: front.stake.some((op) => op.op === 'progress') ? 'pushed' : front.stake.some((op) => op.op === 'delete') ? 'cleared' : 'helped' });
+  // Задание приближает большое дело, но не решает его: найденное и узнанное приходит только с вехами большого дела.
+  const description = target
+    ? `${front.description}. Это задание помогает большому делу «${target.title}»: работа сделана и приблизила его, а ответа и итога большого дела пока нет.`
+    : front.description;
   const beat = await tryAgent<Beat>(
     deps,
     'beat-writer',

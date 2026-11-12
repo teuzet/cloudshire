@@ -10,13 +10,13 @@ export type Change =
   | { kind: 'object_created'; objectId: string; name: string; type: ObjectType; points: StatMap; temporary: boolean; hidden: boolean }
   | { kind: 'object_changed'; objectId: string; name: string; delta: StatMap; description: string | null }
   | { kind: 'object_removed'; objectId: string; name: string; points: StatMap; hidden: boolean }
-  | { kind: 'object_revealed'; objectId: string; name: string }
+  | { kind: 'object_revealed'; objectId: string; name: string; description?: string }
   | { kind: 'fact'; text: string }
   | { kind: 'linked'; a: string; b: string; names: [string, string] }
   | { kind: 'stats'; points: Partial<StatMap> }
   | { kind: 'front_opened'; frontId: string; title: string; form: FrontForm; plus: boolean }
   | { kind: 'front_closed'; frontId: string; title: string; outcome: 'done' | 'averted' | 'failed' | 'cancelled' | 'expired' }
-  | { kind: 'front_moved'; frontId: string; title: string; how: 'rollback' | 'pushed' | 'frozen' | 'slowed' | 'helped' | 'cleared' | 'setback' | 'burst' };
+  | { kind: 'front_moved'; frontId: string; title: string; how: 'rollback' | 'pushed' | 'eased' | 'frozen' | 'slowed' | 'helped' | 'cleared' | 'setback' | 'burst' };
 
 const TYPE_WORDS: Record<ObjectType, string> = {
   building: 'здание',
@@ -74,7 +74,8 @@ const CLOSED_WORDS = {
 
 const MOVED_WORDS = {
   rollback: 'откатилось на шаг назад',
-  pushed: 'получило разовый толчок',
+  pushed: 'заметно продвинулось',
+  eased: 'ослабло, но беда ещё не снята: без дальнейшей работы она случится в срок',
   frozen: 'встало, пока не снята угроза',
   slowed: 'идёт медленнее из-за помехи',
   helped: 'получило помощников',
@@ -106,7 +107,7 @@ export function describeChanges(rules: Pick<Rules, 'stats'>, changes: readonly C
         break;
       }
       case 'object_revealed':
-        out.push(`Открылось: ${c.name}`);
+        out.push(`Открылось: ${c.name}${c.description ? ` — ${c.description}` : ''}`);
         break;
       case 'fact':
         out.push(`Стало известно: ${c.text}`);

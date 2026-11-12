@@ -11,7 +11,7 @@
  *   skip <дни>                         промотать игровые дни и разобрать события
  *   state | fronts | objects [id] | chronicle [n] | facts | calls [n]
  *   save <имя> | load <имя> | saves
- *   mana <n> | faith <n> | seed | no-seed
+ *   mana <n> | faith <n> | seed [id] | seed-on | no-seed | director
  *   roll <frontId> <light|heavy|plus> [dynamicId] [milestone|completion]   чит: осложнение прямо сейчас
  *
  *   PLAYTEST_DIR — папка плейтеста (по умолчанию ./playtest): data/, saves/, calls/, transcript.md
@@ -23,7 +23,9 @@ import { MemoryNotifier } from '../../adapters/notifier/memory.js';
 import type { CallSummary } from '../../adapters/llm/logging.js';
 import type { City, World } from '../../core/city.js';
 import { gameDate } from '../../core/time.js';
+import { scheduleJob } from '../../core/jobs.js';
 import { activeFronts, settleProgress } from '../../core/world/fronts.js';
+import { mysteryShare, plusChance, roomForTrouble, unansweredTroubles } from '../../core/world/director.js';
 import { rawToPoints } from '../../core/world/numbers.js';
 import { requireWorld, today, type FlowDeps } from '../../flows/context.js';
 import { processDue } from '../../flows/day.js';
@@ -177,6 +179,14 @@ async function main(): Promise<void> {
       out(`${head}\nУбрано: ${story.size} фронтов историй, ${storyObjects.size} объектов. Задания: ${JSON.stringify(c.jobs.map((j) => [j.kind, j.dueDay]))}`);
       break;
     }
+    case 'seed-on': {
+      const c = await city(deps);
+      c.jobs = c.jobs.filter((j) => j.kind !== 'seed');
+      scheduleJob(c, { id: `job_seed_${day}`, kind: 'seed', dueDay: day });
+      await deps.storage.saveCity(c);
+      out(`${head}\nПосев включён: режиссёр проверяет город каждые ${deps.rules.seeding.checkEveryDays} дней.`);
+      break;
+    }
     case 'no-seed': {
       const c = await city(deps);
       c.jobs = c.jobs.filter((j) => j.kind !== 'seed');
@@ -282,6 +292,12 @@ async function main(): Promise<void> {
         await sendAll(deps, msg ? [msg] : []);
       }
       await newsAndChronicle(deps, before, inbox);
+      break;
+    }
+    case 'director': {
+      const c = await city(deps);
+      const log = (c.storyLog ?? []).map((m) => `д${m.day}: ${m.engine ?? '?'} / ${m.source ?? '?'} / ${m.sphere ?? '?'}${m.mystery ? ' / тайна' : ''}`);
+      out(`${head}\nБед без ответа: ${unansweredTroubles(c)}; место для беды ${roomForTrouble(deps.rules, c).toFixed(2)}; доля плюсов ${plusChance(deps.rules, c).toFixed(2)}; доля тайн ${mysteryShare(deps.rules, c, day).toFixed(2)}\n${log.join('\n') || 'журнал пуст'}`);
       break;
     }
     case 'mana': {

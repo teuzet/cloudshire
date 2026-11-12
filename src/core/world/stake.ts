@@ -79,7 +79,7 @@ export function applyStake(
         if (!obj || obj.status !== 'active' || !obj.hidden) break;
         obj.hidden = false;
         obj.freshDay = day;
-        changes.push({ kind: 'object_revealed', objectId: obj.id, name: obj.name });
+        changes.push({ kind: 'object_revealed', objectId: obj.id, name: obj.name, description: obj.description });
         break;
       }
       case 'fact': {
@@ -100,7 +100,8 @@ export function applyStake(
         if (!front || front.status !== 'active' || front.capacity <= 0) break;
         settleProgress(front, day);
         front.progress = Math.min(front.capacity, front.progress + Math.max(0, op.amount));
-        changes.push({ kind: 'front_moved', frontId: front.id, title: front.title, how: 'pushed' });
+        const trouble = front.form === 'threat' || front.form === 'tension';
+        changes.push({ kind: 'front_moved', frontId: front.id, title: front.title, how: trouble && front.progress < front.capacity ? 'eased' : 'pushed' });
         break;
       }
       case 'rollback': {
