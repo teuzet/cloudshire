@@ -363,6 +363,8 @@ export interface City {
   unknowns: CanonicalUnknown[];
   /** Факты мира: стартовые из генезиса и дописанные лормастером. */
   facts: LoreFact[];
+  /** Названное покровителем, о чём неизвестно, есть ли оно: его можно только найти. */
+  sought?: string[];
   priest: Priest;
   officers: Officer[];
   stats: StatMap;

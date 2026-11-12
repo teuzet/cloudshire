@@ -81,6 +81,8 @@ function handlersFor(deps: FlowDeps, city: City, day: number): PriestHandlers {
       }
       if (ruling.verdict === 'absent') return { ok: true, say: `Такого в мире нет: ${ruling.reason}` };
       if (ruling.verdict === 'unknown') {
+        // Рассказчики должны знать, что этого пока не нашли: иначе отряд «обследует катакомбы», которых нет.
+        city.sought = [...new Set([thing, ...(city.sought ?? [])])].slice(0, 10);
         return {
           ok: true,
           say: `Есть ли «${thing}», неизвестно. Узнать это можно только поиском: если покровитель велит, это поручение искать (order_change «найти …»).`,

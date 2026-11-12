@@ -36,7 +36,16 @@ export function officerLabel(officer: Pick<Officer, 'title' | 'name' | 'gender'>
 export function leadLabel(city: City, front: Pick<Front, 'id'>): { label: string | null; manner: string | null; officer: Officer | null } {
   const lead = leadOf(city, front.id);
   const officer = lead ? officerOf(city, lead) : null;
-  return { label: officer ? officerLabel(officer) : null, manner: lead?.text ? lead.text : null, officer };
+  const manner = lead?.text ? withSought(city, lead.text) : null;
+  return { label: officer ? officerLabel(officer) : null, manner, officer };
+}
+
+/** Если способ называет то, чего ещё не нашли, рассказчик узнаёт об этом из самого способа. */
+function withSought(city: Pick<City, 'sought'>, manner: string): string {
+  const low = manner.toLowerCase();
+  const stem = (thing: string) => (thing.toLowerCase().split(/\s+/)[0] ?? '').slice(0, 6);
+  const hit = (city.sought ?? []).filter((t) => stem(t).length >= 4 && low.includes(stem(t)));
+  return hit.length ? `${manner} (пока не найдено и не подтверждено: ${hit.join('; ')})` : manner;
 }
 
 /** Отпечаток дела с именами: кого оно занимает, на кого давит, кому выгодно. */
