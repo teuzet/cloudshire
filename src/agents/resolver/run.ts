@@ -33,6 +33,7 @@ export type Resolution =
   | { text: string; effect: 'fact'; fact: string }
   | { text: string; effect: 'link'; a: string; b: string }
   | { text: string; effect: 'keep'; objectId: string }
+  | { text: string; effect: 'gone'; objectId: string }
   | { text: string; effect: 'trace'; trace: { type: ObjectType; name: string; description: string } };
 
 export const resolver: StructuredAgent<ResolutionInput, ResolutionRaw, Resolution> = {
@@ -60,6 +61,7 @@ export const resolver: StructuredAgent<ResolutionInput, ResolutionRaw, Resolutio
     if (raw.effect === 'keep' && (raw.object_ids.length !== 1 || !input.keepable.includes(raw.object_ids[0] ?? ''))) {
       return 'для keep нужен один id из списка временных участников в object_ids';
     }
+    if (raw.effect === 'gone' && (raw.object_ids.length !== 1 || !ids.has(raw.object_ids[0] ?? ''))) return 'для gone нужен один id участника в object_ids';
     if (raw.effect === 'trace' && !raw.trace) return 'для trace нужно описание следа в поле trace';
     return null;
   },
@@ -68,6 +70,7 @@ export const resolver: StructuredAgent<ResolutionInput, ResolutionRaw, Resolutio
     if (raw.effect === 'fact' && raw.fact) return { text, effect: 'fact', fact: raw.fact.trim() };
     if (raw.effect === 'link') return { text, effect: 'link', a: raw.object_ids[0] as string, b: raw.object_ids[1] as string };
     if (raw.effect === 'keep') return { text, effect: 'keep', objectId: raw.object_ids[0] as string };
+    if (raw.effect === 'gone') return { text, effect: 'gone', objectId: raw.object_ids[0] as string };
     if (raw.effect === 'trace' && raw.trace) return { text, effect: 'trace', trace: raw.trace };
     return { text, effect: 'none' };
   },

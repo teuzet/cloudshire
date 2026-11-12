@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { OBJECT_TYPES } from '../../core/rules.js';
 
-export const RESOLUTION_EFFECTS = ['none', 'fact', 'link', 'keep', 'trace'] as const;
+export const RESOLUTION_EFFECTS = ['none', 'fact', 'link', 'keep', 'trace', 'gone'] as const;
 export type ResolutionEffect = (typeof RESOLUTION_EFFECTS)[number];
 
 export const resolutionSchema = z.object({

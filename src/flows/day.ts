@@ -130,6 +130,7 @@ async function applyEffect(deps: FlowDeps, city: City, front: Front, resolution:
   const ctx = stakeCtx(deps, front, day);
   if (resolution.effect === 'fact') return applyStake(deps.rules, city, [{ op: 'fact', text: resolution.fact }], ctx).changes;
   if (resolution.effect === 'link') return applyStake(deps.rules, city, [{ op: 'link', a: resolution.a, b: resolution.b }], ctx).changes;
+  if (resolution.effect === 'gone') return applyStake(deps.rules, city, [{ op: 'delete', target: resolution.objectId }], ctx).changes;
   if (resolution.effect === 'trace') {
     const { points } = await appraise(deps, city, resolution.trace);
     return applyStake(deps.rules, city, [{ op: 'create', object: { ...resolution.trace, points, refs: front.footprint.map((f) => f.objectId) } }], ctx).changes;
@@ -238,7 +239,7 @@ async function avert(deps: FlowDeps, city: City, front: Front, day: number, out:
         keepable: helpers.map((h) => h.id),
         lead: lead.label,
         manner: lead.manner,
-        allowed: ['none', 'fact', ...(people.length >= 2 ? (['link'] as const) : []), ...(helpers.length ? (['keep'] as const) : [])],
+        allowed: ['none', 'fact', 'gone', ...(people.length >= 2 ? (['link'] as const) : []), ...(helpers.length ? (['keep'] as const) : [])],
       }),
     { text: `Обошлось: ${front.title}.`, effect: 'none' },
   );
