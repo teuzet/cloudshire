@@ -26,6 +26,8 @@ export interface ResolutionInput {
   lead: string | null;
   manner: string | null;
   allowed: ResolutionEffect[];
+  /** Прежние записи об этом событии: развязка говорит о новом. */
+  before?: string[];
 }
 
 export type Resolution =
@@ -42,9 +44,10 @@ export const resolver: StructuredAgent<ResolutionInput, ResolutionRaw, Resolutio
   description: 'Чем закончилось событие и одно последствие из разрешённых.',
   schema: resolutionSchema,
   system: () => composeSystem([], prompt, canon('setting'), canon('style-plain'), block('Виды частей города (type)', typesBlock())),
-  user: ({ title, description, ending, consequence, participants, keepable, lead, manner, allowed }) =>
+  user: ({ title, description, ending, consequence, participants, keepable, lead, manner, allowed, before }) =>
     join(
       `Событие: «${title}». ${description}`,
+      before?.length ? `Уже записано об этом событии:\n${before.map((b) => `- ${b}`).join('\n')}` : null,
       `Исход: ${ENDING_WORDS[ending]}${consequence ? `. ${consequence}` : ''}`,
       block('Участники', briefList(participants, 'особых участников нет')),
       keepable.length ? `Временные участники: ${keepable.join(', ')}` : null,

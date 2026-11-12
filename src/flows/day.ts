@@ -156,7 +156,13 @@ async function finish(deps: FlowDeps, city: City, h: Happening, source: readonly
 
 /** Последние записи хроники об этом деле: новая веха продолжает их, а не пересказывает. */
 function earlierBeats(city: City, front: Front): string[] {
-  return city.chronicle.filter((e) => e.frontId === front.id).slice(-3).map((e) => e.text);
+  // Осложнение родилось из родителя: его прошлое — и последние записи родителя.
+  const ids = new Set([front.id, ...(front.parentId ? [front.parentId] : [])]);
+  // Побочная беда без родителя: её рождение записано днём появления.
+  return city.chronicle
+    .filter((e) => (e.frontId != null && ids.has(e.frontId)) || (front.origin === 'complication' && e.day === front.createdDay))
+    .slice(-3)
+    .map((e) => e.text);
 }
 
 async function onMilestone(deps: FlowDeps, city: City, front: Front, day: number, out: OutboundMessage[]): Promise<void> {
@@ -231,6 +237,7 @@ async function avert(deps: FlowDeps, city: City, front: Front, day: number, out:
     'resolver',
     () =>
       resolveEvent(deps.agents, {
+        before: earlierBeats(city, front),
         title: front.title,
         description,
         ending: 'averted',
@@ -301,6 +308,7 @@ async function collapse(deps: FlowDeps, city: City, front: Front, day: number, o
     'resolver',
     () =>
       resolveEvent(deps.agents, {
+        before: earlierBeats(city, front),
         title: front.title,
         description: front.description,
         ending: 'collapsed',
@@ -446,6 +454,7 @@ async function strike(deps: FlowDeps, city: City, front: Front, stake: readonly 
     'resolver',
     () =>
       resolveEvent(deps.agents, {
+        before: earlierBeats(city, front),
         title: front.title,
         description: front.description,
         ending: 'struck',
