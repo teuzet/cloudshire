@@ -144,6 +144,9 @@ export async function complicate(
     if (q.kind === 'plus') return null;
     plan = await freePlan(deps, city, parent, q, day);
     if (!plan) return null;
+    // Свободная беда вокруг того, вокруг чего уже идёт живая беда, повторила бы её другими словами.
+    const objectId = plan.object?.id;
+    if (objectId && city.fronts.some((f) => f.status === 'active' && f.origin === 'complication' && f.refs.includes(objectId))) return null;
   }
 
   const names = plan.needsNew ? await takeNames(deps, deps.rules.seeding.namesPerCall) : [];
