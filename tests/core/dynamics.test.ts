@@ -111,10 +111,12 @@ describe('режиссёрский жребий', () => {
   test('свежий объект и давно не игравшая запись весят больше', () => {
     const { city, front } = town();
     const [guild, quarter] = candidates(r, city, front, { moment: 'milestone', kind: 'light' }).filter((c) => c.dynamic.class === 'bound');
-    expect(candidateWeight(r, city, guild!, 10)).toBe(9);
-    expect(candidateWeight(r, city, quarter!, 720)).toBe(3);
+    // Вкус режиссёра к источнику записи входит в вес множителем.
+    const taste = (c: typeof guild) => r.fronts.director.sourceTaste[c!.dynamic.source] ?? 1;
+    expect(candidateWeight(r, city, guild!, 10)).toBeCloseTo(9 * taste(guild));
+    expect(candidateWeight(r, city, quarter!, 720)).toBeCloseTo(3 * taste(quarter));
     city.dynamicsUsed['key-refuse'] = 10;
-    expect(candidateWeight(r, city, guild!, 10)).toBe(3);
+    expect(candidateWeight(r, city, guild!, 10)).toBeCloseTo(3 * taste(guild));
   });
 
   test('порядок вопросов Примерщику — взвешенная перестановка, обрезанная пределом', () => {

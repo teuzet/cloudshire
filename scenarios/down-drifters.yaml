@@ -1,0 +1,50 @@
+id: down-drifters
+title: Пуховые плывуны
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: success, source: creature, sphere: prosperity }
+pitch: Стадо небесных плывунов, похожих на пуховые шары с домом величиной, прижилось над островом; их пух дороже шерсти, но стадо растёт и закрывает полям солнце.
+
+objects:
+  - id: drifters
+    type: resource
+    name: Пуховые плывуны
+    description: Медлительные небесные существа, круглые и лёгкие, висят над островом на высоте колокольни и пасутся на облачной влаге. Линяют тёплым белым пухом, который город собирает сетями.
+    weight: SIGNIFICANT
+    statProfile: { prosperity: 2 }
+  - id: fields
+    type: resource
+    name: Поля под стадом
+    description: Лучшие поля долины. Теперь над ними полдня стоит тень, и хлеб тянется бледный.
+    weight: MINOR
+    statProfile: { prosperity: 1 }
+
+fronts:
+  - id: shade-over-fields
+    title: Стадо застит солнце
+    description: Плывунов стало втрое больше, и они держатся над тёплой долиной. Ещё один приплод, и поля под ними перестанут родить.
+    impact: SIGNIFICANT
+    drift: SLOW
+    refs: [drifters, fields]
+    alignment: |
+      Отводят беду перегон стада на пустоши дымом и звуком, приманка влагой в стороне от полей, мера на приплод, которую примут сборщики пуха.
+      Избиение плывунов оставит город без пуха, и стадо может уйти совсем.
+    stake:
+      stats: { prosperity: -5 }
+  - id: drifter-herders
+    title: Небесные пастухи
+    form: deed
+    description: Сборщики пуха заметили, что плывуны идут на низкий гул и сторонятся горького дыма. Если научиться водить стадо, оно будет пастись там, где нужно городу.
+    impact: MINOR
+    refs: [drifters]
+    closes:
+      - { target: shade-over-fields, share: 0.7 }
+    alignment: |
+      Двигают дело опыты с гулкими трубами и дымом, вышки на пустошах, люди с терпением и без страха высоты.
+    stake:
+      create:
+        type: capability
+        name: Небесные пастухи
+        description: Люди города умеют водить стадо плывунов над островом.
+        weight: MINOR
+        statProfile: { prosperity: 1, knowledge: 1 }
+        refs: [drifters]

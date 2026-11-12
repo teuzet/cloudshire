@@ -1,0 +1,64 @@
+id: sky-garden
+title: Сад с неба
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: feud, source: ecology, sphere: knowledge }
+pitch: После бури на городской пустырь выпал дождь чужих семян; за два месяца там поднялась чаща невиданных растений, и травники, садоводы и храм не могут решить, сокровище это или зараза.
+
+objects:
+  - id: garden
+    type: site
+    name: Небесная чаща
+    description: Пустырь за красильнями зарос стеной. Синие лопухи в рост человека, лианы с прозрачными ягодами, цветы, которые поворачиваются на голос. Чаща каждую неделю берёт ещё сажень.
+    weight: MINOR
+    statProfile: { knowledge: 1 }
+  - id: herbalists
+    type: organization
+    name: Травники
+    description: Хотят оградить чащу и изучать годами; уже нашли в ней три растения, которые снимают жар.
+    refs: [garden]
+  - id: gardeners
+    type: organization
+    name: Садоводы
+    description: Видят, что чужая зелень глушит всё местное, и требуют выжечь её, пока она не дошла до садов.
+    refs: [garden]
+
+fronts:
+  - id: burn-or-keep
+    title: Жечь чащу или беречь
+    form: tension
+    description: Садоводы носят к пустырю смолу, травники спят в чаще, чтобы её не подпалили. Храм не знает, дар это покровителя или испытание.
+    impact: SIGNIFICANT
+    drift: STEADY
+    refs: [garden, herbalists, gardeners]
+    alignment: |
+      Мирят стороны ров и выжженная полоса вокруг чащи, общий надзор, уговор о том, что брать и что губить.
+    stake:
+      stats: { knowledge: -3, influence: -2 }
+  - id: chaos-spreads
+    title: Чаща идёт к садам
+    description: Лианы перебросились через стену красилен, семена летят с ветром. Если чащу не удержать, она войдёт в сады.
+    impact: MINOR
+    drift: STEADY
+    refs: [garden]
+    alignment: |
+      Держат чащу выполка побегов за её границей, сбор семян до созревания, козы на привязи вдоль рва.
+    stake:
+      stats: { prosperity: -3 }
+  - id: sort-garden
+    title: Разобрать небесный сад
+    form: deed
+    description: Если описать каждое растение и отделить полезное от вредного, город получит свой лекарственный сад, а остальное можно будет извести без спора.
+    impact: SIGNIFICANT
+    refs: [garden, herbalists]
+    closes:
+      - { target: burn-or-keep, share: 0.7 }
+    alignment: |
+      Двигают дело опись растений, опыты травников, гряды под стеклом и за рвом, садоводы и травники за одной работой.
+    stake:
+      create:
+        type: resource
+        name: Небесный аптечный сад
+        description: Огороженный сад чужих лекарственных растений под надзором травников.
+        weight: SIGNIFICANT
+        statProfile: { knowledge: 2, security: 1 }
+        refs: [herbalists]

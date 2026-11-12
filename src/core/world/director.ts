@@ -68,6 +68,7 @@ export function varietyWeight(rules: Rules, city: Pick<City, 'storyLog' | 'front
     const repeats = marks.reduce((acc, m) => acc + (m.mark[axis] === value ? m.w : 0), 0);
     weight /= 1 + d.repeatPenalty * repeats;
   }
+  if (tags.source) weight *= d.sourceTaste[tags.source] ?? 1;
   if (tags.sphere) weight /= 1 + d.loadPenalty * officeLoad(rules, city, tags.sphere);
   if (tags.mystery) weight *= mysteryShare(rules, city, day) < d.mysteryShare ? d.mysteryBoost : 1 / d.mysteryBoost;
   return weight;
@@ -88,18 +89,18 @@ export function roomForTrouble(rules: Rules, city: Pick<City, 'fronts' | 'assign
 /** Чего давно не было: двигатель и источник с наименьшим недавним весом. Заказ свободным генераторам. */
 export function leanOf(rules: Rules, city: Pick<City, 'storyLog' | 'fronts' | 'assignments'>, day: number, rng: () => number): StoryTags {
   const marks = recent(rules, city, day);
-  const least = <T extends string>(values: readonly T[], axis: 'engine' | 'source' | 'sphere', extra: (v: T) => number = () => 0): T => {
-    const scored = values.map((v) => ({ v, s: marks.reduce((acc, m) => acc + (m.mark[axis] === v ? m.w : 0), 0) + extra(v) + rng() * 0.5 }));
+  const d = rules.fronts.director;
+  const least = <T extends string>(values: readonly T[], axis: 'engine' | 'source' | 'sphere', extra: (v: T) => number = () => 0, taste: (v: T) => number = () => 1): T => {
+    const scored = values.map((v) => ({ v, s: (marks.reduce((acc, m) => acc + (m.mark[axis] === v ? m.w : 0), 0) + extra(v) + rng() * 0.5) / taste(v) }));
     scored.sort((a, b) => a.s - b.s);
     return (scored[0] as { v: T }).v;
   };
-  const d = rules.fronts.director;
   const engines = Object.keys(d.engines) as Array<NonNullable<StoryTags['engine']>>;
   const sources = Object.keys(d.sources) as Array<NonNullable<StoryTags['source']>>;
   const spheres = rules.officers.map((o) => o.statId);
   return {
     engine: least(engines, 'engine'),
-    source: least(sources, 'source'),
+    source: least(sources, 'source', () => 0, (v) => d.sourceTaste[v] ?? 1),
     sphere: least(spheres, 'sphere', (s) => officeLoad(rules, city, s)),
     mystery: mysteryShare(rules, city, day) < d.mysteryShare,
   };

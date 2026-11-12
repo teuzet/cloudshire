@@ -8,7 +8,7 @@ import { blankCity, rng, rules } from '../helpers/fixtures.js';
 
 const r = rules();
 const crisis: StoryTags = { engine: 'crisis', source: 'matter', sphere: 'prosperity', mystery: false };
-const feud: StoryTags = { engine: 'feud', source: 'people', sphere: 'influence', mystery: false };
+const feud: StoryTags = { engine: 'feud', source: 'matter', sphere: 'influence', mystery: false };
 
 function trouble(id: string) {
   return createFront({ id, form: 'threat', origin: 'complication', title: id, description: id, capacity: 5, milestones: 1, risk: 'normal', footprint: [], day: 0 });
@@ -26,6 +26,11 @@ describe('режиссёр', () => {
     const city = blankCity();
     markStory(city, crisis, 0);
     expect(varietyWeight(r, city, crisis, r.fronts.director.windowDays + 1)).toBe(varietyWeight(r, city, feud, r.fronts.director.windowDays + 1));
+  });
+
+  test('вкус к источнику: странное желаннее людских дел', () => {
+    const city = blankCity();
+    expect(varietyWeight(r, city, { ...crisis, source: 'sky' }, 0)).toBeGreaterThan(varietyWeight(r, city, { ...crisis, source: 'people' }, 0));
   });
 
   test('тайна тянется к желаемой доле', () => {

@@ -233,6 +233,8 @@ export const rulesSchema = z.object({
       engines: z.record(z.enum(ENGINES), z.string().min(1)),
       sources: z.record(z.enum(SOURCES), z.string().min(1)),
       spheres: z.record(z.enum(STAT_IDS), z.string().min(1)),
+      /** Вкус к источнику причины: множитель веса жребия. Больше единицы — такие истории желаннее. */
+      sourceTaste: z.record(z.enum(SOURCES), z.number().positive()),
     }),
     failure: z.object({ chance: z.number().min(0).max(1), heavyShare: z.number().min(0).max(1) }),
     refresh: z.object({ maxFronts: z.number().int().nonnegative() }),
