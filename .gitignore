@@ -3,8 +3,8 @@ dist/
 coverage/
 .env
 data/
-saves/
+/saves/
 logs/
 *.log
 .DS_Store
-playtest/
+/playtest/
