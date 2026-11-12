@@ -8,6 +8,7 @@
 import { scheduleJob } from '../core/jobs.js';
 import type { Change } from '../core/world/changes.js';
 import { activeFronts } from '../core/world/fronts.js';
+import { leadOf } from '../core/world/assignments.js';
 import { rawToPoints } from '../core/world/numbers.js';
 import { mysteryObjectIds } from '../core/lore.js';
 import type { City, StoryTags } from '../core/city.js';
@@ -34,8 +35,15 @@ function seedWords(deps: FlowDeps, tags: StoryTags): string {
     .join(' ');
 }
 
+/**
+ * Сколько историй живо: фронт истории, который идёт сам (угроза, напряжение) или кем-то ведётся,
+ * считается целым; поиск и дело, за которые никто не взялся, — половиной. Так ждущие игрока
+ * истории не глушат посев, но и не копятся без меры.
+ */
 export function storyCount(city: City): number {
-  return activeFronts(city).filter((f) => f.origin === 'story').length;
+  return activeFronts(city)
+    .filter((f) => f.origin === 'story')
+    .reduce((acc, f) => acc + (f.form === 'threat' || f.form === 'tension' || leadOf(city, f.id) ? 1 : 0.5), 0);
 }
 
 /** Посадить одну историю: заготовку из deps.scenarios, которая тут ещё не играла, или по зерну. */
@@ -91,7 +99,7 @@ export async function plantStory(deps: FlowDeps, city: City, day: number): Promi
 export async function seedStories(deps: FlowDeps, city: City, day: number): Promise<OutboundMessage[]> {
   const out: OutboundMessage[] = [];
   const room = roomForTrouble(deps.rules, city) > 0;
-  const need = room ? Math.max(0, deps.rules.seeding.activeStories - storyCount(city)) : 0;
+  const need = room ? Math.max(0, Math.floor(deps.rules.seeding.activeStories - storyCount(city))) : 0;
   for (let i = 0; i < need; i++) {
     const msg = await plantStory(deps, city, day);
     if (msg) out.push(msg);

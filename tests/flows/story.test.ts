@@ -4,6 +4,8 @@ import { scheduleJob } from '../../src/core/jobs.js';
 import { findFront } from '../../src/core/world/fronts.js';
 import { patronMessage } from '../../src/flows/priest-turn.js';
 import { runDueCities } from '../../src/flows/scheduler.js';
+import { storyCount } from '../../src/flows/seeding.js';
+import { createFront } from '../../src/core/world/fronts.js';
 import { blankCity } from '../helpers/fixtures.js';
 import { lanternIsle, lastUser, scriptFrontAgents, stand } from '../helpers/game.js';
 
@@ -125,4 +127,13 @@ describe('история от посева до развязки', () => {
     expect(city.fronts.filter((f) => f.origin === 'player')).toHaveLength(1);
     expect(city.dialog.filter((d) => d.kind === 'reply')).toHaveLength(4);
   });
+});
+
+test('посев: поиск, за который никто не взялся, считается половиной истории', () => {
+  const city = blankCity();
+  const make = (id: string, form: 'find' | 'threat') => createFront({ id, form, origin: 'story', title: id, description: id, capacity: 4, milestones: 1, risk: 'safe', footprint: [], day: 0 });
+  city.fronts.push(make('a', 'find'), make('b', 'find'));
+  expect(storyCount(city)).toBe(1);
+  city.fronts.push(make('c', 'threat'));
+  expect(storyCount(city)).toBe(2);
 });
