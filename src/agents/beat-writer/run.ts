@@ -18,6 +18,8 @@ export interface BeatInput {
   /** Сведение, которое открывается на этой вехе. */
   reveal: string | null;
   allowed: BeatEffect[];
+  /** Прежние записи об этом деле, от старых к новым: новая говорит о следующем шаге. */
+  before?: string[];
 }
 
 export interface Beat {
@@ -36,9 +38,10 @@ export const beatWriter: StructuredAgent<BeatInput, BeatRaw, Beat> = {
   description: 'Запись о шаге дела и один эффект из разрешённых.',
   schema: beatSchema,
   system: () => composeSystem([], prompt, canon('setting'), canon('style-plain')),
-  user: ({ title, description, share, lead, manner, result, reveal, allowed }) =>
+  user: ({ title, description, share, lead, manner, result, reveal, allowed, before }) =>
     join(
       `Дело: «${title}». ${description}`,
+      before?.length ? `Уже записано об этом деле:\n${before.map((b) => `- ${b}`).join('\n')}` : null,
       `Пройдено: ${shareWords(share)}`,
       result ? `Что должно получиться: ${result}` : null,
       lead ? `Ведёт: ${lead}${manner ? `. Способ: ${manner}` : ''}` : 'Дело идёт само, без ведущего',

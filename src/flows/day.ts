@@ -153,6 +153,11 @@ async function finish(deps: FlowDeps, city: City, h: Happening, source: readonly
 
 // ───────────────────────────── веха ─────────────────────────────
 
+/** Последние записи хроники об этом деле: новая веха продолжает их, а не пересказывает. */
+function earlierBeats(city: City, front: Front): string[] {
+  return city.chronicle.filter((e) => e.frontId === front.id).slice(-3).map((e) => e.text);
+}
+
 async function onMilestone(deps: FlowDeps, city: City, front: Front, day: number, out: OutboundMessage[]): Promise<void> {
   front.milestonesFired += 1;
   const lead = leadLabel(city, front);
@@ -173,6 +178,7 @@ async function onMilestone(deps: FlowDeps, city: City, front: Front, day: number
         result: front.unattainable ? null : resultWords(city, front),
         reveal,
         allowed: reveal ? ['none', 'reveal'] : ['none'],
+        before: earlierBeats(city, front),
       }),
     { text: reveal ?? `Работа идёт: ${front.title}.`, effect: reveal ? 'reveal' : 'none' },
   );
