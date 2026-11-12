@@ -1,29 +1,37 @@
 /**
- * Посев историй: в городе должно идти не меньше `seeding.activeStories` историй
- * (стройки игрока и их последствия не в счёт). Не хватает — сажаем новую:
- * заготовку, которая тут ещё не играла, подогнанную под город, или историю по зерну.
+ * Посев историй: город досаживается до `seeding.activeStories` историй
+ * (стройки игрока и их последствия не в счёт), пока бед без ответа меньше предела режиссёра.
+ * Сажаем заготовку, которая тут ещё не играла, по жребию режиссёра (давно не бывшие оси, тайна
+ * к желаемой доле, свободный сановник), подогнанную под город, или историю по зерну-заказу.
  */
 
-import type { City } from '../core/city.js';
 import { scheduleJob } from '../core/jobs.js';
 import type { Change } from '../core/world/changes.js';
 import { activeFronts } from '../core/world/fronts.js';
 import { rawToPoints } from '../core/world/numbers.js';
 import { mysteryObjectIds } from '../core/lore.js';
-import { plantScenario, touchedMysteries, type Scenario } from '../core/world/scenario.js';
+import type { City, StoryTags } from '../core/city.js';
+import { leanOf, markStory, roomForTrouble, varietyWeight } from '../core/world/director.js';
+import { weightedOrder } from '../core/world/dynamics.js';
+import { plantScenario, scenarioTags, touchedMysteries, type Scenario } from '../core/world/scenario.js';
 import type { OutboundMessage } from '../ports/notifier.js';
 import { writeScenario } from '../agents/scenario-writer/run.js';
 import { record } from './chronicle.js';
 import { namesUsed, newId, returnNames, takeNames, tryAgent, type FlowDeps } from './context.js';
 import { refreshFront } from './fronts.js';
 
-function shuffled<T>(items: readonly T[], rng: () => number): T[] {
-  const out = [...items];
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [out[i], out[j]] = [out[j] as T, out[i] as T];
-  }
-  return out;
+/** Зерно для истории без заготовки: то, чего режиссёр давно не видел. */
+function seedWords(deps: FlowDeps, tags: StoryTags): string {
+  const d = deps.rules.fronts.director;
+  const sphere = tags.sphere ? deps.rules.stats.find((s) => s.id === tags.sphere)?.name : null;
+  return [
+    tags.engine ? `История, в которой ${d.engines[tags.engine]}.` : null,
+    tags.source ? `Причина: ${d.sources[tags.source]}.` : null,
+    sphere ? `Больше всего она касается того, что в городе зовут «${sphere}».` : null,
+    tags.mystery ? 'В ней заранее спрятан ключевой объект или факт, который откроется по ходу.' : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
 }
 
 export function storyCount(city: City): number {
@@ -32,7 +40,9 @@ export function storyCount(city: City): number {
 
 /** Посадить одну историю: заготовку из deps.scenarios, которая тут ещё не играла, или по зерну. */
 export async function plantStory(deps: FlowDeps, city: City, day: number): Promise<OutboundMessage | null> {
-  const template = shuffled(deps.scenarios, deps.random.rng).find((s) => !city.scenariosUsed.includes(s.id)) ?? null;
+  const fresh = deps.scenarios.filter((s) => !city.scenariosUsed.includes(s.id));
+  const template = weightedOrder(fresh, (s) => varietyWeight(deps.rules, city, scenarioTags(s), day), deps.random.rng)[0] ?? null;
+  const lean = template ? null : leanOf(deps.rules, city, day, deps.random.rng);
   const names = await takeNames(deps, deps.rules.seeding.namesPerCall);
   const scenario: Scenario | null = await tryAgent(
     deps,
@@ -42,7 +52,7 @@ export async function plantStory(deps: FlowDeps, city: City, day: number): Promi
         cityBrief: city.brief,
         objects: city.objects.filter((o) => o.status === 'active'),
         template,
-        seed: null,
+        seed: lean ? seedWords(deps, lean) : null,
         names,
         unknowns: city.unknowns,
       }),
@@ -58,6 +68,8 @@ export async function plantStory(deps: FlowDeps, city: City, day: number): Promi
   const used = namesUsed(names, JSON.stringify(scenario));
   await returnNames(deps, names.filter((n) => !used.includes(n)));
 
+  const tags = scenarioTags(scenario);
+  markStory(city, lean ? { ...lean, mystery: tags.mystery } : tags, day);
   const { objects, fronts } = plantScenario(deps.rules, city, scenario, { day, newId: (p) => newId(deps, p) });
   for (const front of fronts) refreshFront(deps, city, front, day);
   // Скрытое в истории город пока не видел: оно не идёт ни в весть, ни в хронику.
@@ -78,7 +90,8 @@ export async function plantStory(deps: FlowDeps, city: City, day: number): Promi
 /** Задание seed: досадить историй и поставить следующую проверку. */
 export async function seedStories(deps: FlowDeps, city: City, day: number): Promise<OutboundMessage[]> {
   const out: OutboundMessage[] = [];
-  const need = Math.max(0, deps.rules.seeding.activeStories - storyCount(city));
+  const room = roomForTrouble(deps.rules, city) > 0;
+  const need = room ? Math.max(0, deps.rules.seeding.activeStories - storyCount(city)) : 0;
   for (let i = 0; i < need; i++) {
     const msg = await plantStory(deps, city, day);
     if (msg) out.push(msg);

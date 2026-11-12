@@ -1,5 +1,7 @@
 id: grey-blight
 title: Серая ржа
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: crisis, source: ecology, sphere: prosperity }
 pitch: На садах и полях города появляется серый налёт, урожай гибнет, люди ищут виноватых.
 
 objects:

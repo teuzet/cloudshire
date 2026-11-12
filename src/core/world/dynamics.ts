@@ -12,6 +12,7 @@ import type { City, Front, WorldObject } from '../city.js';
 import type { Rng } from '../random.js';
 import { leadOf } from './assignments.js';
 import { riskRank } from './numbers.js';
+import { dynamicTags, varietyWeight } from './director.js';
 import { attachedTo, findObject, isFresh, linkedObjects, visibleObjects } from './objects.js';
 
 export type Moment = 'milestone' | 'completion' | 'failure';
@@ -136,14 +137,19 @@ export function candidates(
   return out;
 }
 
-/** Вес пары: свежий объект получает больше внимания, давно не игравшая запись — тоже. */
-export function candidateWeight(rules: Rules, city: Pick<City, 'dynamicsUsed'>, c: Candidate, day: number): number {
+type DrawCity = Pick<City, 'dynamicsUsed' | 'storyLog' | 'fronts' | 'assignments'>;
+
+/**
+ * Вес пары: свежий объект получает больше внимания, давно не игравшая запись — тоже;
+ * режиссёр делит вес за повтор осей и занятого сановника.
+ */
+export function candidateWeight(rules: Rules, city: DrawCity, c: Candidate, day: number): number {
   const d = rules.fronts.director;
   const fresh = c.object && isFresh(c.object, day, d.freshDays) ? d.freshWeight : 1;
   const last = city.dynamicsUsed[c.dynamic.id];
   const idle = last == null ? d.freshDays : Math.max(0, day - last);
   const recency = 1 + Math.min(2, (2 * idle) / d.freshDays);
-  return fresh * recency;
+  return fresh * recency * varietyWeight(rules, city, dynamicTags(c.dynamic), day);
 }
 
 /** Взвешенная перестановка: первый элемент — взвешенный жребий, второй — жребий среди оставшихся и так далее. */
@@ -171,20 +177,16 @@ export function weightedOrder<T>(items: readonly T[], weight: (item: T) => numbe
 }
 
 /** Порядок, в котором поток спрашивает Примерщика. Обрезан пределом вопросов. */
-export function drawOrder(rules: Rules, city: Pick<City, 'dynamicsUsed'>, list: readonly Candidate[], day: number, rng: Rng): Candidate[] {
+export function drawOrder(rules: Rules, city: DrawCity, list: readonly Candidate[], day: number, rng: Rng): Candidate[] {
   return weightedOrder(list, (c) => candidateWeight(rules, city, c, day), rng).slice(0, rules.fronts.director.fitterCalls);
 }
 
 /**
  * Что выпало на вехе. Кубик бросается по ступени риска и сумме рычагов темпа;
- * каждый N-й сработавший бросок отдаётся плюсовой записи.
+ * долю удобных случаев среди сработавших задаёт режиссёр.
  */
-export function rollRisk(
-  rules: Rules,
-  args: { chance: number; heavyShare: number; rollsFired: number },
-  rng: Rng,
-): RollKind | null {
+export function rollRisk(args: { chance: number; heavyShare: number; plusChance: number }, rng: Rng): RollKind | null {
   if (!(rng() < args.chance)) return null;
-  if ((args.rollsFired + 1) % rules.fronts.risk.plusEvery === 0) return 'plus';
+  if (rng() < args.plusChance) return 'plus';
   return rng() < args.heavyShare ? 'heavy' : 'light';
 }

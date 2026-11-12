@@ -250,7 +250,8 @@ fronts:
       hard: 0.5
       risky: 1
       impossible: 1
-    # Каждый N-й сработавший бросок отдаётся плюсовой записи, если она подходит.
+    # Недостижимое дело: каждая N-я беда заменяется находкой. Обычным делам долю
+    # удобных случаев задаёт режиссёр (director.plusBase … plusMax).
     plusEvery: 3
     # Авария: какая доля набранного прогресса теряется.
     accidentLoss: 0.25
@@ -263,11 +264,45 @@ fronts:
     freshDays: 360
     # Сколько пар «запись и объект» Примерщик проверяет за одно осложнение.
     fitterCalls: 6
+    # Режиссёр помнит, что рождалось за последние windowDays дней, и предпочитает другое:
+    # повтор двигателя, источника или сферы делит вес на (1 + repeatPenalty × сколько раз было),
+    # занятый сановник — на (1 + loadPenalty × сколько дел он ведёт).
+    windowDays: 180
+    repeatPenalty: 0.7
+    loadPenalty: 0.4
+    # Тайна (заранее посаженный скрытый объект или факт): желаемая доля среди рождённого.
+    # Меньше доли — история с тайной в mysteryBoost раз желаннее, больше — во столько же раз реже.
+    mysteryShare: 0.3
+    mysteryBoost: 2
+    # Беды без ответа (без ведущего): при calmTroubles новых бед от срывов и посева не рождается,
+    # а доля удобных случаев среди выпавших растёт от plusBase до plusMax.
+    calmTroubles: 3
+    plusBase: 0.2
+    plusMax: 0.7
+    # Слова для свободных генераторов: режиссёр заказывает им то, чего давно не было.
+    engines:
+      refusal: "кто-то нужный городу перестал делать своё"
+      feud: "две силы открыто бьются за одно и то же"
+      discovery: "город нашёл или узнал то, чего у него не было"
+      betrayal: "кто-то внутри круга доверия действует против города"
+      dilemma: "два законных требования, оба выполнить нельзя"
+      crisis: "рушится одна из основ быта города"
+      success: "что-то вышло слишком хорошо, и город не выдерживает своей удачи"
+      ideology: "столкнулись два взгляда на мир"
+      opportunity: "городу выпал шанс, который уйдёт, если его не взять"
+    sources:
+      people: "поступок, решение или умысел конкретных людей"
+      custom: "обычай, привычка, слух или репутация"
+      creature: "животное или существо: нрав, голод, гнездо"
+      ecology: "живая среда целиком: заросли, паразит, цветение"
+      matter: "вещество, вещь или устройство места: порча, износ"
+      sky: "воздух, погода и открытое небо"
+      phenomenon: "редкое явление с устойчивым правилом"
   # Срыв: когда беда случилась, она может потянуть за собой новую (записи словаря с when: failure).
-  # chance — как часто; plusShare — доля удобных случаев среди выпавших; heavyShare — доля тяжёлых бед.
+  # chance — как часто при спокойном городе; режиссёр снижает его с числом бед без ответа
+  # и решает, беда это или удобный случай. heavyShare — доля тяжёлых бед.
   failure:
     chance: 0.5
-    plusShare: 0.3
     heavyShare: 0.3
   refresh:
     maxFronts: 3
@@ -307,6 +342,8 @@ fronts:
   #   condition — вопрос Примерщику (пустой: подходит всегда);
   #   needsNew — Костюмер обязан описать нового участника; newHidden — он скрыт от игрока;
   #   requires — noLead (дело без ведущего) или null; minStep — с какой ступени риска.
+  #   engine, source, sphere — оси режиссёра: что движет историей, где живёт причина, какой сфере
+  #              города (и её сановнику) она достанется; тайна выводится из newHidden.
   dynamics:
     - id: key-refuse
       title: Ключевые отказывают
@@ -325,6 +362,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: refusal
+      source: people
+      sphere: influence
     - id: touched-resist
       title: Задетые сопротивляются
       enabled: true
@@ -342,6 +382,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: feud
+      source: people
+      sphere: influence
     - id: touched-revenge
       title: Задетые сопротивляются (после завершения)
       enabled: true
@@ -359,6 +402,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: feud
+      source: people
+      sphere: influence
     - id: squatters
       title: Заняли бесхозное
       enabled: true
@@ -376,6 +422,9 @@ fronts:
       newHidden: false
       requires: noLead
       minStep: normal
+      engine: feud
+      source: people
+      sphere: security
     - id: occupied-strained
       title: Занятое надорвалось
       enabled: true
@@ -393,6 +442,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: crisis
+      source: matter
+      sphere: prosperity
     - id: bystanders
       title: Пострадали посторонние
       enabled: true
@@ -410,6 +462,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: dilemma
+      source: matter
+      sphere: influence
     - id: accident
       title: Авария
       enabled: true
@@ -427,6 +482,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: risky
+      engine: crisis
+      source: matter
+      sphere: security
     - id: find-at-works
       title: Находка при работах
       enabled: true
@@ -444,6 +502,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: safe
+      engine: discovery
+      source: matter
+      sphere: knowledge
     - id: rival
       title: Соперник за плоды
       enabled: true
@@ -461,6 +522,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: feud
+      source: people
+      sphere: influence
     - id: abuse
       title: Злоупотребление новым
       enabled: true
@@ -478,6 +542,9 @@ fronts:
       newHidden: true
       requires: null
       minStep: normal
+      engine: betrayal
+      source: people
+      sphere: security
     - id: displacement
       title: Вытеснение старого
       enabled: true
@@ -495,6 +562,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: success
+      source: custom
+      sphere: prosperity
     - id: imitators
       title: Подражатели
       enabled: true
@@ -512,6 +582,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: safe
+      engine: success
+      source: custom
+      sphere: influence
     - id: party
       title: Партия нового
       enabled: true
@@ -529,6 +602,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: ideology
+      source: custom
+      sphere: influence
     - id: weather
       title: Непогода на высоте
       enabled: true
@@ -546,6 +622,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: crisis
+      source: sky
+      sphere: knowledge
     - id: omen
       title: Дурное знамение
       enabled: true
@@ -563,6 +642,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: ideology
+      source: phenomenon
+      sphere: influence
     - id: shortage
       title: Не хватает нужного
       enabled: true
@@ -580,6 +662,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: crisis
+      source: matter
+      sphere: prosperity
     - id: suppliers-press
       title: Поставщики давят
       enabled: true
@@ -597,6 +682,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: refusal
+      source: people
+      sphere: prosperity
     - id: poached-hands
       title: Переманили руки
       enabled: true
@@ -614,6 +702,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: feud
+      source: people
+      sphere: prosperity
     - id: bad-rumor
       title: Дурная молва
       enabled: true
@@ -631,6 +722,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: ideology
+      source: custom
+      sphere: influence
     - id: saboteur
       title: Тайный вредитель
       enabled: true
@@ -648,6 +742,9 @@ fronts:
       newHidden: true
       requires: null
       minStep: hard
+      engine: betrayal
+      source: people
+      sphere: security
     - id: botched
       title: Брак
       enabled: true
@@ -665,6 +762,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: hard
+      engine: crisis
+      source: matter
+      sphere: prosperity
     - id: collapse
       title: Обрушение
       enabled: true
@@ -682,6 +782,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: hard
+      engine: crisis
+      source: matter
+      sphere: security
     - id: neglected-duty
       title: Заброшенная служба
       enabled: true
@@ -699,6 +802,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: refusal
+      source: custom
+      sphere: influence
     - id: price-rise
       title: Подорожание у соседей
       enabled: true
@@ -716,6 +822,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: dilemma
+      source: custom
+      sphere: prosperity
     - id: disturbed-creatures
       title: Потревоженные существа
       enabled: true
@@ -733,6 +842,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: crisis
+      source: creature
+      sphere: security
     - id: patron
       title: Покровитель дела
       enabled: true
@@ -750,6 +862,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: safe
+      engine: opportunity
+      source: people
+      sphere: prosperity
     - id: volunteers
       title: Добровольцы
       enabled: true
@@ -767,6 +882,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: safe
+      engine: opportunity
+      source: people
+      sphere: influence
     - id: new-craft
       title: Новый приём
       enabled: true
@@ -784,6 +902,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: safe
+      engine: discovery
+      source: matter
+      sphere: knowledge
     - id: upkeep
       title: Бремя содержания
       enabled: true
@@ -801,6 +922,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: refusal
+      source: matter
+      sphere: prosperity
     - id: overdemand
       title: Наплыв желающих
       enabled: true
@@ -818,6 +942,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: success
+      source: people
+      sphere: influence
     - id: envy
       title: Обида обделённых
       enabled: true
@@ -835,6 +962,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: dilemma
+      source: people
+      sphere: influence
     - id: fame
       title: Слава нового
       enabled: true
@@ -852,6 +982,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: safe
+      engine: success
+      source: custom
+      sphere: influence
     - id: unexpected-use
       title: Неожиданная польза
       enabled: true
@@ -869,6 +1002,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: safe
+      engine: discovery
+      source: people
+      sphere: knowledge
     - id: exposed
       title: Оставлено без защиты
       enabled: true
@@ -886,6 +1022,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: safe
+      engine: crisis
+      source: matter
+      sphere: security
     - id: blame
       title: Ищут виноватого
       enabled: true
@@ -903,6 +1042,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: safe
+      engine: feud
+      source: people
+      sphere: influence
     - id: homeless
       title: Лишились крова
       enabled: true
@@ -920,6 +1062,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: safe
+      engine: dilemma
+      source: people
+      sphere: security
     - id: looters
       title: Растаскивают уцелевшее
       enabled: true
@@ -937,6 +1082,9 @@ fronts:
       newHidden: true
       requires: null
       minStep: safe
+      engine: betrayal
+      source: people
+      sphere: security
     - id: lesson
       title: Урок беды
       enabled: true
@@ -954,6 +1102,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: safe
+      engine: discovery
+      source: custom
+      sphere: knowledge
     - id: salvage
       title: Спасти уцелевшее
       enabled: true
@@ -971,6 +1122,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: safe
+      engine: opportunity
+      source: matter
+      sphere: prosperity
     # Ждёт сопряжения: запись в словаре есть, но не тянется.
     - id: outside-gaze
       title: Взгляд извне
@@ -989,6 +1143,9 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: success
+      source: sky
+      sphere: influence
     # Исполняется кодом завершения этапа с неизвестным исходом, жребием не тянется.
     - id: hidden-property
       title: Неожиданное свойство
@@ -1007,9 +1164,14 @@ fronts:
       newHidden: false
       requires: null
       minStep: normal
+      engine: discovery
+      source: phenomenon
+      sphere: knowledge
 
-# Посев историй: сколько живых историй держать в городе (без строек игрока)
+# Посев историй: до скольких живых историй досаживать город (без строек игрока)
 # и как часто проверять. Первая история приходит вскоре после генезиса.
+# Пока бед без ответа fronts.director.calmTroubles и больше, режиссёр не сажает.
+# Какую заготовку взять, решает режиссёр по осям (см. fronts.director).
 seeding:
   activeStories: 2
   checkEveryDays: 30

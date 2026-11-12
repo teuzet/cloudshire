@@ -5,12 +5,13 @@
  * коротким текстом, код считает ёмкость, срок и ставку.
  */
 
-import type { City, Front, StakeOp, WorldObject } from '../core/city.js';
+import type { City, Front, StakeOp, StoryTags, WorldObject } from '../core/city.js';
 import type { Dynamic, Shape, StatMap } from '../core/rules.js';
 import { DAYS_PER_MONTH } from '../core/time.js';
 import { leadOf } from '../core/world/assignments.js';
 import { changedObjectIds, type Change } from '../core/world/changes.js';
 import { accidentLoss, buildBound, buildOpportunity, buildSide, hindranceOp, type EventDress } from '../core/world/complications.js';
+import { dynamicTags, leanOf, markStory, plusChance, roomForTrouble } from '../core/world/director.js';
 import { candidates, drawOrder, rollRisk, type Candidate, type Moment, type RollKind } from '../core/world/dynamics.js';
 import { refreshTargets } from '../core/world/echo.js';
 import { closeFront, shareDone, tempoSum } from '../core/world/fronts.js';
@@ -46,6 +47,8 @@ interface Plan {
   helps: string;
   needsNew: boolean;
   newHidden: boolean;
+  /** Оси для журнала режиссёра. */
+  tags: StoryTags;
 }
 
 function tempoWords(sum: number): string {
@@ -82,6 +85,9 @@ function runningAround(city: City, parent: Front): string[] {
 /** Словарь не подошёл: Сочинитель динамики пишет свободную. Случай идёт в лог как пробел словаря. */
 async function freePlan(deps: FlowDeps, city: City, parent: Front, q: { moment: Moment; sideOnly?: boolean }, day: number): Promise<Plan | null> {
   deps.log?.warn('dictionary_gap', { cityId: city.id, frontId: parent.id, moment: q.moment });
+  // Режиссёр заказывает то, чего давно не было; в журнал идёт заказ: Сочинитель ему следует, если он ложится на работу.
+  const lean = leanOf(deps.rules, city, day, deps.random.rng);
+  const d = deps.rules.fronts.director;
   const free = await tryAgent(
     deps,
     'dynamics-composer',
@@ -90,6 +96,7 @@ async function freePlan(deps: FlowDeps, city: City, parent: Front, q: { moment: 
         share: shareDone(parent, day),
         touches: touchesOf(city, parent),
         running: runningAround(city, parent),
+        lean: [lean.engine ? d.engines[lean.engine] : null, lean.source ? `причина: ${d.sources[lean.source]}` : null].filter((x): x is string => Boolean(x)),
       }),
     null,
   );
@@ -114,6 +121,7 @@ async function freePlan(deps: FlowDeps, city: City, parent: Front, q: { moment: 
     helps: free.helps,
     needsNew: free.shape === 'hindrance',
     newHidden: false,
+    tags: { engine: lean.engine, source: lean.source, sphere: null, mystery: false },
   };
 }
 
@@ -148,6 +156,7 @@ export async function complicate(
         helps: chosen.dynamic.helps,
         needsNew: chosen.dynamic.needsNew,
         newHidden: chosen.dynamic.newHidden,
+        tags: dynamicTags(chosen.dynamic),
       }
     : null;
   if (!plan) {
@@ -180,6 +189,7 @@ export async function complicate(
   await returnNames(deps, names.filter((n) => !used.includes(n)));
   if (!costume) return null;
   if (plan.dynamicId) city.dynamicsUsed[plan.dynamicId] = day;
+  markStory(city, plan.tags, day);
 
   const dress: EventDress = { title: costume.title, description: costume.description, outburst: costume.outburst, newObject: costume.newObject };
   const ctx = { day, newId: (p: string) => newId(deps, p), frontId: parent.id };
@@ -294,20 +304,25 @@ export function rollFor(deps: FlowDeps, city: City, front: Front, counter: Front
     return counter.rollsFired % risk.plusEvery === 0 ? 'plus' : 'heavy';
   }
   const kind = rollRisk(
-    deps.rules,
-    { chance: complicationChance(deps.rules, front.risk, tempoSum(city, front)), heavyShare: risk.heavyShare[front.risk], rollsFired: counter.rollsFired },
+    { chance: complicationChance(deps.rules, front.risk, tempoSum(city, front)), heavyShare: risk.heavyShare[front.risk], plusChance: plusChance(deps.rules, city) },
     deps.random.rng,
   );
   if (kind) counter.rollsFired += 1;
   return kind;
 }
 
-/** Бросок при срыве: случится ли следом новая беда или удобный случай. Ступень риска тут не важна. */
-export function rollForFailure(deps: FlowDeps): RollKind | null {
+/**
+ * Срыв: случится ли следом новая беда или удобный случай. Решает режиссёр: чем больше
+ * бед висит без ответа, тем реже следом что-то родится и тем чаще это удобный случай.
+ * Когда бед без ответа уже предел, беда не родится, удобный случай — может.
+ */
+export function rollForFailure(deps: FlowDeps, city: City): RollKind | null {
   const f = deps.rules.fronts.failure;
   const rng = deps.random.rng;
-  if (rng() >= f.chance) return null;
-  if (rng() < f.plusShare) return 'plus';
+  const room = roomForTrouble(deps.rules, city);
+  const plus = plusChance(deps.rules, city);
+  if (rng() >= f.chance * Math.max(room, plus)) return null;
+  if (room === 0 || rng() < plus) return 'plus';
   return rng() < f.heavyShare ? 'heavy' : 'light';
 }
 
@@ -324,6 +339,8 @@ export async function complicateRolled(
   const sideOnly = q.sideOnly || Boolean(parent.unattainable) || q.moment !== 'milestone';
   const made = await complicate(deps, city, parent, { ...q, kind, sideOnly }, day);
   if (made || kind !== 'plus') return made;
+  // Удобный случай вместо беды при срыве: если его не нашлось, а бед без ответа предел, ничего не родится.
+  if (q.moment === 'failure' && roomForTrouble(deps.rules, city) === 0) return null;
   const heavy = parent.unattainable || deps.random.rng() < deps.rules.fronts.risk.heavyShare[parent.risk];
   return complicate(deps, city, parent, { ...q, kind: heavy ? 'heavy' : 'light', sideOnly }, day);
 }

@@ -1,0 +1,76 @@
+import { describe, expect, test } from 'vitest';
+import type { StoryTags } from '../../src/core/city.js';
+import { createAssignment } from '../../src/core/world/assignments.js';
+import { leanOf, markStory, mysteryShare, plusChance, roomForTrouble, unansweredTroubles, varietyWeight } from '../../src/core/world/director.js';
+import { createFront } from '../../src/core/world/fronts.js';
+import { parseScenario, scenarioTags } from '../../src/core/world/scenario.js';
+import { blankCity, rng, rules } from '../helpers/fixtures.js';
+
+const r = rules();
+const crisis: StoryTags = { engine: 'crisis', source: 'matter', sphere: 'prosperity', mystery: false };
+const feud: StoryTags = { engine: 'feud', source: 'people', sphere: 'influence', mystery: false };
+
+function trouble(id: string) {
+  return createFront({ id, form: 'threat', origin: 'complication', title: id, description: id, capacity: 5, milestones: 1, risk: 'normal', footprint: [], day: 0 });
+}
+
+describe('режиссёр', () => {
+  test('повтор мягкой оси делит вес: давно не бывшее желаннее', () => {
+    const city = blankCity();
+    markStory(city, crisis, 10);
+    markStory(city, crisis, 20);
+    expect(varietyWeight(r, city, feud, 30)).toBeGreaterThan(varietyWeight(r, city, crisis, 30));
+  });
+
+  test('журнал забывает старое за окном', () => {
+    const city = blankCity();
+    markStory(city, crisis, 0);
+    expect(varietyWeight(r, city, crisis, r.fronts.director.windowDays + 1)).toBe(varietyWeight(r, city, feud, r.fronts.director.windowDays + 1));
+  });
+
+  test('тайна тянется к желаемой доле', () => {
+    const city = blankCity();
+    const mystery = { ...crisis, mystery: true };
+    expect(mysteryShare(r, city, 0)).toBe(0);
+    expect(varietyWeight(r, city, mystery, 0)).toBeGreaterThan(varietyWeight(r, city, crisis, 0));
+    for (let i = 0; i < 5; i++) markStory(city, { ...feud, mystery: true }, i);
+    expect(varietyWeight(r, city, mystery, 5)).toBeLessThan(varietyWeight(r, city, crisis, 5));
+  });
+
+  test('занятый сановник сферы делит вес', () => {
+    const city = blankCity();
+    const busy = createFront({ id: 'b', form: 'deed', origin: 'player', title: 'b', description: 'b', capacity: 5, milestones: 1, risk: 'normal', footprint: [], day: 0 });
+    city.fronts.push(busy);
+    const office = r.officers.find((o) => o.statId === 'prosperity')!.office;
+    const officer = city.officers.find((o) => o.office === office)!;
+    createAssignment(city, { id: 'a', front: busy, officer, day: 0 });
+    const free = r.officers.find((o) => o.statId === 'knowledge')!.statId;
+    expect(varietyWeight(r, city, { ...crisis, sphere: free }, 0)).toBeGreaterThan(varietyWeight(r, city, crisis, 0));
+  });
+
+  test('беды без ответа: места для новой беды меньше, удобных случаев больше', () => {
+    const city = blankCity();
+    expect(roomForTrouble(r, city)).toBe(1);
+    expect(plusChance(r, city)).toBeCloseTo(r.fronts.director.plusBase);
+    for (let i = 0; i < r.fronts.director.calmTroubles; i++) city.fronts.push(trouble(`t${i}`));
+    expect(unansweredTroubles(city)).toBe(r.fronts.director.calmTroubles);
+    expect(roomForTrouble(r, city)).toBe(0);
+    expect(plusChance(r, city)).toBeCloseTo(r.fronts.director.plusMax);
+  });
+
+  test('заказ свободным генераторам: то, чего давно не было', () => {
+    const city = blankCity();
+    for (let i = 0; i < 4; i++) markStory(city, crisis, i);
+    const lean = leanOf(r, city, 5, rng(3));
+    expect(lean.engine).not.toBe('crisis');
+    expect(lean.source).not.toBe('matter');
+    expect(lean.mystery).toBe(true);
+  });
+
+  test('оси заготовки: тайна выводится из скрытого', () => {
+    const base = { id: 's', title: 'S', axes: { engine: 'discovery', source: 'sky', sphere: 'knowledge' }, fronts: [{ id: 'f', description: 'Поиск', impact: 'MINOR' }] };
+    expect(scenarioTags(parseScenario(base))).toEqual({ engine: 'discovery', source: 'sky', sphere: 'knowledge', mystery: false });
+    const hidden = { ...base, objects: [{ id: 'o', type: 'object', name: 'Ключ', hidden: true }] };
+    expect(scenarioTags(parseScenario(hidden)).mystery).toBe(true);
+  });
+});

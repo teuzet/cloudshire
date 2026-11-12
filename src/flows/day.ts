@@ -433,7 +433,7 @@ async function strike(deps: FlowDeps, city: City, front: Front, stake: readonly 
   changes.push(...(await applyEffect(deps, city, front, resolution, day)));
   await faithEvent(deps, city, { event: resolution.text, will, day });
   // Срыв — свой момент жизни фронта: беда может потянуть за собой новую.
-  const trouble = status === 'failed' ? await complicateRolled(deps, city, front, rollForFailure(deps), { moment: 'failure' }, day) : null;
+  const trouble = status === 'failed' ? await complicateRolled(deps, city, front, rollForFailure(deps, city), { moment: 'failure' }, day) : null;
   const gist = [resolution.text, trouble?.gist].filter(Boolean).join(' ');
   await finish(
     deps,

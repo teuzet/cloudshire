@@ -8,8 +8,8 @@
 
 import { clipWords } from '../text.js';
 import { z } from 'zod';
-import { DRIFT_BANDS, IMPACT_LEVELS, OBJECT_TYPES, STAT_IDS, type Rules } from '../rules.js';
-import type { City, Front, StakeOp, WorldObject } from '../city.js';
+import { DRIFT_BANDS, ENGINES, IMPACT_LEVELS, OBJECT_TYPES, SOURCES, STAT_IDS, type Rules } from '../rules.js';
+import type { City, Front, StakeOp, StoryTags, WorldObject } from '../city.js';
 import { createFront } from './fronts.js';
 import { monthsToDays, rawToPoints, scaleOf } from './numbers.js';
 import { createObject } from './objects.js';
@@ -36,7 +36,7 @@ const stakeSchema = z.union([
   z.object({ uncover: z.object({ target: z.string() }) }),
 ]);
 
-export const scenarioSchema = z.object({
+const scenarioBase = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
   /** Короткая подсказка, когда сценарий уместен. Видит только посевщик. */
@@ -86,7 +86,11 @@ export const scenarioSchema = z.object({
       }),
     )
     .min(1),
-}).superRefine((s, ctx) => {
+});
+
+type ScenarioBase = z.infer<typeof scenarioBase>;
+
+function checkScenario(s: ScenarioBase, ctx: z.RefinementCtx): void {
   const ids = new Set(s.fronts.map((f) => f.id));
   s.fronts.forEach((f, i) => {
     f.closes.forEach((c, j) => {
@@ -99,9 +103,24 @@ export const scenarioSchema = z.object({
       ctx.addIssue({ code: 'custom', path: ['fronts', i, 'form'], message: drifting ? 'у фронта с дрейфом род threat или tension' : 'у фронта без дрейфа род find или deed' });
     }
   });
-});
+}
+
+/** Оси режиссёра у заготовки: двигатель, источник причины, сфера города. Тайну код выводит сам. */
+const axesSchema = z.object({ engine: z.enum(ENGINES), source: z.enum(SOURCES), sphere: z.enum(STAT_IDS) });
+
+/** Файл заготовки: с осями режиссёра. */
+export const scenarioSchema = scenarioBase.extend({ axes: axesSchema.optional() }).superRefine(checkScenario);
+/** То, что пишет посевщик: оси ему не нужны, их ставит код. */
+export const scenarioDraftSchema = scenarioBase.superRefine(checkScenario);
 
 export type Scenario = z.infer<typeof scenarioSchema>;
+
+/** Оси истории для режиссёра. Тайна: скрытый объект, ставка «вскрыть» или «узнать», улики. */
+export function scenarioTags(s: Scenario): StoryTags {
+  const mystery =
+    s.objects.some((o) => o.hidden) || s.fronts.some((f) => f.clues.length > 0 || (f.stake != null && ('uncover' in f.stake || 'reveal' in f.stake)));
+  return { engine: s.axes?.engine ?? null, source: s.axes?.source ?? null, sphere: s.axes?.sphere ?? null, mystery };
+}
 
 export function parseScenario(raw: unknown): Scenario {
   const parsed = scenarioSchema.safeParse(raw);

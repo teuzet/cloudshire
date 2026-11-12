@@ -127,11 +127,11 @@ describe('режиссёрский жребий', () => {
     expect(drawOrder(r, city, many, 0, rng(1))).toHaveLength(r.fronts.director.fitterCalls);
   });
 
-  test('бросок риска: каждый третий сработавший отдаётся плюсовой записи', () => {
-    expect(rollRisk(r, { chance: 0, heavyShare: 1, rollsFired: 0 }, rng(1))).toBeNull();
-    expect(rollRisk(r, { chance: 1, heavyShare: 1, rollsFired: 0 }, rng(1))).toBe('heavy');
-    expect(rollRisk(r, { chance: 1, heavyShare: 0, rollsFired: 1 }, rng(1))).toBe('light');
-    expect(rollRisk(r, { chance: 1, heavyShare: 1, rollsFired: 2 }, rng(1))).toBe('plus');
+  test('бросок риска: долю удобных случаев задаёт режиссёр', () => {
+    expect(rollRisk({ chance: 0, heavyShare: 1, plusChance: 0 }, rng(1))).toBeNull();
+    expect(rollRisk({ chance: 1, heavyShare: 1, plusChance: 0 }, rng(1))).toBe('heavy');
+    expect(rollRisk({ chance: 1, heavyShare: 0, plusChance: 0 }, rng(1))).toBe('light');
+    expect(rollRisk({ chance: 1, heavyShare: 1, plusChance: 1 }, rng(1))).toBe('plus');
   });
 });
 

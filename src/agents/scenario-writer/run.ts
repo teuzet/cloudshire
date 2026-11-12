@@ -4,7 +4,7 @@
  */
 
 import type { CanonicalUnknown, PoolName, WorldObject } from '../../core/city.js';
-import { scenarioSchema, touchedMysteries, type Scenario } from '../../core/world/scenario.js';
+import { scenarioDraftSchema, touchedMysteries, type Scenario } from '../../core/world/scenario.js';
 import { composeSystem, loadPrompt } from '../_shared/canon.js';
 import { bullets, namesBlock, objectsBlock, section } from '../_shared/format.js';
 import { runStructured, type AgentDeps, type StructuredAgent } from '../_shared/runtime.js';
@@ -105,14 +105,14 @@ function keepTemplate(raw: Scenario, template: Scenario): Scenario {
     ...f,
     closes: template.fronts[i]!.closes.map((c) => ({ target: finalId.get(c.target) ?? c.target, share: c.share })),
   }));
-  return { ...raw, id: template.id, objects, fronts: withCloses };
+  return { ...raw, id: template.id, objects, fronts: withCloses, ...(template.axes ? { axes: template.axes } : {}) };
 }
 
 export const scenarioWriter: StructuredAgent<ScenarioWriterInput, Scenario, Scenario> = {
   name: 'scenario-writer',
   tool: 'submit_scenario',
   description: 'Объекты и фронты новой истории.',
-  schema: scenarioSchema,
+  schema: scenarioDraftSchema,
   system: ({ cityBrief, objects, names, unknowns }) =>
     composeSystem(
       ['world', 'style-names'],

@@ -20,6 +20,8 @@ export interface DynamicInput {
   touches: Array<{ id: string; name: string; relation: Relation; reason: string }>;
   /** Осложнения, которые уже идут вокруг этой работы: новое должно быть о другом. */
   running?: string[];
+  /** Пожелание: каких историй в городе давно не было. */
+  lean?: string[];
 }
 
 export interface FreeDynamic {
@@ -44,12 +46,13 @@ export const dynamicsComposer: StructuredAgent<DynamicInput, DynamicRaw, FreeDyn
   description: 'Одно осложнение работы в общих чертах.',
   schema: dynamicSchema,
   system: () => composeSystem([], prompt, canon('setting')),
-  user: ({ work, share, touches, running }) =>
+  user: ({ work, share, touches, running, lean }) =>
     join(
       `Работа: «${work}»`,
       `Пройдено: ${shareWords(share)}`,
       block('Затрагивает', touches.length ? touches.map((t) => `- ${t.id} — ${t.name}: ${TOUCH[t.relation]}; ${t.reason}`).join('\n') : 'никого явно'),
       running?.length ? block('Уже идут', running.map((r) => `- ${r}`).join('\n')) : '',
+      lean?.length ? block('Пожелание', lean.map((r) => `- ${r}`).join('\n')) : '',
     ),
   check: (raw, input) => {
     const ids = new Set(input.touches.map((t) => t.id));

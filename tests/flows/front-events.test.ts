@@ -241,18 +241,19 @@ describe('другие исходы броска', () => {
     expect(city.officers.find((o) => o.office === 'keeper')?.assignmentId).toBeNull();
   });
 
-  test('третий сработавший бросок приносит удобный случай; им можно воспользоваться или упустить', async () => {
+  test('сработавший бросок может принести удобный случай (долю задаёт режиссёр); им можно воспользоваться или упустить', async () => {
     const s = await town(['find-at-works'], fireAlways('hard'), { 'Жила небесного железа': [up('prosperity', 'medium')] });
     const { city } = s;
     const front = await start(s, 'hard');
-    front.rollsFired = 2;
+    s.deps.rules.fronts.director.plusBase = 1;
+    s.deps.rules.fronts.director.plusMax = 1;
     s.llm.script('costumer', costume('В кладке нашли жилу', { new_object: { type: 'resource', name: 'Жила небесного железа', description: 'Тяжёлая синяя руда в теле стены.' } }));
     await next(s, front);
     const chance = city.fronts.at(-1)!;
     expect(chance).toMatchObject({ form: 'deed', plus: true, origin: 'complication', capacity: 3.5, atStake: 7, parentId: null });
     expect(chance.deadlineDay! - chance.createdDay).toBe(120);
     expect(chance.stake[0]).toMatchObject({ op: 'create', object: { name: 'Жила небесного железа', points: { prosperity: 5 } } });
-    expect(front.rollsFired).toBe(3);
+    expect(front.rollsFired).toBe(1);
 
     // Никто не взялся: срок вышел, случай тихо исчез.
     s.deps.rules.fronts.risk.chance.hard = 0;

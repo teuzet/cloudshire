@@ -109,6 +109,13 @@ const faithRow = table(
 export const ROLE_SOURCES = [...RELATIONS, 'helper', 'site', 'result', 'nearby', 'same-type', 'struck'] as const;
 export type RoleSource = (typeof ROLE_SOURCES)[number];
 
+/** Двигатель истории: почему сюжет идёт вперёд. Мягкая ось режиссёра. */
+export const ENGINES = ['refusal', 'feud', 'discovery', 'betrayal', 'dilemma', 'crisis', 'success', 'ideology', 'opportunity'] as const;
+export type Engine = (typeof ENGINES)[number];
+/** Где живёт причина. Мягкая ось режиссёра. */
+export const SOURCES = ['people', 'custom', 'creature', 'ecology', 'matter', 'sky', 'phenomenon'] as const;
+export type Source = (typeof SOURCES)[number];
+
 const dynamicDef = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
@@ -127,6 +134,10 @@ const dynamicDef = z.object({
   newHidden: z.boolean(),
   requires: z.enum(['noLead']).nullable(),
   minStep: z.enum(RISK_STEPS),
+  /** Оси режиссёра: двигатель, источник причины, сфера города (её сановник). */
+  engine: z.enum(ENGINES),
+  source: z.enum(SOURCES),
+  sphere: statId,
 });
 
 const statDef = z.object({
@@ -202,6 +213,7 @@ export const rulesSchema = z.object({
     risk: z.object({
       chance: byRiskStep,
       heavyShare: byRiskStep,
+      /** Недостижимое дело: каждая N-я беда заменяется находкой. */
       plusEvery: z.number().int().positive(),
       accidentLoss: z.number().min(0).max(1),
     }),
@@ -210,8 +222,18 @@ export const rulesSchema = z.object({
       freshWeight: z.number().positive(),
       freshDays: z.number().int().positive(),
       fitterCalls: z.number().int().positive(),
+      windowDays: z.number().int().positive(),
+      repeatPenalty: z.number().nonnegative(),
+      loadPenalty: z.number().nonnegative(),
+      mysteryShare: z.number().min(0).max(1),
+      mysteryBoost: z.number().min(1),
+      calmTroubles: z.number().int().positive(),
+      plusBase: z.number().min(0).max(1),
+      plusMax: z.number().min(0).max(1),
+      engines: z.record(z.enum(ENGINES), z.string().min(1)),
+      sources: z.record(z.enum(SOURCES), z.string().min(1)),
     }),
-    failure: z.object({ chance: z.number().min(0).max(1), plusShare: z.number().min(0).max(1), heavyShare: z.number().min(0).max(1) }),
+    failure: z.object({ chance: z.number().min(0).max(1), heavyShare: z.number().min(0).max(1) }),
     refresh: z.object({ maxFronts: z.number().int().nonnegative() }),
     unattainableWarnDays: z.number().int().positive(),
     objects: z.object({

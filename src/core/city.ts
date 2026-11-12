@@ -6,7 +6,7 @@
  */
 
 import type { ClockState } from './time.js';
-import type { FrontForm, ObjectType, Office, Relation, RiskStep, StatId, StatMap, Temper, Tempo, Verdict } from './rules.js';
+import type { Engine, FrontForm, ObjectType, Office, Relation, RiskStep, Source, StatId, StatMap, Temper, Tempo, Verdict } from './rules.js';
 
 // ───────────────────────────── мир ─────────────────────────────
 
@@ -192,6 +192,19 @@ export interface Front {
 // ───────────────────────────── поручения ─────────────────────────────
 
 /** Сановник ведёт один фронт: стратегией или как исполнитель атомарного дела. */
+/** Оси истории для режиссёра. Мягкие (двигатель, источник, сфера) могут быть неизвестны. */
+export interface StoryTags {
+  engine: Engine | null;
+  source: Source | null;
+  sphere: StatId | null;
+  /** Заранее посажен скрытый ключевой объект или скрытый факт. */
+  mystery: boolean;
+}
+
+export interface StoryMark extends StoryTags {
+  day: number;
+}
+
 export interface Assignment {
   id: string;
   frontId: string;
@@ -380,6 +393,8 @@ export interface City {
   projects: Project[];
   /** Когда каждая запись словаря динамик срабатывала в последний раз. */
   dynamicsUsed: Record<string, number>;
+  /** Журнал режиссёра: что рождалось (осложнения и истории) и по каким осям. */
+  storyLog?: StoryMark[];
   /** Предупреждение о недостижимой цели: повторный приказ в срок запускает дело. */
   unattainableWarning: { goal: string; day: number } | null;
   chronicle: ChronicleEntry[];
