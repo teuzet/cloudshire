@@ -7,14 +7,14 @@
 import type { Rules } from './rules.js';
 import type { City } from './city.js';
 import { DAYS_PER_YEAR } from './time.js';
-import { faithOf } from './world/stats.js';
+import { faithOf } from './world/faith.js';
 
 function round6(n: number): number {
   return Math.round(n * 1e6) / 1e6;
 }
 
 /** Начислить ману по прошедшим дням. Хранится дробной, показывается целой. */
-export function accrueMana(rules: Rules, city: Pick<City, 'mana' | 'stats'>, day: number): number {
+export function accrueMana(rules: Rules, city: Pick<City, 'mana' | 'faith'>, day: number): number {
   const now = Math.max(0, Math.round(day));
   const elapsed = Math.max(0, now - city.mana.day);
   if (elapsed > 0) {

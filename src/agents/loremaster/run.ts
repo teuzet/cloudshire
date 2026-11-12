@@ -63,25 +63,29 @@ export function formatOpenStories(fronts: Front[]): string {
   if (!fronts.length) return 'Открытых историй нет.';
   return [
     'Открытые истории (не решай их и не выдумывай развязку, виновника, скрытую причину):',
-    ...fronts.map((f) => `- ${f.id} — ${f.description}`),
+    ...fronts.map((f) => `- ${f.id} — ${f.title}. ${f.description}`),
     'Канон истины и скрытые посылки здесь не приведены. Если вопрос про конкретную идущую историю — её должен передать спрашивающий как story_id.',
   ].join('\n');
 }
 
 function stakeText(front: Front): string | null {
-  const s = front.stake;
-  if (!s) return null;
-  if ('reveal' in s) return s.reveal.text;
-  if ('create' in s) return `появится: ${s.create.name}. ${s.create.description}`;
-  if ('modify' in s) return `изменится ${s.modify.target}${s.modify.intent ? `: ${s.modify.intent}` : ''}`;
-  if ('delete' in s) return `исчезнет ${s.delete.target}`;
-  return null;
+  const parts: string[] = [];
+  for (const op of [...front.stake, ...front.failStake]) {
+    if (op.op === 'fact') parts.push(op.text);
+    if (op.op === 'create') parts.push(`появится: ${op.object.name}. ${op.object.description}`);
+    if (op.op === 'modify') parts.push(`изменится ${op.target}${op.intent ? `: ${op.intent}` : ''}`);
+    if (op.op === 'delete') parts.push(`исчезнет ${op.target}`);
+  }
+  if (front.key?.twist) parts.push(`скрытое свойство исхода: ${front.key.twist}`);
+  return parts.length ? parts.join('; ') : null;
 }
 
 /** Идущая история под фокусом: что город уже выяснил и что знаешь только ты. */
 export function formatFocusedStory(front: Front): string {
-  const revealed = front.clues.filter((c) => c.status === 'revealed');
-  const hidden = front.clues.filter((c) => c.status === 'hidden');
+  const clues = front.script?.clues ?? [];
+  const revealed = clues.filter((c) => c.revealed);
+  const hidden = clues.filter((c) => !c.revealed);
+  const moves = front.key?.moves ?? [];
   const outcome = stakeText(front);
   const lines: Array<string | null> = [
     `ФОКУС: история ${front.id}. Это идущая история — не закрытая.`,
@@ -93,12 +97,12 @@ export function formatFocusedStory(front: Front): string {
     lines.push('ГОРОД ЭТО УЖЕ ВЫЯСНИЛ (можно отвечать прямо, это установлено):');
     for (const c of revealed) lines.push(`- ${c.fact}`);
   }
-  if (hidden.length || front.alignment || outcome) {
+  if (hidden.length || moves.length || outcome) {
     lines.push(
       'НЕРАСКРЫТО (знаешь ты, город нет). В ответ и в fact — только косвенное: куда смотреть, что уже странно, какой обычай или место рядом. Не называй механизм, виновника, улику и разгадку. Не перечисляй кандидатов и не отрицай их поимённо.',
     );
     if (outcome) lines.push(`- чем кончится: ${outcome}`);
-    if (front.alignment) lines.push(`- что двигает историю: ${front.alignment.trim()}`);
+    if (moves.length) lines.push(`- что двигает историю: ${moves.join('; ')}`);
     for (const c of hidden) lines.push(`- подступ: ${c.fact}`);
   } else if (!revealed.length) {
     lines.push('Скрытого слоя нет. Не выдумывай исход, виновника, скрытый мотив или причину нерешённого в этой истории.');

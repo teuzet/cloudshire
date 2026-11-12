@@ -12,7 +12,7 @@
 import { newCity, type City } from '../core/city.js';
 import { appendChronicle, appendDialog } from '../core/chronicle.js';
 import { scheduleJob } from '../core/jobs.js';
-import { createOfficers } from '../core/officers.js';
+import { createOfficers, rollTemper } from '../core/officers.js';
 import { createObject } from '../core/world/objects.js';
 import { genesisStats, objectContribution } from '../core/world/stats.js';
 import type { OnboardingDraft } from '../ports/storage.js';
@@ -126,7 +126,8 @@ export async function runGenesis(deps: FlowDeps, ownerId: string): Promise<City 
       unknowns: brief.unknowns,
       facts: core.openingLore.map((text) => newFact({ id: newId(deps, 'fact'), text, day, author: 'genesis' })),
       priest: core.priest,
-      officers: createOfficers(deps.rules, officers),
+      // Характер-темп сановника бросается при рождении города и от должности не зависит.
+      officers: createOfficers(deps.rules, officers).map((o) => ({ ...o, temper: rollTemper(deps.random.rng) })),
       objects,
       stats: stats.stats,
       statScale: stats.statScale,

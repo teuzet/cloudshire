@@ -2,12 +2,20 @@
  * Четыре сановника. Каждый олицетворяет стат и ведёт одно поручение за раз.
  */
 
-import type { Office, Rules } from './rules.js';
+import { TEMPERS, type Office, type Rules, type Temper } from './rules.js';
 import type { City, Gender, Officer } from './city.js';
 import type { Rng } from './random.js';
 import { pickOne } from './random.js';
 
-export function createOfficers(rules: Rules, people: Record<Office, { name: string; gender: Gender; nature: string }>): Officer[] {
+/** Характер-темп сановника: случайный, от должности не зависит. */
+export function rollTemper(rng: Rng): Temper {
+  return pickOne(TEMPERS, rng) ?? 'even';
+}
+
+export function createOfficers(
+  rules: Rules,
+  people: Record<Office, { name: string; gender: Gender; nature: string; temper?: Temper }>,
+): Officer[] {
   return rules.officers.map((def) => ({
     office: def.office,
     statId: def.statId,
@@ -15,6 +23,7 @@ export function createOfficers(rules: Rules, people: Record<Office, { name: stri
     name: people[def.office].name,
     gender: people[def.office].gender,
     nature: people[def.office].nature,
+    temper: people[def.office].temper ?? 'even',
     assignmentId: null,
   }));
 }

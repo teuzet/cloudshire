@@ -7,14 +7,12 @@
 import type { City } from '../core/city.js';
 import { appendDialog } from '../core/chronicle.js';
 import { canAfford, spendMana, turnCost } from '../core/mana.js';
-import { officeDef } from '../core/officers.js';
-import type { Office } from '../core/rules.js';
 import { runPriestTurn, type PriestHandlers, type ToolOutcome } from '../agents/priest/run.js';
 import { askLoremaster } from '../agents/loremaster/run.js';
 import type { CityLocks } from './city-lock.js';
 import { newId, requireWorld, sendAll, today, type FlowDeps } from './context.js';
 import { processDue } from './day.js';
-import { freeOfficer, openMutation, placeAssignment, withdrawOfficer } from './fronts.js';
+import { playerWill, withdraw } from './will.js';
 
 const MAX_NOTES = 20;
 
@@ -24,49 +22,22 @@ export type PatronReply =
   | { kind: 'no_city' }
   | { kind: 'failed'; text: string };
 
-function officerName(deps: FlowDeps, city: City, office: Office): string {
-  const o = city.officers.find((x) => x.office === office);
-  return `${officeDef(deps.rules, office).title} ${o?.name ?? ''}`.trim();
-}
-
 function handlersFor(deps: FlowDeps, city: City, day: number): PriestHandlers {
-  const busy = (office: Office, what: string | null): ToolOutcome => ({
-    ok: false,
-    error: 'officer_busy',
-    say: `${officerName(deps, city, office)} уже занят${what ? `: ${what}` : ''}. Сначала снять его с этого дела или взять другого.`,
-  });
   const tired = (): ToolOutcome => ({ ok: false, error: 'no_mana', say: 'Сил на новое дело сегодня нет: веры не хватает. Можно только говорить.' });
   const withAction = deps.rules.mana.turnCostWithAction;
 
   return {
+    // Оба инструмента ведут в один поток: что это за приказ, решает Толкователь воли.
     async assignOfficer({ office, task }) {
       if (!canAfford(city, withAction)) return tired();
-      const check = freeOfficer(city, office);
-      if (!check.ok) return check.error === 'officer_busy' ? busy(office, check.busyWith) : { ok: false, error: 'no_officer', say: 'Такого сановника нет.' };
-      const placed = await placeAssignment(deps, city, check.officer, task, day);
-      return placed.front
-        ? { ok: true, say: `${officerName(deps, city, office)} взялся за дело.` }
-        : { ok: true, say: `${officerName(deps, city, office)} взялся, но не похоже, что это сдвинет что-то из того, что сейчас идёт в городе.` };
+      return playerWill(deps, city, office, task, day);
     },
     async orderChange({ office, intent }) {
       if (!canAfford(city, withAction)) return tired();
-      const check = freeOfficer(city, office);
-      if (!check.ok) return check.error === 'officer_busy' ? busy(office, check.busyWith) : { ok: false, error: 'no_officer', say: 'Такого сановника нет.' };
-      const outcome = await openMutation(deps, city, check.officer, intent, day);
-      if (outcome.kind === 'blocked') {
-        return outcome.feasibility.verdict === 'LOCKED'
-          ? { ok: false, error: 'locked', say: `Начать пока нельзя: не хватает того, что нужно: ${outcome.feasibility.missing}.` }
-          : { ok: false, error: 'impossible', say: `Такого город не сможет: ${outcome.feasibility.reason}` };
-      }
-      if (outcome.kind === 'failed') return { ok: false, error: 'failed', say: 'Волю не удалось облечь в дело. Пусть покровитель скажет иначе.' };
-      return {
-        ok: true,
-        say: `${officerName(deps, city, office)} начал работу: ${outcome.draft.description}.${outcome.consequences ? ' Дело большое, и у него будут последствия.' : ''}`,
-      };
+      return playerWill(deps, city, office, intent, day);
     },
     async withdraw({ office }) {
-      const r = withdrawOfficer(deps, city, office, day);
-      return r.ok ? { ok: true, say: `${officerName(deps, city, office)} снят с дела: ${r.text}.` } : { ok: false, error: 'not_busy', say: `${officerName(deps, city, office)} и так свободен.` };
+      return withdraw(deps, city, office, day);
     },
     async writeNote({ text }) {
       city.notes.push({ id: newId(deps, 'note'), text, day });

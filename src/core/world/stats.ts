@@ -10,19 +10,21 @@
 import { emptyStatMap, STAT_IDS, type Impact, type Rules, type StatId, type StatMap } from '../rules.js';
 import type { City } from '../city.js';
 import { activeObjects } from './objects.js';
-import { impactRawBudget } from './scales.js';
+import { impactRawBudget } from './numbers.js';
 
-export function sumObjectEffects(city: Pick<City, 'objects'>): StatMap {
+/** Сумма вкладов объектов. Занятый делом объект даёт только долю `occupiedShare`. */
+export function sumObjectEffects(city: Pick<City, 'objects'>, occupiedShare = 1): StatMap {
   const sum = emptyStatMap();
   for (const obj of activeObjects(city)) {
-    for (const id of STAT_IDS) sum[id] += obj.statEffect[id];
+    const share = obj.occupiedBy ? occupiedShare : 1;
+    for (const id of STAT_IDS) sum[id] += obj.statEffect[id] * share;
   }
   return sum;
 }
 
 /** Пересчитать статы из объектов и ledger. Мутирует и возвращает city.stats. */
-export function recomputeStats(city: Pick<City, 'objects' | 'statScale' | 'statLedger' | 'stats'>): StatMap {
-  const sum = sumObjectEffects(city);
+export function recomputeStats(city: Pick<City, 'objects' | 'statScale' | 'statLedger' | 'stats'>, rules?: Pick<Rules, 'fronts'>): StatMap {
+  const sum = sumObjectEffects(city, rules?.fronts.occupiedShare ?? 1);
   for (const id of STAT_IDS) {
     const raw = city.statScale * sum[id] + city.statLedger[id];
     city.stats[id] = Math.max(0, Math.min(100, Math.round(raw)));
@@ -33,18 +35,18 @@ export function recomputeStats(city: Pick<City, 'objects' | 'statScale' | 'statL
 export function addToLedger(
   city: Pick<City, 'objects' | 'statScale' | 'statLedger' | 'stats'>,
   deltas: Partial<StatMap>,
+  rules?: Pick<Rules, 'fronts'>,
 ): StatMap {
   for (const id of STAT_IDS) {
     const n = Number(deltas[id]);
     if (Number.isFinite(n) && n !== 0) city.statLedger[id] += n;
   }
-  return recomputeStats(city);
+  return recomputeStats(city, rules);
 }
 
-/** Вера — среднее четырёх статов. Не хранится, всегда считается. */
-export function faithOf(city: Pick<City, 'stats'>): number {
-  const sum = STAT_IDS.reduce((acc, id) => acc + city.stats[id], 0);
-  return Math.max(0, Math.min(100, Math.round(sum / STAT_IDS.length)));
+/** Среднее четырёх статов: к нему тянется вера. */
+export function statMean(city: Pick<City, 'stats'>): number {
+  return STAT_IDS.reduce((acc, id) => acc + city.stats[id], 0) / STAT_IDS.length;
 }
 
 /**

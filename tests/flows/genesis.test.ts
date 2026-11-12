@@ -50,6 +50,9 @@ describe('онбординг → генезис', () => {
     const female = new Set(s.names.female);
     expect(city!.priest.gender).toBe(female.has(city!.priest.name) ? 'female' : 'male');
     for (const o of city!.officers) expect(o.gender).toBe(female.has(o.name) ? 'female' : 'male');
+    // Характер-темп брошен кодом при рождении города.
+    for (const o of city!.officers) expect(['slow', 'even', 'hasty']).toContain(o.temper);
+    expect(city!.faith).toEqual({ value: expect.any(Number), day: city!.createdDay });
     expect(world!.namePool.length + people.length).toBe(10);
     expect(await onboardingMessage(s.deps, { ownerId: 'u1', text: 'ещё' })).toEqual({ kind: 'has_city' });
   });

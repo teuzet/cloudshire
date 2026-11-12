@@ -81,11 +81,13 @@ function renderFronts(city, day) {
   box.innerHTML = '';
   if (!city) return;
   for (const f of city.fronts.filter((x) => x.status === 'active')) {
-    const progress = Math.min(f.effort, f.progress + f.ratePerDay * Math.max(0, day - f.progressDay));
-    const share = f.effort ? progress / f.effort : 0;
+    const progress = Math.min(f.capacity, f.progress + f.ratePerDay * Math.max(0, day - f.progressDay));
+    const share = f.capacity ? progress / f.capacity : 0;
     const row = document.createElement('div');
     row.innerHTML = '<div></div><div class="bar"><i></i></div>';
-    row.firstChild.textContent = '[' + f.origin + '] ' + f.description + ' — ' + Math.round(share * 100) + '%, ' + f.ratePerDay.toFixed(3) + '/день';
+    const left = f.deadlineDay == null ? '' : ', срок через ' + Math.max(0, f.deadlineDay - day) + ' дн.';
+    const kind = f.plus ? 'случай' : f.form;
+    row.firstChild.textContent = '[' + f.origin + ' · ' + kind + ' · ' + f.risk + '] ' + f.title + ' — ' + Math.round(share * 100) + '% из ' + f.capacity + ', веха ' + f.milestonesFired + '/' + f.milestones + ', ' + f.ratePerDay.toFixed(3) + '/день' + left;
     row.querySelector('i').style.width = Math.round(share * 100) + '%';
     box.appendChild(row);
   }

@@ -7,13 +7,13 @@
 import type { City, DialogEntry } from '../../core/city.js';
 import type { Rules } from '../../core/rules.js';
 import { activeAssignments } from '../../core/world/assignments.js';
-import { activeFronts } from '../../core/world/fronts.js';
+import { activeFronts, findFront } from '../../core/world/fronts.js';
 import { activeFacts } from '../../core/lore.js';
 import { qualitativeStats } from '../../core/world/stats.js';
 import { gameDate } from '../../core/time.js';
 import type { LlmMessage, LlmUsage } from '../../ports/llm.js';
 import { composeSystem, loadPrompt } from '../_shared/canon.js';
-import { bullets, chronicleBlock, officerLine, section } from '../_shared/format.js';
+import { bullets, chronicleBlock, frontLine, officerLine, section } from '../_shared/format.js';
 import { runToolLoop, type AgentDeps, type LoopTool } from '../_shared/runtime.js';
 import {
   assignOfficerSchema,
@@ -67,9 +67,13 @@ export function priestTurnBlock(rules: Rules, city: City, day: number): string {
   const assignments = activeAssignments(city);
   const officers = city.officers.map((o) => {
     const a = assignments.find((x) => x.id === o.assignmentId);
-    return `${officerLine(o)} — ${a ? `занят: ${a.text}` : 'свободен'}`;
+    const front = a ? findFront(city, a.frontId) : null;
+    return `${officerLine(o)} — ${a ? `занят: ${front?.title ?? 'дело'}${a.text ? ` (наказ: ${a.text})` : ''}` : 'свободен'}`;
   });
-  const fronts = activeFronts(city).map((f) => `${f.id}: ${f.description}`);
+  const fronts = activeFronts(city).map((f) => frontLine(city, f, day));
+  const waiting = city.projects
+    .filter((p) => p.status === 'waiting')
+    .map((p) => `${p.id}: ${p.title} (следующий шаг: ${p.stages[p.stageIndex]?.title ?? 'не назван'})`);
   const facts = activeFacts(city).slice(-30).map((f) => f.text);
   return [
     section('ОПИСАНИЕ ГОРОДА', city.brief),
@@ -78,6 +82,7 @@ export function priestTurnBlock(rules: Rules, city: City, day: number): string {
     section('Состояние города', qualitativeStats(rules, city.stats)),
     section('Сановники', bullets(officers)),
     section('Что сейчас идёт в городе (id: что идёт)', bullets(fronts)),
+    section('Замыслы, которые ждут слова покровителя (id: что дальше)', bullets(waiting)),
     section('Известные факты', bullets(facts)),
     section('Последние записи хроники', chronicleBlock(city.chronicle.slice(-5))),
     section('Память', bullets(city.notes.map((n) => n.text))),

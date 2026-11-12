@@ -119,7 +119,7 @@ describe('голос жреца', () => {
     const llm = new FakeLlm().script('herald', toolReply('submit_news', { text: 'Башня открыта.' }));
     const text = await writeNews(deps(llm), {
       city,
-      entry: { id: 'c1', day: 3, text: 'Хранитель вскрыл башню.', source: 'stake', frontId: 'f1' },
+      entry: { id: 'c1', day: 3, text: 'Хранитель вскрыл башню.', source: 'completion', frontId: 'f1' },
       kind: 'resolution',
       officer: city.officers[2]!,
       history: [],
@@ -195,21 +195,22 @@ describe('голос жреца', () => {
   test('блок хода жреца не выдаёт скрытого слоя фронта', () => {
     const city = blankCity();
     city.fronts.push(
-      createFront(r, {
+      createFront({
         id: 'f1',
+        form: 'find',
+        origin: 'story',
+        title: 'Рецепт в башне',
         description: 'Добраться до рецепта в башне',
-        stake: { reveal: { text: 'ТАЙНА_СТАВКИ' } },
-        effort: 10,
-        driftBand: 'NONE',
-        beatCount: 1,
-        events: [{ id: 'e', description: 'ТАЙНОЕ_СОБЫТИЕ' }],
-        clues: [{ id: 'c', fact: 'ТАЙНАЯ_УЛИКА', alignment: '' }],
-        alignment: 'СКРЫТАЯ_ЛОГИКА',
+        capacity: 10,
+        stake: [{ op: 'fact', text: 'ТАЙНА_СТАВКИ' }],
+        key: { moves: ['СКРЫТАЯ_ЛОГИКА'], twist: 'ТАЙНЫЙ_ПОДВОХ' },
+        script: { events: [{ id: 'e', description: 'ТАЙНОЕ_СОБЫТИЕ', fired: false }], clues: [{ id: 'c', fact: 'ТАЙНАЯ_УЛИКА', revealed: false }] },
+        outburst: 'ТАЙНЫЙ_ПРОРЫВ',
         day: 0,
       }),
     );
     const block = priestTurnBlock(r, city, 5);
     expect(block).toContain('Добраться до рецепта в башне');
-    for (const secret of ['СКРЫТАЯ_ЛОГИКА', 'ТАЙНОЕ_СОБЫТИЕ', 'ТАЙНАЯ_УЛИКА', 'ТАЙНА_СТАВКИ']) expect(block).not.toContain(secret);
+    for (const secret of ['СКРЫТАЯ_ЛОГИКА', 'ТАЙНОЕ_СОБЫТИЕ', 'ТАЙНАЯ_УЛИКА', 'ТАЙНА_СТАВКИ', 'ТАЙНЫЙ_ПОДВОХ', 'ТАЙНЫЙ_ПРОРЫВ']) expect(block).not.toContain(secret);
   });
 });

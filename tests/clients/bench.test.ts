@@ -8,7 +8,7 @@ import { fixedSettings } from '../../src/agents/_shared/settings.js';
 import { compareRuns, runStage, saveState, type BenchConfig } from '../../src/clients/bench/bench.js';
 import type { Snapshot } from '../../src/clients/bench/stages.js';
 import { scriptGenesis } from '../helpers/genesis.js';
-import { lanternIsle } from '../helpers/game.js';
+import { lanternIsle, scriptFrontAgents } from '../helpers/game.js';
 import { rules } from '../helpers/fixtures.js';
 
 const names = { female: ['Айра', 'Вена', 'Ирма', 'Лира', 'Мэа', 'Нэя'], male: ['Орм', 'Кайр', 'Тэн', 'Вэс', 'Дар', 'Рун'] };
@@ -20,20 +20,18 @@ function scripted(): FakeLlm {
       toolReply('submit_onboarding', { reply: 'Как тебя звать, покровитель?' }),
       toolReply('submit_onboarding', { reply: 'Начинаем.', seed: { patron_name: 'Тарн', patron_gender: 'male', pitch: 'Город облачных рыбаков' } }),
     )
-    .always('front-chronicle', toolReply('submit_chronicle', { text: 'К краю прибило островок с фонарями.' }))
+    .always('chronicler', toolReply('submit_chronicle', { text: 'К краю прибило островок с фонарями.' }))
     .always('herald', toolReply('submit_news', { text: 'Покровитель, у края горят чужие фонари.' }))
     .always('scenario-writer', toolReply('submit_scenario', { ...lanternIsle(), title: 'Островок у рыбаков' }))
     .always('priest', toolsReply(['order_change', { office: 'treasurer', intent: 'Построить маяк на краю' }], ['submit_reply', { text: 'Казначей начнёт.' }]))
-    .always('mutation-drafter', toolReply('submit_mutation', { kind: 'create', type: 'structure', name: 'Маяк', description: 'Маяк на краю острова' }))
-    .always('feasibility-judge', toolReply('submit_feasibility', { verdict: 'FEASIBLE' }))
-    .always('impact-judge', toolReply('submit_impact', { impact: 'MAJOR', stat_profile: { security: 3 } }))
-    .always('consequences-generator', (req) => {
-      const n = Number(/Нужно кандидатов: (\d+)/.exec(JSON.stringify(req.messages))?.[1] ?? 0);
-      return toolReply('submit_consequences', {
-        items: Array.from({ length: n }, (_, i) => ({ description: `Чужие корабли видят свет ${i}`, impact: 'MINOR', drift: 'SLOW' })),
-      });
-    })
-    .always('consequence-judge', toolReply('submit_consequence_verdict', { ok: true }));
+    .always('will-interpreter', toolReply('submit_will', { label: 'project', goal: 'Построить маяк на краю острова' }))
+    .always(
+      'stage-planner',
+      toolReply('submit_stages', {
+        stages: [{ title: 'Постройка маяка', work: 'Каменщики кладут башню маяка на краю.', result: { kind: 'new_object', type: 'structure', name: 'Маяк', description: 'Маяк на краю острова.' }, site: { name: 'Стройка маяка', description: '' }, outcome_known: true }],
+      }),
+    );
+  scriptFrontAgents(llm, { Маяк: [{ stat: 'security', direction: 'up', size: 'large' }] });
   return scriptGenesis(llm, rules(), { cityName: 'Сетьград', patronName: 'Тарн' });
 }
 
@@ -84,8 +82,10 @@ describe('стенд агентов', () => {
     const willReport = read(cfg, 'runs', w.id, 'report.md');
     expect(willReport).toContain('**Жрец:** Казначей начнёт.');
     expect(willReport).toContain('создать structure «Маяк»');
-    expect(willReport).toContain('Чужие корабли видят свет');
-    expect(Object.keys(w.agents)).toEqual(expect.arrayContaining(['priest', 'mutation-drafter', 'impact-judge', 'consequence-judge']));
+    expect(willReport).toContain('ёмкость 20, вех 3, риск safe');
+    expect(willReport).toContain('ключ: Действовать открыто.');
+    expect(willReport).toContain('treasurer →');
+    expect(Object.keys(w.agents)).toEqual(expect.arrayContaining(['priest', 'will-interpreter', 'canon-warden', 'stage-planner', 'contribution-appraiser', 'key-sealer']));
 
     const s = await runStage(cfg, { stage: 'seeding', caseName: 'lantern' });
     expect(s.error).toBeNull();

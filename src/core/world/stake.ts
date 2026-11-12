@@ -1,120 +1,152 @@
 /**
- * Ставка фронта: мир меняется, когда шкала дошла до конца.
- * Новую версию объекта для modify пишет агент; сюда она приходит готовой.
+ * Ставка — закрытый список операций над городом. Исполняет только этот файл.
+ * Вклады в операциях заданы в пунктах стата; в сырые единицы объектов их переводит core.
  */
 
-import { type Impact, type Rules, type StatMap } from '../rules.js';
-import type { City, Front, ModifyStake } from '../city.js';
-import { activeAssignmentsForFront, closeAssignment } from './assignments.js';
-import { addObjectVersion, createObject, deleteObject, findObject } from './objects.js';
-import { addToLedger, objectContribution, recomputeStats } from './stats.js';
-
-export type StakeChange =
-  | { kind: 'created'; id: string }
-  | { kind: 'modified'; id: string }
-  | { kind: 'deleted'; id: string }
-  | { kind: 'stats'; deltas: Partial<StatMap> }
-  | { kind: 'reveal'; text: string };
+import type { Rules } from '../rules.js';
+import type { City, StakeOp } from '../city.js';
+import { addFact } from '../lore.js';
+import type { Change } from './changes.js';
+import { closeFront, findFront, rollbackMilestone, settleProgress } from './fronts.js';
+import { diffPoints, pointsToRaw, rawToPoints } from './numbers.js';
+import { addObjectVersion, createObject, deleteWithChildren, findObject } from './objects.js';
+import { addToLedger, recomputeStats } from './stats.js';
 
 export interface StakeResult {
-  front: Front;
-  changes: StakeChange[];
-  /** Почему ставка не сыграла: цели нет или её нельзя трогать. */
-  invalid: 'missing_target' | 'protected' | null;
+  changes: Change[];
+  /** Объект, созданный операцией с пометкой result. */
+  resultId: string | null;
 }
 
-export interface VersionDraft {
-  description: string;
-  weight: Impact;
-  statProfile: Partial<StatMap>;
-  statEffect?: StatMap;
-}
-
-/** Нужна ли этой ставке новая версия от агента. */
-export function stakeNeedsVersion(front: Front): ModifyStake['modify'] | null {
-  const stake = front.stake;
-  if (stake && 'modify' in stake && !stake.modify.proposed) return stake.modify;
-  return null;
-}
-
-/** Закрыть фронт и снять с него все поручения. */
-export function finishFront(city: City, front: Front, day: number, status: 'resolved' | 'invalid'): void {
-  front.status = status;
-  front.resolvedDay = Math.max(0, Math.round(day));
-  for (const a of activeAssignmentsForFront(city, front.id)) closeAssignment(city, a.id, day, 'done');
-}
-
+/**
+ * Применить операции ставки. Операция, цель которой исчезла, молча пропускается:
+ * мир мог измениться, пока фронт шёл. `modify` сюда приходить не должна — поток
+ * заранее превращает её в `revalue`.
+ */
 export function applyStake(
   rules: Rules,
   city: City,
-  front: Front,
-  args: { day: number; newObjectId: () => string; version?: VersionDraft | null },
+  ops: readonly StakeOp[],
+  ctx: { day: number; newId: (prefix: string) => string; frontId?: string | null },
 ): StakeResult {
-  const { day } = args;
-  const stake = front.stake;
-  const changes: StakeChange[] = [];
-  const fail = (invalid: StakeResult['invalid']): StakeResult => {
-    finishFront(city, front, day, 'invalid');
-    return { front, changes, invalid };
-  };
+  const changes: Change[] = [];
+  let resultId: string | null = null;
+  const day = Math.max(0, Math.round(ctx.day));
 
-  if (!stake) {
-    // Фронт без ставки просто заканчивается.
-  } else if ('create' in stake) {
-    const spec = stake.create;
-    const effect = spec.statEffect ?? objectContribution(rules, spec.weight ?? 'SIGNIFICANT', spec.statProfile ?? {});
-    const obj = createObject(rules, {
-      id: args.newObjectId(),
-      type: spec.type,
-      name: spec.name,
-      description: spec.description || spec.name,
-      statEffect: effect,
-      refs: spec.refs ?? [],
-      day,
-    });
-    city.objects.push(obj);
-    recomputeStats(city);
-    changes.push({ kind: 'created', id: obj.id });
-  } else if ('modify' in stake) {
-    const obj = findObject(city, stake.modify.target);
-    if (!obj || obj.status !== 'active') return fail('missing_target');
-    const proposed = stake.modify.proposed ?? args.version;
-    if (!proposed) throw new Error('ставка modify без новой версии');
-    const effect =
-      proposed.statEffect ??
-      objectContribution(rules, proposed.weight ?? 'MINOR', proposed.statProfile ?? obj.statEffect);
-    addObjectVersion(rules, obj, { description: proposed.description || obj.description, statEffect: effect, day });
-    recomputeStats(city);
-    changes.push({ kind: 'modified', id: obj.id });
-  } else if ('delete' in stake) {
-    const obj = findObject(city, stake.delete.target);
-    if (!obj || obj.status !== 'active') return fail('missing_target');
-    if (obj.protected) return fail('protected');
-    deleteObject(obj, day);
-    recomputeStats(city);
-    changes.push({ kind: 'deleted', id: obj.id });
-  } else if ('stats' in stake) {
-    addToLedger(city, stake.stats);
-    changes.push({ kind: 'stats', deltas: stake.stats });
-  } else if ('reveal' in stake) {
-    changes.push({ kind: 'reveal', text: stake.reveal.text.trim() });
+  for (const op of ops) {
+    switch (op.op) {
+      case 'create': {
+        const refs = (op.object.refs ?? []).filter((id) => findObject(city, id)?.status === 'active');
+        const parent = op.object.parentId ? findObject(city, op.object.parentId) : null;
+        const obj = createObject(rules, {
+          id: ctx.newId('obj'),
+          type: op.object.type,
+          name: op.object.name,
+          description: op.object.description,
+          statEffect: pointsToRaw(city, op.object.points),
+          refs,
+          parentId: parent?.status === 'active' ? parent.id : null,
+          hidden: op.object.hidden,
+          day,
+        });
+        city.objects.push(obj);
+        if (op.result) resultId = obj.id;
+        changes.push({ kind: 'object_created', objectId: obj.id, name: obj.name, type: obj.type, points: { ...op.object.points }, temporary: false, hidden: obj.hidden });
+        break;
+      }
+      case 'revalue': {
+        const obj = findObject(city, op.target);
+        if (!obj || obj.status !== 'active') break;
+        const before = rawToPoints(city, obj.statEffect);
+        const description = op.description?.trim() || obj.description;
+        const rewritten = description !== obj.description;
+        addObjectVersion(rules, obj, { description, statEffect: pointsToRaw(city, op.points), day });
+        changes.push({ kind: 'object_changed', objectId: obj.id, name: obj.name, delta: diffPoints(op.points, before), description: rewritten ? obj.description : null });
+        break;
+      }
+      case 'modify':
+        break;
+      case 'delete': {
+        const obj = findObject(city, op.target);
+        if (!obj || obj.status !== 'active' || obj.protected) break;
+        for (const gone of deleteWithChildren(city, obj, day)) {
+          changes.push({ kind: 'object_removed', objectId: gone.id, name: gone.name, points: rawToPoints(city, gone.statEffect), hidden: gone.hidden });
+        }
+        break;
+      }
+      case 'reveal': {
+        const obj = findObject(city, op.target);
+        if (!obj || obj.status !== 'active' || !obj.hidden) break;
+        obj.hidden = false;
+        obj.freshDay = day;
+        changes.push({ kind: 'object_revealed', objectId: obj.id, name: obj.name });
+        break;
+      }
+      case 'fact': {
+        const added = addFact(city, { id: ctx.newId('fact'), text: op.text, day, frontId: ctx.frontId ?? null, author: 'event' });
+        if (added.ok) changes.push({ kind: 'fact', text: added.fact.text });
+        break;
+      }
+      case 'link': {
+        const a = findObject(city, op.a);
+        const b = findObject(city, op.b);
+        if (!a || !b || a.id === b.id || a.status !== 'active' || b.status !== 'active') break;
+        if (!a.refs.includes(b.id)) a.refs.push(b.id);
+        changes.push({ kind: 'linked', a: a.id, b: b.id, names: [a.name, b.name] });
+        break;
+      }
+      case 'progress': {
+        const front = findFront(city, op.frontId);
+        if (!front || front.status !== 'active' || front.capacity <= 0) break;
+        settleProgress(front, day);
+        front.progress = Math.min(front.capacity, front.progress + Math.max(0, op.amount));
+        changes.push({ kind: 'front_moved', frontId: front.id, title: front.title, how: 'pushed' });
+        break;
+      }
+      case 'rollback': {
+        const front = findFront(city, op.frontId);
+        if (!front || front.status !== 'active') break;
+        rollbackMilestone(front, day);
+        changes.push({ kind: 'front_moved', frontId: front.id, title: front.title, how: 'rollback' });
+        break;
+      }
+      case 'cancel': {
+        const front = findFront(city, op.frontId);
+        if (!front || front.status !== 'active') break;
+        changes.push(...closeFront(rules, city, front, 'cancelled', day));
+        break;
+      }
+      case 'attach': {
+        const front = findFront(city, op.frontId);
+        if (!front || front.status !== 'active') break;
+        const obj = createObject(rules, {
+          id: ctx.newId('obj'),
+          type: op.object.type,
+          name: op.object.name,
+          description: op.object.description,
+          statEffect: pointsToRaw(city, op.object.points),
+          parentId: front.siteId,
+          temporary: true,
+          attach: { frontId: front.id, rate: op.rate },
+          day,
+        });
+        city.objects.push(obj);
+        changes.push({ kind: 'object_created', objectId: obj.id, name: obj.name, type: obj.type, points: { ...op.object.points }, temporary: true, hidden: false });
+        changes.push({ kind: 'front_moved', frontId: front.id, title: front.title, how: op.rate < 0 ? 'slowed' : 'helped' });
+        break;
+      }
+      case 'stats': {
+        addToLedger(city, op.points, rules);
+        changes.push({ kind: 'stats', points: { ...op.points } });
+        break;
+      }
+    }
   }
-
-  finishFront(city, front, day, 'resolved');
-  return { front, changes, invalid: null };
+  recomputeStats(city, rules);
+  return { changes, resultId };
 }
 
-/** Сухой факт о сыгравшей ставке для хрониста. */
-export function stakeFact(city: City, result: StakeResult): string {
-  const lines: string[] = [];
-  for (const change of result.changes) {
-    if (change.kind === 'reveal') lines.push(change.text);
-    if (change.kind === 'created' || change.kind === 'modified' || change.kind === 'deleted') {
-      const obj = findObject(city, change.id);
-      const verb = change.kind === 'created' ? 'Появилось' : change.kind === 'modified' ? 'Изменилось' : 'Исчезло';
-      if (obj) lines.push(`${verb}: ${obj.name}. ${obj.description}`.trim());
-    }
-    if (change.kind === 'stats') lines.push(result.front.description);
-  }
-  return lines.join('\n') || result.front.description;
+/** Есть ли в ставке операция, которую поток обязан сначала развернуть агентами. */
+export function hasModify(ops: readonly StakeOp[]): boolean {
+  return ops.some((op) => op.op === 'modify');
 }

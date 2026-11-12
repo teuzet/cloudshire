@@ -30,6 +30,10 @@ export function createObject(
     refs?: string[];
     day: number;
     protected?: boolean;
+    parentId?: string | null;
+    hidden?: boolean;
+    temporary?: boolean;
+    attach?: { frontId: string; rate: number } | null;
   },
 ): WorldObject {
   const limits = rules.fronts.objects;
@@ -51,6 +55,13 @@ export function createObject(
     createdDay: day,
     deletedDay: null,
     protected: Boolean(args.protected),
+    parentId: args.parentId ?? null,
+    hidden: Boolean(args.hidden),
+    occupiedBy: null,
+    temporary: Boolean(args.temporary),
+    attach: args.attach ?? null,
+    themes: [],
+    freshDay: day,
   };
 }
 
@@ -67,6 +78,7 @@ export function addObjectVersion(
   obj.version = version;
   obj.description = description;
   obj.statEffect = statEffect;
+  obj.freshDay = Math.max(0, Math.round(args.day));
   return obj;
 }
 
@@ -78,6 +90,38 @@ export function deleteObject(obj: WorldObject, day: number): WorldObject {
 
 export function activeObjects(city: Pick<City, 'objects'>): WorldObject[] {
   return city.objects.filter((o) => o.status === 'active');
+}
+
+/** То, что видят жрец и игрок: активные и не скрытые. */
+export function visibleObjects(city: Pick<City, 'objects'>): WorldObject[] {
+  return city.objects.filter((o) => o.status === 'active' && !o.hidden);
+}
+
+/** Удалить объект вместе со всем, что в него вложено. Возвращает удалённые. */
+export function deleteWithChildren(city: Pick<City, 'objects'>, obj: WorldObject, day: number): WorldObject[] {
+  const removed: WorldObject[] = [];
+  const walk = (o: WorldObject) => {
+    if (o.status !== 'active') return;
+    deleteObject(o, day);
+    removed.push(o);
+    for (const child of city.objects) if (child.parentId === o.id) walk(child);
+  };
+  walk(obj);
+  return removed;
+}
+
+/** Помощники и помехи фронта. */
+export function attachedTo(city: Pick<City, 'objects'>, frontId: string): WorldObject[] {
+  return city.objects.filter((o) => o.status === 'active' && o.attach?.frontId === frontId);
+}
+
+/** Объекты, связанные с данным: в любую сторону. */
+export function linkedObjects(city: Pick<City, 'objects'>, obj: WorldObject): WorldObject[] {
+  return city.objects.filter((o) => o.status === 'active' && o.id !== obj.id && (o.refs.includes(obj.id) || obj.refs.includes(o.id)));
+}
+
+export function isFresh(obj: Pick<WorldObject, 'freshDay'>, day: number, freshDays: number): boolean {
+  return day - obj.freshDay <= freshDays;
 }
 
 export function findObject(city: Pick<City, 'objects'>, id: string): WorldObject | null {

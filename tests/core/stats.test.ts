@@ -3,11 +3,11 @@ import { createObject, deleteObject } from '../../src/core/world/objects.js';
 import {
   addToLedger,
   clipToBudget,
-  faithOf,
   genesisStats,
   objectContribution,
   recomputeStats,
   statEpithet,
+  statMean,
 } from '../../src/core/world/stats.js';
 import { emptyStatMap, STAT_IDS } from '../../src/core/rules.js';
 import { blankCity, ids, rules, zeroLedgerCity } from '../helpers/fixtures.js';
@@ -67,9 +67,9 @@ describe('статы из объектов', () => {
     expect(city.stats.security).toBe(0);
   });
 
-  test('вера — среднее четырёх статов', () => {
+  test('среднее четырёх статов: к нему тянется вера', () => {
     const city = blankCity({ stats: { prosperity: 40, security: 60, knowledge: 50, influence: 70 } });
-    expect(faithOf(city)).toBe(55);
+    expect(statMean(city)).toBe(55);
   });
 });
 

@@ -3,7 +3,7 @@
  * предупреждения) и по файлу на агента с полными промптами и ответами.
  */
 
-import type { City, Front, Stake } from '../../core/city.js';
+import type { City, Front, StakeOp } from '../../core/city.js';
 import type { LlmMessage, LlmResponse } from '../../ports/llm.js';
 import type { CallRecord } from './llm.js';
 import type { StageName, StageResult, TranscriptLine } from './stages.js';
@@ -95,25 +95,53 @@ export function agentStats(calls: CallRecord[], warnings: Warning[]): AgentStats
 
 // ───────────────────────────── что вышло в игре ─────────────────────────────
 
-function stakeLine(stake: Stake | null): string {
-  if (!stake) return 'без ставки';
-  if ('create' in stake) return `создать ${stake.create.type} «${stake.create.name}»`;
-  if ('modify' in stake) return `изменить ${stake.modify.target}${stake.modify.intent ? `: ${stake.modify.intent}` : ''}`;
-  if ('delete' in stake) return `убрать ${stake.delete.target}`;
-  if ('stats' in stake) return `статы ${json(stake.stats).replace(/\s+/g, ' ')}`;
-  return `раскрыть: ${stake.reveal.text}`;
+function stakeLine(ops: StakeOp[]): string {
+  if (!ops.length) return 'нет';
+  return ops
+    .map((op) => {
+      switch (op.op) {
+        case 'create':
+          return `создать ${op.object.type} «${op.object.name}» ${json(op.object.points).replace(/\s+/g, ' ')}`;
+        case 'revalue':
+          return `переоценить ${op.target} ${json(op.points).replace(/\s+/g, ' ')}`;
+        case 'modify':
+          return `изменить ${op.target}${op.intent ? `: ${op.intent}` : ''}`;
+        case 'delete':
+          return `убрать ${op.target}`;
+        case 'reveal':
+          return `раскрыть ${op.target}`;
+        case 'fact':
+          return `факт: ${op.text}`;
+        case 'link':
+          return `связать ${op.a} и ${op.b}`;
+        case 'progress':
+          return `прогресс ${op.amount} фронту ${op.frontId}`;
+        case 'rollback':
+          return `откат на веху ${op.frontId}`;
+        case 'cancel':
+          return `отмена ${op.frontId}`;
+        case 'attach':
+          return `${op.rate < 0 ? 'помеха' : 'помощник'} «${op.object.name}» на ${op.frontId}`;
+        case 'stats':
+          return `статы ${json(op.points).replace(/\s+/g, ' ')}`;
+      }
+    })
+    .join('; ');
 }
 
 function frontBlock(f: Front): string {
   const lines = [
-    `- **${f.description}** (${f.origin}, ${f.id})`,
+    `- **${f.title}** (${f.form}, ${f.origin}, ${f.id}): ${f.description}`,
+    `  - ёмкость ${f.capacity}, вех ${f.milestones}, риск ${f.risk}, темп проекта ${f.tempo}, скорость ${f.ratePerDay.toFixed(3)}/день${f.deadlineDay != null ? `, срок на день ${f.deadlineDay}` : ''}`,
     `  - ставка: ${stakeLine(f.stake)}`,
-    `  - усилие ${f.effort}, порогов ${f.beatCount}, дрейф ${f.driftBand}, скорость ${f.ratePerDay.toFixed(2)}/день`,
   ];
-  if (f.events.length) lines.push(`  - события: ${f.events.map((e) => e.description).join('; ')}`);
-  if (f.clues.length) lines.push(`  - улики: ${f.clues.map((c) => c.fact).join('; ')}`);
-  if (f.pendingConsequences.length) lines.push(`  - последствия: ${f.pendingConsequences.map((c) => `${c.description} (${c.impact})`).join('; ')}`);
-  if (f.refs.length) lines.push(`  - ссылки: ${f.refs.join(', ')}`);
+  if (f.failStake.length) lines.push(`  - по сроку: ${stakeLine(f.failStake)}`);
+  if (f.unattainable) lines.push(`  - недостижимо: ${f.unattainable}`);
+  if (f.key) lines.push(`  - ключ: ${f.key.moves.join('; ')}${f.key.twist ? ` | подвох: ${f.key.twist}` : ''}`);
+  if (f.footprint.length) lines.push(`  - отпечаток: ${f.footprint.map((e) => `${e.objectId} ${e.relation}`).join(', ')}`);
+  if (f.script?.events.length) lines.push(`  - события: ${f.script.events.map((e) => e.description).join('; ')}`);
+  if (f.script?.clues.length) lines.push(`  - улики: ${f.script.clues.map((c) => c.fact).join('; ')}`);
+  if (f.refs.length) lines.push(`  - участники: ${f.refs.join(', ')}`);
   return lines.join('\n');
 }
 
@@ -153,7 +181,7 @@ function willSummary(before: City | null, after: City): string {
   return [
     `Мана: ${before?.mana.value.toFixed(1) ?? '?'} → ${after.mana.value.toFixed(1)}`,
     '',
-    `Новые поручения:\n${assignments.length ? assignments.map((a) => `- ${a.office}: «${a.text}» → ${a.frontId ?? 'ни на какой фронт'} (${a.direction}, ${a.efficiency}${a.blocks.length ? `, блокирует ${a.blocks.join(', ')}` : ''})`).join('\n') : '- нет'}`,
+    `Новые поручения:\n${assignments.length ? assignments.map((a) => `- ${a.office} → ${a.frontId}: «${a.text || 'без наказа'}» (${a.verdict}, темп ${a.tempo})`).join('\n') : '- нет'}`,
     '',
     `Новые фронты:\n${fronts.length ? fronts.map(frontBlock).join('\n') : '- нет'}`,
     '',

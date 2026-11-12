@@ -7,8 +7,8 @@
 | Этап | Что делает | Агенты |
 | --- | --- | --- |
 | `genesis` | онбординг + генезис: разговор с проводником (или готовая «рыба») → город | onboarding-guide, city-genesis, world-objects-genesis, officer-nature, city-brief |
-| `will` | реплики покровителя на снимке города → поручения, стройки, фронты со ставками и последствиями | priest, loremaster, assignment-evaluator, mutation-drafter, feasibility-judge, impact-judge, consequences-generator, consequence-judge |
-| `seeding` | посев сюжетов из базы `scenarios/` или по зерну на снимок города | scenario-writer, front-chronicle, herald |
+| `will` | реплики покровителя на снимке города → проекты, стратегии, атомарные дела | priest, loremaster, will-interpreter, canon-warden, stage-planner, contribution-appraiser, footprint-mapper, risk-appraiser, key-sealer, alignment-judge, chronicler |
+| `seeding` | посев сюжетов из базы `scenarios/` или по зерну на снимок города | scenario-writer, chronicler, herald |
 
 ## Раскладка
 

@@ -6,29 +6,30 @@ import { addFact, mysteryObjectIds, newFact, normalizeUnknowns, retireFact, upda
 import { createFront } from '../../src/core/world/fronts.js';
 import { blankCity, rules } from '../helpers/fixtures.js';
 
-const r = rules();
 const deps = (llm: FakeLlm) => ({ llm, settings: fixedSettings() });
 
 function cityWithStory() {
   const city = blankCity();
   city.facts.push(newFact({ id: 'fact_salt', text: 'Соль добывают на северном поле.', day: 0, author: 'genesis' }));
   city.unknowns = [{ text: 'Откуда приходят ночные огни, не установлено.', objectIds: [] }];
-  const front = createFront(r, {
+  const front = createFront({
     id: 'f1',
+    form: 'find',
+    origin: 'story',
+    title: 'Рецепт в башне',
     description: 'Добраться до рецепта в башне',
-    stake: { reveal: { text: 'ТАЙНА_СТАВКИ' } },
-    effort: 10,
-    driftBand: 'NONE',
-    beatCount: 1,
-    events: [],
-    clues: [
-      { id: 'c1', fact: 'ТАЙНАЯ_УЛИКА', alignment: '' },
-      { id: 'c2', fact: 'ВЫЯСНЕННОЕ', alignment: '' },
-    ],
-    alignment: 'СКРЫТАЯ_ЛОГИКА',
+    capacity: 10,
+    stake: [{ op: 'fact', text: 'ТАЙНА_СТАВКИ' }],
+    key: { moves: ['СКРЫТАЯ_ЛОГИКА'], twist: null },
+    script: {
+      events: [],
+      clues: [
+        { id: 'c1', fact: 'ТАЙНАЯ_УЛИКА', revealed: false },
+        { id: 'c2', fact: 'ВЫЯСНЕННОЕ', revealed: true },
+      ],
+    },
     day: 0,
   });
-  front.clues[1]!.status = 'revealed';
   city.fronts.push(front);
   return city;
 }
