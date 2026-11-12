@@ -27,7 +27,7 @@ import { resolveEvent, type Resolution } from '../agents/resolver/run.js';
 import { tagThemes } from '../agents/theme-tagger/run.js';
 import { appraise, briefOf, leadLabel, situationOf, workWords } from './briefs.js';
 import { record, type Happening } from './chronicle.js';
-import { complicateRolled, describeHits, echo, refreshAfterChange, resolveModify, rollFor } from './complications.js';
+import { complicateRolled, describeHits, refreshAfterChange, resolveModify, rollFor, rollForFailure } from './complications.js';
 import { newId, requireWorld, sendAll, today, tryAgent, type FlowDeps } from './context.js';
 import { faithEvent, refreshAllFronts, willWords } from './fronts.js';
 import { seedStories } from './seeding.js';
@@ -129,15 +129,15 @@ async function applyEffect(deps: FlowDeps, city: City, front: Front, resolution:
 }
 
 /**
- * Записать случившееся, пустить эхо по связям и обновить дела, которых коснулась перемена.
- * `source` — перемены самой ставки: эхо и обновление идут только от них, а не от осложнений,
- * которые родились в том же событии.
+ * Записать случившееся и обновить дела, которых коснулась перемена.
+ * `source` — перемены самой ставки: обновление идёт только от них, а не от осложнений,
+ * которые родились в том же событии. Сами перемены новых фронтов не рождают:
+ * последствия рождает фронт в свои моменты (веха, завершение, срыв) через словарь динамик.
  */
 async function finish(deps: FlowDeps, city: City, h: Happening, source: readonly Change[], except: string[], out: OutboundMessage[]): Promise<void> {
   syncProjects(city);
   const msg = await record(deps, city, h);
   if (msg) out.push(msg);
-  out.push(...(await echo(deps, city, source, h.day)));
   const lines = describeChanges(deps.rules, source);
   await refreshAfterChange(deps, city, source, except, lines.length ? lines.join('. ') : h.gist, h.day);
 }
@@ -432,7 +432,17 @@ async function strike(deps: FlowDeps, city: City, front: Front, stake: readonly 
   changes.push(...applyStake(deps.rules, city, ops, stakeCtx(deps, front, day)).changes);
   changes.push(...(await applyEffect(deps, city, front, resolution, day)));
   await faithEvent(deps, city, { event: resolution.text, will, day });
-  await finish(deps, city, { gist: resolution.text, changes, source: 'deadline', frontId: front.id, day, kind: 'resolution', officer: lead.officer, announce: true }, changes, [front.id], out);
+  // Срыв — свой момент жизни фронта: беда может потянуть за собой новую.
+  const trouble = status === 'failed' ? await complicateRolled(deps, city, front, rollForFailure(deps), { moment: 'failure' }, day) : null;
+  const gist = [resolution.text, trouble?.gist].filter(Boolean).join(' ');
+  await finish(
+    deps,
+    city,
+    { gist, changes: [...changes, ...(trouble?.changes ?? [])], source: 'deadline', frontId: front.id, day, kind: 'resolution', officer: lead.officer, announce: true },
+    changes,
+    [front.id],
+    out,
+  );
 }
 
 async function onDeadline(deps: FlowDeps, city: City, front: Front, day: number, out: OutboundMessage[]): Promise<void> {

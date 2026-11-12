@@ -12,13 +12,12 @@ import { leadOf } from '../core/world/assignments.js';
 import { changedObjectIds, type Change } from '../core/world/changes.js';
 import { accidentLoss, buildBound, buildOpportunity, buildSide, hindranceOp, type EventDress } from '../core/world/complications.js';
 import { candidates, drawOrder, rollRisk, type Candidate, type Moment, type RollKind } from '../core/world/dynamics.js';
-import { echoTargets, refreshTargets } from '../core/world/echo.js';
+import { refreshTargets } from '../core/world/echo.js';
 import { closeFront, shareDone, tempoSum } from '../core/world/fronts.js';
-import { basePrice, complicationChance, diffPoints, dominantStat, magnitude, newObjectCapacity, rawToPoints } from '../core/world/numbers.js';
+import { complicationChance, diffPoints, dominantStat, magnitude, newObjectCapacity, rawToPoints } from '../core/world/numbers.js';
 import { findObject } from '../core/world/objects.js';
 import { applyStake } from '../core/world/stake.js';
 import { themeNames } from '../core/world/themes.js';
-import type { OutboundMessage } from '../ports/notifier.js';
 import { judgeAlignment } from '../agents/alignment-judge/run.js';
 import { dressEvent } from '../agents/costumer/run.js';
 import { rewriteDescription } from '../agents/description-rewriter/run.js';
@@ -26,7 +25,6 @@ import { composeDynamic } from '../agents/dynamics-composer/run.js';
 import { appraiseRisk } from '../agents/risk-appraiser/run.js';
 import { fitRole } from '../agents/role-fitter/run.js';
 import { appraise, briefOf, seal, situationOf, touchesOf, workWords } from './briefs.js';
-import { record } from './chronicle.js';
 import { namesUsed, newId, returnNames, takeNames, tryAgent, type FlowDeps } from './context.js';
 import { faithEvent, willWords } from './fronts.js';
 
@@ -304,6 +302,15 @@ export function rollFor(deps: FlowDeps, city: City, front: Front, counter: Front
   return kind;
 }
 
+/** Бросок при срыве: случится ли следом новая беда или удобный случай. Ступень риска тут не важна. */
+export function rollForFailure(deps: FlowDeps): RollKind | null {
+  const f = deps.rules.fronts.failure;
+  const rng = deps.random.rng;
+  if (rng() >= f.chance) return null;
+  if (rng() < f.plusShare) return 'plus';
+  return rng() < f.heavyShare ? 'heavy' : 'light';
+}
+
 /** Собрать то, что выпало. Плюсовая запись, которой не нашлось роли, уступает место обычной беде. */
 export async function complicateRolled(
   deps: FlowDeps,
@@ -314,7 +321,7 @@ export async function complicateRolled(
   day: number,
 ): Promise<Complication | null> {
   if (!kind) return null;
-  const sideOnly = q.sideOnly || Boolean(parent.unattainable) || q.moment === 'completion';
+  const sideOnly = q.sideOnly || Boolean(parent.unattainable) || q.moment !== 'milestone';
   const made = await complicate(deps, city, parent, { ...q, kind, sideOnly }, day);
   if (made || kind !== 'plus') return made;
   const heavy = parent.unattainable || deps.random.rng() < deps.rules.fronts.risk.heavyShare[parent.risk];
@@ -367,90 +374,6 @@ export async function describeHits(deps: FlowDeps, city: City, ops: readonly Sta
       target.description,
     );
     out.push({ ...op, description });
-  }
-  return out;
-}
-
-// ───────────────────────────── эхо ─────────────────────────────
-
-function changeWords(source: WorldObject, changes: readonly Change[]): string {
-  const c = changes.find((x) => 'objectId' in x && x.objectId === source.id);
-  if (c?.kind === 'object_removed') return `${source.name} больше нет`;
-  if (c?.kind === 'object_created' || c?.kind === 'object_revealed') return `появилось новое: ${source.name}. ${source.description}`;
-  return `${source.name} теперь: ${source.description}`;
-}
-
-/**
- * Эхо по связям: для объектов, связанных с изменившимися, Оценщик вклада отвечает, каков теперь их
- * вклад. Разница не применяется сразу, а становится ставкой нового фронта: минус приходит угрозой,
- * плюс возможностью. Волна идёт по шагу за раз.
- */
-export async function echo(deps: FlowDeps, city: City, changes: readonly Change[], day: number): Promise<OutboundMessage[]> {
-  const out: OutboundMessage[] = [];
-  for (const { target, source } of echoTargets(deps.rules, city, changedObjectIds(changes), deps.random.rng)) {
-    const event = `С тем, с чем это тесно связано, случилась перемена: ${changeWords(source, changes)}.`;
-    const before = rawToPoints(city, target.statEffect);
-    const appraised = await appraise(deps, city, briefOf(target), { points: before, event });
-    const delta = diffPoints(appraised.points, before);
-    if (!appraised.ok || magnitude(delta) < Math.max(deps.rules.fronts.echo.minPoints, 1e-9)) continue;
-    const plus = delta.prosperity + delta.security + delta.knowledge + delta.influence > 0;
-    const costume = await tryAgent(
-      deps,
-      'costumer',
-      () =>
-        dressEvent(deps.agents, {
-          skeleton: plus
-            ? 'Перемена у связанного открывает этому новые возможности, если успеть ими воспользоваться.'
-            : 'Перемена у связанного подтачивает это: оно теряет силу, если ничего не сделать.',
-          shape: plus ? 'opportunity' : 'threat',
-          cause: event,
-          actor: { object: briefOf(target), touch: `тесно связано с изменившимся: ${source.name}` },
-          themes: themeNames(city),
-          names: [],
-          needsNew: false,
-        }),
-      null,
-    );
-    if (!costume) continue;
-    const dress: EventDress = { title: costume.title, description: costume.description, outburst: costume.outburst, newObject: null };
-    const front = plus
-      ? buildOpportunity(deps.rules, {
-          origin: 'echo',
-          stake: [{ op: 'revalue', target: target.id, points: appraised.points }],
-          gain: magnitude(delta) + basePrice(deps.rules, 'edit'),
-          dress,
-          key: null,
-          dynamicId: null,
-          refs: [target.id, source.id],
-          id: newId(deps, 'front'),
-          day,
-        })
-      : buildSide(deps.rules, city, {
-          shape: 'threat',
-          origin: 'echo',
-          target,
-          newPoints: appraised.points,
-          dress,
-          key: null,
-          dynamicId: null,
-          extraRefs: [source.id],
-          id: newId(deps, 'front'),
-          day,
-          rng: deps.random.rng,
-        });
-    front.key = await seal(deps, city, front);
-    city.fronts.push(front);
-    const msg = await record(deps, city, {
-      gist: costume.rumor,
-      changes: [{ kind: 'front_opened', frontId: front.id, title: front.title, form: front.form, plus }],
-      source: 'complication',
-      frontId: front.id,
-      day,
-      kind: 'beat',
-      officer: null,
-      announce: true,
-    });
-    if (msg) out.push(msg);
   }
   return out;
 }

@@ -3,7 +3,7 @@ import type { City, Front } from '../../src/core/city.js';
 import { createAssignment } from '../../src/core/world/assignments.js';
 import { accidentLoss, buildBound, buildOpportunity, buildSide, hindranceOp, tensionToThreat, type EventDress } from '../../src/core/world/complications.js';
 import { candidateWeight, candidates, drawOrder, rollRisk, shapeFor, weightedOrder } from '../../src/core/world/dynamics.js';
-import { echoTargets, refreshTargets } from '../../src/core/world/echo.js';
+import { refreshTargets } from '../../src/core/world/echo.js';
 import { createFront } from '../../src/core/world/fronts.js';
 import { createObject } from '../../src/core/world/objects.js';
 import { themeNames } from '../../src/core/world/themes.js';
@@ -86,6 +86,17 @@ describe('словарь динамик: кто подходит техниче�
     expect(idsOf(list)).toEqual(expect.arrayContaining(['abuse', 'displacement', 'touched-revenge']));
     expect(list.find((c) => c.dynamic.id === 'displacement')?.object?.id).toBe('tower');
     expect(candidates(r, city, front, { moment: 'completion', kind: 'light' }).some((c) => c.dynamic.hits === 'result')).toBe(false);
+  });
+
+  test('при срыве роли берутся из того, по чему ударила беда, и его соседей', () => {
+    const { city } = town();
+    const threat = createFront({ id: 't', form: 'threat', origin: 'story', title: 'Пожар на рынке', description: '', capacity: 4, deadlineDay: 10, refs: ['market'], day: 0 });
+    city.fronts.push(threat);
+    const light = candidates(r, city, threat, { moment: 'failure', kind: 'light' });
+    expect(light.find((c) => c.dynamic.id === 'homeless')?.object?.id).toBe('market');
+    expect(light.filter((c) => c.dynamic.id === 'blame').map((c) => c.object?.id)).toContain('guild');
+    expect(light.every((c) => c.dynamic.when.includes('failure'))).toBe(true);
+    expect(idsOf(candidates(r, city, threat, { moment: 'failure', kind: 'plus' }))).toEqual(expect.arrayContaining(['salvage']));
   });
 
   test('запись без такой тяжести не предлагается', () => {
@@ -186,18 +197,7 @@ describe('сборка осложнений', () => {
   });
 });
 
-describe('эхо и обновление', () => {
-  test('эхо идёт к связанным с изменившимся, мимо скрытого, временного и уже задетого', () => {
-    const { city } = town();
-    city.objects.push(
-      createObject(r, { id: 'smugglers', type: 'community', name: 'Контрабандисты', description: '', refs: ['guild'], hidden: true, day: 0 }),
-      createObject(r, { id: 'camp', type: 'site', name: 'Лагерь', description: '', refs: ['guild'], temporary: true, day: 0 }),
-    );
-    expect(echoTargets(r, city, ['guild'], rng(1)).map((e) => [e.target.id, e.source.id])).toEqual([['market', 'guild']]);
-    city.fronts.push(createFront({ id: 'e', form: 'threat', origin: 'echo', title: 'x', description: '', capacity: 2, deadlineDay: 99, refs: ['market'], day: 0 }));
-    expect(echoTargets(r, city, ['guild'], rng(1))).toEqual([]);
-  });
-
+describe('обновление после перемен', () => {
   test('обновляются дела, которых касается перемена, кроме источника и часов', () => {
     const { city, front } = town();
     city.fronts.push(

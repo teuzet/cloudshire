@@ -388,11 +388,9 @@ describe('этапы, подвох, эхо и обновление', () => {
     expect(city.objects.some((o) => o.name === 'Школа резонанса')).toBe(true);
   });
 
-  test('перемена идёт эхом по связям и обновляет соседние дела', async () => {
+  test('перемена обновляет соседние дела, но сама новых фронтов не рождает', async () => {
     const s = await town([]);
     const { city } = s;
-    // Здесь проверяется сам путь эха, порог заметности перемены снят.
-    s.deps.rules.fronts.echo.minPoints = 0;
     city.objects.push(createObject(s.r, { id: 'market', type: 'district', name: 'Рынок у стены', description: 'Лавки под стеной.', statEffect: { prosperity: 5 }, refs: ['wall'], day: 0 }));
     recomputeStats(city, s.r);
     // Соседнее дело касается стены: у него есть ведущий со стратегией.
@@ -412,7 +410,6 @@ describe('этапы, подвох, эхо и обновление', () => {
     expect(front.capacity).toBe(5 + 4);
     expect(front.stake[0]).toMatchObject({ op: 'revalue', target: 'wall', description: 'От стены остался низкий вал.' });
 
-    // После перемены: башня без стены теряет (минус → угроза эха), рынок выигрывает (плюс → случай).
     s.llm
       .always('contribution-appraiser', (req) => {
         const name = /Предмет: «([^»]+)»/.exec(lastUser(req))?.[1];
@@ -427,17 +424,10 @@ describe('этапы, подвох, эхо и обновление', () => {
     expect(wall).toMatchObject({ description: 'От стены остался низкий вал.', version: 2 });
     expect(wall.statEffect.security).toBe(0);
 
-    const echoes = city.fronts.filter((f) => f.origin === 'echo');
-    const harm = echoes.find((f) => f.title === 'Башня без стены')!;
-    const boon = echoes.find((f) => f.title === 'Рынку стало просторно')!;
-    expect(harm).toMatchObject({ form: 'threat', plus: false, atStake: 5, capacity: 2, refs: ['tower', 'wall'] });
-    expect(harm.deadlineDay! - harm.createdDay).toBe(120);
-    expect(harm.failStake).toEqual([{ op: 'revalue', target: 'tower', points: zero }]);
-    expect(boon).toMatchObject({ form: 'deed', plus: true, atStake: 7 + 1, capacity: 4 });
-    expect(boon.stake[0]).toMatchObject({ op: 'revalue', target: 'market', points: { prosperity: 12 } });
-    // Эхо не применяется сразу: вклад башни и рынка пока прежний.
+    // Соседи по связям не переоцениваются и фронтов не получают: вклад башни и рынка прежний.
+    expect(city.fronts.filter((f) => f.origin === 'echo')).toEqual([]);
     expect(city.objects.find((o) => o.id === 'tower')?.statEffect.security).toBe(5);
-    expect(city.chronicle.filter((e) => e.source === 'complication')).toHaveLength(2);
+    expect(city.chronicle.filter((e) => e.source === 'complication')).toHaveLength(0);
 
     // Соседнее дело обновлено: описание переписано, ключ запечатан заново, стратегия переоценена.
     expect(search.description).toBe('Ищут старый ход. Теперь иначе.');

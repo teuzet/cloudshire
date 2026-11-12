@@ -106,7 +106,7 @@ const faithRow = table(
 );
 
 /** Откуда берётся объект в роль записи словаря динамик. */
-export const ROLE_SOURCES = [...RELATIONS, 'helper', 'site', 'result', 'nearby', 'same-type'] as const;
+export const ROLE_SOURCES = [...RELATIONS, 'helper', 'site', 'result', 'nearby', 'same-type', 'struck'] as const;
 export type RoleSource = (typeof ROLE_SOURCES)[number];
 
 const dynamicDef = z.object({
@@ -114,7 +114,7 @@ const dynamicDef = z.object({
   title: z.string().min(1),
   enabled: z.boolean(),
   class: z.enum(['bound', 'side', 'plus']),
-  when: z.array(z.enum(['milestone', 'completion'])),
+  when: z.array(z.enum(['milestone', 'completion', 'failure'])),
   light: z.enum(SHAPES).nullable(),
   heavy: z.enum(SHAPES).nullable(),
   from: z.array(z.enum(ROLE_SOURCES)).min(1),
@@ -211,7 +211,7 @@ export const rulesSchema = z.object({
       freshDays: z.number().int().positive(),
       fitterCalls: z.number().int().positive(),
     }),
-    echo: z.object({ maxPerChange: z.number().int().nonnegative(), minPoints: z.number().nonnegative() }),
+    failure: z.object({ chance: z.number().min(0).max(1), plusShare: z.number().min(0).max(1), heavyShare: z.number().min(0).max(1) }),
     refresh: z.object({ maxFronts: z.number().int().nonnegative() }),
     unattainableWarnDays: z.number().int().positive(),
     objects: z.object({

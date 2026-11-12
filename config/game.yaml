@@ -263,11 +263,12 @@ fronts:
     freshDays: 360
     # Сколько пар «запись и объект» Примерщик проверяет за одно осложнение.
     fitterCalls: 6
-  echo:
-    maxPerChange: 2
-    # Эхо рождает дело, только если вклад связанного объекта сдвинулся хотя бы на столько пунктов:
-    # мелкая рябь остаётся без истории.
-    minPoints: 7
+  # Срыв: когда беда случилась, она может потянуть за собой новую (записи словаря с when: failure).
+  # chance — как часто; plusShare — доля удобных случаев среди выпавших; heavyShare — доля тяжёлых бед.
+  failure:
+    chance: 0.5
+    plusShare: 0.3
+    heavyShare: 0.3
   refresh:
     maxFronts: 3
   # Сколько дней действует предупреждение о недостижимой цели: повторный приказ запускает дело.
@@ -298,9 +299,10 @@ fronts:
     profileRange: 5
   # Словарь динамик: скелеты осложнений без конкретики города.
   #   class    — bound (бьёт по делу), side (бьёт по объекту), plus (удобный случай);
-  #   when     — на вехе или при завершении;
+  #   when     — на вехе, при завершении или при срыве (беда случилась);
   #   light / heavy — во что выливается лёгкое и тяжёлое осложнение (null: такой тяжести нет);
-  #   from     — откуда берётся объект в роль: отношения отпечатка, helper, site, result, nearby, same-type;
+  #   from     — откуда берётся объект в роль: отношения отпечатка, helper, site, result, nearby, same-type,
+  #              struck (то, по чему ударила беда);
   #   hits     — по чему бьёт: parent, role, result;
   #   condition — вопрос Примерщику (пустой: подходит всегда);
   #   needsNew — Костюмер обязан описать нового участника; newHidden — он скрыт от игрока;
@@ -863,6 +865,108 @@ fronts:
       condition: "Готовое может пригодиться этому так, как при начале не думали?"
       skeleton: "Готовое пригодилось тем, о ком при начале не думали; если им помочь, польза разойдётся шире."
       helps: "показать им готовое, дать доступ и малую помощь"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+    - id: exposed
+      title: Оставлено без защиты
+      enabled: true
+      class: side
+      when: [failure]
+      light: tension
+      heavy: threat
+      from: [nearby]
+      types: [district, community, settlement, building, structure]
+      hits: role
+      condition: "Случившаяся беда оставила это без защиты, опоры или снабжения?"
+      skeleton: "Беда оставила соседнее без защиты, опоры или снабжения, и теперь оно уязвимо."
+      helps: "прикрыть уязвимое, дать временную опору, наладить снабжение в обход"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+    - id: blame
+      title: Ищут виноватого
+      enabled: true
+      class: side
+      when: [failure]
+      light: tension
+      heavy: threat
+      from: [struck, nearby]
+      types: [community, organization, settlement, district]
+      hits: role
+      condition: "Эти люди пострадали и могут винить в беде соседей или власть?"
+      skeleton: "Пострадавшие ищут виноватого, и их обида направлена на соседей или на сановников."
+      helps: "открыто разобрать, что случилось, помочь пострадавшим, защитить тех, на кого показывают"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+    - id: homeless
+      title: Лишились крова
+      enabled: true
+      class: side
+      when: [failure]
+      light: tension
+      heavy: threat
+      from: [struck]
+      types: [district, community, settlement, building]
+      hits: role
+      condition: "Беда лишила этих людей крова, дела или привычного места?"
+      skeleton: "Лишившиеся крова и дела ищут, где приткнуться, и теснят соседей."
+      helps: "дать временный кров и работу, поселить с согласия соседей"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+    - id: looters
+      title: Растаскивают уцелевшее
+      enabled: true
+      class: side
+      when: [failure]
+      light: tension
+      heavy: tension
+      from: [struck]
+      types: []
+      hits: role
+      condition: "После беды здесь осталось бесхозное, что можно растащить?"
+      skeleton: "На месте беды растаскивают уцелевшее; кто именно, пока неизвестно."
+      helps: "поставить охрану, переписать уцелевшее, найти скупщиков"
+      needsNew: true
+      newHidden: true
+      requires: null
+      minStep: safe
+    - id: lesson
+      title: Урок беды
+      enabled: true
+      class: plus
+      when: [failure]
+      light: opportunity
+      heavy: opportunity
+      from: [nearby, struck]
+      types: [community, organization, practice, capability, district]
+      hits: role
+      condition: "Эти люди могут взяться за то, чтобы такая беда не повторилась?"
+      skeleton: "Беда показала слабое место, и те, кто рядом, готовы взяться за то, чтобы она не повторилась, если их поддержать."
+      helps: "поддержать их, дать им право и средства, записать урок"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+    - id: salvage
+      title: Спасти уцелевшее
+      enabled: true
+      class: plus
+      when: [failure]
+      light: opportunity
+      heavy: opportunity
+      from: [struck]
+      types: []
+      hits: role
+      condition: "После беды здесь осталось что-то ценное, что ещё можно спасти?"
+      skeleton: "Среди обломков осталось ценное, его можно спасти и пустить в дело, пока не растащили."
+      helps: "быстро разобрать завалы, переписать и вывезти уцелевшее"
       needsNew: false
       newHidden: false
       requires: null

@@ -14,7 +14,7 @@ import { leadOf } from './assignments.js';
 import { riskRank } from './numbers.js';
 import { attachedTo, findObject, isFresh, linkedObjects, visibleObjects } from './objects.js';
 
-export type Moment = 'milestone' | 'completion';
+export type Moment = 'milestone' | 'completion' | 'failure';
 export type RollKind = 'light' | 'heavy' | 'plus';
 
 export interface Candidate {
@@ -31,6 +31,13 @@ export function shapeFor(dynamic: Dynamic, kind: RollKind): Shape | null {
   if (kind === 'plus') return dynamic.class === 'plus' ? (dynamic.light ?? dynamic.heavy) : null;
   if (dynamic.class === 'plus') return null;
   return kind === 'light' ? dynamic.light : dynamic.heavy;
+}
+
+/** Что задела беда: её участники и цели её ставок. */
+function struckIds(front: Front): string[] {
+  const ids = new Set(front.refs);
+  for (const op of [...front.failStake, ...front.stake]) if ('target' in op && typeof op.target === 'string') ids.add(op.target);
+  return [...ids];
 }
 
 function roleObjects(city: City, front: Front, dynamic: Dynamic, resultId: string | null): Array<{ object: WorldObject | null; touch: string }> {
@@ -67,10 +74,16 @@ function roleObjects(city: City, front: Front, dynamic: Dynamic, resultId: strin
         if (obj) push(obj, 'это и есть готовый результат');
         break;
       }
+      case 'struck':
+        for (const id of struckIds(front)) {
+          const obj = findObject(city, id);
+          if (obj && !obj.hidden) push(obj, 'по этому ударила беда');
+        }
+        break;
       case 'nearby': {
-        const inFootprint = new Set(front.footprint.map((f) => f.objectId));
-        for (const entry of front.footprint) {
-          const base = findObject(city, entry.objectId);
+        const inFootprint = new Set([...front.footprint.map((f) => f.objectId), ...struckIds(front)]);
+        for (const id of inFootprint) {
+          const base = findObject(city, id);
           if (!base || base.status !== 'active') continue;
           for (const near of linkedObjects(city, base)) {
             if (inFootprint.has(near.id) || near.hidden || near.temporary || near.id === resultId) continue;
