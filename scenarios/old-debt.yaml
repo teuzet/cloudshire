@@ -33,6 +33,8 @@ fronts:
     impact: MINOR
     beatCount: 1
     refs: [deed]
+    closes:
+      - { target: pay-or-refuse, share: 0.7 }
     alignment: |
       Двигает дело сличение печатей, поиск в старых записях города, расспросы стариков.
     stake:

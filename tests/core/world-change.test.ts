@@ -104,6 +104,27 @@ describe('сценарий', () => {
     expect(() => parseScenario({ id: 'x', title: 'x', fronts: [{ id: 'f', form: 'tension', description: 'd', impact: 'MINOR' }] })).toThrow(/fronts\.0\.form/);
   });
 
+  test('фронт истории толкает другой фронт и платит за это ёмкостью', () => {
+    const scenario = parseScenario({
+      id: 'x',
+      title: 'x',
+      fronts: [
+        { id: 'debt', description: 'Соседи требуют долг.', impact: 'SIGNIFICANT', drift: 'SLOW', stake: { stats: { prosperity: -5 } } },
+        { id: 'check', description: 'Проверить грамоту.', impact: 'MINOR', stake: { reveal: { text: 'Долг погашен.' } }, closes: [{ target: 'debt', share: 0.7 }] },
+      ],
+    });
+    const city = blankCity();
+    const { fronts } = plantScenario(r, city, scenario, { day: 3, newId: ids(9) });
+    const debt = fronts[0]!;
+    const check = fronts[1]!;
+    const push = r.seeding.capacity.SIGNIFICANT * 0.7;
+    expect(check.stake).toContainEqual({ op: 'progress', frontId: debt.id, amount: Math.round(push * 100) / 100 });
+    expect(check.capacity).toBeCloseTo(Math.max(r.seeding.capacity.MINOR, push));
+    expect(() =>
+      parseScenario({ id: 'y', title: 'y', fronts: [{ id: 'a', description: 'd', impact: 'MINOR', drift: 'SLOW', closes: [{ target: 'b', share: 1 }] }, { id: 'b', description: 'd', impact: 'MINOR' }] }),
+    ).toThrow(/closes/);
+  });
+
   test('кривая заготовка падает с путём', () => {
     expect(() => parseScenario({ id: 'x', title: 'x', fronts: [{ id: 'f', description: 'd', impact: 'HUGE' }] })).toThrow(
       /fronts\.0\.impact/,

@@ -39,6 +39,8 @@ fronts:
     impact: MINOR
     beatCount: 2
     refs: [blight]
+    closes:
+      - { target: blight-spreads, share: 0.5 }
     alignment: |
       Двигает дело обход садов, расспросы садоводов, сличение, где ржа появилась раньше.
     stake:

@@ -37,6 +37,8 @@ fronts:
     impact: MINOR
     beatCount: 2
     refs: [prophet]
+    closes:
+      - { target: prophet-rises, share: 0.4 }
     alignment: |
       Двигает дело расспрос тех, кто знал пророка раньше, и наблюдение за ним.
     stake:

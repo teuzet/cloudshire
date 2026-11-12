@@ -99,7 +99,13 @@ function keepTemplate(raw: Scenario, template: Scenario): Scenario {
       clues: w.clues.length === t.clues.length ? w.clues : t.clues,
     };
   });
-  return { ...raw, id: template.id, objects, fronts };
+  // Толчки другим фронтам берутся из заготовки, а цели переводятся на id, которые дал писатель.
+  const finalId = new Map(template.fronts.map((t, i) => [t.id, fronts[i]!.id]));
+  const withCloses = fronts.map((f, i) => ({
+    ...f,
+    closes: template.fronts[i]!.closes.map((c) => ({ target: finalId.get(c.target) ?? c.target, share: c.share })),
+  }));
+  return { ...raw, id: template.id, objects, fronts: withCloses };
 }
 
 export const scenarioWriter: StructuredAgent<ScenarioWriterInput, Scenario, Scenario> = {

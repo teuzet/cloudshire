@@ -76,13 +76,23 @@ export const scenarioSchema = z.object({
         refs: z.array(z.string()).default([]),
         alignment: z.string().default(''),
         stake: stakeSchema.nullable().default(null),
+        /**
+         * Чем этот фронт по завершении двигает другие фронты истории: доля их ёмкости (1 — до конца).
+         * Беду это отводит, поиск или дело доводит до их собственной ставки. Цена входит в ёмкость.
+         */
+        closes: z.array(z.object({ target: z.string().min(1), share: z.number().min(0.05).max(1) })).default([]),
         events: z.array(z.object({ id: z.string(), description: z.string() })).default([]),
         clues: z.array(z.object({ id: z.string(), fact: z.string(), alignment: z.string().default('') })).default([]),
       }),
     )
     .min(1),
 }).superRefine((s, ctx) => {
+  const ids = new Set(s.fronts.map((f) => f.id));
   s.fronts.forEach((f, i) => {
+    f.closes.forEach((c, j) => {
+      if (!ids.has(c.target) || c.target === f.id) ctx.addIssue({ code: 'custom', path: ['fronts', i, 'closes', j, 'target'], message: 'closes ведёт на другой фронт этой истории' });
+    });
+    if (f.closes.length && f.drift !== 'NONE') ctx.addIssue({ code: 'custom', path: ['fronts', i, 'closes'], message: 'closes бывает только у фронта без дрейфа: толчок случается при завершении' });
     if (!f.form) return;
     const drifting = f.drift !== 'NONE';
     if (drifting !== (f.form === 'threat' || f.form === 'tension')) {
@@ -161,9 +171,16 @@ export function plantScenario(
   );
   // История ложится на новую модель: без дрейфа это поиск (работа доводит до ставки),
   // с дрейфом — угроза со сроком (ставка сработает, если не успеть).
+  const ownCapacity = (f: Scenario['fronts'][number]) => rules.seeding.capacity[f.impact];
+  const byId = new Map(scenario.fronts.map((f) => [f.id, f]));
   const fronts = scenario.fronts.map((f) => {
-    const capacity = rules.seeding.capacity[f.impact];
-    const ops = stakeOps(rules, city, f.stake, ids);
+    // Двигать другой фронт стоит столько же, сколько сделать эту часть его работы самому.
+    const pushes = f.closes.flatMap((c) => {
+      const target = byId.get(c.target);
+      return target ? [{ op: 'progress' as const, frontId: map(c.target), amount: Math.round(ownCapacity(target) * c.share * 100) / 100 }] : [];
+    });
+    const capacity = Math.max(ownCapacity(f), pushes.reduce((sum, p) => sum + p.amount, 0));
+    const own = stakeOps(rules, city, f.stake, ids);
     const drifting = f.drift !== 'NONE';
     const driftDays = monthsToDays(rules.seeding.driftMonths[f.drift]);
     const moves = keyMoves(f.alignment, f.clues);
@@ -180,8 +197,9 @@ export function plantScenario(
       deadlineDay: drifting ? args.day + driftDays : null,
       // События истории наступают сами, через равные доли срока.
       pulseDay: drifting && f.events.length ? args.day + Math.max(1, Math.floor(driftDays / (f.events.length + 1))) : null,
-      stake: drifting ? [] : ops,
-      failStake: drifting ? ops : [],
+      // Толчки другим фронтам случаются при завершении; у фронта с дрейфом их нет (это проверяет схема).
+      stake: drifting ? [] : [...own, ...pushes],
+      failStake: drifting ? own : [],
       key: moves.length ? { moves, twist: null } : null,
       refs: f.refs.map(map),
       atStake: capacity,

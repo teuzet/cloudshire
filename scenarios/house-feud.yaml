@@ -42,6 +42,8 @@ fronts:
     impact: MINOR
     beatCount: 1
     refs: [house]
+    closes:
+      - { target: feud-burst, share: 0.7 }
     alignment: |
       Двигает дело расспрос слуг и старых друзей покойного, поиск в его бумагах.
     stake:
