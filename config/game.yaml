@@ -1172,6 +1172,1246 @@ fronts:
       engine: discovery
       source: phenomenon
       sphere: knowledge
+    - id: pests
+      title: Вредители на месте
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: hindrance
+      heavy: hindrance
+      from: [site]
+      types: []
+      hits: parent
+      condition: ""
+      skeleton: "На месте работ завелись вредители, грызуны, жуки или птицы, и портят припасы и сделанное."
+      helps: "вывести вредителей, убрать приманку, сторожить припасы"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: crisis
+      source: creature
+      sphere: prosperity
+    - id: nesting
+      title: Гнездовье на пути
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: tension
+      from: [site]
+      types: []
+      hits: parent
+      condition: ""
+      skeleton: "На месте работ загнездились птицы или звери, которых в городе берегут; часть людей требует ждать, пока они выведут потомство."
+      helps: "обойти гнездовье, перенести его с знающими людьми, дождаться вылета"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: dilemma
+      source: creature
+      sphere: influence
+    - id: bad-ground
+      title: Дурной грунт
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: hindrance
+      heavy: hindrance
+      from: [site]
+      types: []
+      hits: parent
+      condition: ""
+      skeleton: "Под местом работ открылась пустота, плывун или гнилая порода; пока её не одолеть, дело стоит."
+      helps: "разведать грунт, укрепить основание, сместить работы"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: crisis
+      source: matter
+      sphere: knowledge
+    - id: old-graves
+      title: Старые кости
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: tension
+      from: [site]
+      types: []
+      hits: parent
+      condition: ""
+      skeleton: "При работах наткнулись на старое захоронение; родня и храм требуют остановиться, пока прах не упокоят как положено."
+      helps: "обряд перенесения, новое место упокоения, слово храма"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: dilemma
+      source: custom
+      sphere: influence
+    - id: craft-quarrel
+      title: Спор мастеров
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [helper, occupies]
+      types: [community, organization, person]
+      hits: parent
+      condition: "На этой работе сходятся люди разных школ, цехов или привычек?"
+      skeleton: "Мастера спорят о способе и делят работу надвое; каждая сторона ждёт, что старшие встанут за неё."
+      helps: "проба обоих способов на малом, слово признанного старшего, раздел участков"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: feud
+      source: custom
+      sphere: knowledge
+    - id: plan-flaw
+      title: Изъян замысла
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: hindrance
+      heavy: hindrance
+      from: [site]
+      types: []
+      hits: parent
+      condition: ""
+      skeleton: "В ходе работы открылся изъян в самом замысле; по прежнему чертежу дальше идти нельзя."
+      helps: "пересчитать замысел, позвать знающих, сделать пробную часть"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: hard
+      engine: discovery
+      source: matter
+      sphere: knowledge
+    - id: works-sickness
+      title: Хворь среди работников
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [helper, occupies]
+      types: [community, organization]
+      hits: parent
+      condition: "Эти люди работают тесно, вместе и подолгу?"
+      skeleton: "Среди работников пошла хворь, люди слегают один за другим, и работа редеет."
+      helps: "отделить больных, дать отдых и уход, позвать лекарей"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: crisis
+      source: ecology
+      sphere: security
+    - id: stores-vanish
+      title: Пропадают припасы
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [site]
+      types: []
+      hits: parent
+      condition: ""
+      skeleton: "Со двора работ пропадают материалы и инструмент; кто их выносит, пока неизвестно."
+      helps: "счёт и замки, ночной сторож, расспросы скупщиков"
+      needsNew: true
+      newHidden: true
+      requires: null
+      minStep: normal
+      engine: betrayal
+      source: people
+      sphere: prosperity
+    - id: sky-strike
+      title: Удар с неба
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: null
+      heavy: accident
+      from: [site]
+      types: []
+      hits: parent
+      condition: ""
+      skeleton: "В место работ ударили молния или шквал, часть сделанного разбита, после удара осталась помеха."
+      helps: "разобрать разбитое, укрыть место работ, поставить дозор за небом"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: hard
+      engine: crisis
+      source: sky
+      sphere: security
+    - id: strange-at-site
+      title: Странное на месте
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: tension
+      from: [site]
+      types: []
+      hits: parent
+      condition: ""
+      skeleton: "На месте работ проявилось странное, звук, свет или холод без видимой причины; работники держатся поодаль, пока это не объяснят."
+      helps: "найти причину, позвать жрецов и знающих, показать людям, что место безопасно"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: discovery
+      source: phenomenon
+      sphere: knowledge
+    - id: skimming
+      title: Нечистый на руку
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [site]
+      types: []
+      hits: parent
+      condition: ""
+      skeleton: "Счёт работ расходится с делом; кто-то из старших кладёт часть средств себе в карман."
+      helps: "сверить счёт с делом, расспросить поставщиков, сменить порядок выдачи"
+      needsNew: true
+      newHidden: true
+      requires: null
+      minStep: hard
+      engine: betrayal
+      source: people
+      sphere: prosperity
+    - id: claimant
+      title: Объявился хозяин
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: hindrance
+      heavy: hindrance
+      from: [site]
+      types: []
+      hits: parent
+      condition: ""
+      skeleton: "Объявился человек или род со старым правом на место работ; его люди встали на участке и ждут своего."
+      helps: "выкуп, обмен, доля в готовом"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: feud
+      source: custom
+      sphere: influence
+    - id: lair
+      title: Потревоженное логово
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: null
+      heavy: accident
+      from: [site]
+      types: []
+      hits: parent
+      condition: ""
+      skeleton: "Работы вскрыли логово опасного зверя; он разогнал людей, попортил сделанное и остался поблизости."
+      helps: "выследить или отвадить зверя, оградить место, позвать охотников"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: hard
+      engine: crisis
+      source: creature
+      sphere: security
+    - id: worker-vision
+      title: Видение работника
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: tension
+      from: [site]
+      types: []
+      hits: parent
+      condition: ""
+      skeleton: "Одному из работников было видение о том, что дело надо вести иначе; половина людей ему верит."
+      helps: "выслушать его при всех, спросить жрецов, найти в видении то, что можно исполнить"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: ideology
+      source: phenomenon
+      sphere: influence
+    - id: harvest-calls
+      title: Свои поля зовут
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [helper, occupies]
+      types: [community, settlement]
+      hits: parent
+      condition: "Эти люди кормятся со своей земли или промысла?"
+      skeleton: "Работникам пора на свои поля и промыслы; если их держать, пропадёт их урожай, если отпустить, встанет дело."
+      helps: "смены и подмена, помощь на их полях, плата вперёд"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: dilemma
+      source: ecology
+      sphere: prosperity
+    - id: two-crews
+      title: Две артели
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [helper, occupies]
+      types: [organization, community]
+      hits: parent
+      condition: "На этой работе заняты две или больше отдельных артелей или общин?"
+      skeleton: "Артели на одной работе спорят за честь и плату и мешают друг другу."
+      helps: "раздел участков, общий старший, равный счёт"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: feud
+      source: people
+      sphere: security
+    - id: one-master
+      title: Всё на одном мастере
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [helper, occupies]
+      types: [person]
+      hits: parent
+      condition: "Без умения этого человека работа встанет?"
+      skeleton: "Вся работа держится на одном мастере, а он занемог, заважничал или собрался уходить."
+      helps: "почёт и отдых мастеру, ученики при нём, запись его приёмов"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: refusal
+      source: people
+      sphere: knowledge
+    - id: no-blessing
+      title: Без благословения
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: tension
+      from: [site]
+      types: []
+      hits: parent
+      condition: ""
+      skeleton: "Служители храма объявили, что работа идёт без должного обряда, и верующие работники ждут их слова."
+      helps: "обряд на месте работ, разговор со служителями, дар храму"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: ideology
+      source: custom
+      sphere: influence
+    - id: gawkers
+      title: Толпа зевак
+      enabled: true
+      class: bound
+      when: [milestone]
+      light: tension
+      heavy: tension
+      from: [site]
+      types: []
+      hits: parent
+      condition: ""
+      skeleton: "На работу сходятся смотреть со всего города; толпа лезет под руку, и дело идёт медленнее и опаснее."
+      helps: "ограда и распорядители, место для зрителей в стороне, дни показа"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: success
+      source: people
+      sphere: security
+    - id: din
+      title: Шум и пыль
+      enabled: true
+      class: side
+      when: [milestone]
+      light: tension
+      heavy: tension
+      from: [nearby]
+      types: [district, community, settlement, building]
+      hits: role
+      condition: "Эти люди живут или трудятся так близко, что работы мешают им каждый день?"
+      skeleton: "Соседям работ нет покоя от шума, пыли и возов; терпение у них кончается."
+      helps: "тихие часы, объезд для возов, доля соседям в готовом"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: dilemma
+      source: matter
+      sphere: influence
+    - id: fouled-land
+      title: Испорченное угодье
+      enabled: true
+      class: side
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [nearby, pressures]
+      types: [resource, site, landmark]
+      hits: role
+      condition: "Отвалы, дым или стоки работ могут испортить это угодье?"
+      skeleton: "Отвалы, дым или стоки работ губят соседнее угодье; чем дальше, тем труднее его вернуть."
+      helps: "отвести стоки, сменить место отвалов, дать угодью отдых"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: crisis
+      source: ecology
+      sphere: prosperity
+    - id: custom-crossed
+      title: Задет обычай
+      enabled: true
+      class: side
+      when: [milestone]
+      light: tension
+      heavy: tension
+      from: [pressures, nearby]
+      types: [practice, policy, landmark]
+      hits: role
+      condition: "Работа идёт вразрез с этим обычаем или задевает это чтимое место?"
+      skeleton: "Работа задела старый обычай или чтимое место, и его хранители подняли голос."
+      helps: "уважить обычай обрядом, изменить ход работ, дать хранителям слово"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: ideology
+      source: custom
+      sphere: influence
+    - id: youth-drawn
+      title: Молодых сманила работа
+      enabled: true
+      class: side
+      when: [milestone]
+      light: tension
+      heavy: tension
+      from: [nearby, linked]
+      types: [organization, practice, capability]
+      hits: role
+      condition: "Этому ремеслу или службе нужна молодая смена?"
+      skeleton: "Молодые бросают прежнее ремесло ради новой работы, где плата и слава; старое остаётся без смены."
+      helps: "срок службы у новых работ, доля старому ремеслу, почёт его мастерам"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: success
+      source: people
+      sphere: knowledge
+    - id: road-worn
+      title: Разбитая дорога
+      enabled: true
+      class: side
+      when: [milestone]
+      light: tension
+      heavy: threat
+      from: [nearby, linked]
+      types: [structure, district, settlement]
+      hits: role
+      condition: "Через это возят тяжёлое для работы?"
+      skeleton: "Возы для работы разбили дорогу и мост, которыми живёт соседнее; чинить их некому."
+      helps: "починка за счёт работ, другой путь для возов, мера на груз"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: crisis
+      source: matter
+      sphere: prosperity
+    - id: good-omen
+      title: Доброе знамение
+      enabled: true
+      class: plus
+      when: [milestone]
+      light: opportunity
+      heavy: opportunity
+      from: [site]
+      types: []
+      hits: role
+      condition: ""
+      skeleton: "Во время работ случилось редкое и красивое, и люди увидели в этом улыбку покровителя; пока все воодушевлены, можно сделать больше обычного."
+      helps: "отметить знамение обрядом, позвать людей на работу"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: ideology
+      source: phenomenon
+      sphere: influence
+    - id: fair-window
+      title: Погожее окно
+      enabled: true
+      class: plus
+      when: [milestone]
+      light: opportunity
+      heavy: opportunity
+      from: [site]
+      types: []
+      hits: role
+      condition: ""
+      skeleton: "Встала редкая ровная погода, в которую работа под небом идёт вдвое скорее, пока окно открыто."
+      helps: "собрать больше рук, работать в две смены, отложить прочее"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: opportunity
+      source: sky
+      sphere: prosperity
+    - id: old-drawing
+      title: Старая запись
+      enabled: true
+      class: plus
+      when: [milestone]
+      light: opportunity
+      heavy: opportunity
+      from: [site]
+      types: []
+      hits: role
+      condition: ""
+      skeleton: "У стариков или в архиве нашлась запись о том, как такое делали прежде; если её разобрать, работа пойдёт вернее."
+      helps: "разобрать запись, расспросить стариков, опробовать старый приём"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: discovery
+      source: custom
+      sphere: knowledge
+    - id: draught-help
+      title: Подмога тяглом
+      enabled: true
+      class: plus
+      when: [milestone]
+      light: opportunity
+      heavy: opportunity
+      from: [nearby, benefits]
+      types: [settlement, community]
+      hits: role
+      condition: "У этих людей есть тягло, вьючный скот или обученные животные?"
+      skeleton: "Соседи готовы дать на работу своих волов и вьючных, если о животных позаботятся."
+      helps: "принять помощь, обеспечить корм и уход, отблагодарить хозяев"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: opportunity
+      source: creature
+      sphere: prosperity
+    - id: gifted-hand
+      title: Самородок
+      enabled: true
+      class: plus
+      when: [milestone]
+      light: opportunity
+      heavy: opportunity
+      from: [site]
+      types: []
+      hits: role
+      condition: ""
+      skeleton: "Среди работников объявился человек с редким даром к делу; если дать ему учителя и место, вырастет мастер."
+      helps: "приставить к нему наставника, дать трудную часть работы"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: discovery
+      source: people
+      sphere: knowledge
+    - id: side-vein
+      title: Попутное добро
+      enabled: true
+      class: plus
+      when: [milestone]
+      light: opportunity
+      heavy: opportunity
+      from: [site]
+      types: []
+      hits: role
+      condition: ""
+      skeleton: "Работы вскрыли попутное добро, хороший камень, глину или руду, которое можно взять заодно."
+      helps: "отрядить людей на добычу, найти добру применение"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: opportunity
+      source: matter
+      sphere: prosperity
+    - id: work-reconciles
+      title: Общее дело мирит
+      enabled: true
+      class: plus
+      when: [milestone]
+      light: opportunity
+      heavy: opportunity
+      from: [nearby, linked, helper]
+      types: [community, organization, settlement]
+      hits: role
+      condition: "У этих людей есть давняя ссора с кем-то из занятых на работе?"
+      skeleton: "На общей работе старые недруги впервые встали рядом; сейчас их можно помирить."
+      helps: "общий стол и общая часть работы, слово уважаемого посредника"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: opportunity
+      source: people
+      sphere: influence
+    - id: work-song
+      title: Песня о деле
+      enabled: true
+      class: plus
+      when: [milestone]
+      light: opportunity
+      heavy: opportunity
+      from: [site]
+      types: []
+      hits: role
+      condition: ""
+      skeleton: "О работе сложили песню, и её поют по всему острову; пока она на слуху, к делу идут люди и подношения."
+      helps: "принять пришедших, отблагодарить певцов, дать делу имя"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: success
+      source: custom
+      sphere: influence
+    - id: early-wear
+      title: Ранний износ
+      enabled: true
+      class: side
+      when: [completion]
+      light: tension
+      heavy: threat
+      from: [result]
+      types: []
+      hits: result
+      condition: "Готовое работает под нагрузкой, ветром или сыростью?"
+      skeleton: "Готовое изнашивается скорее, чем ждали; слабое место уже видно."
+      helps: "укрепить слабое место, сменить материал, назначить осмотры"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: crisis
+      source: matter
+      sphere: prosperity
+    - id: shadow-and-wind
+      title: Тень и ветер
+      enabled: true
+      class: side
+      when: [completion]
+      light: tension
+      heavy: threat
+      from: [nearby]
+      types: [district, community, settlement, resource, building]
+      hits: role
+      condition: "Готовое заслоняет этому свет, ветер или сток?"
+      skeleton: "Готовое изменило вокруг себя ветер, тень или сток, и соседнему стало хуже."
+      helps: "переделать малую часть, возместить соседям, найти им новое место"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: dilemma
+      source: sky
+      sphere: prosperity
+    - id: secret-slips
+      title: Секрет уходит
+      enabled: true
+      class: side
+      when: [completion]
+      light: clock
+      heavy: clock
+      from: [result]
+      types: [capability, practice, object, resource]
+      hits: result
+      condition: "В готовом есть умение или секрет, который можно перенять?"
+      skeleton: "Секрет нового уходит из рук его мастеров; к ближайшему сопряжению им будут владеть и соседи."
+      helps: "клятва мастеров, свой знак на изделиях, выгодный уговор с соседями"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: betrayal
+      source: custom
+      sphere: knowledge
+    - id: idle-hands
+      title: Руки без дела
+      enabled: true
+      class: side
+      when: [completion]
+      light: tension
+      heavy: threat
+      from: [helper, occupies]
+      types: [community, organization]
+      hits: role
+      condition: "Эти люди кормились этой работой?"
+      skeleton: "Работа кончилась, и те, кто ею кормился, остались без дела и заработка."
+      helps: "новое дело для артели, место при готовом, земля или ремесло"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: success
+      source: people
+      sphere: prosperity
+    - id: wonder-cult
+      title: Поклонение новому
+      enabled: true
+      class: side
+      when: [completion]
+      light: tension
+      heavy: tension
+      from: [result]
+      types: []
+      hits: result
+      condition: "Готовое выглядит дивом или чудом?"
+      skeleton: "Вокруг готового сложилось почитание, ему несут дары и ждут от него чудес; храм смотрит на это с тревогой."
+      helps: "слово храма о новом, обряд в его честь, ясный рассказ о том, как оно сделано"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: ideology
+      source: phenomenon
+      sphere: influence
+    - id: old-masters
+      title: Обида прежних первых
+      enabled: true
+      class: side
+      when: [completion]
+      light: tension
+      heavy: tension
+      from: [linked, benefits, nearby]
+      types: [person, organization]
+      hits: role
+      condition: "Эти люди считались первыми в своём деле до появления нового?"
+      skeleton: "Прежние первые в деле оказались в тени нового и копят обиду."
+      helps: "почётное место при новом, заказ по их умению, ученики"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: feud
+      source: custom
+      sphere: knowledge
+    - id: reliance
+      title: Привычка к новому
+      enabled: true
+      class: side
+      when: [completion]
+      light: clock
+      heavy: clock
+      from: [result]
+      types: []
+      hits: result
+      condition: "Городу легко привыкнуть жить за счёт готового?"
+      skeleton: "Город быстро привыкает к новому и забывает, как обходился без него; запасной путь зарастает."
+      helps: "держать старый способ в исправности, учения, запас на случай потери"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: success
+      source: custom
+      sphere: security
+    - id: lure
+      title: Приманка
+      enabled: true
+      class: side
+      when: [completion]
+      light: tension
+      heavy: threat
+      from: [result]
+      types: [resource, building, district, structure, site]
+      hits: result
+      condition: "В готовом много еды, тепла или блеска?"
+      skeleton: "Готовое манит зверей и птиц со всей округи, и они идут к нему стаями."
+      helps: "сетки и сторожа, отвлекающая подкормка в стороне, знатоки повадок"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: crisis
+      source: creature
+      sphere: prosperity
+    - id: odd-nearby
+      title: Странное рядом с новым
+      enabled: true
+      class: side
+      when: [completion]
+      light: tension
+      heavy: tension
+      from: [nearby]
+      types: [community, district, settlement]
+      hits: role
+      condition: "Эти люди живут или бывают рядом с готовым каждый день?"
+      skeleton: "Рядом с готовым людям стало сниться, слышаться или видеться странное; они хотят знать, что это."
+      helps: "наблюдение и записи, слово жрецов, поиск причины в самом устройстве"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: discovery
+      source: phenomenon
+      sphere: knowledge
+    - id: open-to-sky
+      title: Под ударом неба
+      enabled: true
+      class: side
+      when: [completion]
+      light: clock
+      heavy: clock
+      from: [result]
+      types: [building, structure, landmark, resource]
+      hits: result
+      condition: "Готовое стоит открыто, на высоте или у кромки?"
+      skeleton: "Готовое стоит под ветром и грозой без защиты; первая большая буря его проверит."
+      helps: "растяжки и щиты, отвод молнии, укрытие на время бури"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: normal
+      engine: crisis
+      source: sky
+      sphere: security
+    - id: pupils-come
+      title: Тянутся ученики
+      enabled: true
+      class: plus
+      when: [completion]
+      light: opportunity
+      heavy: opportunity
+      from: [result]
+      types: []
+      hits: role
+      condition: "При готовом можно чему-то учиться?"
+      skeleton: "К готовому тянутся ученики со всего острова; если дать им место и наставника, вырастет школа."
+      helps: "наставник и кров ученикам, порядок учения"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: success
+      source: people
+      sphere: knowledge
+    - id: ask-for-same
+      title: Просят такое же
+      enabled: true
+      class: plus
+      when: [completion]
+      light: opportunity
+      heavy: opportunity
+      from: [nearby, benefits]
+      types: [settlement, district, community]
+      hits: role
+      condition: "Этим людям пригодилось бы такое же?"
+      skeleton: "Соседи увидели готовое и просят помочь поставить такое же у себя, своими руками и припасом."
+      helps: "послать к ним мастеров, дать чертёж, договориться о доле"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: success
+      source: people
+      sphere: prosperity
+    - id: leftovers
+      title: Остатки припаса
+      enabled: true
+      class: plus
+      when: [completion]
+      light: opportunity
+      heavy: opportunity
+      from: [site]
+      types: []
+      hits: role
+      condition: ""
+      skeleton: "После работы остались добрый припас, леса и сработавшаяся артель; пока она не разошлась, их можно пустить на малое доброе дело."
+      helps: "выбрать малое дело рядом, оставить артели старшего"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: opportunity
+      source: matter
+      sphere: prosperity
+    - id: new-feast
+      title: День нового
+      enabled: true
+      class: plus
+      when: [completion]
+      light: opportunity
+      heavy: opportunity
+      from: [result]
+      types: []
+      hits: role
+      condition: ""
+      skeleton: "Люди хотят отмечать день, когда дело закончили; если их поддержать, у города появится новый праздник."
+      helps: "угощение и обряд, место празднику в городском обычае"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: success
+      source: custom
+      sphere: influence
+    - id: goods-for-meeting
+      title: Товар к сопряжению
+      enabled: true
+      class: plus
+      when: [completion]
+      light: opportunity
+      heavy: opportunity
+      from: [result]
+      types: [resource, capability, practice, object, organization]
+      hits: role
+      condition: "Плоды готового можно обменивать?"
+      skeleton: "Плоды готового можно припасти к ближайшему сопряжению; такого у соседей нет."
+      helps: "копить запас, найти знатоков чужого спроса, беречь качество"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: opportunity
+      source: sky
+      sphere: prosperity
+    - id: self-watch
+      title: Сами встали в дозор
+      enabled: true
+      class: plus
+      when: [completion]
+      light: opportunity
+      heavy: opportunity
+      from: [nearby, benefits]
+      types: [community, district, settlement]
+      hits: role
+      condition: "Эти люди дорожат готовым?"
+      skeleton: "Соседи готового сами вызвались его беречь; если дать им устав и старшего, выйдет добрая стража."
+      helps: "устав и старший, знак от города, общее учение со стражей"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: opportunity
+      source: people
+      sphere: security
+    - id: after-sickness
+      title: Хворь после беды
+      enabled: true
+      class: side
+      when: [failure]
+      light: tension
+      heavy: threat
+      from: [struck, nearby]
+      types: [community, district, settlement]
+      hits: role
+      condition: "После беды эти люди живут в тесноте, грязи или холоде?"
+      skeleton: "После беды среди пострадавших пошла хворь."
+      helps: "чистая вода и кров, лекари, отделение больных"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: crisis
+      source: ecology
+      sphere: security
+    - id: patron-doubted
+      title: Ропот на покровителя
+      enabled: true
+      class: side
+      when: [failure]
+      light: tension
+      heavy: tension
+      from: [struck, nearby]
+      types: [community, district, settlement, organization]
+      hits: role
+      condition: "Эти люди ждали, что покровитель отведёт беду?"
+      skeleton: "Пострадавшие спрашивают, где был покровитель, и обходят храм стороной."
+      helps: "слово жреца к пострадавшим, дело, в котором видна забота покровителя, общий обряд"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: ideology
+      source: custom
+      sphere: influence
+    - id: skill-fading
+      title: Умение уходит
+      enabled: true
+      class: side
+      when: [failure]
+      light: clock
+      heavy: clock
+      from: [struck]
+      types: [practice, capability, organization, person]
+      hits: role
+      condition: "Беда ударила по тем, кто владел редким умением?"
+      skeleton: "Беда выбила тех, кто знал дело; уцелевшее знание держится на немногих и уходит."
+      helps: "собрать уцелевших мастеров, записать приёмы, дать учеников"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: crisis
+      source: custom
+      sphere: knowledge
+    - id: scavengers
+      title: Падальщики
+      enabled: true
+      class: side
+      when: [failure]
+      light: tension
+      heavy: threat
+      from: [struck]
+      types: [site, district, settlement, resource, building]
+      hits: role
+      condition: "После беды здесь остались развалины, падаль или брошенные припасы?"
+      skeleton: "На разорённое место сошлись падальщики и одичавшие псы и держат людей поодаль."
+      helps: "облава, уборка падали и припасов, костры и сторожа"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: crisis
+      source: creature
+      sphere: security
+    - id: leaving
+      title: Уходят прочь
+      enabled: true
+      class: side
+      when: [failure]
+      light: clock
+      heavy: clock
+      from: [struck]
+      types: [community, district, settlement]
+      hits: role
+      condition: "Этим людям есть куда уйти?"
+      skeleton: "Пострадавшие собирают пожитки и уходят из этих мест; пустое место быстро дичает."
+      helps: "помощь на первое время, твёрдое слово о восстановлении, работа на месте"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: refusal
+      source: people
+      sphere: prosperity
+    - id: profiteers
+      title: Наживаются на беде
+      enabled: true
+      class: side
+      when: [failure]
+      light: tension
+      heavy: tension
+      from: [struck, nearby]
+      types: [community, district, settlement]
+      hits: role
+      condition: "Этим людям после беды остро нужно то, чего мало?"
+      skeleton: "На беде наживаются; нужное пострадавшим продают втридорога."
+      helps: "твёрдая цена, раздача из городских запасов, суд над барышниками"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: betrayal
+      source: people
+      sphere: prosperity
+    - id: shaky-ruins
+      title: Шаткие развалины
+      enabled: true
+      class: side
+      when: [failure]
+      light: tension
+      heavy: threat
+      from: [struck]
+      types: [building, structure, district, site]
+      hits: role
+      condition: "После беды здесь остались шаткие стены, завалы или провалы?"
+      skeleton: "То, что беда не доломала, едва держится и грозит рухнуть на людей."
+      helps: "подпорки и ограждение, разбор опасного, запрет ходить без нужды"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: crisis
+      source: matter
+      sphere: security
+    - id: after-signs
+      title: Странное после беды
+      enabled: true
+      class: side
+      when: [failure]
+      light: tension
+      heavy: tension
+      from: [struck]
+      types: [site, district, building, structure, landmark, settlement]
+      hits: role
+      condition: ""
+      skeleton: "После беды на её месте видят и слышат странное; люди обходят место стороной и говорят о неупокоенных."
+      helps: "обряд поминовения, ночной дозор с жрецом, поиск простой причины"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: ideology
+      source: phenomenon
+      sphere: knowledge
+    - id: grief-unites
+      title: Беда сплотила
+      enabled: true
+      class: plus
+      when: [failure]
+      light: opportunity
+      heavy: opportunity
+      from: [struck, nearby]
+      types: [community, district, settlement, organization]
+      hits: role
+      condition: "Эти люди прежде жили врозь или в ссоре с соседями?"
+      skeleton: "Общая беда свела вместе тех, кто жил врозь; пока это чувство живо, их можно связать общим делом."
+      helps: "общая работа и общий стол, уговор, скреплённый при свидетелях"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: opportunity
+      source: people
+      sphere: influence
+    - id: cleared-ground
+      title: Расчищенное место
+      enabled: true
+      class: plus
+      when: [failure]
+      light: opportunity
+      heavy: opportunity
+      from: [struck]
+      types: [site, district, building, structure, resource]
+      hits: role
+      condition: "Беда расчистила место, которое было занято старым и тесным?"
+      skeleton: "Беда снесла старое и тесное; на расчищенном месте можно поставить лучшее, пока его не заняли как попало."
+      helps: "новый чертёж места, запрет строить наспех, помощь прежним хозяевам"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: opportunity
+      source: matter
+      sphere: prosperity
+    - id: under-rubble
+      title: Открылось под обломками
+      enabled: true
+      class: plus
+      when: [failure]
+      light: opportunity
+      heavy: opportunity
+      from: [struck]
+      types: [site, district, building, structure, landmark]
+      hits: role
+      condition: ""
+      skeleton: "Под обломками открылось то, о чём не знали, старая кладка, ход или тайник."
+      helps: "осторожно разобрать, позвать знающих, поставить сторожа"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: discovery
+      source: matter
+      sphere: knowledge
+    - id: far-help
+      title: Помощь дальних
+      enabled: true
+      class: plus
+      when: [failure]
+      light: opportunity
+      heavy: opportunity
+      from: [nearby]
+      types: [settlement, community, organization]
+      hits: role
+      condition: "Этих людей беда обошла, и им есть чем помочь?"
+      skeleton: "Те, кого беда обошла, готовы помочь пострадавшим руками и припасом, если их позвать и направить."
+      helps: "позвать, дать старшего, отблагодарить при народе"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: opportunity
+      source: people
+      sphere: security
+    - id: fresh-soil
+      title: Земля после беды
+      enabled: true
+      class: plus
+      when: [failure]
+      light: opportunity
+      heavy: opportunity
+      from: [struck]
+      types: [resource, site]
+      hits: role
+      condition: "Беда прошла по земле, лесу или лугу?"
+      skeleton: "На месте беды земля отдохнула и удобрилась; если засеять её сейчас, она даст больше прежнего."
+      helps: "семена и руки, знающие земледельцы, охрана всходов"
+      needsNew: false
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: opportunity
+      source: ecology
+      sphere: prosperity
+    - id: hour-hero
+      title: Человек часа
+      enabled: true
+      class: plus
+      when: [failure]
+      light: opportunity
+      heavy: opportunity
+      from: [struck, nearby]
+      types: [community, organization, district, settlement]
+      hits: role
+      condition: "Среди этих людей мог найтись тот, кто в беде повёл остальных?"
+      skeleton: "В беде один человек повёл за собой остальных; ему верят, и его можно поставить на дело."
+      helps: "найти его, дать ему место и людей, почтить при народе"
+      needsNew: true
+      newHidden: false
+      requires: null
+      minStep: safe
+      engine: success
+      source: people
+      sphere: security
 
 # Посев историй: до скольких живых историй досаживать город (без строек игрока)
 # и как часто проверять. Первая история приходит вскоре после генезиса.

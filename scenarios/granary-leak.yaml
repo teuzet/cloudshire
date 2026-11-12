@@ -1,0 +1,48 @@
+id: granary-leak
+title: Амбар тает
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: betrayal, source: people, sphere: prosperity }
+pitch: По книгам городской амбар полон, а на деле зерна в нём на треть меньше; замки целы, крыс нет.
+
+objects:
+  - id: granary
+    type: building
+    name: Городской амбар
+    description: Главный запас зерна на случай неурожая. Ключи у смотрителя, счёт ведёт казённый писец.
+    weight: MINOR
+    statProfile: { prosperity: 1, security: 1 }
+  - id: thief
+    type: person
+    name: Смотритель амбара
+    description: Смотритель год за годом вывозил зерно ночами через заднюю калитку и продавал мельнику дальней деревни, а в книгах писал полную меру. Деньги вложил в дом на имя сестры.
+    refs: [granary]
+    hidden: true
+
+fronts:
+  - id: where-grain
+    title: Куда уходит зерно
+    description: Узнать, как из запертого амбара пропала треть запаса.
+    impact: MINOR
+    beatCount: 2
+    refs: [granary]
+    alignment: |
+      Двигает дело перемер зерна, сверка книг с возами, расспросы ночных сторожей и возчиков.
+    stake:
+      uncover: { target: thief }
+    clues:
+      - id: gate
+        fact: Петли задней калитки смазаны, а колея от неё свежая.
+        alignment: Осмотр амбара и двора.
+      - id: house
+        fact: Сестра смотрителя купила каменный дом, хотя вдовеет и не торгует.
+        alignment: Расспросы о тех, кто близок к амбару.
+  - id: lean-store
+    title: Запаса не хватит на чёрный день
+    description: Если неурожай придёт сейчас, амбар опустеет вдвое раньше, чем думает город.
+    impact: MINOR
+    drift: SLOW
+    refs: [granary]
+    alignment: |
+      Отводят беду пополнение запаса, закупка у деревень, мера на выдачу, новый порядок ключей и счёта.
+    stake:
+      stats: { prosperity: -3, security: -1 }

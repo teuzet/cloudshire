@@ -1,0 +1,30 @@
+id: ray-worshippers
+title: Дети небесных зверей
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: ideology, source: creature, sphere: influence }
+pitch: После пролёта огромной стаи небесных птиц в городе появились люди, которые считают всякую крылатую тварь посланцем покровителя и требуют запретить охоту и птичьи дворы.
+
+objects:
+  - id: faithful
+    type: community
+    name: Дети крыла
+    description: Горожане с перьями в волосах. Кормят диких птиц на площадях, выпускают чужих кур и гусей и срывают силки.
+  - id: fowlers
+    type: organization
+    name: Птичники и птицеловы
+    description: Те, кто кормит город птицей и яйцом. Теряют товар и терпение.
+    weight: MINOR
+    statProfile: { prosperity: 1 }
+
+fronts:
+  - id: wings-row
+    title: Дети крыла против птичников
+    form: tension
+    description: Птичьи дворы стоят открытые, птицеловов бьют на тропах. Птичники вооружаются, дети крыла готовы пострадать за веру.
+    impact: SIGNIFICANT
+    drift: STEADY
+    refs: [faithful, fowlers]
+    alignment: |
+      Мирят город слово храма о том, что угодно покровителю, заповедные скалы для диких птиц, честь домашней птице как дару.
+    stake:
+      stats: { influence: -3, prosperity: -2, security: -1 }

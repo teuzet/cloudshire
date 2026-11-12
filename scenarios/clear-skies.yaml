@@ -1,0 +1,40 @@
+id: clear-skies
+title: Долгое вёдро
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: success, source: sky, sphere: prosperity }
+pitch: Остров полгода идёт под чистым небом; урожай и сушка небывалые, но ручьи мелеют, а трава на выгонах стала как порох.
+
+objects:
+  - id: sun
+    type: resource
+    name: Ясное небо
+    description: Ни облака, ни тумана месяц за месяцем. Плоды сладкие, сено душистое, кирпич сохнет за день.
+    weight: MINOR
+    statProfile: { prosperity: 2 }
+
+fronts:
+  - id: dry-fire
+    title: Сухая трава ждёт искры
+    description: Выгоны и лес сухие до звона. Один костёр пастуха, и огонь пойдёт на деревни.
+    impact: SIGNIFICANT
+    drift: STEADY
+    refs: [sun]
+    alignment: |
+      Отводят беду опаханные полосы вокруг деревень и леса, запрет на костры, дозоры на вышках, бочки и лопаты наготове.
+    stake:
+      stats: { security: -3, prosperity: -3 }
+  - id: sun-works
+    title: Солнечные промыслы
+    form: deed
+    description: Пока небо чистое, можно насушить плодов, рыбы из прудов и кирпича на годы вперёд и научиться делать это всегда.
+    impact: MINOR
+    refs: [sun]
+    alignment: |
+      Двигают дело большие сушильни, соль и зола для заготовок, общие склады.
+    stake:
+      create:
+        type: practice
+        name: Большие сушильни
+        description: Город сушит и хранит плоды и овощи впрок.
+        weight: MINOR
+        statProfile: { prosperity: 1, security: 1 }

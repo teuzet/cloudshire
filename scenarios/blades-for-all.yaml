@@ -1,0 +1,44 @@
+id: blades-for-all
+title: Клинок у каждого
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: success, source: matter, sphere: security }
+pitch: Оружейники города научились ковать хорошие дешёвые клинки; теперь нож или тесак носит каждый подмастерье, и любая ссора кончается кровью.
+
+objects:
+  - id: armourers
+    type: organization
+    name: Оружейный ряд
+    description: Кузнецы, чьи клинки стали вдвое дешевле и вдвое лучше. Торгуют бойко и не спрашивают, кому.
+    weight: SIGNIFICANT
+    statProfile: { prosperity: 1, security: 1 }
+
+fronts:
+  - id: knife-fights
+    title: Ссоры кончаются поножовщиной
+    form: tension
+    description: Что ни неделя, то зарезанный в кабаке или на рынке. Кварталы собирают своих парней с тесаками.
+    impact: SIGNIFICANT
+    drift: STEADY
+    refs: [armourers]
+    alignment: |
+      Унимают город порядок, где и кому носить оружие, клинки в оружейных под замком до тревоги, суд, скорый для всех одинаково.
+      Отнимать оружие у одних кварталов и оставлять другим опасно.
+    stake:
+      stats: { security: -5, influence: -1 }
+  - id: city-levy
+    title: Городские дружины
+    form: deed
+    description: Раз клинки есть у всех, можно научить людей держать строй. Обученные кварталы станут городу защитой.
+    impact: MINOR
+    refs: [armourers]
+    closes:
+      - { target: knife-fights, share: 0.4 }
+    alignment: |
+      Двигают дело ученья по кварталам под рукой маршала, старшие из уважаемых мастеров, общий устав.
+    stake:
+      create:
+        type: capability
+        name: Квартальные дружины
+        description: Вооружённые и обученные горожане встают в строй по тревоге.
+        weight: MINOR
+        statProfile: { security: 2 }

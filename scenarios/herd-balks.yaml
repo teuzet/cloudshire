@@ -1,0 +1,45 @@
+id: herd-balks
+title: Стада не идут на дальний луг
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: refusal, source: creature, sphere: security }
+pitch: Скот упирается и ревёт у оврага перед дальним пастбищем; пастухи не могут загнать его туда ни кнутом, ни солью.
+
+objects:
+  - id: pasture
+    type: resource
+    name: Дальнее пастбище
+    description: Лучший луг острова за глубоким оврагом. Без него стадам тесно на ближних выгонах.
+    weight: MINOR
+    statProfile: { prosperity: 1 }
+  - id: lurker
+    type: threat
+    name: Туманник в овраге
+    description: В овраге поселился крупный хищник, похожий на серую рысь, которого приносит редкими туманами. Он прячется в норах под корнями и режет отбившийся скот по ночам.
+    refs: [pasture]
+    hidden: true
+
+fronts:
+  - id: what-scares
+    title: Чего боится скот
+    description: Узнать, что не пускает стада через овраг.
+    impact: MINOR
+    beatCount: 1
+    refs: [pasture]
+    alignment: |
+      Двигает дело осмотр оврага с собаками, ночные дозоры пастухов, поиск следов и костей.
+    stake:
+      uncover: { target: lurker }
+    clues:
+      - id: bones
+        fact: Под корнями в овраге лежат обглоданные кости овец, пропавших за последний месяц.
+        alignment: Осмотр оврага и поиск следов.
+  - id: pastures-thin
+    title: Ближние выгоны выедены
+    description: Стада топчутся на ближних лугах и выедают их дочиста. Скоро кормить скот будет нечем.
+    impact: MINOR
+    drift: STEADY
+    refs: [pasture]
+    alignment: |
+      Отводят беду запас сена, очередь выпаса, обходная тропа к дальнему лугу, облава на зверя.
+    stake:
+      stats: { prosperity: -3, security: -1 }

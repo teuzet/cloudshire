@@ -1,0 +1,31 @@
+id: warm-rift
+title: Тёплая расщелина
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: opportunity, source: phenomenon, sphere: prosperity }
+pitch: В скалах за городом открылась расщелина, из которой ровно тянет тёплым воздухом; вокруг неё трава зелёная и густая даже в самые холодные туманы.
+
+objects:
+  - id: rift
+    type: site
+    name: Тёплая расщелина
+    description: Узкая щель в скале, из которой день и ночь идёт тёплый сухой воздух. Камни вокруг неё не остывают.
+    weight: MINOR
+    statProfile: { knowledge: 1 }
+
+fronts:
+  - id: hothouses
+    title: Тёплые сады у расщелины
+    form: deed
+    description: Если подвести тепло под крышу, можно растить нежные плоды и лечебные травы, которые на острове прежде не вызревали, и сушить зерно в сырую пору.
+    impact: SIGNIFICANT
+    refs: [rift]
+    alignment: |
+      Двигают дело каменные короба для тёплого воздуха, крытые гряды, опыты садовников с привозными семенами.
+    stake:
+      create:
+        type: structure
+        name: Тёплые сады
+        description: Крытые сады у расщелины, где круглый год растут нежные плоды и травы.
+        weight: SIGNIFICANT
+        statProfile: { prosperity: 2, knowledge: 1 }
+        refs: [rift]

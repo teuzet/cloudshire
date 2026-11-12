@@ -1,0 +1,29 @@
+id: untouched-earth
+title: Не рань землю
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: ideology, source: ecology, sphere: prosperity }
+pitch: После обвала в каменоломне по деревням пошло учение, что остров живой и каждая выработка это рана; люди садятся перед кирками и заваливают шурфы.
+
+objects:
+  - id: keepers
+    type: community
+    name: Берегущие землю
+    description: Деревенские женщины и старики, а с ними часть каменотёсов. Сидят у входов в выработки и поют.
+  - id: quarries
+    type: resource
+    name: Каменоломни и рудные ямы
+    description: Всё, из чего город строит и куёт.
+    weight: SIGNIFICANT
+    statProfile: { prosperity: 2 }
+
+fronts:
+  - id: quarries-stop
+    title: Каменоломни встают
+    description: Половина выработок закрыта живой стеной. Если не найти общего языка, город останется без камня и руды, либо прольёт кровь у штолен.
+    impact: SIGNIFICANT
+    drift: STEADY
+    refs: [keepers, quarries]
+    alignment: |
+      Находят общий язык обряд перед началом работ, засыпка и засадка выбранных ям, запрет копать у кромки и под деревнями, голос берегущих в выборе мест.
+    stake:
+      stats: { prosperity: -4, influence: -2 }

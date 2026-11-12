@@ -1,0 +1,32 @@
+id: boom-village
+title: Разбогатевшая деревня
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: success, source: people, sphere: influence }
+pitch: Деревня у новой жилы за несколько лет стала богаче иных городских кварталов; она завела своих старшин, свой суд и перестала слать в город подать.
+
+objects:
+  - id: village
+    type: settlement
+    name: Рудная деревня
+    description: Бывшая деревушка в двадцать дворов, теперь шумный посёлок с каменными домами, кабаками и своими стражниками.
+    weight: SIGNIFICANT
+    statProfile: { prosperity: 2 }
+  - id: elders
+    type: organization
+    name: Старшины рудной деревни
+    description: Разбогатевшие рудокопы. Считают, что город только берёт, и хотят говорить с ним на равных.
+    refs: [village]
+
+fronts:
+  - id: village-breaks
+    title: Деревня отбивается от рук
+    form: tension
+    description: Подать не идёт второй год, городских сборщиков выставили за околицу. Другие деревни смотрят, чем это кончится.
+    impact: SIGNIFICANT
+    drift: SLOW
+    refs: [village, elders]
+    alignment: |
+      Удерживают деревню место её старшинам в городском совете, уговор о доле и защите, общие дела с городом.
+      Сборщики со стражей поднимут посёлок на дыбы.
+    stake:
+      stats: { influence: -4, prosperity: -3 }

@@ -1,0 +1,41 @@
+id: giant-bones
+title: Кости в обрыве
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: discovery, source: creature, sphere: knowledge }
+pitch: После осыпи в обрыве открылись кости существа длиной с городскую улицу; таких зверей никто из живущих не видел.
+
+objects:
+  - id: bones
+    type: landmark
+    name: Кости великана
+    description: Рёбра высотой с дом и позвонки в обхват торчат из свежего обрыва у кромки. Кость лёгкая и звонкая, как сухое дерево.
+    weight: MINOR
+    statProfile: { knowledge: 1, influence: 1 }
+
+fronts:
+  - id: dig-bones
+    title: Вынуть кости из обрыва
+    form: deed
+    description: Обрыв осыпается, и кости уходят в бездну по одной. Если их вынуть и собрать, город получит диво, какого нет ни на одном острове.
+    impact: SIGNIFICANT
+    refs: [bones]
+    alignment: |
+      Двигают дело леса и люльки над обрывом, осторожная выемка, зарисовка каждой кости на месте.
+      Помогают мастера, привычные к работе над пустотой.
+    stake:
+      create:
+        type: landmark
+        name: Остов небесного великана
+        description: Собранный остов огромного существа стоит в городе; на него приходят смотреть и по нему учат.
+        weight: SIGNIFICANT
+        statProfile: { knowledge: 2, influence: 1 }
+  - id: bones-fall
+    title: Обрыв уносит кости
+    description: Каждый дождь съедает кусок обрыва. Ещё несколько осыпей, и от великана ничего не останется.
+    impact: MINOR
+    drift: STEADY
+    refs: [bones]
+    alignment: |
+      Удерживают кости подпорки и плетни на обрыве, отвод воды, срочная выемка самого ценного.
+    stake:
+      delete: { target: bones }

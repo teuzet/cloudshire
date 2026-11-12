@@ -1,0 +1,45 @@
+id: seed-or-bread
+title: Посевное зерно
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: dilemma, source: ecology, sphere: prosperity }
+pitch: После двух тощих урожаев в амбарах осталось только посевное зерно; его хватит либо накормить город до жатвы, либо засеять поля.
+
+objects:
+  - id: seed
+    type: resource
+    name: Посевной запас
+    description: Отборное зерно под печатью казначея. Съесть его значит остаться без следующего урожая.
+    weight: MINOR
+    statProfile: { prosperity: 1 }
+
+fronts:
+  - id: hungry-months
+    title: Голодные месяцы
+    description: До жатвы далеко, хлеба мало. Если город не найдёт, чем кормиться, люди вскроют посевной амбар сами.
+    impact: SIGNIFICANT
+    drift: STEADY
+    refs: [seed]
+    alignment: |
+      Отводят беду мера на хлеб для всех без изъятия, лесной и луговой корм, общие котлы, охрана посевного зерна.
+    stake:
+      stats: { prosperity: -4, security: -2 }
+    events:
+      - id: lock
+        description: На дверях посевного амбара нашли следы лома; сторож клянётся, что спал.
+  - id: quick-crop
+    title: Быстрый урожай
+    form: deed
+    description: Огородники говорят, что репа и горох на городских пустырях дадут еду за два месяца, если посадить их сейчас и всем миром.
+    impact: MINOR
+    refs: [seed]
+    closes:
+      - { target: hungry-months, share: 0.5 }
+    alignment: |
+      Двигают дело раздача пустырей под огороды, семена скороспелых овощей, работа всех кварталов.
+    stake:
+      create:
+        type: practice
+        name: Городские огороды
+        description: Кварталы растят овощи на пустырях и крышах.
+        weight: MINOR
+        statProfile: { prosperity: 1 }

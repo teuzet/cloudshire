@@ -1,0 +1,47 @@
+id: sick-quarter
+title: Заражённый квартал
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: dilemma, source: ecology, sphere: security }
+pitch: В тесном квартале кожевников началась заразная язва; лекари просят запереть квартал, а в нём три тысячи человек и вся выделка кож.
+
+objects:
+  - id: quarter
+    type: district
+    name: Квартал кожевников
+    description: Тесный квартал у ручья, где мочат и мнут кожи. Дома стоят стена к стене, люди живут по десять в комнате.
+    weight: MINOR
+    statProfile: { prosperity: 1 }
+  - id: sores
+    type: threat
+    name: Кожевенная язва
+    description: Чёрные язвы на руках и шее, жар, и на десятый день половина больных умирает. Переходит через сырые шкуры и общую посуду.
+    weight: MINOR
+    statProfile: { security: -1 }
+    refs: [quarter]
+
+fronts:
+  - id: plague-spreads
+    title: Язва выйдет из квартала
+    description: Больных всё больше. Если язву не удержать в квартале и не задавить там, она пойдёт по всему городу.
+    impact: MAJOR
+    drift: STEADY
+    refs: [quarter, sores]
+    alignment: |
+      Сдерживают язву отделение больных от здоровых, сжигание заражённых шкур, еда и уход для запертых.
+      Помогают лекари, которые не боятся войти в квартал.
+    stake:
+      stats: { security: -5, prosperity: -3 }
+    events:
+      - id: gate
+        description: Ночью из квартала через стену ушла семья с больным ребёнком; где они теперь, никто не знает.
+  - id: quarter-riot
+    title: Запертые ломают ворота
+    form: tension
+    description: Здоровые в квартале не хотят умирать вместе с больными. Если о них забудут, они выйдут силой.
+    impact: MINOR
+    drift: FAST
+    refs: [quarter]
+    alignment: |
+      Удерживают людей хлеб и вода у ворот каждый день, вести о родных, выход для тех, кто отсидел срок здоровым.
+    stake:
+      stats: { security: -2, influence: -2 }

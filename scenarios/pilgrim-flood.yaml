@@ -1,0 +1,41 @@
+id: pilgrim-flood
+title: Место чуда
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: success, source: phenomenon, sphere: influence }
+pitch: У родника в роще исцелился слепой, и теперь туда идёт весь остров; паломники вытоптали рощу, торговцы ставят лотки, родник мутнеет.
+
+objects:
+  - id: spring
+    type: landmark
+    name: Родник прозревшего
+    description: Маленький родник под старым вязом. После исцеления слепого у него день и ночь стоит очередь.
+    weight: MINOR
+    statProfile: { influence: 2 }
+  - id: pilgrims
+    type: community
+    name: Паломники к роднику
+    description: Сотни больных и любопытных со всего острова. Ночуют прямо в роще, жгут костры и ждут своей очереди.
+    refs: [spring]
+
+fronts:
+  - id: spring-trampled
+    title: Родник затаптывают
+    description: Вяз обдирают на щепки, берег родника превратился в грязь, вода идёт мутная. Ещё немного, и святое место станет помойкой.
+    impact: MINOR
+    drift: STEADY
+    refs: [spring, pilgrims]
+    alignment: |
+      Сберегают родник мощёная тропа и ограда, смотрители, порядок очереди, ночлег для паломников в стороне от рощи.
+    stake:
+      modify: { target: spring, intent: Родник затоптан и замутнён, старый вяз погиб. }
+  - id: spring-claim
+    title: Кому принадлежит чудо
+    form: tension
+    description: Храм, хозяин рощи и ближняя деревня каждый объявили родник своим и берут с паломников плату. До драки один шаг.
+    impact: MINOR
+    drift: STEADY
+    refs: [spring, pilgrims]
+    alignment: |
+      Мирят стороны общий смотритель, доля каждому, свободный доступ бедным.
+    stake:
+      stats: { influence: -3, security: -1 }

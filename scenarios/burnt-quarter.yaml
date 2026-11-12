@@ -1,0 +1,47 @@
+id: burnt-quarter
+title: После большого пожара
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: crisis, source: matter, sphere: security }
+pitch: Ремесленный квартал выгорел за одну ночь; тысяча человек осталась на пепелище без крова и инструмента.
+
+objects:
+  - id: ashes
+    type: site
+    name: Пепелище ремесленного квартала
+    description: Чёрные остовы домов и мастерских. Между ними бродят погорельцы и копаются в золе.
+    weight: MINOR
+    statProfile: { prosperity: -1 }
+  - id: burnt
+    type: community
+    name: Погорельцы
+    description: Бондари, шорники, медники с семьями. Потеряли дома и инструмент, но руки и умение при них.
+    refs: [ashes]
+
+fronts:
+  - id: rebuild
+    title: Отстроить квартал
+    form: deed
+    description: Квартал можно поднять заново, на этот раз с каменными стенами и широкими проездами, чтобы огонь больше не шёл от дома к дому.
+    impact: SIGNIFICANT
+    refs: [ashes, burnt]
+    alignment: |
+      Двигают дело камень и лес от города, общий труд погорельцев, новый чертёж улиц, инструмент в долг.
+    stake:
+      create:
+        type: district
+        name: Каменный ремесленный квартал
+        description: Отстроенный квартал с каменными стенами и широкими проездами.
+        weight: SIGNIFICANT
+        statProfile: { prosperity: 2, security: 1 }
+        refs: [burnt]
+  - id: burnt-drift
+    title: Погорельцы расходятся
+    form: tension
+    description: Люди ночуют под навесами и теряют терпение. Мастера уходят в деревни, а те, кто остаётся, озлобляются.
+    impact: MINOR
+    drift: FAST
+    refs: [burnt]
+    alignment: |
+      Удерживают людей кров на первое время, еда, работа на разборе пепелища, твёрдое слово о том, что квартал будет.
+    stake:
+      stats: { prosperity: -2, influence: -2 }

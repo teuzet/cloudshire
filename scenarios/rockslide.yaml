@@ -1,0 +1,37 @@
+id: rockslide
+title: Обвал на каменной дороге
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: crisis, source: matter, sphere: prosperity }
+pitch: Склон сошёл на единственную дорогу к каменоломням и угольным ямам; город отрезан от камня и топлива.
+
+objects:
+  - id: slide
+    type: threat
+    name: Завал на каменной дороге
+    description: Сотня шагов дороги под глыбами и глиной. Склон над завалом ещё дышит и сыплет камни.
+    weight: MINOR
+    statProfile: { prosperity: -1 }
+
+fronts:
+  - id: clear-road
+    title: Пробить дорогу
+    form: deed
+    description: Завал можно разобрать или обойти новой тропой. И то и другое требует рук и крепи, а склон может сойти снова.
+    impact: SIGNIFICANT
+    refs: [slide]
+    closes:
+      - { target: fuel-out, share: 0.8 }
+    alignment: |
+      Двигают дело разбор завала сверху, подпорные стенки, обходная тропа для вьюков, дозорный на склоне.
+    stake:
+      delete: { target: slide }
+  - id: fuel-out
+    title: Уголь в городе кончается
+    description: Кузни и пекарни жгут последние запасы. Если дорога не откроется, встанут печи.
+    impact: SIGNIFICANT
+    drift: STEADY
+    refs: [slide]
+    alignment: |
+      Отводят беду вьючные тропы, дрова из ближнего леса, мера на уголь для кузен и пекарен.
+    stake:
+      stats: { prosperity: -5 }

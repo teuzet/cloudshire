@@ -19,7 +19,7 @@ fronts:
   - id: tame-rays
     title: Приручить скатов
     form: deed
-    description: Скаты не злые и подпускают людей, если подходить без страха. Приручённые скаты могли бы носить людей и грузы.
+    description: Скаты не злые и подпускают людей, если подходить без страха. Приручённые скаты могли бы носить людей вдоль кромки и под днище острова.
     impact: SIGNIFICANT
     refs: [rays, nests]
     alignment: |
@@ -28,7 +28,7 @@ fronts:
       create:
         type: capability
         name: Наездники на скатах
-        description: Люди города умеют подзывать скатов и летать на них.
+        description: Люди города умеют подзывать скатов и кружить на них вдоль кромки острова.
         weight: SIGNIFICANT
         statProfile: { security: 1, prosperity: 1, knowledge: 1 }
         refs: [rays]
@@ -44,4 +44,4 @@ fronts:
       stats: { security: -3 }
     events:
       - id: rocks
-        description: С днища сорвался большой камень, едва не задев нижний причал.
+        description: С днища сорвался большой камень, едва не задев подвесные мостки у кромки.

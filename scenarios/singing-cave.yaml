@@ -1,0 +1,43 @@
+id: singing-cave
+title: Поющая пещера
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: discovery, source: phenomenon, sphere: prosperity }
+pitch: Пастухи нашли в скалах пещеру, которая поёт на ветру; камень в ней звенит как бронза.
+
+objects:
+  - id: cave
+    type: site
+    name: Поющая пещера
+    description: Пещера в скалах дальнего склона. Когда ветер идёт с востока, она гудит низким чистым голосом, слышным за версту.
+    weight: MINOR
+    statProfile: { knowledge: 1 }
+
+fronts:
+  - id: ringing-stone
+    title: Звонкий камень
+    form: deed
+    description: Камень из пещеры звенит под молотком. Мастера думают, что из него выйдут гонги, плиты для колоколен и точильные круги редкой твёрдости.
+    impact: SIGNIFICANT
+    refs: [cave]
+    alignment: |
+      Двигают дело пробная добыча малыми плитами, опыты камнерезов и литейщиков, дорога к пещере.
+      Помогает бережность, чтобы пещера сохранила голос.
+    stake:
+      create:
+        type: resource
+        name: Звонкий камень
+        description: Город добывает и режет звонкий камень из поющей пещеры.
+        weight: SIGNIFICANT
+        statProfile: { prosperity: 2, knowledge: 1 }
+        refs: [cave]
+  - id: cave-pilgrims
+    title: Пастухи не дают трогать пещеру
+    form: tension
+    description: Пастухи считают голос пещеры добрым знаком и встали у входа. Каменотёсов с кирками они не пустят.
+    impact: MINOR
+    drift: SLOW
+    refs: [cave]
+    alignment: |
+      Снимают спор уговор о том, где можно брать камень, почёт пещере как святому месту, доля пастухам.
+    stake:
+      stats: { influence: -2, prosperity: -1 }

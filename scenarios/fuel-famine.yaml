@@ -1,0 +1,46 @@
+id: fuel-famine
+title: Лес кончается
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: crisis, source: ecology, sphere: prosperity }
+pitch: Угольщики выжгли ближние леса, дрова подорожали втрое; бедные кварталы топят заборами и мебелью.
+
+objects:
+  - id: forest
+    type: resource
+    name: Ближний лес
+    description: Лес в дне пути от города. От него остались пни, подрост и редкие семенные деревья.
+    weight: MINOR
+    statProfile: { prosperity: 1 }
+  - id: burners
+    type: community
+    name: Угольщики
+    description: Артели, которые жгут уголь для кузен. Другого ремесла не знают и готовы идти в дальние леса.
+    refs: [forest]
+
+fronts:
+  - id: cold-hearths
+    title: Городу нечем топить
+    description: Запас дров тает. Если не найти топлива и не сберечь лес, встанут кузни и пекарни, а ближний лес исчезнет совсем.
+    impact: SIGNIFICANT
+    drift: SLOW
+    refs: [forest, burners]
+    alignment: |
+      Отводят беду мера на порубку, торф и сухой навоз вместо дров, общие печи на улицу, посадки на вырубках.
+    stake:
+      stats: { prosperity: -5, security: -1 }
+  - id: plant-forest
+    title: Засадить вырубки
+    form: deed
+    description: Если засадить вырубки быстрорастущей ольхой и ивой и рубить их по кругу, город получит лес, который не кончается.
+    impact: SIGNIFICANT
+    refs: [forest]
+    alignment: |
+      Двигают дело питомники саженцев, охрана посадок от скота, угольщики в роли лесников.
+    stake:
+      create:
+        type: practice
+        name: Круговая порубка
+        description: Город рубит посаженный лес по кругу и сажает на смену.
+        weight: SIGNIFICANT
+        statProfile: { prosperity: 2, knowledge: 1 }
+        refs: [forest]

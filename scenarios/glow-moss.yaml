@@ -1,0 +1,41 @@
+id: glow-moss
+title: Светящийся мох
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: discovery, source: ecology, sphere: prosperity }
+pitch: В сырой выработке старой каменоломни нашли мох, который светит ровным зеленоватым светом и не гаснет неделями.
+
+objects:
+  - id: moss
+    type: resource
+    name: Светящийся мох
+    description: Плотные подушки мха на стенах заброшенной выработки. Светят в темноте так, что можно читать.
+    weight: MINOR
+    statProfile: { knowledge: 1 }
+
+fronts:
+  - id: moss-lamps
+    title: Свет без огня
+    form: deed
+    description: Если мох приживётся в городе, ночные улицы, шахты и книгохранилища получат свет, который не жжёт масла и не грозит пожаром.
+    impact: SIGNIFICANT
+    refs: [moss]
+    alignment: |
+      Двигают дело опыты с пересадкой, сырые ниши и подвалы под мох, садовники с терпением.
+    stake:
+      create:
+        type: practice
+        name: Моховые светильники
+        description: Город выращивает светящийся мох и освещает им улицы, выработки и хранилища.
+        weight: SIGNIFICANT
+        statProfile: { prosperity: 1, security: 1, knowledge: 1 }
+        refs: [moss]
+  - id: moss-stripped
+    title: Мох обдирают на продажу
+    description: Слух о светящемся мхе разошёлся, и ловкачи сдирают его со стен мешками. Ободранный мох гибнет за день, а новый растёт годами.
+    impact: MINOR
+    drift: FAST
+    refs: [moss]
+    alignment: |
+      Спасают мох охрана выработки, запрет на торговлю сорванным мхом, ясный рассказ о том, что он гибнет без своей стены.
+    stake:
+      delete: { target: moss }

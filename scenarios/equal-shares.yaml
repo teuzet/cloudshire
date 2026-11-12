@@ -1,0 +1,29 @@
+id: equal-shares
+title: Равная доля
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: ideology, source: people, sphere: prosperity }
+pitch: В бедных кварталах проповедуют, что перед бездной все равны и запасы города надо поделить поровну; у амбаров и богатых домов собираются толпы.
+
+objects:
+  - id: levellers
+    type: community
+    name: Равнодольщики
+    description: Подёнщики, вдовы, отставные солдаты. Ходят с пустыми мисками на шестах и считают чужие амбары.
+  - id: tribune
+    type: person
+    name: Миска
+    description: Косноязычный хромой бондарь, прозванный Миской. Говорит плохо, но его любят, потому что он делит свой хлеб на всех.
+    refs: [levellers]
+
+fronts:
+  - id: storm-granaries
+    title: Толпа идёт к амбарам
+    form: tension
+    description: Богатые дома нанимают охрану, равнодольщики считают дни. Первый же голодный слух поведёт их на амбары.
+    impact: SIGNIFICANT
+    drift: STEADY
+    refs: [levellers, tribune]
+    alignment: |
+      Снимают напряжение общие котлы и работа от города, открытый счёт запасов, разговор с Миской как с человеком, за которым стоят люди.
+    stake:
+      stats: { prosperity: -3, security: -3, influence: -1 }

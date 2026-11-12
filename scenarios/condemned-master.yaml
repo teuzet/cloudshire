@@ -1,0 +1,46 @@
+id: condemned-master
+title: Приговорённый мастер
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: dilemma, source: people, sphere: knowledge }
+pitch: Единственный в городе мастер, который умеет лить большие колокола и котлы, в пьяной драке убил человека; закон требует казни, ученика у него нет.
+
+objects:
+  - id: founder
+    type: person
+    name: Литейный мастер
+    description: Угрюмый немолодой литейщик, последний, кто знает секрет большой формы. Сидит в яме и вины не отрицает.
+    weight: MINOR
+    statProfile: { knowledge: 1, prosperity: 1 }
+  - id: kin
+    type: community
+    name: Родня убитого
+    description: Большая семья возчиков. Ждёт казни по закону и считает, что мастера выгораживают богатые заказчики.
+    refs: [founder]
+
+fronts:
+  - id: judgement
+    title: Казнить или сохранить мастера
+    form: tension
+    description: Суд назначен. Казнь лишит город литья, помилование скажет всем, что нужному человеку закон не писан.
+    impact: SIGNIFICANT
+    drift: STEADY
+    refs: [founder, kin]
+    alignment: |
+      Развязывают узел вира, которую примет родня, работа мастера в неволе на пользу семье убитого, приговор, оглашённый с объяснением.
+    stake:
+      stats: { influence: -4, knowledge: -2 }
+  - id: save-craft
+    title: Перенять секрет большой формы
+    form: deed
+    description: Что бы ни решил суд, секрет не должен уйти с одним человеком. Мастер готов учить, если его попросят как мастера, а не как узника.
+    impact: MINOR
+    refs: [founder]
+    alignment: |
+      Двигают дело толковые ученики, литьё под его присмотром, запись приёмов хранителем.
+    stake:
+      create:
+        type: capability
+        name: Школа большого литья
+        description: Несколько литейщиков города умеют лить большие колокола и котлы.
+        weight: MINOR
+        statProfile: { knowledge: 1, prosperity: 1 }

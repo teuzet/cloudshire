@@ -1,0 +1,45 @@
+id: bumper-crop
+title: Небывалый урожай
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: success, source: ecology, sphere: prosperity }
+pitch: Хлеб уродился так, что амбаров не хватает; зерно лежит под открытым небом, цена упала, и пахари грозят не сеять на будущий год.
+
+objects:
+  - id: harvest
+    type: resource
+    name: Гора зерна
+    description: Зерно в мешках и россыпью лежит во дворах, на току и просто у дорог под рогожей.
+    weight: MINOR
+    statProfile: { prosperity: 2 }
+  - id: farmers
+    type: community
+    name: Пахари долины
+    description: Вырастили вдвое против обычного и получили за это вдвое меньше.
+    refs: [harvest]
+
+fronts:
+  - id: grain-rots
+    title: Зерно пропадает под небом
+    description: Первый же долгий дождь сгноит то, что не под крышей, а мышей и птиц уже тучи.
+    impact: MINOR
+    drift: FAST
+    refs: [harvest]
+    alignment: |
+      Спасают зерно временные навесы и ямы, сушка, раздача на хранение по дворам под счёт.
+    stake:
+      modify: { target: harvest, intent: Большая часть лишнего зерна сгнила и съедена мышами. }
+  - id: big-granaries
+    title: Построить большие амбары
+    form: deed
+    description: Если сберечь этот урожай в добротных амбарах, город на годы забудет о страхе голода и сможет держать цену.
+    impact: SIGNIFICANT
+    refs: [harvest, farmers]
+    alignment: |
+      Двигают дело каменные амбары с продухами, закупка зерна у пахарей по твёрдой цене, смотрители и счёт.
+    stake:
+      create:
+        type: building
+        name: Большие амбары
+        description: Каменные амбары с запасом зерна на несколько лет.
+        weight: SIGNIFICANT
+        statProfile: { prosperity: 2, security: 1 }

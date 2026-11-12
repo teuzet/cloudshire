@@ -1,0 +1,41 @@
+id: still-wind
+title: Штиль над холмом
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: refusal, source: sky, sphere: prosperity }
+pitch: Ветер, который всегда дул над мельничным холмом, стих и не возвращается; ветряки стоят неделями.
+
+objects:
+  - id: calm
+    type: threat
+    name: Мёртвый штиль
+    description: Над холмом и восточными полями воздух стоит неподвижно. Дым поднимается столбом, крылья мельниц не шелохнутся.
+    weight: MINOR
+    statProfile: { prosperity: -1 }
+
+fronts:
+  - id: hand-mills
+    title: Молоть без ветра
+    form: deed
+    description: Городу нужен способ молоть зерно и качать меха, пока ветра нет. Мастера предлагают упряжные приводы и ручные жернова.
+    impact: MINOR
+    refs: [calm]
+    alignment: |
+      Двигают дело упряжные приводы, ручные жернова в каждом квартале, перенос части мельниц на ветреный склон.
+    stake:
+      create:
+        type: capability
+        name: Упряжные мельницы
+        description: Город умеет молоть зерно без ветра, на тяге волов и людей.
+        weight: MINOR
+        statProfile: { prosperity: 1 }
+  - id: calm-fear
+    title: Люди боятся тишины
+    form: tension
+    description: Старики говорят, что ветер ушёл неспроста. Страх растёт с каждым тихим днём, люди ищут, кого винить.
+    impact: MINOR
+    drift: STEADY
+    refs: [calm]
+    alignment: |
+      Успокаивают людей слово храма, общее дело для всех кварталов, ясный рассказ о том, что штили бывали и раньше.
+    stake:
+      stats: { influence: -2, security: -1 }

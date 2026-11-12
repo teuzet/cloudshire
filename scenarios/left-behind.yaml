@@ -1,0 +1,40 @@
+id: left-behind
+title: Оставшиеся на берегу
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: dilemma, source: people, sphere: influence }
+pitch: Острова разошлись раньше, чем ждали, и на городском берегу осталась сотня соседей; до следующего сопряжения годы, а город сам живёт небогато.
+
+objects:
+  - id: stranded
+    type: community
+    name: Оставшиеся соседи
+    description: Купцы, носильщики и семьи с соседнего острова, которые не успели перейти назад. Живут табором у места стыка и смотрят в пустое небо.
+
+fronts:
+  - id: settle-stranded
+    title: Дать оставшимся место в городе
+    form: deed
+    description: Среди оставшихся есть мастера и купцы с ремёслами, которых в городе нет. Если принять их как своих, город станет богаче людьми.
+    impact: SIGNIFICANT
+    refs: [stranded]
+    alignment: |
+      Двигают дело жильё и работа по умению, свой староста для слободы, уважение к их обычаю.
+    stake:
+      create:
+        type: district
+        name: Слобода соседей
+        description: Люди с соседнего острова живут в городе своей слободой и работают своими ремёслами.
+        weight: SIGNIFICANT
+        statProfile: { prosperity: 1, knowledge: 1, influence: 1 }
+        refs: [stranded]
+  - id: stranded-hunger
+    title: Табор у стыка голодает
+    form: tension
+    description: Запасы у оставшихся кончились. Горожане ропщут, что чужих кормят из общего амбара, а в таборе уже воруют с огородов.
+    impact: SIGNIFICANT
+    drift: STEADY
+    refs: [stranded]
+    alignment: |
+      Снимают напряжение работа за хлеб, ясное слово о том, кто они городу, защита от погромщиков.
+    stake:
+      stats: { influence: -3, security: -3 }

@@ -1,0 +1,42 @@
+id: thunder-month
+title: Грозовой месяц
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: crisis, source: sky, sphere: security }
+pitch: Остров идёт через грозовую гряду; молнии бьют в башни и вышки каждую ночь, уже сгорели две колокольни.
+
+objects:
+  - id: storms
+    type: threat
+    name: Грозовая гряда
+    description: Чёрные тучи идут одна за другой. Молнии выбирают самое высокое и бьют по нескольку раз за ночь.
+    weight: MINOR
+    statProfile: { security: -1 }
+
+fronts:
+  - id: towers-burn
+    title: Молнии жгут высокое
+    description: Колокольни, вышки и большие кровли горят одна за другой. Гряда ещё не кончилась.
+    impact: SIGNIFICANT
+    drift: FAST
+    refs: [storms]
+    alignment: |
+      Берегут город дозоры с водой на высоких кровлях, снятые шпили и флюгера, железные шесты с цепью в землю, как советуют кузнецы.
+    stake:
+      stats: { security: -4, prosperity: -2 }
+  - id: catch-lightning
+    title: Отвести молнию в землю
+    form: deed
+    description: Кузнец с окраины уверяет, что высокий железный шест с цепью, зарытой в сырую землю, берёт удар на себя. Его сарай под таким шестом цел.
+    impact: MINOR
+    refs: [storms]
+    closes:
+      - { target: towers-burn, share: 0.6 }
+    alignment: |
+      Двигают дело пробные шесты на вышках, железо и цепи от кузнецов, наблюдение и запись, куда бьёт молния.
+    stake:
+      create:
+        type: practice
+        name: Грозовые шесты
+        description: На высоких зданиях города стоят железные шесты, которые уводят молнию в землю.
+        weight: MINOR
+        statProfile: { security: 1, knowledge: 1 }

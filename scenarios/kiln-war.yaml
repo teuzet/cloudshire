@@ -1,0 +1,53 @@
+id: kiln-war
+title: Война печей
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: feud, source: matter, sphere: prosperity }
+pitch: Стеклодувы и гончары делят единственный пласт белой глины и песка; подмастерья бьют чужой товар прямо на рынке.
+
+objects:
+  - id: pit
+    type: resource
+    name: Белый карьер
+    description: Единственное место на острове, где лежат рядом белая глина и чистый песок. Места в нём мало.
+    weight: MINOR
+    statProfile: { prosperity: 1 }
+  - id: glass
+    type: organization
+    name: Цех стеклодувов
+    description: Молодой и дерзкий цех. Их стекло хорошо берут, и песка им нужно всё больше.
+    refs: [pit]
+  - id: potters
+    type: organization
+    name: Цех гончаров
+    description: Старый цех, который копал карьер ещё при дедах. Считает стеклодувов выскочками.
+    refs: [pit]
+
+fronts:
+  - id: craft-brawl
+    title: Цеха громят друг друга
+    form: tension
+    description: Подмастерья цехов дерутся у карьера и бьют чужой товар на рынке. Если их не развести, встанут обе печи.
+    impact: MINOR
+    drift: STEADY
+    refs: [glass, potters, pit]
+    alignment: |
+      Мирят цеха раздел карьера по дням или участкам, общий заказ для обоих, старшины за одним столом.
+    stake:
+      stats: { prosperity: -3, security: -1 }
+  - id: second-pit
+    title: Найти второй пласт
+    form: deed
+    description: Старые копатели говорят, что белый пласт тянется под соседний холм. Если его вскрыть, хватит обоим цехам.
+    impact: MINOR
+    refs: [pit]
+    closes:
+      - { target: craft-brawl, share: 0.6 }
+    alignment: |
+      Двигают дело пробные ямы на соседнем холме, знатоки камня и глины, рабочие руки от обоих цехов.
+    stake:
+      create:
+        type: resource
+        name: Второй белый карьер
+        description: Новый пласт белой глины и песка под соседним холмом.
+        weight: MINOR
+        statProfile: { prosperity: 1 }

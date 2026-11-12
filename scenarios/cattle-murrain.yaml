@@ -1,0 +1,28 @@
+id: cattle-murrain
+title: Мор скота
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: crisis, source: creature, sphere: prosperity }
+pitch: У коров и волов на дальних выгонах пошла язва на копытах; скот ложится и не встаёт, а пахать и возить больше не на ком.
+
+objects:
+  - id: murrain
+    type: threat
+    name: Копытная язва
+    description: Сначала скотина хромает, потом ложится. Язва идёт от стада к стаду по общим тропам и водопоям.
+    weight: MINOR
+    statProfile: { prosperity: -1 }
+
+fronts:
+  - id: herds-die
+    title: Мор идёт по стадам
+    description: Пали уже сотни голов. Если мор дойдёт до тягловых волов города, поля останутся непахаными.
+    impact: SIGNIFICANT
+    drift: STEADY
+    refs: [murrain]
+    alignment: |
+      Останавливают мор отделение больных стад, запрет гонять скот по общим тропам, дёготь и известь на копыта, сжигание павших.
+    stake:
+      stats: { prosperity: -5, security: -1 }
+    events:
+      - id: hide
+        description: Пастухи тайком продали на рынке шкуры павшего скота; кожевники уже взяли их в работу.

@@ -1,0 +1,45 @@
+id: herald-birds
+title: Птицы-вестники под стрелами
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: feud, source: creature, sphere: knowledge }
+pitch: Охотники бьют белых птиц, по полёту которых хранители святилища читают погоду; хранители прокляли охотников, те пришли к святилищу с луками.
+
+objects:
+  - id: birds
+    type: resource
+    name: Белые вестники
+    description: Крупные белые птицы, гнездятся на скалах у святилища. Перед переменой ветра снимаются всей стаей, и по ним читают погоду.
+    weight: MINOR
+    statProfile: { knowledge: 1 }
+  - id: hunters
+    type: community
+    name: Охотничья слобода
+    description: Охотники с окраины. Перо вестников дорого идёт на рынке, а дичи в лесах стало мало.
+  - id: wardens
+    type: organization
+    name: Смотрители птичьей скалы
+    description: Служители святилища, которые из поколения в поколение записывают полёты вестников.
+    refs: [birds]
+
+fronts:
+  - id: birds-dwindle
+    title: Вестников выбивают
+    description: Стая редеет с каждой неделей. Если охоту не остановить, скала опустеет, и город разучится читать ветер по птицам.
+    impact: MINOR
+    drift: STEADY
+    refs: [birds, hunters]
+    alignment: |
+      Спасают стаю другой промысел для охотников, охрана скалы, уговор о мере добычи.
+    stake:
+      delete: { target: birds }
+  - id: hunters-wardens
+    title: Охотники против смотрителей
+    form: tension
+    description: Проклятие смотрителей охотники приняли как объявление войны. Обе стороны ждут повода.
+    impact: MINOR
+    drift: STEADY
+    refs: [hunters, wardens]
+    alignment: |
+      Мирят стороны снятие проклятия, доля охотников в сборе пера с линялых птиц, общий дозор на скале.
+    stake:
+      stats: { influence: -2, security: -2 }

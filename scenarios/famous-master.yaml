@@ -1,0 +1,47 @@
+id: famous-master
+title: Мастер, которого все хотят
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: success, source: people, sphere: prosperity }
+pitch: Работы городской ткачихи узоров прославились при сопряжении; теперь знатные дома дерутся за её время, цех завидует, а соседи зовут её к себе при следующей встрече островов.
+
+objects:
+  - id: weaver
+    type: person
+    name: Ткачиха узоров
+    description: Немолодая мастерица, чьи узорные ткани не повторить. Работает одна, учениц не берёт, устала от просителей.
+    weight: MINOR
+    statProfile: { prosperity: 1, influence: 1 }
+  - id: guild
+    type: organization
+    name: Цех ткачей
+    description: Цех, в котором она числится. Старшины требуют, чтобы она платила больше и работала по цеховым правилам.
+    refs: [weaver]
+
+fronts:
+  - id: weaver-leaves
+    title: Мастерица собирается уйти
+    form: tension
+    description: Цех давит, знать торопит, дом осаждают. Ткачиха говорит, что бросит станок или уйдёт к соседям, когда острова сойдутся.
+    impact: MINOR
+    drift: SLOW
+    refs: [weaver, guild]
+    alignment: |
+      Удерживают мастерицу покой и защита от просителей, свобода от цеховой меры, почёт без суеты.
+    stake:
+      delete: { target: weaver }
+  - id: pattern-school
+    title: Мастерская узорного тканья
+    form: deed
+    description: Если мастерица согласится учить, её умение станет ремеслом города, а не одной пары рук.
+    impact: SIGNIFICANT
+    refs: [weaver]
+    alignment: |
+      Двигают дело ученицы, которых она выберет сама, просторная мастерская, заказы от города на годы вперёд.
+    stake:
+      create:
+        type: organization
+        name: Мастерская узорного тканья
+        description: Мастерская, где ученицы ткачихи ткут узорные ткани, известные на соседних островах.
+        weight: SIGNIFICANT
+        statProfile: { prosperity: 2, influence: 1 }
+        refs: [weaver]

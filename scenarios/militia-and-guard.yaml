@@ -1,0 +1,49 @@
+id: militia-and-guard
+title: Ополчение против стражи
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: feud, source: people, sphere: security }
+pitch: Деревенское ополчение поймало разбойников само и повесило без суда; городская стража требует выдать зачинщиков, деревни встают за своих.
+
+objects:
+  - id: militia
+    type: organization
+    name: Деревенское ополчение
+    description: Мужики окрестных деревень с рогатинами и охотничьими луками. Собрались сами, когда устали ждать помощи от города.
+    weight: MINOR
+    statProfile: { security: 1 }
+  - id: captain
+    type: person
+    name: Вожак ополчения
+    description: Бывший стражник, ушедший в деревню. Знает службу и не верит, что город защитит окраины.
+    refs: [militia]
+
+fronts:
+  - id: two-swords
+    title: На острове два закона
+    form: tension
+    description: Ополчение судит и карает само, стража видит в этом бунт. Столкновение на дороге уже едва не кончилось кровью.
+    impact: SIGNIFICANT
+    drift: STEADY
+    refs: [militia, captain]
+    alignment: |
+      Сводят силы воедино место ополчению под рукой маршала, заставы стражи на окраинах, суд над зачинщиками, который признают деревни.
+    stake:
+      stats: { security: -4, influence: -3 }
+  - id: enlist-militia
+    title: Взять ополчение на службу
+    form: deed
+    description: Ополченцы знают окраины лучше стражи. Если дать им устав, старших и долю, город получит дозор там, куда стража не доходит.
+    impact: MINOR
+    refs: [militia, captain]
+    closes:
+      - { target: two-swords, share: 0.6 }
+    alignment: |
+      Двигают дело разговор с вожаком как с равным, общий устав, оружие и знаки от города.
+    stake:
+      create:
+        type: organization
+        name: Окраинный дозор
+        description: Бывшее ополчение несёт службу на окраинах под рукой маршала.
+        weight: MINOR
+        statProfile: { security: 2 }
+        refs: [militia]

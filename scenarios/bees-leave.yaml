@@ -1,0 +1,50 @@
+id: bees-leave
+title: Пчёлы покидают ульи
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: refusal, source: creature, sphere: prosperity }
+pitch: Пчёлы с террасных пасек роями уходят из ульев и не возвращаются; сады остаются без опыления.
+
+objects:
+  - id: apiaries
+    type: resource
+    name: Террасные пасеки
+    description: Ряды ульев на садовых террасах. Дают городу мёд и воск, а садам завязь.
+    weight: MINOR
+    statProfile: { prosperity: 1 }
+  - id: bitterbloom
+    type: site
+    name: Заросли горькоцвета
+    description: На заброшенной пустоши за садами разросся горькоцвет. Пчёлы летят на его сильный запах, пьянеют от нектара и теряют дорогу к улью.
+    hidden: true
+
+fronts:
+  - id: hives-empty
+    title: Пасеки пустеют
+    description: Рой за роем уходит с террас. Если пчёл не удержать, сады в этом году не завяжут плодов.
+    impact: SIGNIFICANT
+    drift: SLOW
+    refs: [apiaries]
+    alignment: |
+      Удерживают пчёл новые матки, перенос ульев, посевы медоносов у самых пасек.
+      Помогают старые пасечники, которые знают повадки роя.
+    stake:
+      stats: { prosperity: -5 }
+  - id: why-bees
+    title: Куда уходят пчёлы
+    description: Узнать, что гонит или манит пчёл прочь от ульев.
+    impact: MINOR
+    beatCount: 2
+    refs: [apiaries]
+    closes:
+      - { target: hives-empty, share: 0.6 }
+    alignment: |
+      Двигает дело слежка за роями, обход окрестных лугов и пустошей, расспросы пасечников.
+    stake:
+      uncover: { target: bitterbloom }
+    clues:
+      - id: drunk
+        fact: Пчёлы, которых находят у дороги, сонные и не могут взлететь.
+        alignment: Осмотр найденных пчёл знающими людьми.
+      - id: direction
+        fact: Все рои уходят в одну сторону, к старой пустоши.
+        alignment: Наблюдение за полётом роёв.

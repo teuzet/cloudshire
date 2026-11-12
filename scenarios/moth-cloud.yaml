@@ -1,0 +1,34 @@
+id: moth-cloud
+title: Туча прожорливой моли
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: crisis, source: creature, sphere: prosperity }
+pitch: Ветер принёс на остров тучу серой моли; её гусеницы едят шерсть, лён и войлок прямо на складах и на людях.
+
+objects:
+  - id: moths
+    type: threat
+    name: Серая моль
+    description: Моль с ноготь величиной, садится тысячами. Гусеницы за неделю превращают тюк шерсти в труху.
+    weight: MINOR
+    statProfile: { prosperity: -1 }
+  - id: weavers
+    type: organization
+    name: Ткацкий цех
+    description: Ткачи, сукновалы и красильщики. Всё, чем они живут, лежит на складах тюками.
+    weight: MINOR
+    statProfile: { prosperity: 1 }
+
+fronts:
+  - id: cloth-eaten
+    title: Моль съедает ткацкие склады
+    description: Склады шерсти и готового сукна гибнут один за другим. Ещё месяц, и городу нечем будет одеться и торговать.
+    impact: SIGNIFICANT
+    drift: FAST
+    refs: [moths, weavers]
+    alignment: |
+      Спасают товар дым горьких трав, проветривание и перетряска тюков, сундуки из пахучего дерева, костры-приманки ночью.
+    stake:
+      stats: { prosperity: -5 }
+    events:
+      - id: felt
+        description: У стражи моль съела войлочные подбои доспехов; смена вышла на стену в одних рубахах.

@@ -1,0 +1,47 @@
+id: herds-and-fields
+title: Потрава
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: feud, source: ecology, sphere: prosperity }
+pitch: Стада пастухов раз за разом заходят в посевы; земледельцы режут скот в отместку, пастухи жгут изгороди.
+
+objects:
+  - id: herders
+    type: community
+    name: Пастухи нагорья
+    description: Вольные семьи со стадами. Трава на нагорье выгорела, и они гонят скот вниз, к полям.
+  - id: farmers
+    type: community
+    name: Земледельцы долины
+    description: Хозяева полей в долине. Потеряли часть посевов под копытами и больше терпеть не хотят.
+    weight: MINOR
+    statProfile: { prosperity: 1 }
+
+fronts:
+  - id: trample-feud
+    title: Пастухи и пахари режут и жгут
+    form: tension
+    description: За потраву платят убитым скотом, за скот горящими изгородями. Ещё немного, и начнут гореть дома.
+    impact: SIGNIFICANT
+    drift: STEADY
+    refs: [herders, farmers]
+    alignment: |
+      Гасят вражду прогонные тропы в обход полей, плата за потраву по общему счёту, выгон для стад на время бескормицы.
+    stake:
+      stats: { prosperity: -4, security: -2 }
+  - id: heal-upland
+    title: Вернуть траву на нагорье
+    form: deed
+    description: Нагорье выбито и выгорело. Если дать ему отдых и подсеять траву, стадам снова будет где пастись.
+    impact: MINOR
+    refs: [herders]
+    closes:
+      - { target: trample-feud, share: 0.5 }
+    alignment: |
+      Двигают дело подсев трав, очередь выгонов, запрет на пал, помощь пастухам на время отдыха земли.
+    stake:
+      create:
+        type: resource
+        name: Отдохнувшее нагорье
+        description: Выгоны нагорья снова кормят стада.
+        weight: MINOR
+        statProfile: { prosperity: 1 }

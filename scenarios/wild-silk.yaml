@@ -1,0 +1,44 @@
+id: wild-silk
+title: Шёлковый лес
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: opportunity, source: creature, sphere: prosperity }
+pitch: В дальнем лесу нашли урочище, где деревья сплошь в коконах диких шелкопрядов; нить из них тонкая и крепкая, но бабочки вылетят через считаные недели.
+
+objects:
+  - id: grove
+    type: site
+    name: Урочище коконов
+    description: Дубовая роща, с ветвей которой гроздьями висят бледные коконы с кулак величиной.
+  - id: worms
+    type: resource
+    name: Дикие шелкопряды
+    description: Крупные гусеницы, которые живут только на этих дубах. Никто ещё не пробовал держать их в неволе.
+    refs: [grove]
+
+fronts:
+  - id: tame-silk
+    title: Приручить шелкопряда
+    form: deed
+    description: Если собрать часть коконов на нить, а часть оставить на племя и понять, чем кормить гусениц, у города будет свой шёлк.
+    impact: SIGNIFICANT
+    refs: [grove, worms]
+    alignment: |
+      Двигают дело бережный сбор с оставлением племени, опыты с кормом, охрана урочища, пряхи с тонкой рукой.
+    stake:
+      create:
+        type: practice
+        name: Шелководство
+        description: Город растит шелкопряда и прядёт шёлк.
+        weight: SIGNIFICANT
+        statProfile: { prosperity: 2, knowledge: 1 }
+        refs: [worms]
+  - id: cocoons-stripped
+    title: Коконы обирают дочиста
+    description: Слух разошёлся, и люди несут коконы мешками. Если снять все, шелкопряд на острове кончится в один год.
+    impact: MINOR
+    drift: FAST
+    refs: [grove, worms]
+    alignment: |
+      Сберегают урочище стража и мера на сбор, скупка коконов только через город, рассказ о том, что без племени не будет нити.
+    stake:
+      delete: { target: worms }

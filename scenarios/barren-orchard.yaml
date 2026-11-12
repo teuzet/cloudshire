@@ -1,0 +1,37 @@
+id: barren-orchard
+title: Сад без плодов
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: refusal, source: ecology, sphere: prosperity }
+pitch: Старейший сад города второй год цветёт и не даёт плодов; садоводы говорят, что земля устала.
+
+objects:
+  - id: orchard
+    type: resource
+    name: Старый сад
+    description: Самый древний сад города, из которого пошли все остальные. Деревья цветут пышно, а плоды осыпаются завязью.
+    weight: MINOR
+    statProfile: { prosperity: 1 }
+
+fronts:
+  - id: revive-orchard
+    title: Вернуть саду плоды
+    form: deed
+    description: Сад можно оживить, если понять, чего не хватает земле, и дать ей это. Садоводы готовы пробовать, но спорят о способе.
+    impact: SIGNIFICANT
+    refs: [orchard]
+    alignment: |
+      Двигают дело отдых земли, свежая почва с лесных склонов, молодые прививки на старые стволы.
+      Помогают опыты на нескольких деревьях прежде всего сада.
+    stake:
+      modify: { target: orchard, intent: Сад снова плодоносит и даёт саженцы другим садам. }
+  - id: orchard-quarrel
+    title: Садоводы хотят вырубить сад
+    form: tension
+    description: Часть садоводов требует срубить старые деревья и посадить новые, другие считают это святотатством. Спор идёт к топорам.
+    impact: MINOR
+    drift: SLOW
+    refs: [orchard]
+    alignment: |
+      Унимают спор проба обоих способов на малом участке и слово того, кого садоводы уважают.
+    stake:
+      stats: { prosperity: -2, influence: -2 }

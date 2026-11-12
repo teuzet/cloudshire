@@ -1,0 +1,42 @@
+id: quarter-fever
+title: Трясучая лихорадка
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: crisis, source: ecology, sphere: security }
+pitch: В низинных кварталах началась лихорадка, которая валит взрослых на недели; работать некому, а больных всё больше.
+
+objects:
+  - id: fever
+    type: threat
+    name: Трясучая лихорадка
+    description: Озноб и жар волнами через день. Умирают немногие, но больной месяц не может встать.
+    weight: MINOR
+    statProfile: { security: -1, prosperity: -1 }
+
+fronts:
+  - id: fever-wave
+    title: Лихорадка валит город
+    description: Слегли уже сотни. Если волну не остановить, некому будет печь хлеб и стоять на стенах.
+    impact: SIGNIFICANT
+    drift: STEADY
+    refs: [fever]
+    alignment: |
+      Сдерживают лихорадку уход за больными в отдельных домах, осушение стоячих луж, дым и полог от мошки, горькая кора из леса.
+    stake:
+      stats: { security: -3, prosperity: -3 }
+  - id: fever-bark
+    title: Запасти горькую кору
+    form: deed
+    description: Травники знают кору, которая сбивает жар. Её мало, растёт она в дальнем лесу, и собирать её надо умеючи.
+    impact: MINOR
+    refs: [fever]
+    closes:
+      - { target: fever-wave, share: 0.5 }
+    alignment: |
+      Двигают дело отряды сборщиков с травниками, бережный сбор без порубки, сушильни и раздача по кварталам.
+    stake:
+      create:
+        type: resource
+        name: Запас горькой коры
+        description: В городе есть запас коры от лихорадки и люди, которые умеют её собирать.
+        weight: MINOR
+        statProfile: { security: 1, knowledge: 1 }

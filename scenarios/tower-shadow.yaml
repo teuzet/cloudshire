@@ -1,0 +1,32 @@
+id: tower-shadow
+title: Тень башни
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: feud, source: sky, sphere: influence }
+pitch: Богатый дом надстроил башню, и её тень на полдня закрыла сады и солнечные сушильни соседей; соседи требуют башню срыть.
+
+objects:
+  - id: tower
+    type: building
+    name: Новая башня богатого дома
+    description: Высокая башня, гордость богатого дома. С неё видно весь город, и весь город видит её.
+    weight: MINOR
+    statProfile: { influence: 1 }
+  - id: neighbours
+    type: community
+    name: Сушильщики и садовники под башней
+    description: Улица, которая живёт солнцем; здесь сушат плоды, травы и крашеную шерсть. Теперь полдня у них сумерки.
+    weight: MINOR
+    statProfile: { prosperity: 1 }
+
+fronts:
+  - id: shadow-row
+    title: Улица требует срыть башню
+    form: tension
+    description: Сушильщики несут убытки и готовы подкопать башню сами. Богатый дом нанял охрану и уступать не собирается.
+    impact: MINOR
+    drift: STEADY
+    refs: [tower, neighbours]
+    alignment: |
+      Мирят соседей новое место под сушильни на солнечном склоне за счёт дома, плата за тень, зеркала или иная выдумка мастеров.
+    stake:
+      stats: { influence: -3, prosperity: -1 }
