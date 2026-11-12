@@ -41,10 +41,12 @@ export function leadLabel(city: City, front: Pick<Front, 'id'>): { label: string
 }
 
 /** Если способ называет то, чего ещё не нашли, рассказчик узнаёт об этом из самого способа. */
-function withSought(city: Pick<City, 'sought'>, manner: string): string {
+function withSought(city: Pick<City, 'sought' | 'objects'>, manner: string): string {
   const low = manner.toLowerCase();
   const stem = (thing: string) => (thing.toLowerCase().split(/\s+/)[0] ?? '').slice(0, 6);
-  const hit = (city.sought ?? []).filter((t) => stem(t).length >= 4 && low.includes(stem(t)));
+  // Уже найденное (в городе есть объект с тем же словом в имени) больше не ищут.
+  const found = (t: string) => city.objects.some((o) => o.status === 'active' && !o.hidden && o.name.toLowerCase().includes(stem(t)));
+  const hit = (city.sought ?? []).filter((t) => stem(t).length >= 4 && low.includes(stem(t)) && !found(t));
   return hit.length ? `${manner} (пока не найдено и не подтверждено: ${hit.join('; ')})` : manner;
 }
 
