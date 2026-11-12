@@ -108,9 +108,12 @@ function fadeDormant(deps: FlowDeps, city: City, day: number): void {
 export async function seedStories(deps: FlowDeps, city: City, day: number): Promise<OutboundMessage[]> {
   const out: OutboundMessage[] = [];
   fadeDormant(deps, city, day);
-  const room = roomForTrouble(deps.rules, city) > 0;
-  const need = room ? Math.max(0, Math.floor(deps.rules.seeding.activeStories - storyCount(city))) : 0;
-  for (let i = 0; i < need; i++) {
+  // В пустой город сразу приходит норма историй; дальше фон идёт по одной истории за проверку,
+  // и каждая следующая ждёт, пока у города есть место для новой беды.
+  const empty = storyCount(city) === 0;
+  const need = Math.max(0, Math.floor(deps.rules.seeding.activeStories - storyCount(city)));
+  for (let i = 0; i < (empty ? need : Math.min(1, need)); i++) {
+    if (roomForTrouble(deps.rules, city) <= 0) break;
     const msg = await plantStory(deps, city, day);
     if (msg) out.push(msg);
   }
