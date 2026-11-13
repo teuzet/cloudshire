@@ -44,14 +44,21 @@ function strength(abs: number): string {
   return 'резко';
 }
 
-/** Сдвиг статов словами: агенты и игрок не видят чисел. */
-export function statShiftWords(rules: Pick<Rules, 'stats'>, delta: Partial<StatMap>): string {
+/** Как сдвиг стата виден в жизни города: [рост, спад]. Названия показателей в тексты не идут. */
+const LIFE_WORDS: Record<(typeof STAT_IDS)[number], readonly [string, string]> = {
+  prosperity: ['в лавках, мастерских и амбарах прибавилось', 'в лавках, мастерских и амбарах убавилось'],
+  security: ['на улицах и у стен стало спокойнее', 'на улицах и у стен стало тревожнее'],
+  knowledge: ['знающих людей и записей прибавилось', 'знающих людей и записей убавилось'],
+  influence: ['к слову города прислушиваются охотнее', 'к слову города прислушиваются меньше'],
+};
+
+/** Сдвиг статов словами о жизни: агенты и игрок не видят ни чисел, ни названий показателей. */
+export function statShiftWords(_rules: Pick<Rules, 'stats'>, delta: Partial<StatMap>): string {
   const parts: string[] = [];
   for (const id of STAT_IDS) {
     const v = Number(delta[id]) || 0;
     if (Math.abs(v) < 0.5) continue;
-    const name = rules.stats.find((s) => s.id === id)?.name ?? id;
-    parts.push(`${name.toLowerCase()} ${strength(Math.abs(v))} ${v > 0 ? 'выше' : 'ниже'}`);
+    parts.push(`${strength(Math.abs(v))} ${v > 0 ? LIFE_WORDS[id][0] : LIFE_WORDS[id][1]}`);
   }
   return parts.join(', ');
 }
@@ -101,18 +108,18 @@ export function describeChanges(rules: Pick<Rules, 'stats'>, changes: readonly C
       case 'object_created': {
         if (c.hidden) break;
         const shift = statShiftWords(rules, c.points);
-        out.push(c.temporary ? `Там, где идёт работа: ${c.name}` : `Появилось: ${c.name} (${TYPE_WORDS[c.type]})${shift ? `. Для города: ${shift}` : ''}`);
+        out.push(c.temporary ? `Там, где идёт работа: ${c.name}` : `Появилось: ${c.name} (${TYPE_WORDS[c.type]})${shift ? `. В жизни города: ${shift}` : ''}`);
         break;
       }
       case 'object_changed': {
         const shift = statShiftWords(rules, c.delta);
-        out.push(`Изменилось: ${c.name}${c.description ? `. Теперь: ${c.description}` : ''}${shift ? `. Для города: ${shift}` : ''}`);
+        out.push(`Изменилось: ${c.name}${c.description ? `. Теперь: ${c.description}` : ''}${shift ? `. В жизни города: ${shift}` : ''}`);
         break;
       }
       case 'object_removed': {
         if (c.hidden) break;
         const shift = statShiftWords(rules, negate(c.points));
-        out.push(`Исчезло: ${c.name}${shift ? `. Для города: ${shift}` : ''}`);
+        out.push(`Исчезло: ${c.name}${shift ? `. В жизни города: ${shift}` : ''}`);
         break;
       }
       case 'object_revealed':
@@ -126,7 +133,7 @@ export function describeChanges(rules: Pick<Rules, 'stats'>, changes: readonly C
         break;
       case 'stats': {
         const shift = statShiftWords(rules, c.points);
-        if (shift) out.push(`Для города: ${shift}`);
+        if (shift) out.push(`В жизни города: ${shift}`);
         break;
       }
       case 'front_opened':
