@@ -102,7 +102,8 @@ describe('сценарий', () => {
     });
     const city = blankCity();
     const { objects, fronts } = plantScenario(r, city, scenario, { day: 3, newId: ids(9) });
-    expect(objects[0]!.statEffect.influence).toBeGreaterThan(0);
+    // Объект истории приходит без вклада: ценность он получит ставкой.
+    expect(objects[0]!.statEffect.influence).toBe(0);
     expect(objects[1]!.hidden).toBe(true);
     expect(fronts[0]).toMatchObject({ title: 'Толпа', form: 'tension' });
     expect(fronts[0]!.deadlineDay).not.toBeNull();
@@ -201,6 +202,21 @@ describe('сценарий', () => {
     // Возможностей достаточно, чтобы режиссёр сажал их наравне с бедами.
     expect(kinds.chance).toBeGreaterThanOrEqual(40);
     expect(kinds.trouble).toBeGreaterThanOrEqual(90);
+  });
+
+  test('вклад с посадки есть только у того, что беда истории может отнять', () => {
+    const scenario = parseScenario({
+      id: 'y',
+      title: 'y',
+      objects: [
+        { id: 'mill', type: 'building', name: 'Мельница', weight: 'MINOR', statProfile: { prosperity: 1 } },
+        { id: 'well', type: 'landmark', name: 'Колодец', weight: 'MINOR', statProfile: { prosperity: 1 } },
+      ],
+      fronts: [{ id: 'f', description: 'Мельницу подмывает.', impact: 'MINOR', drift: 'SLOW', stake: { delete: { target: 'mill' } } }],
+    });
+    const { objects } = plantScenario(r, blankCity(), scenario, { day: 0, newId: ids(4) });
+    expect(objects[0]!.statEffect.prosperity).toBeGreaterThan(0);
+    expect(objects[1]!.statEffect.prosperity).toBe(0);
   });
 
   test('кривая заготовка падает с путём', () => {

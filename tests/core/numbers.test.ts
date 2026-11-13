@@ -79,7 +79,7 @@ describe('ёмкость и масштаб', () => {
     // Срок: не короче заданного, и сановник обычной скорости успевает с запасом в полтора раза.
     expect(troubleDays(r, 2, 1)).toBe(30);
     expect(troubleDays(r, 12, 1)).toBe(135);
-    expect(pressureTarget(r)).toBe(12.6);
+    expect(pressureTarget(r)).toBe(10.5);
     expect(quenchCapacity(r, 14)).toBe(2.8);
     expect(quenchCapacity(r, 2)).toBe(1);
     expect(opportunityCapacity(r, 10)).toBe(5);
@@ -105,7 +105,7 @@ describe('темп и скорость', () => {
 
   test('выработка ведущего: четыре единицы в месяц, вердикт и темп множат', () => {
     expect(leadRatePerDay(r, { verdict: 'fits', tempoSum: 0, fit: 1 }) * 30).toBeCloseTo(4);
-    expect(leadRatePerDay(r, { verdict: 'spot_on', tempoSum: 3, fit: 1 }) * 30).toBeCloseTo(4 * 1.5 * 1.6);
+    expect(leadRatePerDay(r, { verdict: 'spot_on', tempoSum: 3, fit: 1 }) * 30).toBeCloseTo(4 * 1.25 * 1.6);
     expect(leadRatePerDay(r, { verdict: 'off', tempoSum: -1, fit: 1 }) * 30).toBeCloseTo(4 * 0.5 * 0.8);
   });
 });

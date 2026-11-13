@@ -83,7 +83,7 @@ describe('воля игрока: новый проект', () => {
     expect(city.objects.find((o) => o.id === front.siteId)).toMatchObject({ type: 'site', name: 'Стройка баллисты', temporary: true });
 
     // Скорость: 4 в месяц × «в точку» × спешка проекта × поправка маршала (безопасность 55, дело его профиля).
-    expect(front.ratePerDay * 30).toBeCloseTo(4 * 1.5 * 1.2 * 1.06);
+    expect(front.ratePerDay * 30).toBeCloseTo(4 * 1.25 * 1.2 * 1.06);
     expect(city.jobs.find((j) => j.state === 'pending' && j.payload.frontId === front.id)?.dueDay).toBe(nextEventDay(front));
 
     expect(out).toMatchObject({ ok: true });
@@ -269,7 +269,7 @@ describe('атомарные дела', () => {
     const pushFront = city.fronts.at(-1)!;
     expect(pushFront).toMatchObject({ origin: 'deed', parentId: parent.id, capacity: 3.3, milestones: 1, risk: 'normal', deed: { kind: 'push', verdict: 'spot_on' } });
     expect(pushFront.stake[0]).toMatchObject({ op: 'progress', frontId: parent.id });
-    expect((pushFront.stake[0] as { amount: number }).amount).toBeCloseTo(3.3 * 1.5);
+    expect((pushFront.stake[0] as { amount: number }).amount).toBeCloseTo(3.3 * 1.25);
     expect(leadOf(city, pushFront.id)).toMatchObject({ office: 'keeper', verdict: 'fits' });
 
     // Помощник: Планировщик называет, кого привлечь, цена считается как у нового объекта.

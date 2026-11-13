@@ -76,7 +76,7 @@ describe('прогресс', () => {
     lead(city, front, 'marshal', { tempo: 1, verdict: 'spot_on' });
     expect(tempoSum(city, front)).toBe(3);
     recomputeRate(r, city, front, 0);
-    expect(front.ratePerDay * 30).toBeCloseTo(4 * 0.9 * 1.5 * 1.6);
+    expect(front.ratePerDay * 30).toBeCloseTo(4 * 0.9 * 1.25 * 1.6);
   });
 
   test('помощник прибавляет, помеха отнимает, ниже нуля скорость не падает', () => {

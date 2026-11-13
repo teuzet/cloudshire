@@ -83,9 +83,9 @@ describe('режиссёр', () => {
     const city = blankCity();
     expect(troublePressure(r, city, 100)).toBe(0);
     expect(wantsTrouble(r, city, 100)).toBe(true);
-    // Семь бед по 5 единиц за три месяца — 11,7 в месяц при цели 12,6; восьмая закрывает норму.
-    for (let i = 0; i < 7; i++) city.fronts.push({ ...trouble(`t${i}`), createdDay: 40 + i });
-    expect(troublePressure(r, city, 100)).toBeCloseTo(35 / 3);
+    // Шесть бед по 5 единиц за три месяца — 10 в месяц при цели 10,5; седьмая закрывает норму.
+    for (let i = 0; i < 6; i++) city.fronts.push({ ...trouble(`t${i}`), createdDay: 40 + i });
+    expect(troublePressure(r, city, 100)).toBeCloseTo(30 / 3);
     expect(wantsTrouble(r, city, 100)).toBe(true);
     // Случившаяся беда тоже в счёте: это нагрузка, которую город уже получил.
     city.fronts.push({ ...trouble('t7'), createdDay: 60, status: 'failed' });

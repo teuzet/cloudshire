@@ -8,7 +8,7 @@
 
 import { clipWords } from '../text.js';
 import { z } from 'zod';
-import { DRIFT_BANDS, ENGINES, IMPACT_LEVELS, OBJECT_TYPES, SCALES, SOURCES, STAT_IDS, type Rules, type StatMap } from '../rules.js';
+import { DRIFT_BANDS, emptyStatMap, ENGINES, IMPACT_LEVELS, OBJECT_TYPES, SCALES, SOURCES, STAT_IDS, type Rules, type StatMap } from '../rules.js';
 import type { City, Front, StakeOp, StoryTags, WorldObject } from '../city.js';
 import { createFront } from './fronts.js';
 import { magnitude, monthsToDays, rawToPoints, scaleOf, threatCapacity, troubleDays } from './numbers.js';
@@ -188,6 +188,11 @@ export function plantScenario(
   const tweak = args.adapted ?? {};
 
   const pull = scalePull(rules, scenario.scale, args.day);
+  // Объект истории приходит без вклада: город его ещё не освоил, ценность он получит ставкой.
+  // Вклад с посадки есть только у того, что беда истории может отнять: иначе ей нечего терять.
+  const atRisk = new Set(
+    scenario.fronts.flatMap((f) => (f.drift !== 'NONE' && f.stake && 'delete' in f.stake ? [f.stake.delete.target] : [])),
+  );
   const objects = scenario.objects.map((o) => {
     const obj = createObject(rules, {
       id: map(o.id),
@@ -195,7 +200,7 @@ export function plantScenario(
       name: tweak[o.id]?.name ?? o.name,
       description: tweak[o.id]?.description ?? o.description,
       refs: o.refs.map(map),
-      statEffect: objectContribution(rules, o.weight ?? 'NONE', o.statProfile ?? {}),
+      statEffect: atRisk.has(o.id) ? objectContribution(rules, o.weight ?? 'NONE', o.statProfile ?? {}) : emptyStatMap(),
       hidden: o.hidden ?? false,
       day: args.day,
     });

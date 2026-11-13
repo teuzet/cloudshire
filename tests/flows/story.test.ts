@@ -60,7 +60,7 @@ describe('история от посева до развязки', () => {
     expect(reply).toMatchObject({ kind: 'reply', text: 'Вета возьмётся.', acted: true });
     city = (await s.deps.storage.getCity(s.cityId))!;
     expect(city.mana.value).toBeCloseTo(50 - s.r.mana.turnCostWithAction, 0);
-    expect(findFront(city, story.id)!.ratePerDay * 30).toBeCloseTo(4 * 1.5 * 0.9);
+    expect(findFront(city, story.id)!.ratePerDay * 30).toBeCloseTo(4 * 1.25 * 0.9);
     const keeper = city.officers.find((o) => o.office === 'keeper')!;
     expect(keeper.assignmentId).not.toBeNull();
     // Судья сверял стратегию со скрытой логикой заготовки и подходами к уликам.
