@@ -3,7 +3,7 @@
  * Смысл (кто, что, почему) приходит от агентов; ёмкость, срок и ставку считает этот файл.
  */
 
-import type { ObjectType, Rules, StatMap } from '../rules.js';
+import { STAT_IDS, type ObjectType, type Rules, type StatMap } from '../rules.js';
 import type { City, Front, FrontKey, StakeOp, WorldObject } from '../city.js';
 import type { Rng } from '../random.js';
 import { createFront, settleProgress } from './fronts.js';
@@ -74,6 +74,16 @@ export function buildBound(
     dynamicId: args.dynamicId,
     day: args.day,
   });
+}
+
+/**
+ * Предел удара побочной беды по объекту: беда может отнять то, что объект даёт городу,
+ * и увести его в малый минус, но одна беда не превращает опору города в его главную рану.
+ */
+export function capSideHit(rules: Rules, before: StatMap, hit: StatMap): StatMap {
+  const out = { ...hit };
+  for (const id of STAT_IDS) out[id] = Math.max(hit[id], Math.min(before[id], 0) - rules.fronts.contribution.small);
+  return out;
 }
 
 /**

@@ -32,7 +32,7 @@ fronts:
     form: tension
     description: Каждая деревня выставила у туши своих с топорами, из города едут скупщики. Пока делят, добро гниёт, а до первой крови остался один удар.
     impact: SIGNIFICANT
-    drift: FAST
+    drift: STEADY
     refs: [carcass, hill-village, brook-village]
     alignment: |
       Мирят деревни делёж по счёту при городских свидетелях, общая разделка с долей каждому, плата хозяевам задавленного стада.

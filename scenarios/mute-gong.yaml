@@ -25,6 +25,8 @@ fronts:
     impact: MINOR
     beatCount: 2
     refs: [gong]
+    closes:
+      - { target: blind-storm, share: 0.6 }
     alignment: |
       Двигает дело осмотр скалы вокруг святилища, записи хранителей о прежних бурях, расспросы каменотёсов.
     stake:

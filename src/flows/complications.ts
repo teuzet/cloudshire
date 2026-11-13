@@ -10,7 +10,8 @@ import type { Dynamic, Shape, StatMap } from '../core/rules.js';
 import { DAYS_PER_MONTH } from '../core/time.js';
 import { leadOf } from '../core/world/assignments.js';
 import { changedObjectIds, type Change } from '../core/world/changes.js';
-import { accidentLoss, buildBound, buildOpportunity, buildSide, hindranceOp, type EventDress } from '../core/world/complications.js';
+import { plainTitle } from '../core/text.js';
+import { accidentLoss, buildBound, buildOpportunity, buildSide, capSideHit, hindranceOp, type EventDress } from '../core/world/complications.js';
 import { dynamicTags, leanOf, markStory, plusChance, roomForTrouble } from '../core/world/director.js';
 import { candidates, drawOrder, rollRisk, type Candidate, type Moment, type RollKind } from '../core/world/dynamics.js';
 import { refreshTargets } from '../core/world/echo.js';
@@ -196,7 +197,7 @@ export async function complicate(
     return made;
   };
 
-  const dress: EventDress = { title: costume.title, description: costume.description, outburst: costume.outburst, newObject: costume.newObject };
+  const dress: EventDress = { title: plainTitle(costume.title), description: costume.description, outburst: costume.outburst, newObject: costume.newObject };
   const ctx = { day, newId: (p: string) => newId(deps, p), frontId: parent.id };
   const changes: Change[] = [];
 
@@ -275,7 +276,8 @@ export async function complicate(
   }
   const before = rawToPoints(city, hit.statEffect);
   const appraised = await appraise(deps, city, briefOf(hit), { points: before, event: costume.outburst });
-  const newPoints = magnitude(diffPoints(appraised.points, before)) > 0 ? appraised.points : fallbackHit(deps, before);
+  const capped = capSideHit(deps.rules, before, appraised.points);
+  const newPoints = magnitude(diffPoints(capped, before)) > 0 ? capped : fallbackHit(deps, before);
   const front = buildSide(deps.rules, city, {
     shape: plan.shape,
     origin: 'complication',

@@ -219,3 +219,14 @@ describe('обновление после перемен', () => {
     expect(themeNames(city).slice(0, 2)).toEqual(['камень', 'оборона']);
   });
 });
+
+describe('предел удара побочной беды', () => {
+  test('беда отнимает вклад объекта и уводит его не глубже малого минуса', async () => {
+    const { capSideHit } = await import('../../src/core/world/complications.js');
+    const rr = rules();
+    const small = rr.fronts.contribution.small;
+    const before = { prosperity: 0, security: 5, knowledge: 2, influence: -4 };
+    const hit = { prosperity: -5, security: -12, knowledge: 1, influence: -9 };
+    expect(capSideHit(rr, before, hit)).toEqual({ prosperity: -small, security: -small, knowledge: 1, influence: -4 - small });
+  });
+});
