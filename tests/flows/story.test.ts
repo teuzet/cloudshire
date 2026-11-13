@@ -82,7 +82,8 @@ describe('история от посева до развязки', () => {
     ]);
     expect(lastUser(s.llm.callsTo('chronicler').at(-1)!)).toContain('Стало известно: Рецепт — состав, который светится без огня; им заправлены фонари островка.');
     expect(city.officers.find((o) => o.office === 'keeper')!.assignmentId).toBeNull();
-    expect(s.inbox.sent).toHaveLength(5);
+    // Бед в этих историях нет, поэтому режиссёр за это время досадил ещё три.
+    expect(s.inbox.sent).toHaveLength(8);
     expect(s.llm.callsTo('herald').at(-1)?.messages[0]?.content).toContain('развязка');
   });
 

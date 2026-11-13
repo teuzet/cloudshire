@@ -201,15 +201,16 @@ export const rulesSchema = z.object({
     helper: z.object({ unitsPerMonth: z.number().positive(), maxShare: z.number().positive() }),
     hindrance: z.object({ unitsPerMonth: z.number().negative(), removalShare: z.number().positive(), removalMin: z.number().positive() }),
     push: z.object({ share: z.number().positive(), min: z.number().positive() }),
-    threat: z.object({ capacityShare: z.number().positive(), capacityMin: z.number().positive() }),
+    threat: z.object({ capacityShare: z.number().positive(), boundShare: z.number().positive(), capacityMin: z.number().positive() }),
     tension: z.object({
       quenchShare: z.number().positive(),
+      sideQuenchShare: z.number().positive(),
       quenchMin: z.number().positive(),
       burstMonthsMin: z.number().int().positive(),
       burstMonthsMax: z.number().int().positive(),
     }),
     opportunity: z.object({ capacityShare: z.number().positive(), capacityMin: z.number().positive() }),
-    deadlines: z.object({ ownRiskMonths: z.number().positive(), worldMonths: z.number().positive() }),
+    deadlines: z.object({ ownRiskMonths: z.number().positive(), worldMonths: z.number().positive(), slack: z.number().min(1) }),
     risk: z.object({
       chance: byRiskStep,
       heavyShare: byRiskStep,
@@ -228,6 +229,8 @@ export const rulesSchema = z.object({
       mysteryShare: z.number().min(0).max(1),
       mysteryBoost: z.number().min(1),
       calmTroubles: z.number().int().positive(),
+      /** Поток бед: сколько сановников и какую долю их времени беды должны занимать при хорошей игре. */
+      pressure: z.object({ officers: z.number().positive(), share: z.number().min(0).max(1), windowMonths: z.number().int().positive() }),
       plusBase: z.number().min(0).max(1),
       plusMax: z.number().min(0).max(1),
       engines: z.record(z.enum(ENGINES), z.string().min(1)),

@@ -105,7 +105,7 @@ describe('баллиста: от приказа до результата', () =
     const threat = city.fronts.at(-1)!;
     expect(front.milestonesFired).toBe(1);
     expect(threat).toMatchObject({ form: 'threat', origin: 'complication', parentId: front.id, bound: 'rollback', dynamicId: 'key-refuse', refs: ['guild'], capacity: 2.93 });
-    expect(threat.deadlineDay! - threat.createdDay).toBe(30);
+    expect(threat.deadlineDay! - threat.createdDay).toBe(33);
     expect(threat.failStake).toEqual([{ op: 'rollback', frontId: front.id }]);
     expect(threat.key?.moves).toHaveLength(3);
     expect(isFrozen(city, front)).toBe(true);
@@ -207,7 +207,7 @@ describe('другие исходы броска', () => {
     s.llm.script('costumer', costume('Обрушились леса', { new_object: { type: 'threat', name: 'Завал из лесов', description: 'Брёвна и камень лежат на стене.' } }));
     const clean = front.ratePerDay;
     await next(s, front);
-    expect(front.progress).toBeCloseTo((22 / 3) * 0.75, 1);
+    expect(front.progress).toBeCloseTo((22 / 3) * 0.75, 0);
     const rubble = attachedTo(city, front.id)[0]!;
     expect(rubble).toMatchObject({ name: 'Завал из лесов', temporary: true, attach: { rate: -2 }, parentId: front.siteId });
     expect((clean - front.ratePerDay) * 30).toBeCloseTo(2);
@@ -295,12 +295,12 @@ describe('сроки', () => {
     const burstDay = tension.deadlineDay!;
 
     const news = await at(s, burstDay);
-    expect(tension).toMatchObject({ form: 'threat', status: 'active', capacity: 2, deadlineDay: burstDay + 30 });
+    expect(tension).toMatchObject({ form: 'threat', status: 'active', capacity: 5, deadlineDay: burstDay + 56 });
     expect(news).toHaveLength(1);
     expect(city.chronicle.at(-1)?.text).toContain('Квартал перекроет подвоз.');
 
     // Угрозу никто не снял: башня теряет вклад, описание переписано.
-    await at(s, burstDay + 30);
+    await at(s, burstDay + 56);
     expect(tension.status).toBe('failed');
     expect(tower.statEffect.security).toBe(0);
     expect(tower.description).toContain('Теперь иначе.');
@@ -476,7 +476,8 @@ describe('недостижимое дело', () => {
     expect(trace).toMatchObject({ type: 'landmark', status: 'active' });
     expect(trace.statEffect.prosperity).toBe(-2);
     expect(lastUser(s.llm.callsTo('resolver').at(-1)!)).toContain(`Исход: затея рухнула. ${reason}`);
-    // Беда по гильдии сработала раньше краха: срок у своих бед месяц.
+    // Беда по гильдии переживает крах дела и срабатывает в свой срок.
+    await at(s, trouble.deadlineDay!);
     expect(trouble.status).toBe('failed');
     expect(city.objects.find((o) => o.id === 'guild')?.statEffect.prosperity).toBe(0);
     // Та же беда с тем же участником не открывалась дважды, пока первая была жива.

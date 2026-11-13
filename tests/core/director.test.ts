@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import type { StoryTags } from '../../src/core/city.js';
 import { createAssignment } from '../../src/core/world/assignments.js';
-import { leanOf, markStory, mysteryShare, plusChance, roomForTrouble, unansweredTroubles, varietyWeight } from '../../src/core/world/director.js';
+import { leanOf, markStory, mysteryShare, plusChance, roomForTrouble, troublePressure, unansweredTroubles, varietyWeight, wantsTrouble } from '../../src/core/world/director.js';
 import { createFront } from '../../src/core/world/fronts.js';
 import { parseScenario, scenarioTags } from '../../src/core/world/scenario.js';
 import { blankCity, rng, rules } from '../helpers/fixtures.js';
@@ -77,5 +77,20 @@ describe('режиссёр', () => {
     expect(scenarioTags(parseScenario(base))).toEqual({ engine: 'discovery', source: 'sky', sphere: 'knowledge', mystery: false });
     const hidden = { ...base, objects: [{ id: 'o', type: 'object', name: 'Ключ', hidden: true }] };
     expect(scenarioTags(parseScenario(hidden)).mystery).toBe(true);
+  });
+
+  test('поток бед: режиссёр ждёт новую историю, пока беды дают меньше работы, чем три сановника на 70%', () => {
+    const city = blankCity();
+    expect(troublePressure(r, city, 100)).toBe(0);
+    expect(wantsTrouble(r, city, 100)).toBe(true);
+    // Пять бед по 5 единиц за три месяца — 8,3 в месяц при цели 8,4; шестая закрывает норму.
+    for (let i = 0; i < 5; i++) city.fronts.push({ ...trouble(`t${i}`), createdDay: 40 + i });
+    expect(troublePressure(r, city, 100)).toBeCloseTo(25 / 3);
+    expect(wantsTrouble(r, city, 100)).toBe(true);
+    // Случившаяся беда тоже в счёте: это нагрузка, которую город уже получил.
+    city.fronts.push({ ...trouble('t5'), createdDay: 60, status: 'failed' });
+    expect(wantsTrouble(r, city, 100)).toBe(false);
+    // За окном беды забываются.
+    expect(wantsTrouble(r, city, 100 + 90)).toBe(true);
   });
 });

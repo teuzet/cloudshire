@@ -83,7 +83,7 @@ describe('воля игрока: новый проект', () => {
     expect(city.objects.find((o) => o.id === front.siteId)).toMatchObject({ type: 'site', name: 'Стройка баллисты', temporary: true });
 
     // Скорость: 4 в месяц × «в точку» × спешка проекта × поправка маршала (безопасность 55, дело его профиля).
-    expect(front.ratePerDay * 30).toBeCloseTo(4 * 1.5 * 1.2 * 1.07);
+    expect(front.ratePerDay * 30).toBeCloseTo(4 * 1.5 * 1.2 * 1.06);
     expect(city.jobs.find((j) => j.state === 'pending' && j.payload.frontId === front.id)?.dueDay).toBe(nextEventDay(front));
 
     expect(out).toMatchObject({ ok: true });

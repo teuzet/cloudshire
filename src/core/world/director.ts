@@ -11,6 +11,7 @@
 import type { City, StoryMark, StoryTags } from '../city.js';
 import type { Dynamic, Rules } from '../rules.js';
 import { leadOf } from './assignments.js';
+import { monthsToDays, pressureTarget } from './numbers.js';
 
 const LOG_MAX = 60;
 
@@ -79,6 +80,24 @@ export function plusChance(rules: Rules, city: Pick<City, 'fronts' | 'assignment
   const d = rules.fronts.director;
   const load = Math.min(1, unansweredTroubles(city) / d.calmTroubles);
   return d.plusBase + (d.plusMax - d.plusBase) * load;
+}
+
+/**
+ * Поток бед: сколько работы в месяц потребовали беды мира, рождённые за окно `pressure.windowMonths`.
+ * Считаются и снятые, и случившиеся: это нагрузка, которую город получил, а не та, что на нём висит.
+ */
+export function troublePressure(rules: Rules, city: Pick<City, 'fronts'>, day: number): number {
+  const months = rules.fronts.director.pressure.windowMonths;
+  const since = day - monthsToDays(months);
+  const sum = city.fronts
+    .filter((f) => !f.plus && (f.form === 'threat' || f.form === 'tension') && f.origin !== 'player' && f.createdDay > since)
+    .reduce((acc, f) => acc + f.capacity, 0);
+  return sum / months;
+}
+
+/** Ждёт ли город новую историю: поток бед ниже цели режиссёра. */
+export function wantsTrouble(rules: Rules, city: Pick<City, 'fronts'>, day: number): boolean {
+  return troublePressure(rules, city, day) < pressureTarget(rules);
 }
 
 /** Можно ли сейчас родить новую беду мира (срыв, посев): пока бед без ответа меньше предела. */

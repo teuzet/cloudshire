@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { DRIFT_BANDS, ENGINES, IMPACT_LEVELS, OBJECT_TYPES, SOURCES, STAT_IDS, type Rules } from '../rules.js';
 import type { City, Front, StakeOp, StoryTags, WorldObject } from '../city.js';
 import { createFront } from './fronts.js';
-import { monthsToDays, rawToPoints, scaleOf } from './numbers.js';
+import { magnitude, monthsToDays, rawToPoints, scaleOf, threatCapacity, troubleDays } from './numbers.js';
 import { createObject } from './objects.js';
 import { objectContribution } from './stats.js';
 
@@ -190,7 +190,23 @@ export function plantScenario(
   );
   // История ложится на новую модель: без дрейфа это поиск (работа доводит до ставки),
   // с дрейфом — угроза со сроком (ставка сработает, если не успеть).
-  const ownCapacity = (f: Scenario['fronts'][number]) => rules.seeding.capacity[f.impact];
+  // Чем беда истории бьёт по городу, в пунктах статов: от этого её ёмкость. Ноль — удар не в числах.
+  const hitOf = (f: Scenario['fronts'][number]): number => {
+    if (!f.stake) return 0;
+    if ('stats' in f.stake) return magnitude(f.stake.stats);
+    if ('delete' in f.stake) {
+      const target = f.stake.delete.target;
+      const own = scenario.objects.find((o) => o.id === target);
+      const raw = own ? objectContribution(rules, own.weight ?? 'NONE', own.statProfile ?? {}) : city.objects.find((o) => o.id === target)?.statEffect;
+      return raw ? magnitude(rawToPoints(city, raw)) : 0;
+    }
+    return 0;
+  };
+  // Поиск и дело стоят по масштабу; беда стоит столько, сколько она отнимет.
+  const ownCapacity = (f: Scenario['fronts'][number]) => {
+    const hit = f.drift !== 'NONE' ? hitOf(f) : 0;
+    return hit > 0 ? threatCapacity(rules, hit) : rules.seeding.capacity[f.impact];
+  };
   const byId = new Map(scenario.fronts.map((f) => [f.id, f]));
   const fronts = scenario.fronts.map((f) => {
     // Двигать другой фронт стоит столько же, сколько сделать эту часть его работы самому.
@@ -201,7 +217,7 @@ export function plantScenario(
     const capacity = Math.max(ownCapacity(f), pushes.reduce((sum, p) => sum + p.amount, 0));
     const own = stakeOps(rules, city, f.stake, ids);
     const drifting = f.drift !== 'NONE';
-    const driftDays = monthsToDays(rules.seeding.driftMonths[f.drift]);
+    const driftDays = drifting ? troubleDays(rules, capacity, rules.seeding.driftMonths[f.drift]) : 0;
     const moves = keyMoves(f.alignment, f.clues);
     const description = tweak[f.id]?.description ?? f.description;
     const form = f.form ?? (drifting ? 'threat' : 'find');
@@ -221,7 +237,7 @@ export function plantScenario(
       failStake: drifting ? own : [],
       key: moves.length ? { moves, twist: null } : null,
       refs: f.refs.map(map),
-      atStake: capacity,
+      atStake: (drifting && hitOf(f)) || capacity,
       script: {
         events: f.events.map((e) => ({ id: e.id, description: e.description, fired: false })),
         clues: f.clues.map((c) => ({ id: c.id, fact: c.fact, revealed: false })),

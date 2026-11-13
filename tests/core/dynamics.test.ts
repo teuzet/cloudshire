@@ -148,7 +148,7 @@ describe('сборка осложнений', () => {
     expect(normal.deadlineDay! - 10).toBeLessThanOrEqual(120);
 
     const hard = buildBound(r, town('hard').front, { ...args, shape: 'threat' });
-    expect(hard).toMatchObject({ form: 'threat', bound: 'rollback', deadlineDay: 40, failStake: [{ op: 'rollback', frontId: 'p' }] });
+    expect(hard).toMatchObject({ form: 'threat', bound: 'rollback', deadlineDay: 43, failStake: [{ op: 'rollback', frontId: 'p' }] });
     expect(hard.atStake).toBeCloseTo(22 / 3);
     expect(hard.capacity).toBeCloseTo(2.93);
 
@@ -161,13 +161,13 @@ describe('сборка осложнений', () => {
     const guild = city.objects[0]!;
     const side = { origin: 'complication' as const, target: guild, newPoints: { prosperity: 0, security: 0, knowledge: 0, influence: 0 }, dress, key: null, dynamicId: null, id: 's', day: 10, rng: rng(5) };
     const threat = buildSide(r, city, { ...side, shape: 'threat' });
-    expect(threat).toMatchObject({ form: 'threat', atStake: 5, capacity: 2, deadlineDay: 40, parentId: null, refs: ['guild'] });
+    expect(threat).toMatchObject({ form: 'threat', atStake: 5, capacity: 5, deadlineDay: 66, parentId: null, refs: ['guild'] });
     expect(threat.failStake).toEqual([{ op: 'revalue', target: 'guild', points: side.newPoints }]);
     expect(buildSide(r, city, { ...side, shape: 'threat', origin: 'echo' }).deadlineDay).toBe(130);
     const clock = buildSide(r, city, { ...side, shape: 'clock' });
     expect(clock).toMatchObject({ form: 'clock', capacity: 0, deadlineDay: 130 });
     expect(clock.stake).toHaveLength(1);
-    expect(buildSide(r, city, { ...side, shape: 'tension' })).toMatchObject({ form: 'tension', capacity: 1 });
+    expect(buildSide(r, city, { ...side, shape: 'tension' })).toMatchObject({ form: 'tension', capacity: 2.5 });
   });
 
   test('удобный случай: плюсовое дело со скидкой и сроком', () => {
@@ -185,10 +185,11 @@ describe('сборка осложнений', () => {
   test('напряжение прорывается в угрозу: доля сделанного сохраняется', () => {
     const { city } = town();
     const tension = buildSide(r, city, { shape: 'tension', origin: 'complication', target: city.objects[3]!, newPoints: { prosperity: 0, security: -5, knowledge: 0, influence: 0 }, dress, key: null, dynamicId: null, id: 't', day: 0, rng: rng(5) });
-    expect(tension.capacity).toBe(2);
-    tension.progress = 1;
+    expect(tension.capacity).toBe(5);
+    tension.progress = 2.5;
     tensionToThreat(r, tension, 70);
-    expect(tension).toMatchObject({ form: 'threat', capacity: 4, progress: 2, deadlineDay: 100, milestones: 1 });
+    // Осталось 5 единиц работы: срок 5 / 4 × 1,5 месяца.
+    expect(tension).toMatchObject({ form: 'threat', capacity: 10, progress: 5, deadlineDay: 126, milestones: 1 });
   });
 
   test('авария съедает четверть набранного', () => {

@@ -13,7 +13,7 @@ import { rawToPoints } from '../core/world/numbers.js';
 import { mysteryObjectIds } from '../core/lore.js';
 import type { City, StoryTags } from '../core/city.js';
 import { IMPACT_LEVELS } from '../core/rules.js';
-import { leanOf, markStory, roomForTrouble, varietyWeight } from '../core/world/director.js';
+import { leanOf, markStory, roomForTrouble, varietyWeight, wantsTrouble } from '../core/world/director.js';
 import { weightedOrder } from '../core/world/dynamics.js';
 import { plantScenario, scenarioTags, touchedMysteries, type Scenario } from '../core/world/scenario.js';
 import type { OutboundMessage } from '../ports/notifier.js';
@@ -136,9 +136,11 @@ export async function seedStories(deps: FlowDeps, city: City, day: number): Prom
   // В пустой город сразу приходит норма историй; дальше фон идёт по одной истории за проверку,
   // и каждая следующая ждёт, пока у города есть место для новой беды.
   const empty = storyCount(city) === 0;
+  // activeStories — потолок числа историй; сажать ли ещё одну, решает поток бед: пока город получает
+  // меньше работы над бедами, чем хочет режиссёр, приходит следующая история.
   const need = Math.max(0, Math.floor(deps.rules.seeding.activeStories - storyCount(city)));
-  for (let i = 0; i < (empty ? need : Math.min(1, need)); i++) {
-    if (roomForTrouble(deps.rules, city) <= 0) break;
+  for (let i = 0; i < (empty ? Math.min(2, need) : Math.min(1, need)); i++) {
+    if (roomForTrouble(deps.rules, city) <= 0 || !wantsTrouble(deps.rules, city, day)) break;
     const msg = await plantStory(deps, city, day);
     if (msg) out.push(msg);
   }

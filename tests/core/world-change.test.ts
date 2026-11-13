@@ -117,7 +117,9 @@ describe('сценарий', () => {
     const { fronts } = plantScenario(r, city, scenario, { day: 3, newId: ids(9) });
     const debt = fronts[0]!;
     const check = fronts[1]!;
-    const push = r.seeding.capacity.SIGNIFICANT * 0.7;
+    // Беда стоит столько, сколько отнимет: пять пунктов достатка — пять единиц работы.
+    expect(debt).toMatchObject({ capacity: 5, atStake: 5, deadlineDay: 3 + 240 });
+    const push = 5 * 0.7;
     expect(check.stake).toContainEqual({ op: 'progress', frontId: debt.id, amount: Math.round(push * 100) / 100 });
     expect(check.capacity).toBeCloseTo(Math.max(r.seeding.capacity.MINOR, push));
     expect(() =>

@@ -14,7 +14,10 @@ import {
   magnitude,
   monthsToDays,
   opportunityCapacity,
+  boundCapacity,
   quenchCapacity,
+  sideQuenchCapacity,
+  troubleDays,
   rawToPoints,
   threatCapacity,
 } from './numbers.js';
@@ -62,8 +65,8 @@ export function buildBound(
     origin: 'complication',
     title: args.dress.title,
     description: args.dress.description,
-    capacity: tension ? quenchCapacity(rules, atStake) : threatCapacity(rules, atStake),
-    deadlineDay: tension ? burstDay(rules, args.day, args.rng) : args.day + monthsToDays(rules.fronts.deadlines.ownRiskMonths),
+    capacity: tension ? quenchCapacity(rules, atStake) : boundCapacity(rules, atStake),
+    deadlineDay: tension ? burstDay(rules, args.day, args.rng) : args.day + troubleDays(rules, boundCapacity(rules, atStake), rules.fronts.deadlines.ownRiskMonths),
     failStake,
     key: args.key,
     refs: args.roleId ? [args.roleId] : [],
@@ -127,9 +130,10 @@ export function buildSide(
     return createFront({ ...base, form: 'clock', capacity: 0, deadlineDay: args.day + monthsToDays(rules.fronts.deadlines.worldMonths), stake: hit });
   }
   if (args.shape === 'tension') {
-    return createFront({ ...base, form: 'tension', capacity: quenchCapacity(rules, atStake), deadlineDay: burstDay(rules, args.day, args.rng), failStake: hit });
+    return createFront({ ...base, form: 'tension', capacity: sideQuenchCapacity(rules, atStake), deadlineDay: burstDay(rules, args.day, args.rng), failStake: hit });
   }
-  return createFront({ ...base, form: 'threat', capacity: threatCapacity(rules, atStake), deadlineDay: args.day + monthsToDays(months), failStake: hit });
+  const capacity = threatCapacity(rules, atStake);
+  return createFront({ ...base, form: 'threat', capacity, deadlineDay: args.day + troubleDays(rules, capacity, months), failStake: hit });
 }
 
 /** Удобный случай: плюсовое дело со сроком и скидкой. Срок вышел — просто исчез. */
@@ -164,13 +168,13 @@ export function tensionToThreat(rules: Rules, front: Front, day: number): void {
   settleProgress(front, day);
   const share = front.capacity > 0 ? front.progress / front.capacity : 0;
   front.form = 'threat';
-  front.capacity = threatCapacity(rules, front.atStake);
+  front.capacity = front.parentId ? boundCapacity(rules, front.atStake) : threatCapacity(rules, front.atStake);
   front.progress = share * front.capacity;
   front.progressDay = Math.max(front.progressDay, Math.round(day));
   front.milestones = 1;
   front.milestonesFired = 0;
   const months = front.origin === 'echo' ? rules.fronts.deadlines.worldMonths : rules.fronts.deadlines.ownRiskMonths;
-  front.deadlineDay = Math.round(day) + monthsToDays(months);
+  front.deadlineDay = Math.round(day) + troubleDays(rules, front.capacity - front.progress, months);
 }
 
 /** Авария: мгновенный удар. Часть набранного прогресса теряется. Возвращает потерю. */

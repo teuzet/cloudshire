@@ -133,9 +133,34 @@ export function threatCapacity(rules: Rules, atStake: number): number {
   return share(atStake, rules.fronts.threat.capacityShare, rules.fronts.threat.capacityMin);
 }
 
+/** Беда, привязанная к делу: на кону его работа, а не статы, и снять её дешевле, чем переделывать. */
+export function boundCapacity(rules: Rules, atStake: number): number {
+  return share(atStake, rules.fronts.threat.boundShare, rules.fronts.threat.capacityMin);
+}
+
+/**
+ * Срок беды в днях: не короче заданного и такой, чтобы один сановник обычной скорости
+ * успел её снять с запасом `deadlines.slack`.
+ */
+export function troubleDays(rules: Rules, capacity: number, minMonths: number): number {
+  const feasible = (capacity / rules.fronts.work.unitsPerMonth) * rules.fronts.deadlines.slack;
+  return monthsToDays(Math.max(minMonths, feasible));
+}
+
+/** Сколько работы над бедами в месяц режиссёр хочет давать городу. */
+export function pressureTarget(rules: Rules): number {
+  const p = rules.fronts.director.pressure;
+  return round2(p.officers * p.share * rules.fronts.work.unitsPerMonth);
+}
+
 /** Погасить напряжение до прорыва дешевле. */
 export function quenchCapacity(rules: Rules, atStake: number): number {
   return share(atStake, rules.fronts.tension.quenchShare, rules.fronts.tension.quenchMin);
+}
+
+/** Погасить напряжение, которое грозит статам города. */
+export function sideQuenchCapacity(rules: Rules, atStake: number): number {
+  return share(atStake, rules.fronts.tension.sideQuenchShare, rules.fronts.tension.quenchMin);
 }
 
 export function opportunityCapacity(rules: Rules, gain: number): number {

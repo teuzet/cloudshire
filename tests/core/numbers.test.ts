@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'vitest';
 import {
+  boundCapacity,
   boundThreat,
+  pressureTarget,
+  sideQuenchCapacity,
+  troubleDays,
   changeCapacity,
   complicationChance,
   gradePoints,
@@ -68,8 +72,14 @@ describe('ёмкость и масштаб', () => {
   });
 
   test('угроза, напряжение, случай, помеха и разовый вклад считаются долей с нижней границей', () => {
-    expect(threatCapacity(r, 14)).toBe(5.6);
-    expect(threatCapacity(r, 3)).toBe(2);
+    expect(threatCapacity(r, 14)).toBe(14);
+    expect(threatCapacity(r, 1)).toBe(2);
+    expect(boundCapacity(r, 14)).toBe(5.6);
+    expect(sideQuenchCapacity(r, 14)).toBe(7);
+    // Срок: не короче заданного, и сановник обычной скорости успевает с запасом в полтора раза.
+    expect(troubleDays(r, 2, 1)).toBe(30);
+    expect(troubleDays(r, 12, 1)).toBe(135);
+    expect(pressureTarget(r)).toBe(8.4);
     expect(quenchCapacity(r, 14)).toBe(2.8);
     expect(quenchCapacity(r, 2)).toBe(1);
     expect(opportunityCapacity(r, 10)).toBe(5);
