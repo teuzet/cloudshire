@@ -72,6 +72,13 @@ export interface WorldObject {
   themes: string[];
   /** День создания или последней перемены: год после него объект «свежий» для подбора ролей. */
   freshDay: number;
+  /**
+   * Объект выбыл: сгорел, распущен, заброшен, ушёл. Он остаётся в городе и в памяти жреца,
+   * но городу больше ничего не даёт; `was` — прежний вклад, который вернёт восстановление.
+   */
+  out?: { day: number; cause: string; was: StatMap; /** Утрачено безвозвратно: осталось только в памяти. */ forever?: boolean } | null;
+  /** Память объекта: что с ним случалось. Короткие строки из хроники, новые в конце. */
+  log?: Array<{ day: number; text: string }>;
 }
 
 // ───────────────────────────── фронты ─────────────────────────────
@@ -97,6 +104,10 @@ export type StakeOp =
   /** Переписать и переоценить по намерению: поток заранее превращает её в revalue. */
   | { op: 'modify'; target: string; intent: string }
   | { op: 'delete'; target: string }
+  /** Объект выбывает: остаётся в городе без вклада. Вид, который не хранится, удаляется. */
+  | { op: 'retire'; target: string }
+  /** Вернуть выбывший объект к жизни с прежним вкладом. */
+  | { op: 'restore'; target: string; description?: string | null }
   | { op: 'reveal'; target: string }
   | { op: 'fact'; text: string }
   | { op: 'link'; a: string; b: string }
@@ -226,7 +237,7 @@ export interface ProjectStage {
   title: string;
   work: string;
   result: {
-    kind: 'new_object' | 'change_object' | 'remove_object' | 'fact';
+    kind: 'new_object' | 'change_object' | 'remove_object' | 'restore_object' | 'fact';
     objectId: string | null;
     type: ObjectType | null;
     name: string;

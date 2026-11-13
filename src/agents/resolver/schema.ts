@@ -9,6 +9,7 @@ export const resolutionSchema = z.object({
   effect: z.enum(RESOLUTION_EFFECTS).default('none'),
   fact: z.string().trim().max(400).nullable().default(null),
   object_ids: z.array(z.string().trim().min(1)).max(2).default([]),
+  lost_forever: z.array(z.string().trim().min(1)).max(6).default([]),
   trace: z
     .object({
       type: z.enum(OBJECT_TYPES),

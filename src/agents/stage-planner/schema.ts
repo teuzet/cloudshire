@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { OBJECT_TYPES } from '../../core/rules.js';
 
-export const RESULT_KINDS = ['new_object', 'change_object', 'remove_object', 'fact'] as const;
+export const RESULT_KINDS = ['new_object', 'change_object', 'remove_object', 'restore_object', 'fact'] as const;
 export type ResultKind = (typeof RESULT_KINDS)[number];
 
 const resultSchema = z.object({

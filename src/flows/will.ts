@@ -228,6 +228,15 @@ async function planStake(deps: FlowDeps, city: City, stage: ProjectStage): Promi
         target: null,
       };
     }
+    case 'restore_object': {
+      if (!target || target.status !== 'active') return 'Того, что этот шаг должен был вернуть, в городе больше нет.';
+      if (target.out) {
+        // Сколько вернётся, решает код: прежний вклад объекта. Цена — как у перемены на эту разницу.
+        const delta = diffPoints(target.out.was, rawToPoints(city, target.statEffect));
+        return { capacity: changeCapacity(deps.rules, target.type, delta), stake: [{ op: 'restore', target: target.id, description: r.description }], points: delta, target };
+      }
+      return planStake(deps, city, { ...stage, result: { ...r, kind: 'change_object' } });
+    }
     case 'change_object': {
       if (!target || target.status !== 'active') return 'Того, что этот шаг должен был изменить, в городе больше нет.';
       const before = rawToPoints(city, target.statEffect);

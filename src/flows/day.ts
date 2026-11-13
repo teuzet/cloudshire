@@ -15,7 +15,7 @@ import { DAYS_PER_MONTH } from '../core/time.js';
 import { describeChanges, type Change } from '../core/world/changes.js';
 import { tensionToThreat } from '../core/world/complications.js';
 import { dueEvent, findFront, frontObjectIds, neighbors, closeFront, settleProgress, shareDone } from '../core/world/fronts.js';
-import { attachedTo, findObject } from '../core/world/objects.js';
+import { attachedTo, findObject, deleteWithChildren } from '../core/world/objects.js';
 import { applyStake } from '../core/world/stake.js';
 import { themeNames } from '../core/world/themes.js';
 import type { OutboundMessage } from '../ports/notifier.js';
@@ -468,7 +468,15 @@ async function strike(deps: FlowDeps, city: City, front: Front, stake: readonly 
     { text: event, effect: 'none' },
   );
   const changes = closeFront(deps.rules, city, front, status, day, { outcome: 'failed' });
-  changes.push(...applyStake(deps.rules, city, ops, stakeCtx(deps, front, day)).changes);
+  // Беда выводит объекты из строя, а не стирает: их можно вернуть делом. Что утрачено
+  // безвозвратно, решил Развязчик; такое уходит из города и остаётся только в памяти.
+  changes.push(...applyStake(deps.rules, city, ops, { ...stakeCtx(deps, front, day), trouble: front.title }).changes);
+  for (const id of resolution.lostForever ?? []) {
+    const obj = findObject(city, id);
+    if (!obj?.out || obj.protected) continue;
+    obj.out.forever = true;
+    deleteWithChildren(city, obj, day);
+  }
   changes.push(...(await applyEffect(deps, city, front, resolution, day)));
   await faithEvent(deps, city, { event: resolution.text, will, day });
   // Срыв — свой момент жизни фронта: беда может потянуть за собой новую.

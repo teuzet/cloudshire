@@ -3,8 +3,8 @@
  * Вклады в операциях заданы в пунктах стата; в сырые единицы объектов их переводит core.
  */
 
-import type { Rules } from '../rules.js';
-import type { City, StakeOp } from '../city.js';
+import { STAT_IDS, type Rules, type StatMap } from '../rules.js';
+import type { City, StakeOp, WorldObject } from '../city.js';
 import { addFact } from '../lore.js';
 import type { Change } from './changes.js';
 import { closeFront, findFront, rollbackMilestone, settleProgress } from './fronts.js';
@@ -27,11 +27,21 @@ export function applyStake(
   rules: Rules,
   city: City,
   ops: readonly StakeOp[],
-  ctx: { day: number; newId: (prefix: string) => string; frontId?: string | null },
+  ctx: { day: number; newId: (prefix: string) => string; frontId?: string | null; /** Ставку исполняет случившаяся беда: её имя. Беда выводит объекты из строя, а не стирает. */ trouble?: string | null },
 ): StakeResult {
   const changes: Change[] = [];
   let resultId: string | null = null;
   const day = Math.max(0, Math.round(ctx.day));
+
+  const zero = (): StatMap => ({ prosperity: 0, security: 0, knowledge: 0, influence: 0 });
+  const keeps = (obj: WorldObject) => rules.fronts.objects.keepLost.includes(obj.type) && !obj.temporary && !obj.hidden;
+  /** Вывести объект из строя: вклад снят (минус остаётся минусом), прежний запомнен. */
+  const retire = (obj: WorldObject, points: StatMap, description: string, cause: string) => {
+    const before = rawToPoints(city, obj.statEffect);
+    obj.out = { day, cause, was: obj.out?.was ?? { ...before } };
+    addObjectVersion(rules, obj, { description, statEffect: pointsToRaw(city, points), day });
+    changes.push({ kind: 'object_out', objectId: obj.id, name: obj.name, delta: diffPoints(points, before) });
+  };
 
   for (const op of ops) {
     switch (op.op) {
@@ -59,6 +69,13 @@ export function applyStake(
         if (!obj || obj.status !== 'active') break;
         const before = rawToPoints(city, obj.statEffect);
         const description = op.description?.trim() || obj.description;
+        // Беда, которая отняла у объекта всё, что он давал, выводит его из строя.
+        const gave = STAT_IDS.some((id) => before[id] > 0);
+        const gives = STAT_IDS.some((id) => op.points[id] > 0);
+        if (ctx.trouble && gave && !gives && !obj.out && keeps(obj)) {
+          retire(obj, op.points, description, ctx.trouble);
+          break;
+        }
         const rewritten = description !== obj.description;
         addObjectVersion(rules, obj, { description, statEffect: pointsToRaw(city, op.points), day });
         changes.push({ kind: 'object_changed', objectId: obj.id, name: obj.name, delta: diffPoints(op.points, before), description: rewritten ? obj.description : null });
@@ -69,9 +86,32 @@ export function applyStake(
       case 'delete': {
         const obj = findObject(city, op.target);
         if (!obj || obj.status !== 'active' || obj.protected) break;
+        if (ctx.trouble && keeps(obj)) {
+          if (!obj.out) retire(obj, zero(), obj.description, ctx.trouble);
+          break;
+        }
         for (const gone of deleteWithChildren(city, obj, day)) {
           changes.push({ kind: 'object_removed', objectId: gone.id, name: gone.name, points: rawToPoints(city, gone.statEffect), hidden: gone.hidden });
         }
+        break;
+      }
+      case 'retire': {
+        const obj = findObject(city, op.target);
+        if (!obj || obj.status !== 'active' || obj.protected || obj.out) break;
+        if (keeps(obj)) retire(obj, zero(), obj.description, ctx.trouble ?? 'беда');
+        else for (const gone of deleteWithChildren(city, obj, day)) changes.push({ kind: 'object_removed', objectId: gone.id, name: gone.name, points: rawToPoints(city, gone.statEffect), hidden: gone.hidden });
+        break;
+      }
+      case 'restore': {
+        const obj = findObject(city, op.target);
+        if (!obj || obj.status !== 'active' || !obj.out) break;
+        const before = rawToPoints(city, obj.statEffect);
+        const description = op.description?.trim() || obj.description;
+        const rewritten = description !== obj.description;
+        const points = obj.out.was;
+        obj.out = null;
+        addObjectVersion(rules, obj, { description, statEffect: pointsToRaw(city, points), day });
+        changes.push({ kind: 'object_back', objectId: obj.id, name: obj.name, delta: diffPoints(points, before), description: rewritten ? obj.description : null });
         break;
       }
       case 'reveal': {

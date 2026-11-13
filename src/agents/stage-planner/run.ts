@@ -44,7 +44,7 @@ export const stagePlanner: StructuredAgent<StagesInput, StagesRaw, PlannedStage[
     for (const [i, s] of raw.stages.entries()) {
       const r = s.result;
       const at = `этап ${i + 1}`;
-      if ((r.kind === 'change_object' || r.kind === 'remove_object') && (!r.object_id || !ids.has(r.object_id))) {
+      if ((r.kind === 'change_object' || r.kind === 'remove_object' || r.kind === 'restore_object') && (!r.object_id || !ids.has(r.object_id))) {
         return `${at}: для ${r.kind} нужен object_id из списка «В городе есть»`;
       }
       if (r.kind === 'new_object' && !r.type) return `${at}: для new_object нужен type`;
@@ -58,7 +58,7 @@ export const stagePlanner: StructuredAgent<StagesInput, StagesRaw, PlannedStage[
       work: s.work,
       result: {
         kind: s.result.kind,
-        objectId: s.result.kind === 'change_object' || s.result.kind === 'remove_object' ? s.result.object_id : null,
+        objectId: s.result.kind === 'change_object' || s.result.kind === 'remove_object' || s.result.kind === 'restore_object' ? s.result.object_id : null,
         type: s.result.kind === 'new_object' ? s.result.type : null,
         name: s.result.name,
         description: s.result.description,

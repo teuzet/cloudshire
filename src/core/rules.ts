@@ -242,6 +242,10 @@ export const rulesSchema = z.object({
     objects: z.object({
       nameMax: z.number().int().positive(),
       descriptionMax: z.number().int().positive(),
+      /** Виды объектов, которые после беды остаются в городе выбывшими и ждут восстановления. */
+      keepLost: z.array(z.enum(OBJECT_TYPES)),
+      /** Сколько строк памяти хранит объект. */
+      logMax: z.number().int().positive(),
     }),
     genesisObjects: z.object({
       minCount: z.number().int().positive(),

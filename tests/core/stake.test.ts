@@ -138,3 +138,50 @@ describe('ставка: закрытый список операций', () => {
     expect(out).toEqual({ changes: [], resultId: null });
   });
 });
+
+describe('выбывшие объекты', () => {
+  const trouble = () => ({ ...ctx(20), trouble: 'Стена осыпается' });
+
+  test('беда выводит объект из строя: он остаётся в городе без вклада и помнит прежний', () => {
+    const city = town();
+    const out = applyStake(r, city, [{ op: 'delete', target: 'wall' }], trouble());
+    const wall = city.objects.find((o) => o.id === 'wall')!;
+    expect(wall.status).toBe('active');
+    expect(wall.out).toMatchObject({ day: 20, cause: 'Стена осыпается', was: { security: 5 } });
+    expect(city.stats.security).toBe(50);
+    expect(out.changes[0]).toMatchObject({ kind: 'object_out', name: 'Стена', delta: { security: -5 } });
+    // Вложенное остаётся на месте: ворота никуда не делись.
+    expect(city.objects.find((o) => o.id === 'gate')?.status).toBe('active');
+  });
+
+  test('беда, отнявшая весь вклад переоценкой, тоже выводит из строя; частичный урон — обычная перемена', () => {
+    const city = town();
+    applyStake(r, city, [{ op: 'revalue', target: 'wall', points: { prosperity: 0, security: 2, knowledge: 0, influence: 0 } }], trouble());
+    expect(city.objects.find((o) => o.id === 'wall')?.out ?? null).toBeNull();
+    const out = applyStake(r, city, [{ op: 'revalue', target: 'wall', points: { prosperity: 0, security: -2, knowledge: 0, influence: 0 } }], trouble());
+    expect(out.changes[0]).toMatchObject({ kind: 'object_out' });
+    expect(city.objects.find((o) => o.id === 'wall')?.out?.was.security).toBe(2);
+    expect(city.stats.security).toBe(48);
+  });
+
+  test('restore возвращает прежний вклад и снимает пометку; дело игрока удаляет по-настоящему', () => {
+    const city = town();
+    applyStake(r, city, [{ op: 'delete', target: 'wall' }], trouble());
+    const out = applyStake(r, city, [{ op: 'restore', target: 'wall', description: 'Стена отстроена заново' }], ctx(40));
+    const wall = city.objects.find((o) => o.id === 'wall')!;
+    expect(wall.out).toBeNull();
+    expect(wall.description).toBe('Стена отстроена заново');
+    expect(city.stats.security).toBe(55);
+    expect(out.changes[0]).toMatchObject({ kind: 'object_back', delta: { security: 5 } });
+    applyStake(r, city, [{ op: 'delete', target: 'wall' }], ctx(50));
+    expect(wall.status).toBe('deleted');
+  });
+
+  test('скрытое и то, чей вид не хранится, беда стирает как раньше', () => {
+    const city = town();
+    city.objects.push(createObject(r, { id: 'rot', type: 'threat', name: 'Гниль', description: '', day: 0 }));
+    applyStake(r, city, [{ op: 'delete', target: 'cache' }, { op: 'delete', target: 'rot' }], trouble());
+    expect(city.objects.find((o) => o.id === 'cache')?.status).toBe('deleted');
+    expect(city.objects.find((o) => o.id === 'rot')?.status).toBe('deleted');
+  });
+});

@@ -343,6 +343,11 @@ fronts:
       - mystery
     nameMax: 80
     descriptionMax: 560
+    # Что беда не стирает, а выводит из строя: объект остаётся в городе без вклада, жрец о нём помнит,
+    # и его можно восстановить делом. Угрозы и загадки сюда не входят: их уход и есть развязка.
+    keepLost: [building, structure, landmark, district, settlement, site, object, resource, organization, community, person, practice, capability, policy]
+    # Память объекта: столько последних строк о том, что с ним случалось.
+    logMax: 5
   genesisObjects:
     minCount: 20
     maxCount: 100

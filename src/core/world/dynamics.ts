@@ -46,7 +46,7 @@ function roleObjects(city: City, front: Front, dynamic: Dynamic, resultId: strin
   const seen = new Set<string>();
   const push = (object: WorldObject | null, touch: string) => {
     if (object) {
-      if (object.status !== 'active' || seen.has(object.id)) return;
+      if (object.status !== 'active' || object.out || seen.has(object.id)) return;
       if (dynamic.types.length && !dynamic.types.includes(object.type)) return;
       seen.add(object.id);
     }

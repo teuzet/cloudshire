@@ -78,6 +78,18 @@ export function priestTurnBlock(rules: Rules, city: City, day: number): string {
     .filter((p) => p.status === 'waiting')
     .map((p) => `${p.id}: ${p.title} (следующий шаг: ${p.stages[p.stageIndex]?.title ?? 'не назван'})`);
   const facts = activeFacts(city).slice(-30).map((f) => f.text);
+  // Память о частях города: что выбыло и что с чем случалось. Хроника про события, это про вещи.
+  const seen = city.objects.filter((o) => !o.hidden && !o.temporary);
+  const lost = seen
+    .filter((o) => o.out && (o.status === 'active' || o.out.forever))
+    .sort((a, b) => (b.out?.day ?? 0) - (a.out?.day ?? 0))
+    .slice(0, 12)
+    .map((o) => `${o.name}: ${o.out?.forever ? 'утрачено навсегда' : 'не действует, можно вернуть делом'} — ${gameDate(o.out?.day ?? 0).label}, после беды «${o.out?.cause}»`);
+  const memory = seen
+    .filter((o) => o.log?.length && (o.status === 'active' || o.out?.forever))
+    .sort((a, b) => (b.log?.at(-1)?.day ?? 0) - (a.log?.at(-1)?.day ?? 0))
+    .slice(0, 10)
+    .map((o) => `${o.name}: ${(o.log ?? []).slice(-2).map((l) => `${gameDate(l.day).label}: ${l.text}`).join(' / ')}`);
   return [
     section('ОПИСАНИЕ ГОРОДА', city.brief),
     `Город: ${city.name}. Покровитель: ${city.patronName}. Сегодня: ${gameDate(day).label}.`,
@@ -86,6 +98,8 @@ export function priestTurnBlock(rules: Rules, city: City, day: number): string {
     section('Сановники', bullets(officers)),
     section('Что сейчас идёт в городе (id: что идёт)', bullets(fronts)),
     section('Замыслы, которые ждут слова покровителя (id: что дальше)', bullets(waiting)),
+    section('Что в городе выбыло из строя', bullets(lost)),
+    section('Что случалось с частями города', bullets(memory)),
     section('Известные факты', bullets(facts)),
     section('Последние записи хроники', chronicleBlock(city.chronicle.slice(-5))),
     section('Память', bullets(city.notes.map((n) => n.text))),

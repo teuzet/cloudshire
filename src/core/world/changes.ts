@@ -10,6 +10,10 @@ export type Change =
   | { kind: 'object_created'; objectId: string; name: string; type: ObjectType; points: StatMap; temporary: boolean; hidden: boolean }
   | { kind: 'object_changed'; objectId: string; name: string; delta: StatMap; description: string | null }
   | { kind: 'object_removed'; objectId: string; name: string; points: StatMap; hidden: boolean }
+  /** Объект выбыл: остался в городе, но ничего не даёт. */
+  | { kind: 'object_out'; objectId: string; name: string; delta: StatMap }
+  /** Выбывший объект вернулся к жизни. */
+  | { kind: 'object_back'; objectId: string; name: string; delta: StatMap; description: string | null }
   | { kind: 'object_revealed'; objectId: string; name: string; description?: string }
   | { kind: 'fact'; text: string }
   | { kind: 'linked'; a: string; b: string; names: [string, string] }
@@ -116,6 +120,16 @@ export function describeChanges(rules: Pick<Rules, 'stats'>, changes: readonly C
         out.push(`Изменилось: ${c.name}${c.description ? `. Теперь: ${c.description}` : ''}${shift ? `. В жизни города: ${shift}` : ''}`);
         break;
       }
+      case 'object_out': {
+        const shift = statShiftWords(rules, c.delta);
+        out.push(`Больше не служит городу, но ещё может быть возвращено: ${c.name}${shift ? `. В жизни города: ${shift}` : ''}`);
+        break;
+      }
+      case 'object_back': {
+        const shift = statShiftWords(rules, c.delta);
+        out.push(`Возвращено к жизни: ${c.name}${c.description ? `. Теперь: ${c.description}` : ''}${shift ? `. В жизни города: ${shift}` : ''}`);
+        break;
+      }
       case 'object_removed': {
         if (c.hidden) break;
         const shift = statShiftWords(rules, negate(c.points));
@@ -164,7 +178,7 @@ export function changedObjectIds(changes: readonly Change[]): string[] {
   for (const c of changes) {
     if (c.kind === 'object_created' && !c.temporary) ids.add(c.objectId);
     if (c.kind === 'object_changed' && (magnitude(c.delta) > 0 || c.description)) ids.add(c.objectId);
-    if (c.kind === 'object_removed') ids.add(c.objectId);
+    if (c.kind === 'object_removed' || c.kind === 'object_out' || c.kind === 'object_back') ids.add(c.objectId);
     if (c.kind === 'object_revealed') ids.add(c.objectId);
   }
   return [...ids];

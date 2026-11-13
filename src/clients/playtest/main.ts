@@ -253,7 +253,7 @@ async function main(): Promise<void> {
         console.log(
           c.objects
             .filter((o) => o.status === 'active')
-            .map((o) => `${o.id} ${o.type} «${o.name}» ${JSON.stringify(rawToPoints(c, o.statEffect))}${o.hidden ? ' скрыт' : ''}${o.occupiedBy ? ` занят ${o.occupiedBy}` : ''}${o.temporary ? ' временный' : ''}${o.attach ? ` attach ${JSON.stringify(o.attach)}` : ''}`)
+            .map((o) => `${o.id} ${o.type} «${o.name}» ${JSON.stringify(rawToPoints(c, o.statEffect))}${o.hidden ? ' скрыт' : ''}${o.occupiedBy ? ` занят ${o.occupiedBy}` : ''}${o.temporary ? ' временный' : ''}${o.attach ? ` attach ${JSON.stringify(o.attach)}` : ''}${o.out ? ` ВЫБЫЛ после «${o.out.cause}»` : ''}`)
             .join('\n'),
         );
       break;

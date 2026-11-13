@@ -17,8 +17,10 @@ import { tryAgent, type FlowDeps } from './context.js';
 
 const KEY_OBJECTS = 8;
 
-export function briefOf(o: Pick<WorldObject, 'id' | 'type' | 'name' | 'description'>): ObjectBrief {
-  return { id: o.id, type: o.type, name: o.name, description: o.description };
+export function briefOf(o: Pick<WorldObject, 'id' | 'type' | 'name' | 'description' | 'out'>): ObjectBrief {
+  // Выбывшее агенты видят как есть: оно в городе, но не служит, и его можно вернуть.
+  const state = o.out ? ` Сейчас не действует (после беды «${o.out.cause}») и ждёт восстановления.` : '';
+  return { id: o.id, type: o.type, name: o.name, description: `${o.description}${state}`.trim() };
 }
 
 /** То, что агентам можно показать как «в городе есть»: видимое и долговечное. */

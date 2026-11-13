@@ -30,13 +30,16 @@ export interface ResolutionInput {
   before?: string[];
 }
 
-export type Resolution =
+type Outcome =
   | { text: string; effect: 'none' }
   | { text: string; effect: 'fact'; fact: string }
   | { text: string; effect: 'link'; a: string; b: string }
   | { text: string; effect: 'keep'; objectId: string }
   | { text: string; effect: 'gone'; objectId: string }
   | { text: string; effect: 'trace'; trace: { type: ObjectType; name: string; description: string } };
+
+/** Развязка. lostForever — участники, которых после случившейся беды уже не вернуть. */
+export type Resolution = Outcome & { lostForever?: string[] };
 
 export const resolver: StructuredAgent<ResolutionInput, ResolutionRaw, Resolution> = {
   name: 'resolver',
@@ -68,14 +71,19 @@ export const resolver: StructuredAgent<ResolutionInput, ResolutionRaw, Resolutio
     if (raw.effect === 'trace' && !raw.trace) return 'для trace нужно описание следа в поле trace';
     return null;
   },
-  finish: (raw) => {
+  finish: (raw, input) => {
     const text = raw.text;
-    if (raw.effect === 'fact' && raw.fact) return { text, effect: 'fact', fact: raw.fact.trim() };
-    if (raw.effect === 'link') return { text, effect: 'link', a: raw.object_ids[0] as string, b: raw.object_ids[1] as string };
-    if (raw.effect === 'keep') return { text, effect: 'keep', objectId: raw.object_ids[0] as string };
-    if (raw.effect === 'gone') return { text, effect: 'gone', objectId: raw.object_ids[0] as string };
-    if (raw.effect === 'trace' && raw.trace) return { text, effect: 'trace', trace: raw.trace };
-    return { text, effect: 'none' };
+    const ids = new Set(input.participants.map((p) => p.id));
+    const lostForever = input.ending === 'struck' ? raw.lost_forever.filter((id) => ids.has(id)) : [];
+    const outcome = (): Outcome => {
+      if (raw.effect === 'fact' && raw.fact) return { text, effect: 'fact', fact: raw.fact.trim() };
+      if (raw.effect === 'link') return { text, effect: 'link', a: raw.object_ids[0] as string, b: raw.object_ids[1] as string };
+      if (raw.effect === 'keep') return { text, effect: 'keep', objectId: raw.object_ids[0] as string };
+      if (raw.effect === 'gone') return { text, effect: 'gone', objectId: raw.object_ids[0] as string };
+      if (raw.effect === 'trace' && raw.trace) return { text, effect: 'trace', trace: raw.trace };
+      return { text, effect: 'none' };
+    };
+    return lostForever.length ? { ...outcome(), lostForever } : outcome();
   },
 };
 
