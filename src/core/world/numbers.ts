@@ -150,7 +150,7 @@ export function troubleDays(rules: Rules, capacity: number, minMonths: number): 
 /** Сколько работы над бедами в месяц режиссёр хочет давать городу. */
 export function pressureTarget(rules: Rules): number {
   const p = rules.fronts.director.pressure;
-  return round2(p.officers * p.share * rules.fronts.work.unitsPerMonth);
+  return round2(p.officers * p.share * rules.fronts.work.unitsPerMonth * rules.fronts.verdict[p.verdict]);
 }
 
 /** Погасить напряжение до прорыва дешевле. */

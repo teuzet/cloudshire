@@ -236,7 +236,7 @@ export const rulesSchema = z.object({
       /** Насколько тяга объекта умножает его вес в жребии осложнений: 1 + pullWeight × тяга. */
       pullWeight: z.number().nonnegative(),
       /** Поток бед: сколько сановников и какую долю их времени беды должны занимать при хорошей игре. */
-      pressure: z.object({ officers: z.number().positive(), share: z.number().min(0).max(1), windowMonths: z.number().int().positive() }),
+      pressure: z.object({ officers: z.number().positive(), share: z.number().min(0).max(1), verdict: z.enum(VERDICTS), windowMonths: z.number().int().positive() }),
       plusBase: z.number().min(0).max(1),
       plusMax: z.number().min(0).max(1),
       engines: z.record(z.enum(ENGINES), z.string().min(1)),

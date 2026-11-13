@@ -286,15 +286,17 @@ fronts:
     mysteryBoost: 2
     # Беды без ответа (без ведущего): при calmTroubles новых бед от срывов и посева не рождается,
     # а доля удобных случаев среди выпавших растёт от plusBase до plusMax.
-    calmTroubles: 3
+    calmTroubles: 4
     # Тяга объекта (метка истории, см. seeding.scale) умножает его вес в жребии осложнений: 1 + pullWeight × тяга.
     pullWeight: 0.5
     # Поток бед: режиссёр сажает истории, пока беды мира, рождённые за windowMonths, требуют в месяц
-    # меньше officers × share × work.unitsPerMonth единиц работы. Осложнения от дел игрока идут в тот же счёт.
+    # меньше officers × share × work.unitsPerMonth × verdict единиц работы. Осложнения от дел игрока идут в тот же счёт.
     # Цель: при хорошей игре три сановника заняты бедами 70% времени и город ничего не теряет.
+    # Хорошая игра — это стратегия «в точку» (verdict): её множитель скорости входит в цель.
     pressure:
       officers: 3
       share: 0.7
+      verdict: spot_on
       windowMonths: 3
     plusBase: 0.2
     plusMax: 0.7
@@ -2892,7 +2894,7 @@ fronts:
 # Пока бед без ответа fronts.director.calmTroubles и больше, режиссёр не сажает.
 # Какую заготовку взять, решает режиссёр по осям (см. fronts.director).
 seeding:
-  activeStories: 6
+  activeStories: 10
   checkEveryDays: 15
   firstStoryDay: 3
   # Поиск или дело истории, за которые никто не взялся за столько дней, тихо уходят из дел города

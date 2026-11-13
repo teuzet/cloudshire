@@ -79,7 +79,7 @@ describe('ёмкость и масштаб', () => {
     // Срок: не короче заданного, и сановник обычной скорости успевает с запасом в полтора раза.
     expect(troubleDays(r, 2, 1)).toBe(30);
     expect(troubleDays(r, 12, 1)).toBe(135);
-    expect(pressureTarget(r)).toBe(8.4);
+    expect(pressureTarget(r)).toBe(12.6);
     expect(quenchCapacity(r, 14)).toBe(2.8);
     expect(quenchCapacity(r, 2)).toBe(1);
     expect(opportunityCapacity(r, 10)).toBe(5);
