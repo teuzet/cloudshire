@@ -112,7 +112,7 @@ describe('баллиста: от приказа до результата', () =
     expect(front.ratePerDay).toBe(0);
     expect(city.dynamicsUsed['key-refuse']).toBe(threat.createdDay);
     expect(news).toHaveLength(1);
-    expect(city.chronicle.at(-1)).toMatchObject({ source: 'milestone', frontId: front.id, text: 'Шаг дела «Постройка баллисты». Слух: Гильдия грозит бросить стройку.' });
+    expect(city.chronicle.at(-1)).toMatchObject({ source: 'milestone', frontId: front.id, text: 'Шаг дела «Постройка баллисты: идёт работа». Слух: Гильдия грозит бросить стройку.' });
 
     // Что именно показали узким агентам.
     const fitter = lastUser(s.llm.callsTo('role-fitter')[0]!);
@@ -435,7 +435,9 @@ describe('этапы, подвох, эхо и обновление', () => {
     expect(search.key?.moves).toEqual(['Действовать открыто.', 'Договориться с теми, кого это касается.', 'Не жалеть сил на надзор.']);
     expect(leadOf(city, 'srch')?.verdict).toBe('off');
     const gate = s.llm.callsTo('role-fitter').map(lastUser).find((u) => u.includes('существенно меняет ход дела'))!;
-    expect(gate).toContain('Ход под стеной');
+    // Агенты видят дело словами того, что происходит, без заголовка.
+    expect(gate).toContain('Ищут старый ход');
+    expect(gate).not.toContain('Ход под стеной');
   });
 });
 

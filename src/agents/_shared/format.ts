@@ -58,8 +58,8 @@ export function frontLine(city: Pick<City, 'assignments' | 'officers' | 'fronts'
   else if (front.capacity > 0 && left != null) parts.push(`работы осталось: ${spanBand(left)}`);
   if (front.deadlineDay != null) parts.push(`срок: ${spanBand(Math.max(0, front.deadlineDay - day))}`);
   if (officer) parts.push(`ведёт ${officer.title.toLowerCase()} ${officer.name}`);
-  const text = front.description && front.description !== front.title ? `${front.title}. ${front.description}` : front.title;
-  return `${front.id}: ${text} (${parts.join('; ')})`;
+  // Заголовок фронта агентам не нужен: они имеют дело с тем, что происходит.
+  return `${front.id}: ${front.description || front.title} (${parts.join('; ')})`;
 }
 
 export function officerLine(officer: Officer): string {

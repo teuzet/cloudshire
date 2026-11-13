@@ -7,7 +7,7 @@
 import type { City, DialogEntry } from '../../core/city.js';
 import type { Rules } from '../../core/rules.js';
 import { activeAssignments } from '../../core/world/assignments.js';
-import { activeFronts, findFront } from '../../core/world/fronts.js';
+import { activeFronts, findFront, frontGist } from '../../core/world/fronts.js';
 import { activeFacts } from '../../core/lore.js';
 import { qualitativeStats } from '../../core/world/stats.js';
 import { gameDate } from '../../core/time.js';
@@ -71,7 +71,7 @@ export function priestTurnBlock(rules: Rules, city: City, day: number): string {
   const officers = city.officers.map((o) => {
     const a = assignments.find((x) => x.id === o.assignmentId);
     const front = a ? findFront(city, a.frontId) : null;
-    return `${officerLine(o)} — ${a ? `занят: ${front?.title ?? 'дело'}${a.text ? ` (наказ: ${a.text})` : ''}` : 'свободен'}`;
+    return `${officerLine(o)} — ${a ? `занят: ${front ? frontGist(front) : 'дело'}${a.text ? ` (наказ: ${a.text})` : ''}` : 'свободен'}`;
   });
   const fronts = activeFronts(city).map((f) => frontLine(city, f, day));
   const waiting = city.projects

@@ -15,7 +15,7 @@ import { accidentLoss, buildBound, buildOpportunity, buildSide, capSideHit, hind
 import { dynamicTags, leanOf, markStory, plusChance, roomForTrouble } from '../core/world/director.js';
 import { candidates, drawOrder, rollRisk, type Candidate, type Moment, type RollKind } from '../core/world/dynamics.js';
 import { refreshTargets } from '../core/world/echo.js';
-import { closeFront, shareDone, tempoSum } from '../core/world/fronts.js';
+import { closeFront, frontGist, shareDone, tempoSum } from '../core/world/fronts.js';
 import { complicationChance, diffPoints, dominantStat, magnitude, newObjectCapacity, rawToPoints } from '../core/world/numbers.js';
 import { findObject } from '../core/world/objects.js';
 import { applyStake } from '../core/world/stake.js';
@@ -66,8 +66,8 @@ async function pick(deps: FlowDeps, city: City, parent: Front, order: Candidate[
       () =>
         fitRole(deps.agents, {
           question: c.dynamic.condition,
-          subject: c.object ? `${c.object.name}: ${c.object.description}` : `Место работ: ${parent.title}`,
-          context: [`${parent.title}. ${parent.description}`, tempoWords(tempoSum(city, parent)), `Как дело касается предмета: ${c.touch}`].filter(Boolean).join(' '),
+          subject: c.object ? `${c.object.name}: ${c.object.description}` : `Место работ: ${frontGist(parent)}`,
+          context: [(parent.description || frontGist(parent)), tempoWords(tempoSum(city, parent)), `Как дело касается предмета: ${c.touch}`].filter(Boolean).join(' '),
         }),
       { fits: false, reason: '' },
     );
@@ -93,7 +93,7 @@ async function freePlan(deps: FlowDeps, city: City, parent: Front, q: { moment: 
     deps,
     'dynamics-composer',
     () => composeDynamic(deps.agents, {
-        work: `${parent.title}. ${parent.description}`,
+        work: (parent.description || frontGist(parent)),
         share: shareDone(parent, day),
         touches: touchesOf(city, parent),
         running: runningAround(city, parent),
@@ -178,7 +178,7 @@ export async function complicate(
       dressEvent(deps.agents, {
         skeleton: plan.skeleton,
         shape: plan.shape,
-        cause: `${parent.title}. ${workWords(parent)}`,
+        cause: `${frontGist(parent)}. ${workWords(parent)}`,
         actor: role ? { object: briefOf(role), touch: plan.touch } : null,
         themes: themeNames(city),
         names: names.map((n) => `${n.name} (${n.gender === 'female' ? 'ж' : 'м'})`),
@@ -209,7 +209,7 @@ export async function complicate(
 
   // Авария: мгновенный удар, после неё остаётся помеха.
   if (plan.shape === 'accident') {
-    if (accidentLoss(deps.rules, parent, day) > 0) changes.push({ kind: 'front_moved', frontId: parent.id, title: parent.title, how: 'setback' });
+    if (accidentLoss(deps.rules, parent, day) > 0) changes.push({ kind: 'front_moved', frontId: parent.id, title: frontGist(parent), how: 'setback' });
     changes.push(...applyStake(deps.rules, city, [hindranceOp(deps.rules, parent, dress)], ctx).changes);
     await faithEvent(deps, city, { event: costume.description, will: willWords(city, parent), day });
     return born({ changes, gist: costume.description });
@@ -234,7 +234,7 @@ export async function complicate(
     });
     front.key = await seal(deps, city, front, { hint: plan.helps });
     city.fronts.push(front);
-    changes.push({ kind: 'front_opened', frontId: front.id, title: front.title, form: front.form, plus: true });
+    changes.push({ kind: 'front_opened', frontId: front.id, title: frontGist(front), form: front.form, plus: true });
     return born({ changes, gist: costume.rumor });
   }
 
@@ -253,8 +253,8 @@ export async function complicate(
     });
     front.key = await seal(deps, city, front, { hint: plan.helps });
     city.fronts.push(front);
-    changes.push({ kind: 'front_opened', frontId: front.id, title: front.title, form: front.form, plus: false });
-    if (front.form === 'threat') changes.push({ kind: 'front_moved', frontId: parent.id, title: parent.title, how: 'frozen' });
+    changes.push({ kind: 'front_opened', frontId: front.id, title: frontGist(front), form: front.form, plus: false });
+    if (front.form === 'threat') changes.push({ kind: 'front_moved', frontId: parent.id, title: frontGist(parent), how: 'frozen' });
     return born({ changes, gist: costume.rumor });
   }
 
@@ -293,7 +293,7 @@ export async function complicate(
   });
   if (front.form !== 'clock') front.key = await seal(deps, city, front, { hint: plan.helps });
   city.fronts.push(front);
-  changes.push({ kind: 'front_opened', frontId: front.id, title: front.title, form: front.form, plus: false });
+  changes.push({ kind: 'front_opened', frontId: front.id, title: frontGist(front), form: front.form, plus: false });
   return born({ changes, gist: costume.rumor });
 }
 
@@ -467,7 +467,7 @@ export async function refreshAfterChange(
         await tryAgent(
           deps,
           'risk-appraiser',
-          () => appraiseRisk(deps.agents, { work: `${front.title}. ${front.description}`, touches: touchesOf(city, front) }),
+          () => appraiseRisk(deps.agents, { work: (front.description || frontGist(front)), touches: touchesOf(city, front) }),
           { step: front.risk, reason: '' },
         )
       ).step;

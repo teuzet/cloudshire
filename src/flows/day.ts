@@ -14,7 +14,7 @@ import { accrueMana } from '../core/mana.js';
 import { DAYS_PER_MONTH } from '../core/time.js';
 import { describeChanges, type Change } from '../core/world/changes.js';
 import { tensionToThreat } from '../core/world/complications.js';
-import { dueEvent, findFront, frontObjectIds, neighbors, closeFront, settleProgress, shareDone } from '../core/world/fronts.js';
+import { dueEvent, findFront, frontGist, frontObjectIds, neighbors, closeFront, settleProgress, shareDone } from '../core/world/fronts.js';
 import { attachedTo, findObject, deleteWithChildren, scalePull } from '../core/world/objects.js';
 import { applyStake } from '../core/world/stake.js';
 import { themeNames } from '../core/world/themes.js';
@@ -177,7 +177,7 @@ async function onMilestone(deps: FlowDeps, city: City, front: Front, day: number
     'beat-writer',
     () =>
       writeBeat(deps.agents, {
-        title: front.title,
+        title: frontGist(front),
         description: workWords(front),
         share: shareDone(front, day),
         lead: lead.label,
@@ -187,7 +187,7 @@ async function onMilestone(deps: FlowDeps, city: City, front: Front, day: number
         allowed: reveal ? ['none', 'reveal'] : ['none'],
         before: earlierBeats(city, front),
       }),
-    { text: reveal ?? `Работа идёт: ${front.title}.`, effect: reveal ? 'reveal' : 'none' },
+    { text: reveal ?? `Работа идёт: ${frontGist(front)}.`, effect: reveal ? 'reveal' : 'none' },
   );
   const changes: Change[] = [];
   if (beat.effect === 'reveal') {
@@ -238,7 +238,7 @@ async function avert(deps: FlowDeps, city: City, front: Front, day: number, out:
     () =>
       resolveEvent(deps.agents, {
         before: earlierBeats(city, front),
-        title: front.title,
+        title: frontGist(front),
         description,
         ending: 'averted',
         consequence: null,
@@ -248,7 +248,7 @@ async function avert(deps: FlowDeps, city: City, front: Front, day: number, out:
         manner: lead.manner,
         allowed: ['none', 'fact', 'gone', ...(people.length >= 2 ? (['link'] as const) : []), ...(helpers.length ? (['keep'] as const) : [])],
       }),
-    { text: `Обошлось: ${front.title}.`, effect: 'none' },
+    { text: `Обошлось: ${frontGist(front)}.`, effect: 'none' },
   );
   const changes: Change[] = [...unmasked];
   // Того, кого решено оставить городу, надо отвязать до закрытия фронта: иначе он исчезнет вместе с ним.
@@ -278,7 +278,7 @@ async function completeDeed(deps: FlowDeps, city: City, front: Front, day: numbe
   const changes = closeFront(deps.rules, city, front, 'done', day);
   changes.push(...applyStake(deps.rules, city, front.stake, stakeCtx(deps, target ?? front, day)).changes);
   // Задание — часть большого дела: в списке перемен и в сути видно, что большое дело идёт дальше.
-  if (target && !changes.some((c) => c.kind === 'front_moved' && c.frontId === target.id)) changes.push({ kind: 'front_moved', frontId: target.id, title: target.title, how: front.stake.some((op) => op.op === 'progress') ? 'pushed' : front.stake.some((op) => op.op === 'delete') ? 'cleared' : 'helped' });
+  if (target && !changes.some((c) => c.kind === 'front_moved' && c.frontId === target.id)) changes.push({ kind: 'front_moved', frontId: target.id, title: frontGist(target), how: front.stake.some((op) => op.op === 'progress') ? 'pushed' : front.stake.some((op) => op.op === 'delete') ? 'cleared' : 'helped' });
   // Задание приближает большое дело, но не решает его: найденное и узнанное приходит только с вехами большого дела.
   const description = target
     ? `${front.description}. Это шаг в работе над «${target.title}»: ответ и итог «${target.title}» ещё впереди.`
@@ -286,8 +286,8 @@ async function completeDeed(deps: FlowDeps, city: City, front: Front, day: numbe
   const beat = await tryAgent<Beat>(
     deps,
     'beat-writer',
-    () => writeBeat(deps.agents, { title: front.title, description, share: 1, lead: lead.label, manner: lead.manner, result, reveal: null, allowed: ['none'] }),
-    { text: `Сделано: ${front.title}.`, effect: 'none' },
+    () => writeBeat(deps.agents, { title: frontGist(front), description, share: 1, lead: lead.label, manner: lead.manner, result, reveal: null, allowed: ['none'] }),
+    { text: `Сделано: ${frontGist(front)}.`, effect: 'none' },
   );
   const trouble = target ? await complicateRolled(deps, city, target, rolled, { moment: 'milestone' }, day) : null;
   await finish(
@@ -309,7 +309,7 @@ async function collapse(deps: FlowDeps, city: City, front: Front, day: number, o
     () =>
       resolveEvent(deps.agents, {
         before: earlierBeats(city, front),
-        title: front.title,
+        title: frontGist(front),
         description: front.description,
         ending: 'collapsed',
         consequence: front.unattainable,
@@ -319,7 +319,7 @@ async function collapse(deps: FlowDeps, city: City, front: Front, day: number, o
         manner: lead.manner,
         allowed: ['fact', 'trace'],
       }),
-    { text: `Затея рухнула: ${front.title}. ${front.unattainable ?? ''}`.trim(), effect: 'none' },
+    { text: `Затея рухнула: ${frontGist(front)}. ${front.unattainable ?? ''}`.trim(), effect: 'none' },
   );
   const changes = closeFront(deps.rules, city, front, 'failed', day);
   changes.push(...(await applyEffect(deps, city, front, resolution, day)));
@@ -365,7 +365,7 @@ async function offerHelp(deps: FlowDeps, city: City, result: WorldObject, near: 
     );
     if (ruling.verdict !== 'spot_on') continue;
     result.attach = { frontId: front.id, rate: deps.rules.fronts.helper.unitsPerMonth };
-    return [{ kind: 'front_moved', frontId: front.id, title: front.title, how: 'helped' }];
+    return [{ kind: 'front_moved', frontId: front.id, title: frontGist(front), how: 'helped' }];
   }
   return [];
 }
@@ -377,7 +377,7 @@ async function complete(deps: FlowDeps, city: City, front: Front, day: number, o
   const expected = resultWords(city, front);
   const rolled = front.origin === 'player' ? rollFor(deps, city, front) : null;
   const twist = front.key?.twist ?? null;
-  let ops = await resolveModify(deps, city, front.stake, `${front.title}. ${front.description}`);
+  let ops = await resolveModify(deps, city, front.stake, (front.description || frontGist(front)));
   if (twist) ops = await applyTwist(deps, city, ops, twist);
   const near = neighbors(city, front)
     .filter((n) => n.capacity > 0)
@@ -406,7 +406,7 @@ async function complete(deps: FlowDeps, city: City, front: Front, day: number, o
     'beat-writer',
     () =>
       writeBeat(deps.agents, {
-        title: front.title,
+        title: frontGist(front),
         description: front.description,
         share: 1,
         lead: lead.label,
@@ -415,7 +415,7 @@ async function complete(deps: FlowDeps, city: City, front: Front, day: number, o
         reveal: twist,
         allowed: twist ? ['reveal'] : ['none'],
       }),
-    { text: `Сделано: ${front.title}.${twist ? ` ${twist}` : ''}`, effect: 'none' },
+    { text: `Сделано: ${frontGist(front)}.${twist ? ` ${twist}` : ''}`, effect: 'none' },
   );
   await faithEvent(deps, city, { event: beat.text, will, day });
   const trouble = await complicateRolled(deps, city, front, rolled, { moment: 'completion', resultId: applied.resultId }, day);
@@ -455,7 +455,7 @@ async function strike(deps: FlowDeps, city: City, front: Front, stake: readonly 
     () =>
       resolveEvent(deps.agents, {
         before: earlierBeats(city, front),
-        title: front.title,
+        title: frontGist(front),
         description: front.description,
         ending: 'struck',
         consequence: consequenceWords(city, ops),
@@ -496,7 +496,7 @@ async function onDeadline(deps: FlowDeps, city: City, front: Front, day: number,
   // Удобный случай просто уходит.
   if (front.plus) {
     const changes = closeFront(deps.rules, city, front, 'cancelled', day, { outcome: 'expired' });
-    await record(deps, city, { gist: `Случай упущен: ${front.title}.`, changes, source: 'deadline', frontId: front.id, day, kind: 'resolution', officer: null, announce: false });
+    await record(deps, city, { gist: `Случай упущен: ${frontGist(front)}.`, changes, source: 'deadline', frontId: front.id, day, kind: 'resolution', officer: null, announce: false });
     return;
   }
   if (front.form === 'clock') return strike(deps, city, front, front.stake, 'done', day, out);
@@ -504,8 +504,8 @@ async function onDeadline(deps: FlowDeps, city: City, front: Front, day: number,
   if (front.form === 'tension' && front.bound !== 'slow') {
     const parent = front.parentId ? findFront(city, front.parentId) : null;
     tensionToThreat(deps.rules, front, day);
-    const changes: Change[] = [{ kind: 'front_moved', frontId: front.id, title: front.title, how: 'burst' }];
-    if (parent && parent.status === 'active' && front.bound) changes.push({ kind: 'front_moved', frontId: parent.id, title: parent.title, how: 'frozen' });
+    const changes: Change[] = [{ kind: 'front_moved', frontId: front.id, title: frontGist(front), how: 'burst' }];
+    if (parent && parent.status === 'active' && front.bound) changes.push({ kind: 'front_moved', frontId: parent.id, title: frontGist(parent), how: 'frozen' });
     const msg = await record(deps, city, {
       gist: front.outburst ?? front.description,
       changes,
@@ -538,7 +538,7 @@ async function onPulse(deps: FlowDeps, city: City, front: Front, day: number, ou
       'beat-writer',
       () =>
         writeBeat(deps.agents, {
-          title: front.title,
+          title: frontGist(front),
           description: front.description,
           share: shareDone(front, day),
           lead: lead.label,

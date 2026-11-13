@@ -63,7 +63,7 @@ export function formatOpenStories(fronts: Front[]): string {
   if (!fronts.length) return 'Открытых историй нет.';
   return [
     'Открытые истории (не решай их и не выдумывай развязку, виновника, скрытую причину):',
-    ...fronts.map((f) => `- ${f.id} — ${f.title}. ${f.description}`),
+    ...fronts.map((f) => `- ${f.id} — ${f.description || f.title}`),
     'Канон истины и скрытые посылки здесь не приведены. Если вопрос про конкретную идущую историю — её должен передать спрашивающий как story_id.',
   ].join('\n');
 }

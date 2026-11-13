@@ -87,7 +87,7 @@ describe('воля игрока: новый проект', () => {
     expect(city.jobs.find((j) => j.state === 'pending' && j.payload.frontId === front.id)?.dueDay).toBe(nextEventDay(front));
 
     expect(out).toMatchObject({ ok: true });
-    expect(out.say).toContain('начал работу: Постройка баллисты');
+    expect(out.say).toContain('начал работу: Каменщики поднимают на стену станину и собирают орудие.');
     expect(out.say).toContain('Дело трудное');
     expect(out.say).toContain('Гильдия каменщиков');
     expect(out.say).not.toMatch(/22|7,56/);

@@ -281,7 +281,7 @@ export function closeFront(
   front.resolvedDay = Math.max(0, Math.round(day));
   front.ratePerDay = 0;
   front.pulseDay = null;
-  changes.push({ kind: 'front_closed', frontId: front.id, title: front.title, outcome: opts.outcome ?? OUTCOME[status] });
+  changes.push({ kind: 'front_closed', frontId: front.id, title: frontGist(front), outcome: opts.outcome ?? OUTCOME[status] });
 
   const lead = leadOf(city, front.id);
   if (lead) closeAssignment(city, lead, day);
@@ -306,4 +306,14 @@ export function closeFront(
   for (const child of childFronts(city, front.id)) changes.push(...closeFront(rules, city, child, 'cancelled', day));
   recomputeStats(city, rules);
   return changes;
+}
+
+/**
+ * Как о фронте говорят агенты: словами того, что происходит, без заголовка.
+ * Заголовок фронта нужен только людям в отладке; агенты имеют дело с событиями.
+ */
+export function frontGist(front: Pick<Front, 'title' | 'description'>): string {
+  const text = (front.description || front.title).trim();
+  const first = text.split(/(?<=[.!?])\s+/)[0] ?? text;
+  return clipWords(first, 140).replace(/[.!]+$/, '');
 }

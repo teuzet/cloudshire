@@ -74,7 +74,7 @@ export function rolesOf(city: City, front: Front): string[] {
 }
 
 export function situationOf(front: Pick<Front, 'title' | 'description'>): string {
-  return front.description && front.description !== front.title ? `«${front.title}». ${front.description}` : `«${front.title}»`;
+  return front.description || front.title;
 }
 
 export function kindOf(front: Pick<Front, 'form' | 'plus'>): SituationKind {

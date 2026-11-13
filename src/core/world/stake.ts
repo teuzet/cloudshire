@@ -7,7 +7,7 @@ import { STAT_IDS, type Rules, type StatMap } from '../rules.js';
 import type { City, Pull, StakeOp, WorldObject } from '../city.js';
 import { addFact } from '../lore.js';
 import type { Change } from './changes.js';
-import { closeFront, findFront, rollbackMilestone, settleProgress } from './fronts.js';
+import { closeFront, findFront, frontGist, rollbackMilestone, settleProgress } from './fronts.js';
 import { diffPoints, pointsToRaw, rawToPoints } from './numbers.js';
 import { addObjectVersion, createObject, deleteWithChildren, findObject, tug } from './objects.js';
 import { addToLedger, recomputeStats } from './stats.js';
@@ -146,14 +146,14 @@ export function applyStake(
         settleProgress(front, day);
         front.progress = Math.min(front.capacity, front.progress + Math.max(0, op.amount));
         const trouble = front.form === 'threat' || front.form === 'tension';
-        changes.push({ kind: 'front_moved', frontId: front.id, title: front.title, how: trouble && front.progress < front.capacity ? 'eased' : 'pushed' });
+        changes.push({ kind: 'front_moved', frontId: front.id, title: frontGist(front), how: trouble && front.progress < front.capacity ? 'eased' : 'pushed' });
         break;
       }
       case 'rollback': {
         const front = findFront(city, op.frontId);
         if (!front || front.status !== 'active') break;
         rollbackMilestone(front, day);
-        changes.push({ kind: 'front_moved', frontId: front.id, title: front.title, how: 'rollback' });
+        changes.push({ kind: 'front_moved', frontId: front.id, title: frontGist(front), how: 'rollback' });
         break;
       }
       case 'cancel': {
@@ -178,7 +178,7 @@ export function applyStake(
         });
         city.objects.push(obj);
         changes.push({ kind: 'object_created', objectId: obj.id, name: obj.name, type: obj.type, points: { ...op.object.points }, temporary: true, hidden: false });
-        changes.push({ kind: 'front_moved', frontId: front.id, title: front.title, how: op.rate < 0 ? 'slowed' : 'helped' });
+        changes.push({ kind: 'front_moved', frontId: front.id, title: frontGist(front), how: op.rate < 0 ? 'slowed' : 'helped' });
         break;
       }
       case 'stats': {

@@ -16,7 +16,7 @@ import { emptyStatMap } from '../core/rules.js';
 import { realWaitLabel, spanBand, DAYS_PER_MONTH } from '../core/time.js';
 import { assignmentOf, closeAssignment, createAssignment, leadOf, officerOf } from '../core/world/assignments.js';
 import type { Change } from '../core/world/changes.js';
-import { activeFronts, childFronts, closeFront, createFront, daysLeft, findFront, occupyFootprint } from '../core/world/fronts.js';
+import { activeFronts, childFronts, closeFront, createFront, daysLeft, findFront, frontGist, occupyFootprint } from '../core/world/fronts.js';
 import {
   basePrice,
   changeCapacity,
@@ -63,7 +63,7 @@ function title(deps: FlowDeps, officer: Officer): string {
 function busy(deps: FlowDeps, city: City, officer: Officer): WillOutcome {
   const a = assignmentOf(city, officer);
   const front = a ? findFront(city, a.frontId) : null;
-  return refuse('officer_busy', `${title(deps, officer)} уже занят${front ? `: ${front.title}` : ''}. Сначала снять его с этого дела или взять другого.`);
+  return refuse('officer_busy', `${title(deps, officer)} уже занят${front ? `: ${frontGist(front)}` : ''}. Сначала снять его с этого дела или взять другого.`);
 }
 
 /** Сколько ждать: словами и в реальном времени. */
@@ -76,7 +76,7 @@ function willInput(city: City) {
   return {
     fronts: activeFronts(city).map((f) => ({
       id: f.id,
-      title: f.title,
+      title: frontGist(f),
       kind: f.plus ? 'удобный случай со сроком' : FORM_WORDS[f.form],
       description: f.description,
       lead: leadLabel(city, f).label,
@@ -351,7 +351,7 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
   refreshAllFronts(deps, city, day);
 
   const changes: Change[] = [
-    { kind: 'front_opened', frontId: front.id, title: front.title, form: front.form, plus: false },
+    { kind: 'front_opened', frontId: front.id, title: frontGist(front), form: front.form, plus: false },
     { kind: 'object_created', objectId: site.id, name: site.name, type: site.type, points: emptyStatMap(), temporary: true, hidden: false },
   ];
   await record(deps, city, {
@@ -370,7 +370,7 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
   return {
     ok: true,
     say: [
-      `${title(deps, officer)} начал работу: ${front.title}.`,
+      `${title(deps, officer)} начал работу: ${frontGist(front)}.`,
       waitWords(deps, front, day),
       RISK_WORDS[risk],
       names.length ? `На время работ заняты и дают городу меньше: ${names.join(', ')}.` : '',
@@ -386,11 +386,11 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
 async function setStrategy(deps: FlowDeps, city: City, officer: Officer, will: Will, day: number): Promise<WillOutcome> {
   const front = will.frontId ? findFront(city, will.frontId) : null;
   if (!front || front.status !== 'active') return refuse('no_front', 'Неясно, какого дела это касается. Пусть покровитель назовёт его.');
-  if (front.form === 'clock') return refuse('only_wait', `«${front.title}»: работой это не сдвинуть, остаётся дождаться срока.`);
+  if (front.form === 'clock') return refuse('only_wait', `«${frontGist(front)}»: работой это не сдвинуть, остаётся дождаться срока.`);
   const lead = leadOf(city, front.id);
   if (lead && lead.office !== officer.office) {
     const other = officerOf(city, lead);
-    return refuse('has_lead', `«${front.title}» уже ведёт ${other ? title(deps, other) : 'другой сановник'}. Сначала снять его с этого дела.`);
+    return refuse('has_lead', `«${frontGist(front)}» уже ведёт ${other ? title(deps, other) : 'другой сановник'}. Сначала снять его с этого дела.`);
   }
   if (!lead && officer.assignmentId) return busy(deps, city, officer);
 
@@ -412,7 +412,7 @@ async function setStrategy(deps: FlowDeps, city: City, officer: Officer, will: W
   }
   if (will.projectTempo != null) front.tempo = will.projectTempo;
   refreshAllFronts(deps, city, day);
-  return { ok: true, say: [`${title(deps, officer)} ведёт «${front.title}» так, как велено.`, waitWords(deps, front, day)].filter(Boolean).join(' ') };
+  return { ok: true, say: [`${title(deps, officer)} ведёт «${frontGist(front)}» так, как велено.`, waitWords(deps, front, day)].filter(Boolean).join(' ') };
 }
 
 // ───────────────────────────── атомарное дело ─────────────────────────────
@@ -420,7 +420,7 @@ async function setStrategy(deps: FlowDeps, city: City, officer: Officer, will: W
 async function atomicDeed(deps: FlowDeps, city: City, officer: Officer, will: Will, day: number): Promise<WillOutcome> {
   const parent = will.frontId ? findFront(city, will.frontId) : null;
   if (!parent || parent.status !== 'active') return refuse('no_front', 'Неясно, какому делу это должно помочь. Пусть покровитель назовёт его.');
-  if (parent.capacity <= 0) return refuse('only_wait', `«${parent.title}»: работой это не сдвинуть, остаётся дождаться срока.`);
+  if (parent.capacity <= 0) return refuse('only_wait', `«${frontGist(parent)}»: работой это не сдвинуть, остаётся дождаться срока.`);
   if (officer.assignmentId) return busy(deps, city, officer);
   const kind = will.deedKind ?? 'push';
   const proposal = will.manner ?? will.goal;
@@ -439,7 +439,7 @@ async function atomicDeed(deps: FlowDeps, city: City, officer: Officer, will: Wi
   if (kind === 'clear') {
     const hindrances = attachedTo(city, parent.id).filter((o) => (o.attach?.rate ?? 0) < 0);
     const hindrance = hindrances.find((h) => will.goal.toLowerCase().includes(h.name.toLowerCase())) ?? hindrances[0];
-    if (!hindrance) return refuse('no_hindrance', `На деле «${parent.title}» сейчас нет помех, которые можно убрать.`);
+    if (!hindrance) return refuse('no_hindrance', `На деле «${frontGist(parent)}» сейчас нет помех, которые можно убрать.`);
     capacity = hindranceRemovalCapacity(deps.rules, parent.capacity);
     stake = [{ op: 'delete', target: hindrance.id }];
     targetId = hindrance.id;
@@ -484,7 +484,7 @@ async function atomicDeed(deps: FlowDeps, city: City, officer: Officer, will: Wi
   refreshAllFronts(deps, city, day);
   return {
     ok: true,
-    say: [`${title(deps, officer)} взялся за задание для дела «${parent.title}»: ${front.title}.`, waitWords(deps, front, day), RISK_WORDS[risk]].filter(Boolean).join(' '),
+    say: [`${title(deps, officer)} взялся за задание для дела «${frontGist(parent)}»: ${frontGist(front)}.`, waitWords(deps, front, day), RISK_WORDS[risk]].filter(Boolean).join(' '),
   };
 }
 
@@ -506,16 +506,16 @@ function setTempo(deps: FlowDeps, city: City, will: Will, day: number): WillOutc
     const officer = officerOf(city, lead);
     said.push(`${officer ? title(deps, officer) : 'ведущий'} будет работать ${TEMPO_SAY[will.workTempo]}`);
   }
-  if (!said.length) return refuse('no_lead', `«${front.title}» сейчас никто не ведёт: торопить некого.`);
+  if (!said.length) return refuse('no_lead', `«${frontGist(front)}» сейчас никто не ведёт: торопить некого.`);
   refreshAllFronts(deps, city, day);
-  return { ok: true, say: [`«${front.title}»: ${said.join('; ')}.`, waitWords(deps, front, day), 'Спешка ускоряет работу и чаще приводит к бедам, осторожность наоборот.'].filter(Boolean).join(' ') };
+  return { ok: true, say: [`«${frontGist(front)}»: ${said.join('; ')}.`, waitWords(deps, front, day), 'Спешка ускоряет работу и чаще приводит к бедам, осторожность наоборот.'].filter(Boolean).join(' ') };
 }
 
 async function cancelWork(deps: FlowDeps, city: City, will: Will, day: number): Promise<WillOutcome> {
   const front = will.frontId ? findFront(city, will.frontId) : null;
   if (!front || front.status !== 'active') return refuse('no_front', 'Неясно, что именно прекратить. Пусть покровитель назовёт дело.');
   if (!(front.origin === 'player' || front.origin === 'deed' || front.plus)) {
-    return refuse('not_ours', `«${front.title}» начато не по воле покровителя: его можно унять работой или переждать, но не отменить.`);
+    return refuse('not_ours', `«${frontGist(front)}» начато не по воле покровителя: его можно унять работой или переждать, но не отменить.`);
   }
   const lead = leadLabel(city, front).officer;
   const changes = closeFront(deps.rules, city, front, 'cancelled', day);
@@ -526,7 +526,7 @@ async function cancelWork(deps: FlowDeps, city: City, will: Will, day: number): 
   }
   refreshAllFronts(deps, city, day);
   await record(deps, city, {
-    gist: `По воле покровителя дело прекращено: ${front.title}.`,
+    gist: `По воле покровителя дело прекращено: ${frontGist(front)}.`,
     changes,
     source: 'will',
     frontId: front.id,
@@ -535,7 +535,7 @@ async function cancelWork(deps: FlowDeps, city: City, will: Will, day: number): 
     officer: lead,
     announce: false,
   });
-  return { ok: true, say: `Дело «${front.title}» прекращено.${front.siteId ? ' То, что успели сделать, осталось стоять как есть.' : ''}` };
+  return { ok: true, say: `Дело «${frontGist(front)}» прекращено.${front.siteId ? ' То, что успели сделать, осталось стоять как есть.' : ''}` };
 }
 
 /** Снять сановника с дела. Исполнитель атомарного дела уносит дело с собой; большое дело остаётся без ведущего. */
@@ -551,6 +551,6 @@ export function withdraw(deps: FlowDeps, city: City, office: Office, day: number
     closeAssignment(city, assignment, day);
   }
   refreshAllFronts(deps, city, day);
-  const left = front && front.status === 'active' ? ` Дело «${front.title}» осталось без ведущего и стоит.` : front ? ` Задание «${front.title}» брошено.` : '';
+  const left = front && front.status === 'active' ? ` Дело «${frontGist(front)}» осталось без ведущего и стоит.` : front ? ` Задание «${frontGist(front)}» брошено.` : '';
   return { ok: true, say: `${title(deps, officer)} снят с дела.${left}` };
 }
