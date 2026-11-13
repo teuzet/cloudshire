@@ -1,5 +1,6 @@
 id: barren-orchard
 title: Сад без плодов
+scale: episode
 # Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
 axes: { engine: refusal, source: ecology, sphere: prosperity }
 pitch: Старейший сад города второй год цветёт и не даёт плодов; садоводы говорят, что земля устала.

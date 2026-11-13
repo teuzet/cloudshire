@@ -1,5 +1,6 @@
 id: conjunction-ledger
 title: Книга встреч
+scale: situation
 # Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
 axes: { engine: discovery, source: custom, sphere: knowledge }
 pitch: В сундуке умершего старика нашли тетради, где его род триста лет записывал каждое сопряжение и приметы перед ним.

@@ -2,8 +2,8 @@
  * Объекты мира: устойчивые части города со своей историей версий.
  */
 
-import { emptyStatMap, STAT_IDS, type ObjectType, type Rules, type StatMap } from '../rules.js';
-import type { City, WorldObject } from '../city.js';
+import { emptyStatMap, STAT_IDS, type ObjectType, type Rules, type Scale, type StatMap } from '../rules.js';
+import type { City, Pull, WorldObject } from '../city.js';
 
 function clip(text: string, max: number): string {
   return text.trim().slice(0, max);
@@ -126,4 +126,24 @@ export function isFresh(obj: Pick<WorldObject, 'freshDay'>, day: number, freshDa
 
 export function findObject(city: Pick<City, 'objects'>, id: string): WorldObject | null {
   return city.objects.find((o) => o.id === id) ?? null;
+}
+
+/** Тяга объекта на этот день: метка истории слабеет линейно до нуля за свой срок. */
+export function pullOf(obj: Pick<WorldObject, 'pull'>, day: number): number {
+  const p = obj.pull;
+  if (!p) return 0;
+  if (p.days == null) return p.level;
+  return Math.max(0, p.level * (1 - Math.max(0, day - p.day) / p.days));
+}
+
+/** Тяга, которую история такого масштаба даёт своим объектам. */
+export function scalePull(rules: Rules, scale: Scale | null | undefined, day: number): Pull | null {
+  if (!scale) return null;
+  const row = rules.seeding.scale[scale];
+  return row.pull > 0 ? { level: row.pull, day, days: row.pullDays } : null;
+}
+
+/** Пометить объект тягой, если новая сильнее той, что на нём сейчас. */
+export function tug(obj: WorldObject, pull: Pull | null | undefined): void {
+  if (pull && pull.level >= pullOf(obj, pull.day)) obj.pull = { ...pull };
 }

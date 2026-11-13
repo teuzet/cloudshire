@@ -8,11 +8,11 @@
 
 import { clipWords } from '../text.js';
 import { z } from 'zod';
-import { DRIFT_BANDS, ENGINES, IMPACT_LEVELS, OBJECT_TYPES, SOURCES, STAT_IDS, type Rules } from '../rules.js';
+import { DRIFT_BANDS, ENGINES, IMPACT_LEVELS, OBJECT_TYPES, SCALES, SOURCES, STAT_IDS, type Rules, type StatMap } from '../rules.js';
 import type { City, Front, StakeOp, StoryTags, WorldObject } from '../city.js';
 import { createFront } from './fronts.js';
 import { magnitude, monthsToDays, rawToPoints, scaleOf, threatCapacity, troubleDays } from './numbers.js';
-import { createObject } from './objects.js';
+import { createObject, scalePull, tug } from './objects.js';
 import { objectContribution } from './stats.js';
 
 const statPartial = z.object(Object.fromEntries(STAT_IDS.map((id) => [id, z.number().optional()])));
@@ -108,8 +108,8 @@ function checkScenario(s: ScenarioBase, ctx: z.RefinementCtx): void {
 /** Оси режиссёра у заготовки: двигатель, источник причины, сфера города. Тайну код выводит сам. */
 const axesSchema = z.object({ engine: z.enum(ENGINES), source: z.enum(SOURCES), sphere: z.enum(STAT_IDS) });
 
-/** Файл заготовки: с осями режиссёра. */
-export const scenarioSchema = scenarioBase.extend({ axes: axesSchema.optional() }).superRefine(checkScenario);
+/** Файл заготовки: с осями режиссёра и масштабом истории. */
+export const scenarioSchema = scenarioBase.extend({ axes: axesSchema.optional(), scale: z.enum(SCALES).optional() }).superRefine(checkScenario);
 /** То, что пишет посевщик: оси ему не нужны, их ставит код. */
 export const scenarioDraftSchema = scenarioBase.superRefine(checkScenario);
 
@@ -122,6 +122,11 @@ export function scenarioTags(s: Scenario): StoryTags {
   return { engine: s.axes?.engine ?? null, source: s.axes?.source ?? null, sphere: s.axes?.sphere ?? null, mystery };
 }
 
+/** Знак истории: беда, если хоть один её фронт идёт к сроку сам; иначе возможность. */
+export function storyKind(s: Pick<Scenario, 'fronts'>): 'trouble' | 'chance' {
+  return s.fronts.some((f) => f.drift !== 'NONE') ? 'trouble' : 'chance';
+}
+
 export function parseScenario(raw: unknown): Scenario {
   const parsed = scenarioSchema.safeParse(raw);
   if (!parsed.success) {
@@ -131,18 +136,24 @@ export function parseScenario(raw: unknown): Scenario {
   return parsed.data;
 }
 
-/** Ставка заготовки на языке операций новой системы. */
-function stakeOps(rules: Rules, city: Pick<City, 'statScale'>, stake: Scenario['fronts'][number]['stake'], ids: Map<string, string>): StakeOp[] {
+function times(points: Partial<StatMap>, k: number): StatMap {
+  const out = { prosperity: 0, security: 0, knowledge: 0, influence: 0 };
+  for (const id of STAT_IDS) out[id] = Math.round((Number(points[id]) || 0) * k * 10) / 10;
+  return out;
+}
+
+/** Ставка заготовки на языке операций новой системы. `k` — множитель чисел от масштаба истории. */
+function stakeOps(rules: Rules, city: Pick<City, 'statScale'>, stake: Scenario['fronts'][number]['stake'], ids: Map<string, string>, k = 1): StakeOp[] {
   if (!stake) return [];
   const map = (id: string) => ids.get(id) ?? id;
   if ('create' in stake) {
     const c = stake.create;
-    const points = rawToPoints(city, objectContribution(rules, c.weight ?? 'NONE', c.statProfile ?? {}));
+    const points = times(rawToPoints(city, objectContribution(rules, c.weight ?? 'NONE', c.statProfile ?? {})), k);
     return [{ op: 'create', object: { type: c.type, name: c.name, description: c.description, points, refs: (c.refs ?? []).map(map) }, result: true }];
   }
   if ('modify' in stake) return [{ op: 'modify', target: map(stake.modify.target), intent: stake.modify.intent ?? '' }];
   if ('delete' in stake) return [{ op: 'delete', target: map(stake.delete.target) }];
-  if ('stats' in stake) return [{ op: 'stats', points: stake.stats }];
+  if ('stats' in stake) return [{ op: 'stats', points: k === 1 ? stake.stats : times(stake.stats, k) }];
   if ('uncover' in stake) return [{ op: 'reveal', target: map(stake.uncover.target) }];
   return [{ op: 'fact', text: stake.reveal.text }];
 }
@@ -176,8 +187,9 @@ export function plantScenario(
   const map = (id: string) => ids.get(id) ?? id;
   const tweak = args.adapted ?? {};
 
-  const objects = scenario.objects.map((o) =>
-    createObject(rules, {
+  const pull = scalePull(rules, scenario.scale, args.day);
+  const objects = scenario.objects.map((o) => {
+    const obj = createObject(rules, {
       id: map(o.id),
       type: o.type,
       name: tweak[o.id]?.name ?? o.name,
@@ -186,14 +198,29 @@ export function plantScenario(
       statEffect: objectContribution(rules, o.weight ?? 'NONE', o.statProfile ?? {}),
       hidden: o.hidden ?? false,
       day: args.day,
-    }),
-  );
-  // История ложится на новую модель: без дрейфа это поиск (работа доводит до ставки),
-  // с дрейфом — угроза со сроком (ставка сработает, если не успеть).
+    });
+    tug(obj, pull);
+    return obj;
+  });
+  type F = Scenario['fronts'][number];
+  const drifts = (f: F) => f.drift !== 'NONE';
+  // Числа в файле — доли: масштаб истории задаёт, сколько пунктов статов на кону всего.
+  // Удар бед и выигрыш считаются отдельно, каждый тянется к бюджету масштаба.
+  const statsSize = (f: F) => (f.stake && 'stats' in f.stake ? magnitude(f.stake.stats) : 0);
+  const gainSize = (f: F) => {
+    if (!f.stake || drifts(f)) return 0;
+    if ('create' in f.stake) return magnitude(rawToPoints(city, objectContribution(rules, f.stake.create.weight ?? 'NONE', f.stake.create.statProfile ?? {})));
+    return statsSize(f);
+  };
+  const budget = scenario.scale ? rules.seeding.scale[scenario.scale].budget : null;
+  const factor = (sum: number) => (budget && sum > 0 ? budget / sum : 1);
+  const kTrouble = factor(scenario.fronts.filter(drifts).reduce((acc, f) => acc + statsSize(f), 0));
+  const kGain = factor(scenario.fronts.reduce((acc, f) => acc + gainSize(f), 0));
+  const kOf = (f: F) => (drifts(f) ? kTrouble : kGain);
   // Чем беда истории бьёт по городу, в пунктах статов: от этого её ёмкость. Ноль — удар не в числах.
-  const hitOf = (f: Scenario['fronts'][number]): number => {
+  const hitOf = (f: F): number => {
     if (!f.stake) return 0;
-    if ('stats' in f.stake) return magnitude(f.stake.stats);
+    if ('stats' in f.stake) return Math.round(statsSize(f) * kTrouble * 100) / 100;
     if ('delete' in f.stake) {
       const target = f.stake.delete.target;
       const own = scenario.objects.find((o) => o.id === target);
@@ -202,21 +229,32 @@ export function plantScenario(
     }
     return 0;
   };
-  // Поиск и дело стоят по масштабу; беда стоит столько, сколько она отнимет.
-  const ownCapacity = (f: Scenario['fronts'][number]) => {
-    const hit = f.drift !== 'NONE' ? hitOf(f) : 0;
-    return hit > 0 ? threatCapacity(rules, hit) : rules.seeding.capacity[f.impact];
+  // Беда стоит столько, сколько она отнимет. Выигрыш в истории с масштабом стоит долю того, что принесёт.
+  // Остальное (узнать, открыть, переменить) стоит по масштабу фронта.
+  const ownCapacity = (f: F) => {
+    if (drifts(f)) {
+      const hit = hitOf(f);
+      return hit > 0 ? threatCapacity(rules, hit) : rules.seeding.capacity[f.impact];
+    }
+    const gain = budget ? gainSize(f) * kGain : 0;
+    return gain > 0 ? Math.max(2, Math.round(gain * rules.seeding.gainShare * 100) / 100) : rules.seeding.capacity[f.impact];
   };
   const byId = new Map(scenario.fronts.map((f) => [f.id, f]));
-  const fronts = scenario.fronts.map((f) => {
+  const pushesOf = (f: F) =>
     // Двигать другой фронт стоит столько же, сколько сделать эту часть его работы самому.
-    const pushes = f.closes.flatMap((c) => {
+    f.closes.flatMap((c) => {
       const target = byId.get(c.target);
       return target ? [{ op: 'progress' as const, frontId: map(c.target), amount: Math.round(ownCapacity(target) * c.share * 100) / 100 }] : [];
     });
-    const capacity = Math.max(ownCapacity(f), pushes.reduce((sum, p) => sum + p.amount, 0));
-    const own = stakeOps(rules, city, f.stake, ids);
-    const drifting = f.drift !== 'NONE';
+  const capacityOf = (f: F) => Math.max(ownCapacity(f), pushesOf(f).reduce((sum, p) => sum + p.amount, 0));
+  // История-возможность живёт окно: не взялись и не довели — она уходит.
+  const chance = storyKind(scenario) === 'chance';
+  const windowDays = troubleDays(rules, scenario.fronts.reduce((acc, f) => acc + capacityOf(f), 0), rules.seeding.chanceMonths);
+  const fronts = scenario.fronts.map((f) => {
+    const pushes = pushesOf(f);
+    const capacity = capacityOf(f);
+    const own = stakeOps(rules, city, f.stake, ids, kOf(f));
+    const drifting = drifts(f);
     const driftDays = drifting ? troubleDays(rules, capacity, rules.seeding.driftMonths[f.drift]) : 0;
     const moves = keyMoves(f.alignment, f.clues);
     const description = tweak[f.id]?.description ?? f.description;
@@ -229,7 +267,9 @@ export function plantScenario(
       description,
       capacity,
       milestones: Math.max(scaleOf(rules, capacity).milestones, Math.min(4, f.beatCount + 1)),
-      deadlineDay: drifting ? args.day + driftDays : null,
+      deadlineDay: drifting ? args.day + driftDays : chance ? args.day + windowDays : null,
+      plus: chance,
+      scale: scenario.scale ?? null,
       // События истории наступают сами, через равные доли срока.
       pulseDay: drifting && f.events.length ? args.day + Math.max(1, Math.floor(driftDays / (f.events.length + 1))) : null,
       // Толчки другим фронтам случаются при завершении; у фронта с дрейфом их нет (это проверяет схема).

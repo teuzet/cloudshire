@@ -6,7 +6,7 @@
  */
 
 import type { ClockState } from './time.js';
-import type { Engine, FrontForm, ObjectType, Office, Relation, RiskStep, Source, StatId, StatMap, Temper, Tempo, Verdict } from './rules.js';
+import type { Engine, FrontForm, ObjectType, Office, Relation, RiskStep, Scale, Source, StatId, StatMap, Temper, Tempo, Verdict } from './rules.js';
 
 // ───────────────────────────── мир ─────────────────────────────
 
@@ -79,6 +79,8 @@ export interface WorldObject {
   out?: { day: number; cause: string; was: StatMap; /** Утрачено безвозвратно: осталось только в памяти. */ forever?: boolean } | null;
   /** Память объекта: что с ним случалось. Короткие строки из хроники, новые в конце. */
   log?: Array<{ day: number; text: string }>;
+  /** Тяга: метка режиссёра от истории, которая объект породила или изменила. */
+  pull?: Pull | null;
 }
 
 // ───────────────────────────── фронты ─────────────────────────────
@@ -195,6 +197,8 @@ export interface Front {
   outburst: string | null;
   /** Запись словаря динамик, из которой фронт собран. */
   dynamicId: string | null;
+  /** Масштаб истории, которой принадлежит фронт: от него тяга объектов, которые фронт породит или изменит. */
+  scale?: Scale | null;
   status: 'active' | 'done' | 'failed' | 'cancelled';
   createdDay: number;
   resolvedDay: number | null;
@@ -214,6 +218,17 @@ export interface StoryTags {
 
 export interface StoryMark extends StoryTags {
   day: number;
+  /** Посаженная история: беда (есть фронт, идущий к сроку сам) или возможность. У осложнений нет. */
+  kind?: 'trouble' | 'chance';
+  scale?: Scale | null;
+}
+
+/** Тяга объекта: насколько он способен направить дальнейший сюжет города. Со временем слабеет. */
+export interface Pull {
+  level: number;
+  day: number;
+  /** За сколько дней сходит на нет; null — не сходит. */
+  days: number | null;
 }
 
 export interface Assignment {

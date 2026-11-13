@@ -1,0 +1,29 @@
+id: silver-run
+title: Ход серебрянки
+scale: crisis
+# Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
+axes: { engine: opportunity, source: creature, sphere: prosperity }
+pitch: "Мимо острова идёт стая небесной серебрянки, какая бывает раз в поколение; рыба сама бьётся в облачные сети, и её столько, что сети рвутся."
+
+objects:
+  - id: thing
+    type: resource
+    name: "Стая серебрянки"
+    description: "Серебряное облако мелкой небесной рыбы вдоль всей наветренной кромки. Идёт плотно, день и ночь."
+
+fronts:
+  - id: main
+    title: "Взять ход серебрянки"
+    form: deed
+    description: "Ход продлится недели. Рыбаков, сетей, соли и бочек у города на десятую долю того, что идёт мимо."
+    impact: SIGNIFICANT
+    refs: [thing]
+    alignment: "Двигают дело все руки на кромку, новые сети и черпаки, соль и коптильни, бочары, которые работают без сна."
+    stake:
+      create:
+        type: resource
+        name: "Запас серебрянки"
+        description: "В погребах города стоят бочки солёной и копчёной серебрянки на несколько лет."
+        weight: SIGNIFICANT
+        statProfile: { prosperity: 4, security: 2 }
+        refs: [thing]

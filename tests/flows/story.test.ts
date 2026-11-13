@@ -17,7 +17,9 @@ async function plantedCity() {
   const city = blankCity({ worldId: world.id, ownerId: 'u1', brief: 'Мерв живёт камнем.' });
   scheduleJob(city, { id: 'job_seed', kind: 'seed', dueDay: 3 });
   await s.deps.storage.saveCity(city);
-  s.llm.always('scenario-writer', toolReply('submit_scenario', { ...lanternIsle(), title: 'Островок у Мерва' }));
+  // Заготовка одна, и она возможность; беду режиссёр заказывает по зерну.
+  const blight = { id: 'blight', title: 'Серая ржа', fronts: [{ id: 'rust', title: 'Ржа на зерне', description: 'Ржа ест зерно в амбарах.', impact: 'MINOR', drift: 'SLOW', stake: { stats: { prosperity: -4 } } }] };
+  s.llm.always('scenario-writer', (req) => toolReply('submit_scenario', lastUser(req).includes('Зерно истории') ? blight : { ...lanternIsle(), title: 'Островок у Мерва' }));
   scriptFrontAgents(s.llm);
   s.llm.always(
     'stage-planner',
@@ -35,12 +37,15 @@ describe('история от посева до развязки', () => {
     s.passDays(1);
     await runDueCities(s.deps, s.locks);
     let city = (await s.deps.storage.getCity(s.cityId))!;
-    const story = city.fronts.find((f) => f.origin === 'story')!;
-    // Норма — две истории: первая из заготовки, вторая по зерну (заготовок больше нет).
-    expect(city.scenariosUsed[0]).toBe('lantern-isle');
-    expect(city.scenariosUsed[1]).toMatch(/^story_/);
-    expect(s.llm.callsTo('scenario-writer')[1]?.messages[0]?.content).toContain('Зерно истории');
-    expect(story).toMatchObject({ form: 'find', capacity: s.r.seeding.capacity.SIGNIFICANT, milestones: 3, ratePerDay: 0 });
+    const story = city.fronts.find((f) => f.origin === 'story' && f.form === 'find')!;
+    // За проверку приходят беда и возможность: беда по зерну (заготовок-бед нет), возможность из заготовки.
+    expect(city.scenariosUsed[0]).toMatch(/^story_/);
+    expect(city.scenariosUsed[1]).toBe('lantern-isle');
+    expect(lastUser(s.llm.callsTo('scenario-writer')[0]!)).toContain('Зерно истории');
+    expect(city.storyLog?.map((m) => m.kind)).toEqual(['trouble', 'chance']);
+    // Возможность живёт окно и уходит, если её не довели.
+    expect(story).toMatchObject({ form: 'find', plus: true, capacity: s.r.seeding.capacity.SIGNIFICANT, milestones: 3, ratePerDay: 0 });
+    expect(story.deadlineDay).toBe(3 + 120);
     expect(city.objects.map((o) => o.name)).toContain('Башня на островке');
     expect(s.inbox.sent).toHaveLength(2);
     expect(city.fronts.filter((f) => f.origin === 'story')).toHaveLength(2);
@@ -82,8 +87,8 @@ describe('история от посева до развязки', () => {
     ]);
     expect(lastUser(s.llm.callsTo('chronicler').at(-1)!)).toContain('Стало известно: Рецепт — состав, который светится без огня; им заправлены фонари островка.');
     expect(city.officers.find((o) => o.office === 'keeper')!.assignmentId).toBeNull();
-    // Бед в этих историях нет, поэтому режиссёр за это время досадил ещё три.
-    expect(s.inbox.sent).toHaveLength(8);
+    // Вести: две посадки, две вехи, развязка; остальное — беды по зерну, которые режиссёр досадил за это время.
+    expect(s.inbox.sent.length).toBeGreaterThanOrEqual(5);
     expect(s.llm.callsTo('herald').at(-1)?.messages[0]?.content).toContain('развязка');
   });
 

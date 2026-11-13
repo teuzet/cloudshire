@@ -12,10 +12,11 @@ import { leadOf } from '../core/world/assignments.js';
 import { rawToPoints } from '../core/world/numbers.js';
 import { mysteryObjectIds } from '../core/lore.js';
 import type { City, StoryTags } from '../core/city.js';
-import { IMPACT_LEVELS } from '../core/rules.js';
-import { leanOf, markStory, roomForTrouble, varietyWeight, wantsTrouble } from '../core/world/director.js';
+import { IMPACT_LEVELS, SCALES, type Scale } from '../core/rules.js';
+import { leanOf, markStory, roomForTrouble, varietyWeight, wantsChance, wantsTrouble } from '../core/world/director.js';
+import { pullOf } from '../core/world/objects.js';
 import { weightedOrder } from '../core/world/dynamics.js';
-import { plantScenario, scenarioTags, touchedMysteries, type Scenario } from '../core/world/scenario.js';
+import { plantScenario, scenarioTags, storyKind, touchedMysteries, type Scenario } from '../core/world/scenario.js';
 import type { OutboundMessage } from '../ports/notifier.js';
 import { writeScenario } from '../agents/scenario-writer/run.js';
 import { record } from './chronicle.js';
@@ -43,8 +44,35 @@ export function trimFree(deps: Pick<FlowDeps, 'rules'>, s: Scenario): Scenario {
   };
 }
 
+type Kind = 'trouble' | 'chance';
+
+/** История по зерну под заказанный знак: у возможности убираются фронты, идущие к сроку сами. */
+function ofKind(s: Scenario, kind: Kind | null): Scenario | null {
+  if (kind !== 'chance') return s;
+  const fronts = s.fronts.filter((f) => f.drift === 'NONE');
+  if (!fronts.length) return null;
+  const ids = new Set(fronts.map((f) => f.id));
+  return { ...s, fronts: fronts.map((f) => ({ ...f, closes: f.closes.filter((c) => ids.has(c.target)) })) };
+}
+
+/** Масштаб истории по зерну: жребий по весам, не выше freeMaxScale. */
+function freeScale(deps: FlowDeps): Scale {
+  const table = deps.rules.seeding.scale;
+  const allowed = SCALES.slice(0, SCALES.indexOf(deps.rules.seeding.freeMaxScale) + 1);
+  return weightedOrder(allowed, (s) => table[s].weight, deps.random.rng)[0] ?? 'situation';
+}
+
+/** Вокруг чего город живёт сейчас: видимые объекты с самой сильной тягой. */
+function focusNames(city: City, day: number): string[] {
+  return city.objects
+    .filter((o) => o.status === 'active' && !o.hidden && !o.temporary && pullOf(o, day) > 0)
+    .sort((a, b) => pullOf(b, day) - pullOf(a, day))
+    .slice(0, 4)
+    .map((o) => o.name);
+}
+
 /** Зерно для истории без заготовки: то, чего режиссёр давно не видел, и о другом, чем то, что уже идёт. */
-function seedWords(deps: FlowDeps, city: City, tags: StoryTags): string {
+function seedWords(deps: FlowDeps, city: City, tags: StoryTags, kind: Kind | null): string {
   const running = activeFronts(city).filter((f) => f.origin === 'story' || f.origin === 'complication').map((f) => f.title);
   const d = deps.rules.fronts.director;
   const sphere = tags.sphere ? d.spheres[tags.sphere] : null;
@@ -52,6 +80,7 @@ function seedWords(deps: FlowDeps, city: City, tags: StoryTags): string {
     tags.engine ? `История, в которой ${d.engines[tags.engine]}.` : null,
     tags.source ? `Причина: ${d.sources[tags.source]}.` : null,
     sphere ? `Больше всего она касается того, чем город живёт: ${sphere}.` : null,
+    kind === 'chance' ? 'Это удача для города: находка, гость, редкий случай или дар, которым можно воспользоваться, пока он рядом. Все фронты без дрейфа (drift NONE), с выигрышем в ставке.' : null,
     tags.mystery ? 'В ней заранее спрятан ключевой объект или факт, который откроется по ходу.' : null,
     running.length ? `В городе уже идёт: ${running.join('; ')}. Эта история о другом: свои люди, своё место и своя причина.` : null,
   ]
@@ -70,9 +99,9 @@ export function storyCount(city: City): number {
     .reduce((acc, f) => acc + (f.form === 'threat' || f.form === 'tension' || leadOf(city, f.id) ? 1 : 0.5), 0);
 }
 
-/** Посадить одну историю: заготовку из deps.scenarios, которая тут ещё не играла, или по зерну. */
-export async function plantStory(deps: FlowDeps, city: City, day: number): Promise<OutboundMessage | null> {
-  const fresh = deps.scenarios.filter((s) => !city.scenariosUsed.includes(s.id));
+/** Посадить одну историю: заготовку, которая тут ещё не играла, или по зерну. `kind` — заказанный знак, без него любой. */
+export async function plantStory(deps: FlowDeps, city: City, day: number, kind: Kind | null = null): Promise<OutboundMessage | null> {
+  const fresh = deps.scenarios.filter((s) => !city.scenariosUsed.includes(s.id) && (!kind || storyKind(s) === kind));
   const template = weightedOrder(fresh, (s) => varietyWeight(deps.rules, city, scenarioTags(s), day), deps.random.rng)[0] ?? null;
   const lean = template ? null : leanOf(deps.rules, city, day, deps.random.rng);
   const names = await takeNames(deps, deps.rules.seeding.namesPerCall);
@@ -84,15 +113,20 @@ export async function plantStory(deps: FlowDeps, city: City, day: number): Promi
         cityBrief: city.brief,
         objects: city.objects.filter((o) => o.status === 'active'),
         template,
-        seed: lean ? seedWords(deps, city, lean) : null,
+        seed: lean ? seedWords(deps, city, lean, kind) : null,
         names,
         unknowns: city.unknowns,
+        focus: focusNames(city, day),
       }),
     template,
   );
-  // История по зерну получает свой id: заготовки он не повторит.
-  if (scenario && !template) scenario.id = newId(deps, 'story');
-  const planted = scenario && !template ? trimFree(deps, scenario) : scenario;
+  // История по зерну получает свой id (заготовки он не повторит), масштаб по жребию и заказанный знак.
+  const free = scenario && !template ? ofKind(trimFree(deps, scenario), kind) : null;
+  if (free) {
+    free.id = newId(deps, 'story');
+    free.scale = freeScale(deps);
+  }
+  const planted = template ? scenario : free;
   // Тайны острова закрыты для посадок: это проверяет и агент, но запасная заготовка идёт мимо него.
   if (!planted || city.scenariosUsed.includes(planted.id) || touchedMysteries(planted, mysteryObjectIds(city)).length) {
     await returnNames(deps, names);
@@ -102,7 +136,7 @@ export async function plantStory(deps: FlowDeps, city: City, day: number): Promi
   await returnNames(deps, names.filter((n) => !used.includes(n)));
 
   const tags = scenarioTags(planted);
-  markStory(city, lean ? { ...lean, mystery: tags.mystery } : tags, day);
+  markStory(city, lean ? { ...lean, mystery: tags.mystery } : tags, day, { kind: storyKind(planted), scale: planted.scale ?? null });
   const { objects, fronts } = plantScenario(deps.rules, city, planted, { day, newId: (p) => newId(deps, p) });
   for (const front of fronts) refreshFront(deps, city, front, day);
   // Скрытое в истории город пока не видел: оно не идёт ни в весть, ни в хронику.
@@ -133,15 +167,16 @@ function fadeDormant(deps: FlowDeps, city: City, day: number): void {
 export async function seedStories(deps: FlowDeps, city: City, day: number): Promise<OutboundMessage[]> {
   const out: OutboundMessage[] = [];
   fadeDormant(deps, city, day);
-  // В пустой город сразу приходит норма историй; дальше фон идёт по одной истории за проверку,
-  // и каждая следующая ждёт, пока у города есть место для новой беды.
-  const empty = storyCount(city) === 0;
-  // activeStories — потолок числа историй; сажать ли ещё одну, решает поток бед: пока город получает
-  // меньше работы над бедами, чем хочет режиссёр, приходит следующая история.
-  const need = Math.max(0, Math.floor(deps.rules.seeding.activeStories - storyCount(city)));
-  for (let i = 0; i < (empty ? Math.min(2, need) : Math.min(1, need)); i++) {
-    if (roomForTrouble(deps.rules, city) <= 0 || !wantsTrouble(deps.rules, city, day)) break;
-    const msg = await plantStory(deps, city, day);
+  // activeStories — потолок числа историй. За проверку приходит не больше одной беды и одной возможности:
+  // беда — пока город получает меньше работы над бедами, чем хочет режиссёр, и у него есть место;
+  // возможность — пока их посажено меньше, чем бед.
+  const room = () => storyCount(city) < deps.rules.seeding.activeStories;
+  if (room() && roomForTrouble(deps.rules, city) > 0 && wantsTrouble(deps.rules, city, day)) {
+    const msg = await plantStory(deps, city, day, 'trouble');
+    if (msg) out.push(msg);
+  }
+  if (room() && wantsChance(deps.rules, city, day)) {
+    const msg = await plantStory(deps, city, day, 'chance');
     if (msg) out.push(msg);
   }
   scheduleJob(city, { id: newId(deps, 'job'), kind: 'seed', dueDay: day + deps.rules.seeding.checkEveryDays });

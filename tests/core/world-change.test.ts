@@ -4,7 +4,10 @@ import yaml from 'js-yaml';
 import { describe, expect, test } from 'vitest';
 import { changedObjectIds, describeChanges, isNotable, type Change } from '../../src/core/world/changes.js';
 import { nextEventDay } from '../../src/core/world/fronts.js';
-import { parseScenario, plantScenario } from '../../src/core/world/scenario.js';
+import { parseScenario, plantScenario, storyKind } from '../../src/core/world/scenario.js';
+import { magnitude } from '../../src/core/world/numbers.js';
+import { pullOf } from '../../src/core/world/objects.js';
+import { applyStake } from '../../src/core/world/stake.js';
 import { blankCity, ids, rules } from '../helpers/fixtures.js';
 
 const r = rules();
@@ -73,7 +76,10 @@ describe('сценарий', () => {
       const source = scenario.fronts[i]!;
       const drifting = source.drift !== 'NONE';
       expect(front).toMatchObject({ origin: 'story', form: drifting ? 'threat' : 'find', capacity: r.seeding.capacity[source.impact] });
-      expect(front.deadlineDay == null).toBe(!drifting);
+      // История без беды — возможность: у её фронтов окно, после которого она уходит.
+      const chance = scenario.fronts.every((f) => f.drift === 'NONE');
+      expect(front.deadlineDay == null).toBe(!drifting && !chance);
+      expect(front.plus).toBe(chance);
       expect(drifting ? front.failStake.length : front.stake.length).toBe(source.stake ? 1 : 0);
       expect(front.script?.clues.map((c) => c.fact)).toEqual(source.clues.map((c) => c.fact));
       if (source.alignment) expect(front.key?.moves.length).toBeGreaterThan(0);
@@ -125,6 +131,76 @@ describe('сценарий', () => {
     expect(() =>
       parseScenario({ id: 'y', title: 'y', fronts: [{ id: 'a', description: 'd', impact: 'MINOR', drift: 'SLOW', closes: [{ target: 'b', share: 1 }] }, { id: 'b', description: 'd', impact: 'MINOR' }] }),
     ).toThrow(/closes/);
+  });
+
+  test('масштаб истории: числа в файле — доли, удар бед и выигрыш тянутся к бюджету масштаба', () => {
+    const story = (scale: string) =>
+      parseScenario({
+        id: scale,
+        title: 'x',
+        scale,
+        objects: [{ id: 'mill', type: 'building', name: 'Мельница' }],
+        fronts: [
+          { id: 'a', description: 'Беда первая.', impact: 'MINOR', drift: 'STEADY', stake: { stats: { prosperity: -2 } } },
+          { id: 'b', description: 'Беда вторая.', impact: 'MINOR', drift: 'STEADY', stake: { stats: { security: -1 } } },
+          { id: 'c', description: 'Выигрыш.', impact: 'MINOR', stake: { stats: { knowledge: 5 } } },
+        ],
+      });
+    for (const scale of ['situation', 'rupture'] as const) {
+      const city = blankCity();
+      const { fronts, objects } = plantScenario(r, city, story(scale), { day: 0, newId: ids(3) });
+      const budget = r.seeding.scale[scale].budget;
+      const [a, b, c] = fronts as [typeof fronts[number], typeof fronts[number], typeof fronts[number]];
+      // Две беды делят бюджет как 2 к 1; ёмкость беды равна её удару, срок позволяет успеть.
+      expect(a.failStake[0]).toMatchObject({ op: 'stats', points: { prosperity: (-budget * 2) / 3 } });
+      expect(a.capacity + b.capacity).toBeCloseTo(Math.max(2, (budget * 2) / 3) + Math.max(2, budget / 3));
+      expect(a.deadlineDay! / 30).toBeGreaterThanOrEqual((a.capacity / 4) * 1.5 - 0.05);
+      // Выигрыш получает весь бюджет и стоит его долю.
+      expect(c.stake[0]).toMatchObject({ op: 'stats', points: { knowledge: budget } });
+      expect(c.capacity).toBeCloseTo(Math.max(2, budget * r.seeding.gainShare));
+      expect(fronts.every((f) => f.scale === scale && !f.plus)).toBe(true);
+      // Тяга: объекты перелома остаются узлом сюжета, объекты узкого случая — декорацией.
+      expect(pullOf(objects[0]!, 5000)).toBe(r.seeding.scale[scale].pull);
+    }
+  });
+
+  test('тяга ложится на то, что история породила, и слабеет со временем', () => {
+    const city = blankCity();
+    const pull = { level: 2, day: 100, days: 1000 };
+    const { changes } = applyStake(r, city, [{ op: 'create', object: { type: 'building', name: 'Маяк', description: '', points: { prosperity: 0, security: 1, knowledge: 0, influence: 0 } } }], { day: 100, newId: ids(5), pull });
+    const made = city.objects.find((o) => o.name === 'Маяк')!;
+    expect(changes).toHaveLength(1);
+    expect(pullOf(made, 100)).toBe(2);
+    expect(pullOf(made, 600)).toBe(1);
+    expect(pullOf(made, 2000)).toBe(0);
+  });
+
+  test('все заготовки сажаются: масштаб задан, возможность живёт окно, беда успевается', () => {
+    const dir = path.resolve(import.meta.dirname, '../../scenarios');
+    const kinds = { trouble: 0, chance: 0 };
+    for (const file of fs.readdirSync(dir)) {
+      const scenario = parseScenario(yaml.load(fs.readFileSync(path.join(dir, file), 'utf8')));
+      expect(scenario.scale, file).toBeDefined();
+      const kind = storyKind(scenario);
+      kinds[kind] += 1;
+      const city = blankCity();
+      const { fronts } = plantScenario(r, city, scenario, { day: 0, newId: ids(11) });
+      const budget = r.seeding.scale[scenario.scale!].budget;
+      let hit = 0;
+      for (const [i, f] of fronts.entries()) {
+        const drifting = scenario.fronts[i]!.drift !== 'NONE';
+        expect(f.plus, file).toBe(kind === 'chance');
+        if (kind === 'chance') expect(f.deadlineDay, file).toBeGreaterThanOrEqual(r.seeding.chanceMonths * 30);
+        if (!drifting) continue;
+        expect(f.deadlineDay! / 30, file).toBeGreaterThanOrEqual((f.capacity / r.fronts.work.unitsPerMonth) * r.fronts.deadlines.slack - 0.05);
+        const op = f.failStake[0];
+        if (op?.op === 'stats') hit += magnitude(op.points);
+      }
+      if (hit > 0) expect(hit, file).toBeCloseTo(budget, 0);
+    }
+    // Возможностей достаточно, чтобы режиссёр сажал их наравне с бедами.
+    expect(kinds.chance).toBeGreaterThanOrEqual(40);
+    expect(kinds.trouble).toBeGreaterThanOrEqual(90);
   });
 
   test('кривая заготовка падает с путём', () => {

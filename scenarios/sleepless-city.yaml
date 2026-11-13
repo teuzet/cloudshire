@@ -1,5 +1,6 @@
 id: sleepless-city
 title: Город без сна
+scale: episode
 # Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
 axes: { engine: crisis, source: phenomenon, sphere: knowledge }
 pitch: Целая улица, а потом и квартал перестали спать; люди лежат с открытыми глазами ночь за ночью и слабеют.

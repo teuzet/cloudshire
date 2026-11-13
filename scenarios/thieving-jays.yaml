@@ -1,5 +1,6 @@
 id: thieving-jays
 title: Учёные сойки
+scale: situation
 # Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
 axes: { engine: betrayal, source: creature, sphere: prosperity }
 pitch: С прилавков ювелиров и из открытых окон пропадают мелкие ценные вещи; люди видели, как их уносят птицы.

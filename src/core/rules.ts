@@ -13,6 +13,10 @@ export type StatMap = Record<StatId, number>;
 export const IMPACT_LEVELS = ['NONE', 'MINOR', 'SIGNIFICANT', 'MAJOR', 'DEFINING'] as const;
 export type Impact = (typeof IMPACT_LEVELS)[number];
 
+/** Масштаб истории: узкий случай, общее событие, глава в жизни города, перелом с «до» и «после». */
+export const SCALES = ['situation', 'episode', 'crisis', 'rupture'] as const;
+export type Scale = (typeof SCALES)[number];
+
 export const DRIFT_BANDS = ['NONE', 'SLOW', 'STEADY', 'FAST'] as const;
 export type DriftBand = (typeof DRIFT_BANDS)[number];
 
@@ -229,6 +233,8 @@ export const rulesSchema = z.object({
       mysteryShare: z.number().min(0).max(1),
       mysteryBoost: z.number().min(1),
       calmTroubles: z.number().int().positive(),
+      /** Насколько тяга объекта умножает его вес в жребии осложнений: 1 + pullWeight × тяга. */
+      pullWeight: z.number().nonnegative(),
       /** Поток бед: сколько сановников и какую долю их времени беды должны занимать при хорошей игре. */
       pressure: z.object({ officers: z.number().positive(), share: z.number().min(0).max(1), windowMonths: z.number().int().positive() }),
       plusBase: z.number().min(0).max(1),
@@ -268,6 +274,17 @@ export const rulesSchema = z.object({
     namesPerCall: z.number().int().nonnegative(),
     capacity: byImpact,
     driftMonths: byDrift,
+    /**
+     * Масштаб истории: budget — пункты статов, которые история ставит на кон (удар бед и отдельно выигрыш);
+     * pull — тяга, которую получают её объекты; pullDays — за сколько дней тяга сходит на нет (null — не сходит);
+     * weight — вес жребия масштаба для истории по зерну.
+     */
+    scale: table(SCALES, z.object({ budget: z.number().positive(), pull: z.number().nonnegative(), pullDays: z.number().int().positive().nullable(), weight: z.number().nonnegative() })),
+    freeMaxScale: z.enum(SCALES),
+    /** Ёмкость фронта с выигрышем: доля выигрыша в пунктах. */
+    gainShare: z.number().positive(),
+    /** Окно истории-возможности в месяцах: не взялись и не довели — она уходит. */
+    chanceMonths: z.number().positive(),
   }),
   priest: z.object({ dialogDepth: z.number().int().positive() }),
 });

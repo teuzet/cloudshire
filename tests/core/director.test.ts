@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import type { StoryTags } from '../../src/core/city.js';
 import { createAssignment } from '../../src/core/world/assignments.js';
-import { leanOf, markStory, mysteryShare, plusChance, roomForTrouble, troublePressure, unansweredTroubles, varietyWeight, wantsTrouble } from '../../src/core/world/director.js';
+import { leanOf, markStory, mysteryShare, plusChance, roomForTrouble, troublePressure, unansweredTroubles, varietyWeight, wantsChance, wantsTrouble } from '../../src/core/world/director.js';
 import { createFront } from '../../src/core/world/fronts.js';
 import { parseScenario, scenarioTags } from '../../src/core/world/scenario.js';
 import { blankCity, rng, rules } from '../helpers/fixtures.js';
@@ -92,5 +92,16 @@ describe('режиссёр', () => {
     expect(wantsTrouble(r, city, 100)).toBe(false);
     // За окном беды забываются.
     expect(wantsTrouble(r, city, 100 + 90)).toBe(true);
+  });
+
+  test('возможности приходят так же часто, как беды: режиссёр ждёт возможность, пока их посажено меньше', () => {
+    const city = blankCity();
+    expect(wantsChance(r, city, 10)).toBe(false);
+    markStory(city, crisis, 10, { kind: 'trouble', scale: 'episode' });
+    // Осложнение от дела игрока знака не имеет и в счёт историй не идёт.
+    markStory(city, feud, 12);
+    expect(wantsChance(r, city, 20)).toBe(true);
+    markStory(city, feud, 20, { kind: 'chance', scale: 'situation' });
+    expect(wantsChance(r, city, 30)).toBe(false);
   });
 });

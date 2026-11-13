@@ -19,6 +19,8 @@ export interface ScenarioWriterInput {
   names: readonly PoolName[];
   /** Тайны острова: их объекты новая история не трогает. */
   unknowns: readonly CanonicalUnknown[];
+  /** Имена объектов, вокруг которых город живёт сейчас: история охотнее цепляется за них. */
+  focus?: readonly string[];
 }
 
 const prompt = loadPrompt(import.meta.url);
@@ -110,7 +112,7 @@ function keepTemplate(raw: Scenario, template: Scenario): Scenario {
     ...f,
     closes: template.fronts[i]!.closes.map((c) => ({ target: finalId.get(c.target) ?? c.target, share: c.share })),
   }));
-  return { ...raw, id: template.id, objects, fronts: withCloses, ...(template.axes ? { axes: template.axes } : {}) };
+  return { ...raw, id: template.id, objects, fronts: withCloses, ...(template.axes ? { axes: template.axes } : {}), ...(template.scale ? { scale: template.scale } : {}) };
 }
 
 export const scenarioWriter: StructuredAgent<ScenarioWriterInput, Scenario, Scenario> = {
@@ -118,12 +120,13 @@ export const scenarioWriter: StructuredAgent<ScenarioWriterInput, Scenario, Scen
   tool: 'submit_scenario',
   description: 'Объекты и фронты новой истории.',
   schema: scenarioDraftSchema,
-  system: ({ cityBrief, objects, names, unknowns }) =>
+  system: ({ cityBrief, objects, names, unknowns, focus }) =>
     composeSystem(
       ['world', 'style-names'],
       prompt,
       section('Город', cityBrief),
       section('Объекты города', objectsBlock(objects)),
+      section('Сейчас город живёт вокруг этого (историю лучше связать с одним из них)', focus?.length ? bullets([...focus]) : null),
       mysteryBlock(unknowns),
       namesBlock(names),
     ),

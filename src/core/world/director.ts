@@ -20,9 +20,9 @@ export function dynamicTags(d: Pick<Dynamic, 'engine' | 'source' | 'sphere' | 'n
 }
 
 /** Записать рождённое в журнал режиссёра. */
-export function markStory(city: City, tags: StoryTags, day: number): void {
+export function markStory(city: City, tags: StoryTags, day: number, story?: Pick<StoryMark, 'kind' | 'scale'>): void {
   const log = (city.storyLog ??= []);
-  log.push({ ...tags, day });
+  log.push({ ...tags, day, ...(story ?? {}) });
   if (log.length > LOG_MAX) log.splice(0, log.length - LOG_MAX);
 }
 
@@ -98,6 +98,16 @@ export function troublePressure(rules: Rules, city: Pick<City, 'fronts'>, day: n
 /** Ждёт ли город новую историю: поток бед ниже цели режиссёра. */
 export function wantsTrouble(rules: Rules, city: Pick<City, 'fronts'>, day: number): boolean {
   return troublePressure(rules, city, day) < pressureTarget(rules);
+}
+
+/**
+ * Пора ли сажать историю-возможность: за окно потока их посажено меньше, чем историй-бед.
+ * Так возможности приходят так же часто, как беды.
+ */
+export function wantsChance(rules: Rules, city: Pick<City, 'storyLog'>, day: number): boolean {
+  const since = day - monthsToDays(rules.fronts.director.pressure.windowMonths);
+  const marks = (city.storyLog ?? []).filter((m) => m.day > since && m.day <= day);
+  return marks.filter((m) => m.kind === 'chance').length < marks.filter((m) => m.kind === 'trouble').length;
 }
 
 /** Можно ли сейчас родить новую беду мира (срыв, посев): пока бед без ответа меньше предела. */

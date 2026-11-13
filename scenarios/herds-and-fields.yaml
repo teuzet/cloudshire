@@ -1,5 +1,6 @@
 id: herds-and-fields
 title: Потрава
+scale: situation
 # Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
 axes: { engine: feud, source: ecology, sphere: prosperity }
 pitch: Стада пастухов раз за разом заходят в посевы; земледельцы режут скот в отместку, пастухи жгут изгороди.

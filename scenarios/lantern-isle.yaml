@@ -1,5 +1,6 @@
 id: lantern-isle
 title: Островок с горящими фонарями
+scale: episode
 # Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
 axes: { engine: discovery, source: phenomenon, sphere: knowledge }
 pitch: К краю острова прибивает малое тело с башней, на котором по ночам сами зажигаются фонари.

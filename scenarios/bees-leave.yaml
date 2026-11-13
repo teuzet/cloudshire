@@ -1,5 +1,6 @@
 id: bees-leave
 title: Пчёлы покидают ульи
+scale: episode
 # Оси режиссёра: что движет историей, где причина, какой сфере достаётся.
 axes: { engine: refusal, source: creature, sphere: prosperity }
 pitch: Пчёлы с террасных пасек роями уходят из ульев и не возвращаются; сады остаются без опыления.

@@ -4,12 +4,12 @@
  */
 
 import { STAT_IDS, type Rules, type StatMap } from '../rules.js';
-import type { City, StakeOp, WorldObject } from '../city.js';
+import type { City, Pull, StakeOp, WorldObject } from '../city.js';
 import { addFact } from '../lore.js';
 import type { Change } from './changes.js';
 import { closeFront, findFront, rollbackMilestone, settleProgress } from './fronts.js';
 import { diffPoints, pointsToRaw, rawToPoints } from './numbers.js';
-import { addObjectVersion, createObject, deleteWithChildren, findObject } from './objects.js';
+import { addObjectVersion, createObject, deleteWithChildren, findObject, tug } from './objects.js';
 import { addToLedger, recomputeStats } from './stats.js';
 
 export interface StakeResult {
@@ -27,7 +27,7 @@ export function applyStake(
   rules: Rules,
   city: City,
   ops: readonly StakeOp[],
-  ctx: { day: number; newId: (prefix: string) => string; frontId?: string | null; /** Ставку исполняет случившаяся беда: её имя. Беда выводит объекты из строя, а не стирает. */ trouble?: string | null },
+  ctx: { day: number; newId: (prefix: string) => string; frontId?: string | null; /** Ставку исполняет случившаяся беда: её имя. Беда выводит объекты из строя, а не стирает. */ trouble?: string | null; /** Тяга истории: ложится на всё, что ставка породила или изменила. */ pull?: Pull | null },
 ): StakeResult {
   const changes: Change[] = [];
   let resultId: string | null = null;
@@ -59,6 +59,7 @@ export function applyStake(
           hidden: op.object.hidden,
           day,
         });
+        tug(obj, ctx.pull);
         city.objects.push(obj);
         if (op.result) resultId = obj.id;
         changes.push({ kind: 'object_created', objectId: obj.id, name: obj.name, type: obj.type, points: { ...op.object.points }, temporary: false, hidden: obj.hidden });
@@ -69,6 +70,7 @@ export function applyStake(
         if (!obj || obj.status !== 'active') break;
         const before = rawToPoints(city, obj.statEffect);
         const description = op.description?.trim() || obj.description;
+        tug(obj, ctx.pull);
         // Беда, которая отняла у объекта всё, что он давал, выводит его из строя.
         const gave = STAT_IDS.some((id) => before[id] > 0);
         const gives = STAT_IDS.some((id) => op.points[id] > 0);
@@ -87,6 +89,7 @@ export function applyStake(
         const obj = findObject(city, op.target);
         if (!obj || obj.status !== 'active' || obj.protected) break;
         if (ctx.trouble && keeps(obj)) {
+          tug(obj, ctx.pull);
           if (!obj.out) retire(obj, zero(), obj.description, ctx.trouble);
           break;
         }
@@ -110,6 +113,7 @@ export function applyStake(
         const rewritten = description !== obj.description;
         const points = obj.out.was;
         obj.out = null;
+        tug(obj, ctx.pull);
         addObjectVersion(rules, obj, { description, statEffect: pointsToRaw(city, points), day });
         changes.push({ kind: 'object_back', objectId: obj.id, name: obj.name, delta: diffPoints(points, before), description: rewritten ? obj.description : null });
         break;
@@ -119,6 +123,7 @@ export function applyStake(
         if (!obj || obj.status !== 'active' || !obj.hidden) break;
         obj.hidden = false;
         obj.freshDay = day;
+        tug(obj, ctx.pull);
         changes.push({ kind: 'object_revealed', objectId: obj.id, name: obj.name, description: obj.description });
         break;
       }

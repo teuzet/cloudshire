@@ -15,7 +15,7 @@ import { DAYS_PER_MONTH } from '../core/time.js';
 import { describeChanges, type Change } from '../core/world/changes.js';
 import { tensionToThreat } from '../core/world/complications.js';
 import { dueEvent, findFront, frontObjectIds, neighbors, closeFront, settleProgress, shareDone } from '../core/world/fronts.js';
-import { attachedTo, findObject, deleteWithChildren } from '../core/world/objects.js';
+import { attachedTo, findObject, deleteWithChildren, scalePull } from '../core/world/objects.js';
 import { applyStake } from '../core/world/stake.js';
 import { themeNames } from '../core/world/themes.js';
 import type { OutboundMessage } from '../ports/notifier.js';
@@ -38,8 +38,8 @@ const MAX_PARTICIPANTS = 6;
 /** Скольким соседним делам предложить готовый результат в помощь. */
 const MAX_NEIGHBORS = 2;
 
-function stakeCtx(deps: FlowDeps, front: Pick<Front, 'id'>, day: number) {
-  return { day, newId: (p: string) => newId(deps, p), frontId: front.id };
+function stakeCtx(deps: FlowDeps, front: Pick<Front, 'id' | 'scale'>, day: number) {
+  return { day, newId: (p: string) => newId(deps, p), frontId: front.id, pull: scalePull(deps.rules, front.scale, day) };
 }
 
 /** Кого событие касается: объекты отпечатка, участники, цели ставок. Без места работ. */

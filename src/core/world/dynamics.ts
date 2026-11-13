@@ -13,7 +13,7 @@ import type { Rng } from '../random.js';
 import { leadOf } from './assignments.js';
 import { riskRank } from './numbers.js';
 import { dynamicTags, varietyWeight } from './director.js';
-import { attachedTo, findObject, isFresh, linkedObjects, visibleObjects } from './objects.js';
+import { attachedTo, findObject, isFresh, linkedObjects, pullOf, visibleObjects } from './objects.js';
 
 export type Moment = 'milestone' | 'completion' | 'failure';
 export type RollKind = 'light' | 'heavy' | 'plus';
@@ -149,7 +149,9 @@ export function candidateWeight(rules: Rules, city: DrawCity, c: Candidate, day:
   const last = city.dynamicsUsed[c.dynamic.id];
   const idle = last == null ? d.freshDays : Math.max(0, day - last);
   const recency = 1 + Math.min(2, (2 * idle) / d.freshDays);
-  return fresh * recency * varietyWeight(rules, city, dynamicTags(c.dynamic), day);
+  // Объект с тягой (история его породила или изменила) охотнее становится участником следующего события.
+  const pull = c.object ? 1 + d.pullWeight * pullOf(c.object, day) : 1;
+  return fresh * recency * pull * varietyWeight(rules, city, dynamicTags(c.dynamic), day);
 }
 
 /** Взвешенная перестановка: первый элемент — взвешенный жребий, второй — жребий среди оставшихся и так далее. */

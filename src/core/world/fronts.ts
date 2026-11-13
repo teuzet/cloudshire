@@ -11,7 +11,7 @@
  */
 
 import { clipWords } from '../text.js';
-import type { FrontForm, RiskStep, Rules, StatId, Tempo } from '../rules.js';
+import type { FrontForm, RiskStep, Rules, Scale, StatId, Tempo } from '../rules.js';
 import type { City, FootprintEntry, Front, FrontKey, FrontOrigin, StakeOp } from '../city.js';
 import { closeAssignment, leadOf, officerOf } from './assignments.js';
 import type { Change } from './changes.js';
@@ -42,6 +42,7 @@ export function createFront(args: {
   bound?: Front['bound'];
   atStake?: number;
   plus?: boolean;
+  scale?: Scale | null;
   unattainable?: string | null;
   projectId?: string | null;
   siteId?: string | null;
@@ -81,6 +82,7 @@ export function createFront(args: {
     bound: args.bound ?? null,
     atStake: Math.max(0, args.atStake ?? 0),
     plus: Boolean(args.plus),
+    scale: args.scale ?? null,
     unattainable: args.unattainable ?? null,
     rollsFired: 0,
     projectId: args.projectId ?? null,
