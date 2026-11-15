@@ -11,6 +11,8 @@
  *   skip <дни>                         промотать игровые дни и разобрать события
  *   next [дни]                         глазами игрока: идти по дню до первой вести (не дальше 90 дней),
  *                                      показать только вести, без хроники и перемен
+ *   wait <дни>                         глазами игрока, который был в отлучке: прожить дни по одному
+ *                                      и показать все вести за это время с датами, без хроники и перемен
  *   undo                               вернуть город к слепку перед последним say/next/skip
  *   rerun <n> [раз] [--prompt]         повторить вызов агента n из calls/ (по умолчанию 3 раза) и показать ответы;
  *                                      --prompt подставляет текущий prompt.md агента вместо записанного
@@ -183,7 +185,7 @@ async function main(): Promise<void> {
   const before = await deps.storage.getCityByOwner(OWNER);
   const head = `\n## ${new Date().toISOString().slice(0, 16)} · ${gameDate(day).label} (д.${day}) · \`${[cmd, ...args].join(' ')}\``;
 
-  if (cmd === 'say' || cmd === 'next' || cmd === 'skip') {
+  if (cmd === 'say' || cmd === 'next' || cmd === 'skip' || cmd === 'wait') {
     fs.mkdirSync(SAVES, { recursive: true });
     fs.writeFileSync(path.join(SAVES, '_undo.json'), JSON.stringify(await exportGame(deps, OWNER)));
   }
@@ -372,6 +374,19 @@ async function main(): Promise<void> {
       await importGame(deps, OWNER, JSON.parse(fs.readFileSync(path.join(SAVES, `${name}.json`), 'utf8')) as GameSave);
       await pauseWorld(deps);
       out(`${head}\nЗагружено: ${name}`);
+      break;
+    }
+    case 'wait': {
+      const days = Number(args[0] ?? 120);
+      out(`${head}`);
+      const seen: string[] = [];
+      for (let i = 0; i < days; i++) {
+        await advance(deps, locks, 1);
+        const msgs = inbox.drain(OWNER);
+        if (msgs.length) seen.push(`\n#### ${await nowLabel(deps)}`, ...msgs.map((m) => `\n> **${m.kind === 'news' ? 'Весть' : m.kind}:** ${m.text.replace(/\n/g, '\n> ')}`));
+      }
+      out(`Теперь ${await nowLabel(deps)}, прошло ${days} дн., вестей: ${seen.filter((l) => l.startsWith('\n>')).length}.`);
+      for (const l of seen) out(l);
       break;
     }
     case 'undo': {
