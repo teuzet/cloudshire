@@ -10,6 +10,11 @@ export class MemoryNotifier implements Notifier {
     this.boxes.set(message.ownerId, box);
   }
 
+  /** Сколько вестей ждёт в ящике, не забирая их. */
+  pending(ownerId: string): number {
+    return this.boxes.get(ownerId)?.length ?? 0;
+  }
+
   drain(ownerId: string): OutboundMessage[] {
     const box = this.boxes.get(ownerId) ?? [];
     this.boxes.delete(ownerId);

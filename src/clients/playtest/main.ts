@@ -9,6 +9,8 @@
  *   strip-stories                      убрать посаженные истории: их фронты, объекты, факты, хронику, задания
  *   say <текст>                        слово покровителя жрецу
  *   skip <дни>                         промотать игровые дни и разобрать события
+ *   next [дни]                         глазами игрока: идти по дню до первой вести (не дальше 90 дней),
+ *                                      показать только вести, без хроники и перемен
  *   state | fronts | objects [id] | chronicle [n] | facts | calls [n]
  *   save <имя> | load <имя> | saves
  *   mana <n> | faith <n> | seed [id] | seed-on | no-seed | director
@@ -101,6 +103,25 @@ function frontsText(deps: FlowDeps, c: City, day: number): string {
 
 function statsLine(c: City): string {
   return `статы ${Object.entries(c.stats).map(([k, v]) => `${k} ${Math.round(v as number)}`).join(', ')}; вера ${Math.round(c.faith.value)}; мана ${c.mana.value.toFixed(1)}`;
+}
+
+/** Промотать дни и разобрать наступившие задания; вести уходят в ящик. */
+async function advance(deps: FlowDeps, locks: Parameters<typeof patronMessage>[1], days: number): Promise<void> {
+  await skipWorldDays(deps, days);
+  const w = await requireWorld(deps);
+  const c = await city(deps);
+  const news = await locks.run(c.id, async () => {
+    const fresh = (await deps.storage.getCity(c.id))!;
+    const msgs = await processDue(deps, w, fresh);
+    await deps.storage.saveCity(fresh);
+    return msgs;
+  });
+  for (const m of news) await deps.notifier.send(m);
+}
+
+async function nowLabel(deps: FlowDeps): Promise<string> {
+  const w = await requireWorld(deps);
+  return `${gameDate(today(deps, w)).label} (д.${today(deps, w)})`;
 }
 
 async function newsAndChronicle(deps: FlowDeps, before: City | null, inbox: MemoryNotifier): Promise<void> {
@@ -217,18 +238,21 @@ async function main(): Promise<void> {
     case 'skip': {
       const days = Number(args[0] ?? 1);
       out(`${head}`);
-      await skipWorldDays(deps, days);
-      const w = await requireWorld(deps);
-      const c = await city(deps);
-      const news = await locks.run(c.id, async () => {
-        const fresh = (await deps.storage.getCity(c.id))!;
-        const msgs = await processDue(deps, w, fresh);
-        await deps.storage.saveCity(fresh);
-        return msgs;
-      });
-      for (const m of news) await deps.notifier.send(m);
-      out(`Теперь ${gameDate(today(deps, w)).label} (д.${today(deps, w)}).`);
+      await advance(deps, locks, days);
+      out(`Теперь ${await nowLabel(deps)}.`);
       await newsAndChronicle(deps, before, inbox);
+      break;
+    }
+    case 'next': {
+      const limit = Number(args[0] ?? 90);
+      out(`${head}`);
+      let passed = 0;
+      while (passed < limit && !inbox.pending(OWNER)) {
+        await advance(deps, locks, 1);
+        passed++;
+      }
+      out(`Теперь ${await nowLabel(deps)}, прошло ${passed} дн.${inbox.pending(OWNER) ? '' : ' Вестей не было.'}`);
+      for (const m of inbox.drain(OWNER)) out(`\n> **${m.kind === 'news' ? 'Весть' : m.kind}:** ${m.text.replace(/\n/g, '\n> ')}`);
       break;
     }
     case 'state': {
