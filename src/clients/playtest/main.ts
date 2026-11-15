@@ -11,6 +11,9 @@
  *   skip <дни>                         промотать игровые дни и разобрать события
  *   next [дни]                         глазами игрока: идти по дню до первой вести (не дальше 90 дней),
  *                                      показать только вести, без хроники и перемен
+ *   undo                               вернуть город к слепку перед последним say/next/skip
+ *   rerun <n> [раз] [--prompt]         повторить вызов агента n из calls/ (по умолчанию 3 раза) и показать ответы;
+ *                                      --prompt подставляет текущий prompt.md агента вместо записанного
  *   state | fronts | objects [id] | chronicle [n] | facts | calls [n]
  *   save <имя> | load <имя> | saves
  *   mana <n> | faith <n> | seed [id] | seed-on | no-seed | director
@@ -19,10 +22,12 @@
  *   PLAYTEST_DIR — папка плейтеста (по умолчанию ./playtest): data/, saves/, calls/, transcript.md
  */
 
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { MemoryNotifier } from '../../adapters/notifier/memory.js';
 import type { CallSummary } from '../../adapters/llm/logging.js';
+import type { LlmRequest } from '../../ports/llm.js';
 import type { City, World } from '../../core/city.js';
 import { gameDate } from '../../core/time.js';
 import { scheduleJob } from '../../core/jobs.js';
@@ -124,6 +129,16 @@ async function nowLabel(deps: FlowDeps): Promise<string> {
   return `${gameDate(today(deps, w)).label} (д.${today(deps, w)})`;
 }
 
+/** Подменить в записанном системном промпте старый prompt.md агента (из HEAD) на текущий файл. */
+function freshPrompt(request: LlmRequest): string {
+  const rel = `src/agents/${request.agent}/prompt.md`;
+  const now = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+  const old = execFileSync('git', ['show', `HEAD:${rel}`], { cwd: ROOT, encoding: 'utf8' });
+  const parts = [old, old.trim()].filter((t) => request.system.includes(t));
+  if (!parts.length) throw new Error(`в записанном промпте не нашлось ${rel} из HEAD: подставить нечего`);
+  return request.system.replace(parts[0]!, parts[0] === old ? now : now.trim());
+}
+
 async function newsAndChronicle(deps: FlowDeps, before: City | null, inbox: MemoryNotifier): Promise<void> {
   const after = await city(deps);
   for (const m of inbox.drain(OWNER)) out(`\n> **${m.kind === 'news' ? 'Весть' : m.kind}:** ${m.text.replace(/\n/g, '\n> ')}`);
@@ -167,6 +182,11 @@ async function main(): Promise<void> {
   const day = today(deps, world);
   const before = await deps.storage.getCityByOwner(OWNER);
   const head = `\n## ${new Date().toISOString().slice(0, 16)} · ${gameDate(day).label} (д.${day}) · \`${[cmd, ...args].join(' ')}\``;
+
+  if (cmd === 'say' || cmd === 'next' || cmd === 'skip') {
+    fs.mkdirSync(SAVES, { recursive: true });
+    fs.writeFileSync(path.join(SAVES, '_undo.json'), JSON.stringify(await exportGame(deps, OWNER)));
+  }
 
   switch (cmd) {
     case 'import': {
@@ -352,6 +372,27 @@ async function main(): Promise<void> {
       await importGame(deps, OWNER, JSON.parse(fs.readFileSync(path.join(SAVES, `${name}.json`), 'utf8')) as GameSave);
       await pauseWorld(deps);
       out(`${head}\nЗагружено: ${name}`);
+      break;
+    }
+    case 'undo': {
+      const file = path.join(SAVES, '_undo.json');
+      if (!fs.existsSync(file)) throw new Error('нет слепка для undo');
+      await importGame(deps, OWNER, JSON.parse(fs.readFileSync(file, 'utf8')) as GameSave);
+      await pauseWorld(deps);
+      out(`${head}\nВозвращено к слепку перед последним шагом.`);
+      break;
+    }
+    case 'rerun': {
+      const n = Number(args[0]);
+      const times = Number(args.find((a, i) => i > 0 && /^\d+$/.test(a)) ?? 3);
+      const file = fs.readdirSync(CALLS).find((f) => f.startsWith(`${String(n).padStart(4, '0')}-`) && f.endsWith('.json'));
+      if (!file) throw new Error(`нет записанного запроса ${n} (запросы пишутся в .json с этой версии)`);
+      const request = JSON.parse(fs.readFileSync(path.join(CALLS, file), 'utf8')) as LlmRequest;
+      if (args.includes('--prompt')) request.system = freshPrompt(request);
+      for (let i = 1; i <= times; i++) {
+        const r = await deps.agents.llm.complete(request);
+        out(`\n### ${request.agent} · повтор ${i}\n${r.text}${r.toolCalls.map((c) => `\n\`${c.name}\` ${c.arguments}`).join('')}`);
+      }
       break;
     }
     case 'saves':

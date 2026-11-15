@@ -101,6 +101,9 @@ export class LoggingLlm implements Llm {
       };
       try {
         fs.writeFileSync(path.join(this.dir, file), renderCall(request, response, error, ms));
+        // Сам запрос целиком: по нему вызов можно повторить (плейтест, команда rerun).
+        const { signal: _signal, ...plain } = request;
+        fs.writeFileSync(path.join(this.dir, file.replace(/\.md$/, '.json')), JSON.stringify(plain));
         fs.appendFileSync(path.join(this.dir, 'calls.jsonl'), JSON.stringify(summary) + '\n');
       } catch {
         // Журнал не должен ронять игру.
