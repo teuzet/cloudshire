@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { OFFICES } from '../../core/rules.js';
+import { OFFICES, STEWARD_MODES, STEWARD_WAITS } from '../../core/rules.js';
 
 export const assignOfficerSchema = z.object({
   office: z.enum(OFFICES),
@@ -29,6 +29,15 @@ export const existenceCheckSchema = z.object({
   context: z.string().trim().min(1).max(400).describe('Слова покровителя, в которых он прозвучал.'),
 });
 
+export const standingOrderSchema = z.object({
+  mode: z
+    .enum(STEWARD_MODES)
+    .describe('act — сразу ставить свободного сановника на новую беду и сообщать; wait — ждать слова покровителя, потом ставить самой; report — только сообщать и ждать слова.'),
+  wait: z.enum(STEWARD_WAITS).describe('Сколько ждать слова покровителя при wait: days — считанные дни, weeks — недели, season — сезон.'),
+  spare: z.array(z.enum(OFFICES)).describe('Сановники, которых покровитель велел самой не трогать. Пустой список — можно любого.'),
+  text: z.string().trim().min(1).max(300).describe('Наказ словами покровителя.'),
+});
+
 export const replySchema = z.object({ text: z.string().trim().min(1).max(4000) });
 
 export type AssignOfficerArgs = z.infer<typeof assignOfficerSchema>;
@@ -36,4 +45,5 @@ export type OrderChangeArgs = z.infer<typeof orderChangeSchema>;
 export type WithdrawArgs = z.infer<typeof withdrawSchema>;
 export type NoteArgs = z.infer<typeof noteSchema>;
 export type ConsultArgs = z.infer<typeof consultSchema>;
+export type StandingOrderArgs = z.infer<typeof standingOrderSchema>;
 export type ExistenceCheckArgs = z.infer<typeof existenceCheckSchema>;

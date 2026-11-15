@@ -27,6 +27,7 @@ import { resolveEvent, type Resolution } from '../agents/resolver/run.js';
 import { tagThemes } from '../agents/theme-tagger/run.js';
 import { appraise, briefOf, leadLabel, situationOf, workWords } from './briefs.js';
 import { record, type Happening } from './chronicle.js';
+import { runSteward } from './steward.js';
 import { complicateRolled, describeHits, refreshAfterChange, resolveModify, rollFor, rollForFailure } from './complications.js';
 import { newId, requireWorld, sendAll, today, tryAgent, type FlowDeps } from './context.js';
 import { faithEvent, refreshAllFronts, willWords } from './fronts.js';
@@ -614,6 +615,7 @@ export async function processDue(deps: FlowDeps, world: World, city: City): Prom
     const job = dueJobs(city, now)[0];
     if (!job || !claimJob(job)) break;
     try {
+      out.push(...(await runSteward(deps, city, job.dueDay)));
       await handle(deps, city, job, out);
       completeJob(job);
     } catch (err) {
@@ -621,6 +623,7 @@ export async function processDue(deps: FlowDeps, world: World, city: City): Prom
       deps.log?.warn('job_failed', { cityId: city.id, job: job.kind, error: String(err) });
     }
   }
+  out.push(...(await runSteward(deps, city, now)));
   accrueMana(deps.rules, city, now);
   pruneJobs(city);
   return out;

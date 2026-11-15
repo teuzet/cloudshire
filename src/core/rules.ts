@@ -76,6 +76,12 @@ export type Temper = (typeof TEMPERS)[number];
 
 /** Вердикт Судьи соответствия на стратегию или дело. */
 export const VERDICTS = ['spot_on', 'fits', 'off'] as const;
+/** Наказ жрецу на беду без ответа покровителя: ставить сразу, ждать слова, только сообщать. */
+export const STEWARD_MODES = ['act', 'wait', 'report'] as const;
+export type StewardMode = (typeof STEWARD_MODES)[number];
+/** Сколько ждать слова покровителя, словами людей. */
+export const STEWARD_WAITS = ['days', 'weeks', 'season'] as const;
+export type StewardWait = (typeof STEWARD_WAITS)[number];
 export type Verdict = (typeof VERDICTS)[number];
 
 /** Отношения дела с объектами города (отпечаток). */
@@ -244,6 +250,13 @@ export const rulesSchema = z.object({
       spheres: z.record(z.enum(STAT_IDS), z.string().min(1)),
       /** Вкус к источнику причины: множитель веса жребия. Больше единицы — такие истории желаннее. */
       sourceTaste: z.record(z.enum(SOURCES), z.number().positive()),
+    }),
+    /** Жрец сам ставит свободного сановника на беду без ведущего по наказу покровителя. */
+    steward: z.object({
+      mode: z.enum(STEWARD_MODES),
+      wait: z.enum(STEWARD_WAITS),
+      waitDays: table(STEWARD_WAITS, z.number().int().nonnegative()),
+      verdict: z.enum(VERDICTS),
     }),
     failure: z.object({ chance: z.number().min(0).max(1), heavyShare: z.number().min(0).max(1) }),
     refresh: z.object({ maxFronts: z.number().int().nonnegative() }),

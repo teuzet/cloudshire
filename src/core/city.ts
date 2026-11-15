@@ -6,7 +6,7 @@
  */
 
 import type { ClockState } from './time.js';
-import type { Engine, FrontForm, ObjectType, Office, Relation, RiskStep, Scale, Source, StatId, StatMap, Temper, Tempo, Verdict } from './rules.js';
+import type { Engine, FrontForm, ObjectType, Office, Relation, RiskStep, Scale, Source, StatId, StatMap, StewardMode, StewardWait, Temper, Tempo, Verdict } from './rules.js';
 
 // ───────────────────────────── мир ─────────────────────────────
 
@@ -313,7 +313,7 @@ export interface ChronicleEntry {
   day: number;
   text: string;
   /** Откуда запись: генезис, веха, завершение или срок фронта, осложнение, посадка истории, воля игрока. */
-  source: 'genesis' | 'milestone' | 'completion' | 'deadline' | 'complication' | 'scenario' | 'will';
+  source: 'genesis' | 'milestone' | 'completion' | 'deadline' | 'complication' | 'scenario' | 'will' | 'steward';
   frontId: string | null;
 }
 
@@ -388,6 +388,17 @@ export interface Faith {
   day: number;
 }
 
+/** Наказ покровителя жрецу на беду без ответа. */
+export interface StewardOrder {
+  mode: StewardMode;
+  /** Сколько ждать слова покровителя при mode = wait. */
+  wait: StewardWait;
+  /** Кого из сановников жрецу самому не ставить. */
+  spare: Office[];
+  /** Слова покровителя, как он их сказал. */
+  text: string;
+}
+
 export interface City {
   id: string;
   worldId: string;
@@ -423,6 +434,8 @@ export interface City {
   storyLog?: StoryMark[];
   /** Предупреждение о недостижимой цели: повторный приказ в срок запускает дело. */
   unattainableWarning: { goal: string; day: number } | null;
+  /** Наказ жрецу на беду без ответа; нет — значения по умолчанию из правил. */
+  steward?: StewardOrder;
   chronicle: ChronicleEntry[];
   dialog: DialogEntry[];
   notes: PriestNote[];

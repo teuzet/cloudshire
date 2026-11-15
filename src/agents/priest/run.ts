@@ -4,6 +4,7 @@
  * через переданные обработчики — агент только переводит речь в вызовы.
  */
 
+import { stewardOrder } from '../../core/world/steward.js';
 import type { City, DialogEntry } from '../../core/city.js';
 import type { Rules } from '../../core/rules.js';
 import { activeAssignments } from '../../core/world/assignments.js';
@@ -22,12 +23,14 @@ import {
   noteSchema,
   orderChangeSchema,
   replySchema,
+  standingOrderSchema,
   withdrawSchema,
   type AssignOfficerArgs,
   type ConsultArgs,
   type ExistenceCheckArgs,
   type NoteArgs,
   type OrderChangeArgs,
+  type StandingOrderArgs,
   type WithdrawArgs,
 } from './schema.js';
 
@@ -39,6 +42,7 @@ export interface PriestHandlers {
   orderChange(args: OrderChangeArgs): Promise<ToolOutcome>;
   withdraw(args: WithdrawArgs): Promise<ToolOutcome>;
   writeNote(args: NoteArgs): Promise<ToolOutcome>;
+  setStandingOrder(args: StandingOrderArgs): Promise<ToolOutcome>;
   consultLoremaster(args: ConsultArgs): Promise<ToolOutcome>;
   checkExistence(args: ExistenceCheckArgs): Promise<ToolOutcome>;
 }
@@ -64,6 +68,16 @@ export interface PriestTurn {
 
 const prompt = loadPrompt(import.meta.url);
 const ACTIONS = new Set(['assign_officer', 'order_change', 'withdraw_assignment']);
+
+const MODE_WORDS = { act: 'сразу ставить свободного сановника и сообщать', wait: 'ждать слова покровителя', report: 'только сообщать и ждать слова' } as const;
+const WAIT_WORDS = { days: 'считанные дни', weeks: 'недели', season: 'сезон' } as const;
+
+function standingOrderLine(rules: Rules, city: City): string {
+  const o = stewardOrder(rules, city);
+  const how = o.mode === 'wait' ? `${MODE_WORDS.wait} ${WAIT_WORDS[o.wait]}, потом ставить свободного самой` : MODE_WORDS[o.mode];
+  const spare = o.spare.length ? ` Не трогать: ${o.spare.map((s) => city.officers.find((x) => x.office === s)?.name ?? s).join(', ')}.` : '';
+  return `${o.text ? `«${o.text}» — ` : 'Покровитель наказа не давал, по обычаю: '}${how}.${spare}`;
+}
 
 /** Блок хода: всё, что жрец знает о городе сейчас. */
 export function priestTurnBlock(rules: Rules, city: City, day: number): string {
@@ -96,6 +110,7 @@ export function priestTurnBlock(rules: Rules, city: City, day: number): string {
     `Ты: ${city.priest.name} (${city.priest.gender === 'female' ? 'она' : 'он'}), ${city.priest.nature}`,
     section('Состояние города', qualitativeStats(rules, city.stats)),
     section('Сановники', bullets(officers)),
+    section('Наказ покровителя на беду, пока он молчит', standingOrderLine(rules, city)),
     section('Что сейчас идёт в городе (id: что идёт)', bullets(fronts)),
     section('Замыслы, которые ждут слова покровителя (id: что дальше)', bullets(waiting)),
     section('Что в городе выбыло из строя', bullets(lost)),
@@ -127,6 +142,12 @@ const TOOLS: LoopTool<PriestHandlers>[] = [
   tool<OrderChangeArgs>('order_change', 'Воля изменить сам город: построить, учредить, снести.', orderChangeSchema, (h, a) => h.orderChange(a)),
   tool<WithdrawArgs>('withdraw_assignment', 'Снять сановника с его дела. Дело остаётся стоять без ведущего. Прекратить дело совсем — order_change «отменить дело …».', withdrawSchema, (h, a) => h.withdraw(a)),
   tool<NoteArgs>('write_note', 'Постоянная заметка памяти.', noteSchema, (h, a) => h.writeNote(a)),
+  tool<StandingOrderArgs>(
+    'set_standing_order',
+    'Наказ покровителя: как поступать с новой бедой, пока он молчит. Заменяет прежний наказ.',
+    standingOrderSchema,
+    (h, a) => h.setStandingOrder(a),
+  ),
   tool<ConsultArgs>(
     'consult_loremaster',
     'Спросить лормастера о конкретике мира, которой нет в блоке хода. Один вопрос за вызов.',

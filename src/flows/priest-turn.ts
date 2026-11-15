@@ -46,6 +46,10 @@ function handlersFor(deps: FlowDeps, city: City, day: number): PriestHandlers {
       if (city.notes.length > MAX_NOTES) city.notes.splice(0, city.notes.length - MAX_NOTES);
       return { ok: true, say: 'Запомнил.' };
     },
+    async setStandingOrder({ mode, wait, spare, text }) {
+      city.steward = { mode, wait, spare: [...new Set(spare)], text };
+      return { ok: true, say: 'Наказ принят: так и будет, пока покровитель не скажет иначе.' };
+    },
     async consultLoremaster({ question, story_id }) {
       try {
         const lore = await askLoremaster(deps.agents, {

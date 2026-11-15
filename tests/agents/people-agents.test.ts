@@ -137,6 +137,7 @@ describe('голос жреца', () => {
       orderChange: async (a) => (log.push(`change:${a.intent}`), { ok: false, error: 'busy', say: 'Казначей занят.' }),
       withdraw: async (a) => (log.push(`withdraw:${a.office}`), { ok: true, say: 'Снят.' }),
       writeNote: async (a) => (log.push(`note:${a.text}`), { ok: true, say: 'Запомнил.' }),
+      setStandingOrder: async (a) => (log.push(`order:${a.mode}`), { ok: true, say: 'Наказ принят.' }),
       consultLoremaster: async (a) => (log.push(`lore:${a.question}:${a.story_id ?? ''}`), { ok: true, say: 'В: что\nО: так' }),
       checkExistence: async (a) => (log.push(`exists:${a.thing}`), { ok: true, say: 'Неизвестно.' }),
     };

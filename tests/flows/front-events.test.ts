@@ -34,6 +34,8 @@ async function town(dynamics: string[], tweak: (r: Rules) => void = () => {}, ap
   const s = await stand();
   s.deps.rules = rulesWith(dynamics, tweak);
   const city = blankCity();
+  // Беды здесь должны стоять без ведущего: жрец сам никого не ставит.
+  city.steward = { mode: 'report', wait: 'weeks', spare: [], text: '' };
   city.objects.push(
     createObject(s.r, { id: 'guild', type: 'organization', name: 'Гильдия каменщиков', description: 'Старая гильдия.', statEffect: { prosperity: 5 }, day: 0 }),
     createObject(s.r, { id: 'quarter', type: 'community', name: 'Жители квартала', description: 'Живут под стеной.', day: 0 }),
@@ -280,6 +282,22 @@ describe('другие исходы броска', () => {
     // Оценщик вклада не увидел разницы, поэтому на кону малый урон главному стату объекта.
     expect(tension.failStake[0]).toMatchObject({ op: 'revalue', target: 'quarter', points: { prosperity: -2 } });
     expect(isFrozen(city, front)).toBe(false);
+  });
+});
+
+describe('наказ жрецу', () => {
+  test('по наказу «ставь сразу» жрец сам ставит свободного на беду и пишет об этом в хронику', async () => {
+    const s = await town([]);
+    const { city } = s;
+    city.steward = { mode: 'act', wait: 'days', spare: [], text: 'ставь сразу' };
+    const tower = city.objects.find((o) => o.id === 'tower')!;
+    const built = buildSide(s.r, city, { shape: 'tension', origin: 'complication', target: tower, newPoints: zero, dress, key: { moves: ['Поставить дозор у башни'], twist: null }, dynamicId: null, id: 'tns', day: 0, rng: rng(2) });
+    const tension = addFront(s.deps, city, built, 0);
+    await at(s, 1);
+    const lead = leadOf(city, tension.id);
+    expect(lead).toMatchObject({ text: 'Поставить дозор у башни', verdict: s.r.fronts.steward.verdict });
+    expect(city.chronicle.at(-1)).toMatchObject({ source: 'steward', frontId: tension.id });
+    expect(city.chronicle.at(-1)?.text).toContain('Поставить дозор у башни');
   });
 });
 
