@@ -25,8 +25,13 @@ export async function runSteward(deps: FlowDeps, city: City, day: number): Promi
     createAssignment(city, { id: newId(deps, 'asg'), front, officer, text: move, verdict: deps.rules.fronts.steward.verdict, day });
     refreshAllFronts(deps, city, day);
     const who = `${officeDef(deps.rules, officer.office).title} ${officer.name}`.trim();
+    const she = city.priest.gender === 'female';
+    const gist = frontGist(front).replace(/[.!]+$/, '');
     const msg = await record(deps, city, {
-      gist: `Не дождавшись слова покровителя, ${who} по воле жреца сам взялся за дело: ${move.replace(/[.!]+$/, '')}. Речь о том, что ${frontGist(front)}.`,
+      gist:
+        `${city.priest.name} не ${she ? 'дождалась' : 'дождался'} слова покровителя и ${she ? 'сама поставила' : 'сам поставил'} ` +
+        `${who} на беду: ${gist.charAt(0).toLowerCase()}${gist.slice(1)}. ` +
+        `${officer.gender === 'female' ? 'Она начала' : 'Он начал'} так: ${move.replace(/[.!]+$/, '')}.`,
       changes: [],
       source: 'steward',
       frontId: front.id,
