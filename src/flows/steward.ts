@@ -7,7 +7,7 @@
 import type { City } from '../core/city.js';
 import { officeDef } from '../core/officers.js';
 import { createAssignment } from '../core/world/assignments.js';
-import { frontGist } from '../core/world/fronts.js';
+import { findFront, frontGist } from '../core/world/fronts.js';
 import { stewardOrder, stewardPick } from '../core/world/steward.js';
 import type { OutboundMessage } from '../ports/notifier.js';
 import { record } from './chronicle.js';
@@ -33,14 +33,18 @@ async function runQueue(deps: FlowDeps, city: City, day: number): Promise<Outbou
     const who = `${officeDef(deps.rules, officer.office).title} ${officer.name}`.trim();
     const took = officer.gender === 'female' ? 'взялась' : 'взялся';
     const task = order.task.replace(/[.!]+$/, '');
+    // Весть о том, за что сановник взялся на деле: толкователь мог прочесть поручение иначе.
+    const asg = city.assignments.find((a) => a.id === officer.assignmentId);
+    const front = asg ? findFront(city, asg.frontId) : null;
+    const work = front ? frontGist(front).replace(/[.!]+$/, '') : task;
     const gist = outcome.ok
-      ? `${who} освободился от прежнего дела и, как велел покровитель, ${took} за отложенное поручение: ${task}.`
+      ? `${who} освободился от прежнего дела и, как велел покровитель, ${took} за отложенное поручение: ${work}.`
       : `Отложенное поручение покровителя не удалось начать: ${task}. ${outcome.say}`;
     const msg = await record(deps, city, {
       gist: officer.gender === 'female' ? gist.replace('освободился', 'освободилась') : gist,
       changes: [],
       source: 'steward',
-      frontId: city.assignments.find((a) => a.id === officer.assignmentId)?.frontId ?? null,
+      frontId: front?.id ?? null,
       day,
       kind: 'beat',
       officer,
