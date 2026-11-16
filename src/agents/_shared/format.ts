@@ -8,6 +8,7 @@ import { STAT_IDS } from '../../core/rules.js';
 import type { ChronicleEntry, City, Front, Officer, PoolName, WorldObject } from '../../core/city.js';
 import { gameDate, spanBand } from '../../core/time.js';
 import { leadOf, officerOf } from '../../core/world/assignments.js';
+import { attachedTo } from '../../core/world/objects.js';
 import { daysLeft, isFrozen, progressAt, shareDone } from '../../core/world/fronts.js';
 import { leadRatePerDay } from '../../core/world/numbers.js';
 
@@ -49,7 +50,7 @@ function shareWords(share: number): string {
  * Числа жрец не видит: срок приходит словесной полосой.
  */
 export function frontLine(
-  city: Pick<City, 'assignments' | 'officers' | 'fronts'>,
+  city: Pick<City, 'assignments' | 'officers' | 'fronts' | 'objects'>,
   front: Front,
   day: number,
   rules?: Rules,
@@ -60,7 +61,11 @@ export function frontLine(
   const parts: string[] = [front.plus ? 'удобный случай' : FRONT_FORM_WORDS[front.form]];
   if (front.capacity > 0) parts.push(shareWords(shareDone(front, day)));
   if (isFrozen(city, front)) parts.push('стоит, пока не снята угроза');
-  else if (front.capacity > 0 && left == null) {
+  else if (front.capacity > 0 && left == null && officer) {
+    // Ведущий есть, а работа стоит: помехи перевешивают. Без этого жрец уверен, что дело идёт.
+    const hinders = attachedTo(city, front.id).filter((o) => (o.attach?.rate ?? 0) < 0).map((o) => o.name);
+    parts.push(`дело стоит: помехи перевешивают работу${hinders.length ? ` (${hinders.join(', ')})` : ''}, их надо убрать`);
+  } else if (front.capacity > 0 && left == null) {
     parts.push('никто не ведёт, дело стоит');
     // Сколько займёт у одного подходящего сановника: чтобы жрец видел, успеет ли дело к сроку.
     const rate = rules ? leadRatePerDay(rules, { verdict: 'fits', tempoSum: front.tempo, fit: 1 }) : 0;
