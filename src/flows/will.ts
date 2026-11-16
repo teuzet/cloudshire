@@ -69,7 +69,11 @@ function busy(deps: FlowDeps, city: City, officer: Officer): WillOutcome {
 /** Сколько ждать: словами и в реальном времени. */
 function waitWords(deps: FlowDeps, front: Front, day: number): string {
   const left = daysLeft(front, day);
-  return left == null ? '' : `Работы: ${spanBand(left)} (${realWaitLabel(left, deps.rules)}).`;
+  if (left == null) return '';
+  const work = `Работы: ${spanBand(left)} (${realWaitLabel(left, deps.rules)}).`;
+  // Полосы грубые: «сезон» работы и «сезон» срока не скажут, успеет ли сановник. Это считает код.
+  if (front.deadlineDay == null || day + left <= front.deadlineDay) return work;
+  return `${work} До срока меньше: к сроку не успеть${front.plus ? ', случай уйдёт раньше' : ''}.`;
 }
 
 function willInput(city: City) {
@@ -414,7 +418,7 @@ async function setStrategy(deps: FlowDeps, city: City, officer: Officer, will: W
   refreshAllFronts(deps, city, day);
   return {
     ok: true,
-    say: [`${title(deps, officer)} ведёт «${frontGist(front)}» так, как велено.`, waitWords(deps, front, day), leftBehind(city, officer, front, day)]
+    say: [`${title(deps, officer)} ведёт «${front.title || frontGist(front)}» так, как велено.`, waitWords(deps, front, day), leftBehind(city, officer, front, day)]
       .filter(Boolean)
       .join(' '),
   };
