@@ -193,7 +193,7 @@ describe('сценарий', () => {
         expect(f.plus, file).toBe(kind === 'chance');
         if (kind === 'chance') expect(f.deadlineDay, file).toBeGreaterThanOrEqual(r.seeding.chanceMonths * 30);
         if (!drifting) continue;
-        expect(f.deadlineDay! / 30, file).toBeGreaterThanOrEqual((f.capacity / r.fronts.work.unitsPerMonth) * r.fronts.deadlines.slack - 0.05);
+        expect(f.deadlineDay! / 30, file).toBeGreaterThanOrEqual((f.capacity / r.fronts.deadlines.unitsPerMonth) * r.fronts.deadlines.slack - 0.05);
         const op = f.failStake[0];
         if (op?.op === 'stats') hit += magnitude(op.points);
       }

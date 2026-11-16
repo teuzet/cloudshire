@@ -220,7 +220,7 @@ export const rulesSchema = z.object({
       burstMonthsMax: z.number().int().positive(),
     }),
     opportunity: z.object({ capacityShare: z.number().positive(), capacityMin: z.number().positive() }),
-    deadlines: z.object({ ownRiskMonths: z.number().positive(), worldMonths: z.number().positive(), slack: z.number().min(1) }),
+    deadlines: z.object({ ownRiskMonths: z.number().positive(), worldMonths: z.number().positive(), unitsPerMonth: z.number().positive(), slack: z.number().min(1) }),
     risk: z.object({
       chance: byRiskStep,
       heavyShare: byRiskStep,

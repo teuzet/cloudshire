@@ -107,7 +107,7 @@ describe('баллиста: от приказа до результата', () =
     const threat = city.fronts.at(-1)!;
     expect(front.milestonesFired).toBe(1);
     expect(threat).toMatchObject({ form: 'threat', origin: 'complication', parentId: front.id, bound: 'rollback', dynamicId: 'key-refuse', refs: ['guild'], capacity: 2.93 });
-    expect(threat.deadlineDay! - threat.createdDay).toBe(33);
+    expect(threat.deadlineDay! - threat.createdDay).toBe(37);
     expect(threat.failStake).toEqual([{ op: 'rollback', frontId: front.id }]);
     expect(threat.key?.moves).toHaveLength(3);
     expect(isFrozen(city, front)).toBe(true);
@@ -333,12 +333,12 @@ describe('сроки', () => {
     const burstDay = tension.deadlineDay!;
 
     const news = await at(s, burstDay);
-    expect(tension).toMatchObject({ form: 'threat', status: 'active', capacity: 5, deadlineDay: burstDay + 56 });
+    expect(tension).toMatchObject({ form: 'threat', status: 'active', capacity: 5, deadlineDay: burstDay + 62 });
     expect(news).toHaveLength(1);
     expect(city.chronicle.at(-1)?.text).toContain('Квартал перекроет подвоз.');
 
     // Угрозу никто не снял: башня теряет вклад, описание переписано.
-    await at(s, burstDay + 56);
+    await at(s, burstDay + 62);
     expect(tension.status).toBe('failed');
     expect(tower.statEffect.security).toBe(0);
     expect(tower.description).toContain('Теперь иначе.');

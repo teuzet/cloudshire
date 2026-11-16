@@ -139,11 +139,11 @@ export function boundCapacity(rules: Rules, atStake: number): number {
 }
 
 /**
- * Срок беды в днях: не короче заданного и такой, чтобы один сановник обычной скорости
- * успел её снять с запасом `deadlines.slack`.
+ * Срок беды в днях: не короче заданного и такой, чтобы один сановник типичной скорости
+ * (`deadlines.unitsPerMonth`: с поправкой на стат и нрав) успел её снять с запасом `deadlines.slack`.
  */
 export function troubleDays(rules: Rules, capacity: number, minMonths: number): number {
-  const feasible = (capacity / rules.fronts.work.unitsPerMonth) * rules.fronts.deadlines.slack;
+  const feasible = (capacity / rules.fronts.deadlines.unitsPerMonth) * rules.fronts.deadlines.slack;
   return monthsToDays(Math.max(minMonths, feasible));
 }
 

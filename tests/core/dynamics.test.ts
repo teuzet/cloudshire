@@ -148,7 +148,7 @@ describe('сборка осложнений', () => {
     expect(normal.deadlineDay! - 10).toBeLessThanOrEqual(120);
 
     const hard = buildBound(r, town('hard').front, { ...args, shape: 'threat' });
-    expect(hard).toMatchObject({ form: 'threat', bound: 'rollback', deadlineDay: 43, failStake: [{ op: 'rollback', frontId: 'p' }] });
+    expect(hard).toMatchObject({ form: 'threat', bound: 'rollback', deadlineDay: 47, failStake: [{ op: 'rollback', frontId: 'p' }] });
     expect(hard.atStake).toBeCloseTo(22 / 3);
     expect(hard.capacity).toBeCloseTo(2.93);
 
@@ -161,7 +161,7 @@ describe('сборка осложнений', () => {
     const guild = city.objects[0]!;
     const side = { origin: 'complication' as const, target: guild, newPoints: { prosperity: 0, security: 0, knowledge: 0, influence: 0 }, dress, key: null, dynamicId: null, id: 's', day: 10, rng: rng(5) };
     const threat = buildSide(r, city, { ...side, shape: 'threat' });
-    expect(threat).toMatchObject({ form: 'threat', atStake: 5, capacity: 5, deadlineDay: 66, parentId: null, refs: ['guild'] });
+    expect(threat).toMatchObject({ form: 'threat', atStake: 5, capacity: 5, deadlineDay: 72, parentId: null, refs: ['guild'] });
     expect(threat.failStake).toEqual([{ op: 'revalue', target: 'guild', points: side.newPoints }]);
     expect(buildSide(r, city, { ...side, shape: 'threat', origin: 'echo' }).deadlineDay).toBe(130);
     const clock = buildSide(r, city, { ...side, shape: 'clock' });
@@ -188,8 +188,8 @@ describe('сборка осложнений', () => {
     expect(tension.capacity).toBe(5);
     tension.progress = 2.5;
     tensionToThreat(r, tension, 70);
-    // Осталось 5 единиц работы: срок 5 / 4 × 1,5 месяца.
-    expect(tension).toMatchObject({ form: 'threat', capacity: 10, progress: 5, deadlineDay: 126, milestones: 1 });
+    // Осталось 5 единиц работы: срок 5 / 3,6 × 1,5 месяца.
+    expect(tension).toMatchObject({ form: 'threat', capacity: 10, progress: 5, deadlineDay: 132, milestones: 1 });
   });
 
   test('авария съедает четверть набранного', () => {
