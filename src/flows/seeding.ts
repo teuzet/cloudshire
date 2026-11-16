@@ -102,7 +102,8 @@ export function storyCount(city: City): number {
 /** Посадить одну историю: заготовку, которая тут ещё не играла, или по зерну. `kind` — заказанный знак, без него любой. */
 export async function plantStory(deps: FlowDeps, city: City, day: number, kind: Kind | null = null): Promise<OutboundMessage | null> {
   const fresh = deps.scenarios.filter((s) => !city.scenariosUsed.includes(s.id) && (!kind || storyKind(s) === kind));
-  const template = weightedOrder(fresh, (s) => varietyWeight(deps.rules, city, scenarioTags(s), day), deps.random.rng)[0] ?? null;
+  const uniform = deps.rules.fronts.director.uniform;
+  const template = weightedOrder(fresh, (s) => (uniform ? 1 : varietyWeight(deps.rules, city, scenarioTags(s), day)), deps.random.rng)[0] ?? null;
   const lean = template ? null : leanOf(deps.rules, city, day, deps.random.rng);
   const names = await takeNames(deps, deps.rules.seeding.namesPerCall);
   const scenario: Scenario | null = await tryAgent(

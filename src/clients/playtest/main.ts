@@ -21,6 +21,7 @@
  *   mana <n> | faith <n> | seed [id] | seed-on | no-seed | director
  *   roll <frontId> <light|heavy|plus> [dynamicId] [milestone|completion]   чит: осложнение прямо сейчас
  *
+ *   PLAYTEST_RANDOM_STORIES=1 — истории выбираются равновероятно, без вкуса режиссёра
  *   PLAYTEST_DIR — папка плейтеста (по умолчанию ./playtest): data/, saves/, calls/, transcript.md
  */
 
@@ -175,6 +176,8 @@ async function main(): Promise<void> {
   const inbox = new MemoryNotifier();
   const app = await buildApp(process.env, inbox);
   const { deps, locks } = app;
+  // PLAYTEST_RANDOM_STORIES=1: режиссёр выбирает истории равновероятно (для широты прогонов, не для интересности).
+  if (process.env.PLAYTEST_RANDOM_STORIES === '1') deps.rules.fronts.director.uniform = true;
   // Журнал этого запуска: LoggingLlm пишет файлы, сводку читаем из calls.jsonl после команды.
   const jsonl = path.join(CALLS, 'calls.jsonl');
   const callsBefore = fs.existsSync(jsonl) ? fs.readFileSync(jsonl, 'utf8').split('\n').filter(Boolean).length : 0;

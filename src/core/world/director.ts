@@ -120,7 +120,9 @@ export function leanOf(rules: Rules, city: Pick<City, 'storyLog' | 'fronts' | 'a
   const marks = recent(rules, city, day);
   const d = rules.fronts.director;
   const least = <T extends string>(values: readonly T[], axis: 'engine' | 'source' | 'sphere', extra: (v: T) => number = () => 0, taste: (v: T) => number = () => 1): T => {
-    const scored = values.map((v) => ({ v, s: (marks.reduce((acc, m) => acc + (m.mark[axis] === v ? m.w : 0), 0) + extra(v) + rng() * 0.5) / taste(v) }));
+    const scored = d.uniform
+      ? values.map((v) => ({ v, s: rng() }))
+      : values.map((v) => ({ v, s: (marks.reduce((acc, m) => acc + (m.mark[axis] === v ? m.w : 0), 0) + extra(v) + rng() * 0.5) / taste(v) }));
     scored.sort((a, b) => a.s - b.s);
     return (scored[0] as { v: T }).v;
   };

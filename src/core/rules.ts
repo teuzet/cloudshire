@@ -230,6 +230,8 @@ export const rulesSchema = z.object({
     }),
     outcome: z.object({ asPlanned: z.number().nonnegative(), twist: z.number().nonnegative() }),
     director: z.object({
+      /** Плейтест: заготовки и заказы свободному автору выбираются равновероятно, без вкуса режиссёра. */
+      uniform: z.boolean(),
       freshWeight: z.number().positive(),
       freshDays: z.number().int().positive(),
       fitterCalls: z.number().int().positive(),
