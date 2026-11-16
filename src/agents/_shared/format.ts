@@ -68,6 +68,10 @@ export function frontLine(
   }
   else if (front.capacity > 0 && left != null) parts.push(`работы осталось: ${spanBand(left)}`);
   if (front.deadlineDay != null) parts.push(`срок: ${spanBand(Math.max(0, front.deadlineDay - day))}`);
+  // Полосы грубые: «сезон» работы и «сезон» срока не скажут, успеет ли ведущий. Это считает код.
+  if (front.capacity > 0 && left != null && front.deadlineDay != null && day + left > front.deadlineDay) {
+    parts.push('при нынешней работе к сроку не успеть');
+  }
   if (officer) parts.push(`ведёт ${officer.title.toLowerCase()} ${officer.name}`);
   // Заголовок фронта агентам не нужен: они имеют дело с тем, что происходит.
   return `${front.id}: ${front.description || front.title} (${parts.join('; ')})`;
