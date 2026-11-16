@@ -23,6 +23,7 @@ import {
   noteSchema,
   orderChangeSchema,
   queueOrderSchema,
+  unqueueSchema,
   replySchema,
   standingOrderSchema,
   withdrawSchema,
@@ -32,6 +33,7 @@ import {
   type NoteArgs,
   type OrderChangeArgs,
   type QueueOrderArgs,
+  type UnqueueArgs,
   type StandingOrderArgs,
   type WithdrawArgs,
 } from './schema.js';
@@ -45,6 +47,7 @@ export interface PriestHandlers {
   withdraw(args: WithdrawArgs): Promise<ToolOutcome>;
   writeNote(args: NoteArgs): Promise<ToolOutcome>;
   queueOrder(args: QueueOrderArgs): Promise<ToolOutcome>;
+  unqueue(args: UnqueueArgs): Promise<ToolOutcome>;
   setStandingOrder(args: StandingOrderArgs): Promise<ToolOutcome>;
   consultLoremaster(args: ConsultArgs): Promise<ToolOutcome>;
   checkExistence(args: ExistenceCheckArgs): Promise<ToolOutcome>;
@@ -83,9 +86,9 @@ function standingOrderLine(rules: Rules, city: City): string {
 }
 
 function queueLines(city: City): string[] {
-  return (city.queue ?? []).map((q) => {
+  return (city.queue ?? []).map((q, i) => {
     const who = q.office ? (city.officers.find((o) => o.office === q.office)?.name ?? q.office) : 'первый освободившийся';
-    return `${who}: ${q.task}`;
+    return `${i + 1}. ${who}: ${q.task}`;
   });
 }
 
@@ -160,6 +163,12 @@ const TOOLS: LoopTool<PriestHandlers>[] = [
     'Поручение на потом: сановник возьмётся за него, как только освободится, раньше любой новой беды.',
     queueOrderSchema,
     (h, a) => h.queueOrder(a),
+  ),
+  tool<UnqueueArgs>(
+    'unqueue_order',
+    'Убрать поручение из очереди на потом: покровитель его отменил или хочет поставить в другом порядке.',
+    unqueueSchema,
+    (h, a) => h.unqueue(a),
   ),
   tool<StandingOrderArgs>(
     'set_standing_order',

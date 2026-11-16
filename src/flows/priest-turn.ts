@@ -52,6 +52,13 @@ function handlersFor(deps: FlowDeps, city: City, day: number): PriestHandlers {
       const who = office ? (city.officers.find((o) => o.office === office)?.name ?? office) : 'первый, кто освободится';
       return { ok: true, say: `Поручение в очереди: ${who} возьмётся за него, как только освободится, раньше новых бед.` };
     },
+    async unqueue({ number }) {
+      const queue = city.queue ?? [];
+      const gone = queue[number - 1];
+      if (!gone) return { ok: false, error: 'no_such_order', say: `В очереди нет поручения номер ${number}.` };
+      city.queue = queue.filter((q) => q.id !== gone.id);
+      return { ok: true, say: `Убрано из очереди: ${gone.task}` };
+    },
     async setStandingOrder({ mode, wait, spare, text }) {
       city.steward = { mode, wait, spare: [...new Set(spare)], text };
       return { ok: true, say: 'Наказ принят: так и будет, пока покровитель не скажет иначе.' };

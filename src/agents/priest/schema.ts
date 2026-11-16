@@ -15,6 +15,10 @@ export const withdrawSchema = z.object({ office: z.enum(OFFICES) });
 
 export const noteSchema = z.object({ text: z.string().trim().min(1).max(300) });
 
+export const unqueueSchema = z.object({
+  number: z.number().int().min(1).describe('Номер поручения из списка «Поручения на потом» в блоке хода.'),
+});
+
 export const queueOrderSchema = z.object({
   office: z
     .enum(OFFICES)
@@ -53,6 +57,7 @@ export type OrderChangeArgs = z.infer<typeof orderChangeSchema>;
 export type WithdrawArgs = z.infer<typeof withdrawSchema>;
 export type NoteArgs = z.infer<typeof noteSchema>;
 export type QueueOrderArgs = z.infer<typeof queueOrderSchema>;
+export type UnqueueArgs = z.infer<typeof unqueueSchema>;
 export type ConsultArgs = z.infer<typeof consultSchema>;
 export type StandingOrderArgs = z.infer<typeof standingOrderSchema>;
 export type ExistenceCheckArgs = z.infer<typeof existenceCheckSchema>;
