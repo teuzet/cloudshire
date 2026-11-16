@@ -29,6 +29,7 @@ import { fitRole } from '../agents/role-fitter/run.js';
 import { appraise, briefOf, seal, situationOf, touchesOf, workWords } from './briefs.js';
 import { namesUsed, newId, returnNames, takeNames, tryAgent, type FlowDeps } from './context.js';
 import { faithEvent, willWords } from './fronts.js';
+import { answerHindrances } from './hindrances.js';
 
 export interface Complication {
   changes: Change[];
@@ -197,13 +198,14 @@ export async function complicate(
     return made;
   };
 
-  const dress: EventDress = { title: plainTitle(costume.title), description: costume.description, outburst: costume.outburst, newObject: costume.newObject };
+  const dress: EventDress = { title: plainTitle(costume.title), description: costume.description, outburst: costume.outburst, newObject: costume.newObject, hindrance: costume.hindrance };
   const ctx = { day, newId: (p: string) => newId(deps, p), frontId: parent.id };
   const changes: Change[] = [];
 
   // Помеха: объект с отрицательной скоростью, фронта нет.
   if (plan.shape === 'hindrance') {
     changes.push(...applyStake(deps.rules, city, [hindranceOp(deps.rules, parent, dress)], ctx).changes);
+    await answerHindrances(deps, city, parent, leadOf(city, parent.id)?.text ?? null, day);
     return born({ changes, gist: costume.rumor });
   }
 
@@ -211,6 +213,7 @@ export async function complicate(
   if (plan.shape === 'accident') {
     if (accidentLoss(deps.rules, parent, day) > 0) changes.push({ kind: 'front_moved', frontId: parent.id, title: frontGist(parent), how: 'setback' });
     changes.push(...applyStake(deps.rules, city, [hindranceOp(deps.rules, parent, dress)], ctx).changes);
+    await answerHindrances(deps, city, parent, leadOf(city, parent.id)?.text ?? null, day);
     await faithEvent(deps, city, { event: costume.description, will: willWords(city, parent), day });
     return born({ changes, gist: costume.description });
   }

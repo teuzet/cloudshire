@@ -202,11 +202,46 @@ describe('баллиста: от приказа до результата', () =
 });
 
 describe('другие исходы броска', () => {
+  test('помеху можно обойти словом приказа: тот же ведущий, другой способ работы', async () => {
+    const s = await town(['accident'], fireAlways('risky'));
+    const { city } = s;
+    const front = await start(s, 'risky');
+    s.llm.script(
+      'costumer',
+      costume('Обрушились леса', {
+        new_object: { type: 'threat', name: 'Завал из лесов', description: 'Брёвна и камень лежат на стене.' },
+        hindrance: { effect: 'pace', counters: ['Поднимать камень с другой стороны стены', 'Пустить брёвна завала на новые леса'] },
+      }),
+    );
+    const clean = front.ratePerDay;
+    await next(s, front);
+    const rubble = attachedTo(city, front.id)[0]!;
+    expect(rubble.attach).toMatchObject({ effect: 'pace', answered: false });
+    expect(front.ratePerDay).toBeLessThan(clean);
+    expect(priestTurnBlock(s.deps.rules, city, await now(s))).toContain('мешает Завал из лесов: работа идёт медленнее');
+
+    // Тот же сановник, новый способ: судья видит, что он справляется с завалом.
+    s.deps.rules.fronts.risk.chance.risky = 0;
+    const lead = leadOf(city, front.id)!;
+    s.llm.script('will-interpreter', will({ label: 'strategy', front_id: front.id, goal: 'Строить из брёвен завала', manner: 'пустить брёвна завала на новые леса' }));
+    s.llm.script('alignment-judge', toolReply('submit_alignment', { verdict: 'fits' }), toolReply('submit_alignment', { verdict: 'spot_on', matched_move: 2 }));
+    const out = await playerWill(s.deps, city, lead.office, 'Пусть пустят брёвна завала на новые леса', await now(s));
+    expect(out.say).toContain('справляется с тем, что мешало: Завал из лесов');
+    expect(rubble).toMatchObject({ status: 'active', attach: { answered: true } });
+    expect(front.ratePerDay).toBeCloseTo(clean);
+  });
+
   test('авария съедает часть сделанного и оставляет помеху; атомарное дело её убирает', async () => {
     const s = await town(['accident'], fireAlways('risky'));
     const { city } = s;
     const front = await start(s, 'risky');
-    s.llm.script('costumer', costume('Обрушились леса', { new_object: { type: 'threat', name: 'Завал из лесов', description: 'Брёвна и камень лежат на стене.' } }));
+    s.llm.script(
+      'costumer',
+      costume('Обрушились леса', {
+        new_object: { type: 'threat', name: 'Завал из лесов', description: 'Брёвна и камень лежат на стене.' },
+        hindrance: { effect: 'pace', counters: ['Поднимать камень с другой стороны стены', 'Пустить брёвна завала на новые леса'] },
+      }),
+    );
     const clean = front.ratePerDay;
     await next(s, front);
     expect(front.progress).toBeCloseTo((22 / 3) * 0.75, 0);

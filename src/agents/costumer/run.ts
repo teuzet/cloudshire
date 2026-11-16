@@ -1,4 +1,4 @@
-import type { ObjectType, Shape } from '../../core/rules.js';
+import type { HindranceEffect, ObjectType, Shape } from '../../core/rules.js';
 import { block, briefLine, join, typesBlock, type ObjectBrief } from '../_shared/blocks.js';
 import { canon, composeSystem, loadPrompt } from '../_shared/canon.js';
 import { runStructured, type AgentDeps, type StructuredAgent } from '../_shared/runtime.js';
@@ -45,6 +45,12 @@ export interface Costume {
   rumor: string;
   outburst: string;
   newObject: { type: ObjectType; name: string; description: string } | null;
+  hindrance: { effect: HindranceEffect; counters: string[] } | null;
+}
+
+/** Род события, после которого на работе остаётся помеха. */
+export function leavesHindrance(shape: Shape): boolean {
+  return shape === 'hindrance' || shape === 'accident';
 }
 
 export const costumer: StructuredAgent<CostumeInput, CostumeRaw, Costume> = {
@@ -62,14 +68,20 @@ export const costumer: StructuredAgent<CostumeInput, CostumeRaw, Costume> = {
       themes.length ? `Темы города: ${themes.join('; ')}` : null,
       `Имена для новых людей: ${names.length ? names.join(', ') : 'личных имён не давай, называй людей по ремеслу'}`,
       needsNew ? `Нужен новый участник: да. Его роль в событии: ${NEW_ROLE[shape]}` : 'Нужен новый участник: нет',
+      `Помеха после события: ${leavesHindrance(shape) ? 'да' : 'нет'}`,
     ),
-  check: (raw, input) => (input.needsNew && !raw.new_object ? 'нужен новый участник в поле new_object' : null),
+  check: (raw, input) => {
+    if (input.needsNew && !raw.new_object) return 'нужен новый участник в поле new_object';
+    if (leavesHindrance(input.shape) && !raw.hindrance) return 'нужна помеха в поле hindrance';
+    return null;
+  },
   finish: (raw, input) => ({
     title: raw.title,
     description: raw.description,
     rumor: raw.rumor,
     outburst: raw.outburst,
     newObject: input.needsNew ? raw.new_object : null,
+    hindrance: leavesHindrance(input.shape) ? raw.hindrance : null,
   }),
 };
 

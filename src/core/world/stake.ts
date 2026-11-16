@@ -10,6 +10,7 @@ import type { Change } from './changes.js';
 import { closeFront, findFront, frontGist, rollbackMilestone, settleProgress } from './fronts.js';
 import { diffPoints, pointsToRaw, rawToPoints } from './numbers.js';
 import { addObjectVersion, createObject, deleteWithChildren, findObject, tug } from './objects.js';
+import { applyHindrance, feasibleEffect, liftHindrance } from './hindrance.js';
 import { addToLedger, recomputeStats } from './stats.js';
 
 export interface StakeResult {
@@ -93,6 +94,7 @@ export function applyStake(
           if (!obj.out) retire(obj, zero(), obj.description, ctx.trouble);
           break;
         }
+        if (obj.attach) liftHindrance(findFront(city, obj.attach.frontId), obj);
         for (const gone of deleteWithChildren(city, obj, day)) {
           changes.push({ kind: 'object_removed', objectId: gone.id, name: gone.name, points: rawToPoints(city, gone.statEffect), hidden: gone.hidden });
         }
@@ -173,10 +175,13 @@ export function applyStake(
           statEffect: pointsToRaw(city, op.object.points),
           parentId: front.siteId,
           temporary: true,
-          attach: { frontId: front.id, rate: op.rate },
+          attach: op.rate < 0
+            ? { frontId: front.id, rate: op.rate, effect: feasibleEffect(front, op.effect), counters: op.counters ?? [], answered: false }
+            : { frontId: front.id, rate: op.rate },
           day,
         });
         city.objects.push(obj);
+        applyHindrance(rules, front, obj, day);
         changes.push({ kind: 'object_created', objectId: obj.id, name: obj.name, type: obj.type, points: { ...op.object.points }, temporary: true, hidden: false });
         changes.push({ kind: 'front_moved', frontId: front.id, title: frontGist(front), how: op.rate < 0 ? 'slowed' : 'helped' });
         break;

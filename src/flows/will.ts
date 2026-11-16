@@ -41,6 +41,7 @@ import { appraise, leadLabel, officerLabel, seal, situationOf, touchesOf, visibl
 import { record } from './chronicle.js';
 import { newId, tryAgent, type FlowDeps } from './context.js';
 import { refreshAllFronts } from './fronts.js';
+import { answerHindrances, answerWords } from './hindrances.js';
 
 export type WillOutcome = { ok: true; say: string } | { ok: false; error: string; say: string };
 
@@ -415,10 +416,11 @@ async function setStrategy(deps: FlowDeps, city: City, officer: Officer, will: W
     createAssignment(city, { id: newId(deps, 'asg'), front, officer, text: manner, verdict, tempo: will.workTempo ?? 0, day });
   }
   if (will.projectTempo != null) front.tempo = will.projectTempo;
+  const answer = await answerHindrances(deps, city, front, manner, day);
   refreshAllFronts(deps, city, day);
   return {
     ok: true,
-    say: [`${title(deps, officer)} ведёт «${front.title || frontGist(front)}» так, как велено.`, waitWords(deps, front, day), leftBehind(city, officer, front, day)]
+    say: [`${title(deps, officer)} ведёт «${front.title || frontGist(front)}» так, как велено.`, answerWords(answer), waitWords(deps, front, day), leftBehind(city, officer, front, day)]
       .filter(Boolean)
       .join(' '),
   };

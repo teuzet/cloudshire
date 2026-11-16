@@ -13,6 +13,7 @@ import type { OutboundMessage } from '../ports/notifier.js';
 import { record } from './chronicle.js';
 import { newId, type FlowDeps } from './context.js';
 import { refreshAllFronts } from './fronts.js';
+import { answerHindrances } from './hindrances.js';
 import { playerWill } from './will.js';
 
 /** Сколько назначений жрец делает за один проход: по одному на свободного сановника. */
@@ -63,6 +64,7 @@ export async function runSteward(deps: FlowDeps, city: City, day: number): Promi
     if (!pick) break;
     const { front, officer, move } = pick;
     createAssignment(city, { id: newId(deps, 'asg'), front, officer, text: move, verdict: deps.rules.fronts.steward.verdict, day });
+    await answerHindrances(deps, city, front, move, day);
     refreshAllFronts(deps, city, day);
     const who = `${officeDef(deps.rules, officer.office).title} ${officer.name}`.trim();
     const she = city.priest.gender === 'female';

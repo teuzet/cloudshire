@@ -3,7 +3,7 @@
  */
 
 import { emptyStatMap, STAT_IDS, type ObjectType, type Rules, type Scale, type StatMap } from '../rules.js';
-import type { City, Pull, WorldObject } from '../city.js';
+import type { Attachment, City, Pull, WorldObject } from '../city.js';
 
 function clip(text: string, max: number): string {
   return text.trim().slice(0, max);
@@ -33,7 +33,7 @@ export function createObject(
     parentId?: string | null;
     hidden?: boolean;
     temporary?: boolean;
-    attach?: { frontId: string; rate: number } | null;
+    attach?: Attachment | null;
   },
 ): WorldObject {
   const limits = rules.fronts.objects;

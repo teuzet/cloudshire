@@ -6,7 +6,7 @@
  */
 
 import type { ClockState } from './time.js';
-import type { Engine, FrontForm, ObjectType, Office, Relation, RiskStep, Scale, Source, StatId, StatMap, StewardMode, StewardWait, Temper, Tempo, Verdict } from './rules.js';
+import type { Engine, FrontForm, HindranceEffect, ObjectType, Office, Relation, RiskStep, Scale, Source, StatId, StatMap, StewardMode, StewardWait, Temper, Tempo, Verdict } from './rules.js';
 
 // ───────────────────────────── мир ─────────────────────────────
 
@@ -42,6 +42,23 @@ export interface ObjectVersion {
   createdDay: number;
 }
 
+/**
+ * Привязка объекта к фронту. У помехи есть удар (effect) и способы, которыми ведущий
+ * справляется с ней по ходу дела (counters). Если нынешний способ работы с ней справляется,
+ * помеха обойдена (answered): объект остаётся в мире, но этому делу больше не мешает.
+ */
+export interface Attachment {
+  frontId: string;
+  rate: number;
+  effect?: HindranceEffect;
+  counters?: string[];
+  answered?: boolean;
+  /** На сколько дней помеха придвинула срок (вернётся, когда её обойдут или уберут). */
+  shift?: number;
+  /** Ступень риска дела до помехи. */
+  riskBefore?: RiskStep;
+}
+
 export interface WorldObject {
   id: string;
   type: ObjectType;
@@ -67,7 +84,7 @@ export interface WorldObject {
   /** Временный объект: живёт, пока жив фронт, к которому привязан. */
   temporary: boolean;
   /** Помощник (rate > 0) или помеха (rate < 0) фронта: единиц работы в игровой месяц. */
-  attach: { frontId: string; rate: number } | null;
+  attach: Attachment | null;
   /** Одна или две темы города. */
   themes: string[];
   /** День создания или последней перемены: год после него объект «свежий» для подбора ролей. */
@@ -117,7 +134,15 @@ export type StakeOp =
   | { op: 'rollback'; frontId: string }
   | { op: 'cancel'; frontId: string }
   /** Помощник (rate > 0) или помеха (rate < 0) на фронте. */
-  | { op: 'attach'; frontId: string; rate: number; object: { type: ObjectType; name: string; description: string; points: StatMap } }
+  | {
+      op: 'attach';
+      frontId: string;
+      rate: number;
+      object: { type: ObjectType; name: string; description: string; points: StatMap };
+      /** Только у помехи: чем она бьёт по делу и какие способы работы с ней справляются. */
+      effect?: HindranceEffect;
+      counters?: string[];
+    }
   /** Изменение статов без носителя в мире. */
   | { op: 'stats'; points: Partial<StatMap> };
 

@@ -201,9 +201,11 @@ describe('веха, осложнение, развязка', () => {
   });
 
   test('costumer: новый участник обязателен только по запросу', async () => {
-    const base = { title: 'Грозовые птицы', description: 'Птицы сели на леса.', rumor: 'Говорят, на лесах гнёзда.', outburst: 'Работа встанет.' };
+    const hindrance = { effect: 'risk', counters: ['Работать на рассвете, пока птицы спят', 'Натянуть сети над лесами'] };
+    const base = { title: 'Грозовые птицы', description: 'Птицы сели на леса.', rumor: 'Говорят, на лесах гнёзда.', outburst: 'Работа встанет.', hindrance };
     const llm = new FakeLlm().script(
       'costumer',
+      toolReply('submit_costume', { ...base, hindrance: null }),
       toolReply('submit_costume', base),
       toolReply('submit_costume', { ...base, new_object: { type: 'threat', name: 'Стая грозовых птиц', description: 'Гнездятся на остове.' } }),
       toolReply('submit_costume', { ...base, new_object: { type: 'threat', name: 'Лишние птицы', description: 'x' } }),
@@ -211,6 +213,7 @@ describe('веха, осложнение, развязка', () => {
     const input = { skeleton: 'Стройку заняли чужие.', shape: 'hindrance' as const, cause: 'Стройка башни', actor: null, themes: ['военная мощь'], names: ['Айра (ж)'], needsNew: true };
     const dressed = await dressEvent(deps(llm), input);
     expect(dressed.newObject?.name).toBe('Стая грозовых птиц');
+    expect(dressed.hindrance).toEqual(hindrance);
     expect(lastUser(llm, 'costumer')).toContain('Род события: помеха в работе');
     const plain = await dressEvent(deps(llm), { ...input, needsNew: false, actor: { object: masons, touch: 'занята работой' } });
     expect(plain.newObject).toBeNull();

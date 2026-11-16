@@ -90,6 +90,12 @@ export type Relation = (typeof RELATIONS)[number];
 
 /** Во что выливается осложнение: какой род события соберёт код. */
 export const SHAPES = ['tension', 'threat', 'hindrance', 'accident', 'clock', 'opportunity'] as const;
+/**
+ * Чем помеха бьёт по делу: замедляет работу, съедает срок, делает работу опаснее
+ * (ступень риска выше) или портит готовое. Что именно — решает агент по смыслу, силу считает код.
+ */
+export const HINDRANCE_EFFECTS = ['pace', 'deadline', 'risk', 'outcome'] as const;
+export type HindranceEffect = (typeof HINDRANCE_EFFECTS)[number];
 export type Shape = (typeof SHAPES)[number];
 
 /** Случаи и сила события для веры. */
@@ -209,7 +215,7 @@ export const rulesSchema = z.object({
     verdict: byVerdict,
     tempoStep: z.number().min(0).max(0.3),
     helper: z.object({ unitsPerMonth: z.number().positive(), maxShare: z.number().positive() }),
-    hindrance: z.object({ unitsPerMonth: z.number().negative(), removalShare: z.number().positive(), removalMin: z.number().positive() }),
+    hindrance: z.object({ unitsPerMonth: z.number().negative(), removalShare: z.number().positive(), removalMin: z.number().positive(), deadlineShare: z.number().min(0).max(1) }),
     push: z.object({ share: z.number().positive(), min: z.number().positive() }),
     threat: z.object({ capacityShare: z.number().positive(), boundShare: z.number().positive(), capacityMin: z.number().positive() }),
     tension: z.object({

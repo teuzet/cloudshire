@@ -8,7 +8,7 @@ import { STAT_IDS } from '../../core/rules.js';
 import type { ChronicleEntry, City, Front, Officer, PoolName, WorldObject } from '../../core/city.js';
 import { gameDate, spanBand } from '../../core/time.js';
 import { leadOf, officerOf } from '../../core/world/assignments.js';
-import { attachedTo } from '../../core/world/objects.js';
+import { EFFECT_WORDS, effectOf, hindrancesOf } from '../../core/world/hindrance.js';
 import { daysLeft, isFrozen, progressAt, shareDone } from '../../core/world/fronts.js';
 import { leadRatePerDay } from '../../core/world/numbers.js';
 
@@ -62,9 +62,8 @@ export function frontLine(
   if (front.capacity > 0) parts.push(shareWords(shareDone(front, day)));
   if (isFrozen(city, front)) parts.push('стоит, пока не снята угроза');
   else if (front.capacity > 0 && left == null && officer) {
-    // Ведущий есть, а работа стоит: помехи перевешивают. Без этого жрец уверен, что дело идёт.
-    const hinders = attachedTo(city, front.id).filter((o) => (o.attach?.rate ?? 0) < 0).map((o) => o.name);
-    parts.push(`дело стоит: помехи перевешивают работу${hinders.length ? ` (${hinders.join(', ')})` : ''}, их надо убрать`);
+    // Ведущий есть, а работа стоит: без этого жрец уверен, что дело идёт.
+    parts.push('работа стоит на месте');
   } else if (front.capacity > 0 && left == null) {
     parts.push('никто не ведёт, дело стоит');
     // Сколько займёт у одного подходящего сановника: чтобы жрец видел, успеет ли дело к сроку.
@@ -78,6 +77,10 @@ export function frontLine(
     parts.push('при нынешней работе к сроку не успеть');
   }
   if (officer) parts.push(`ведёт ${officer.title.toLowerCase()} ${officer.name}`);
+  // Что мешает делу и как: словами мира. Как с этим быть, решает покровитель.
+  for (const obj of hindrancesOf(city, front.id)) {
+    parts.push(obj.attach?.answered ? `рядом ${obj.name}, но нынешний способ работы с этим справляется` : `мешает ${obj.name}: ${EFFECT_WORDS[effectOf(obj)]}`);
+  }
   // Заголовок фронта агентам не нужен: они имеют дело с тем, что происходит.
   return `${front.id}: ${front.description || front.title} (${parts.join('; ')})`;
 }

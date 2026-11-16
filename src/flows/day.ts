@@ -16,6 +16,7 @@ import { describeChanges, type Change } from '../core/world/changes.js';
 import { tensionToThreat } from '../core/world/complications.js';
 import { dueEvent, findFront, frontGist, frontObjectIds, neighbors, closeFront, settleProgress, shareDone } from '../core/world/fronts.js';
 import { attachedTo, findObject, deleteWithChildren, scalePull } from '../core/world/objects.js';
+import { biting, effectOf, hindrancesOf } from '../core/world/hindrance.js';
 import { applyStake } from '../core/world/stake.js';
 import { themeNames } from '../core/world/themes.js';
 import type { OutboundMessage } from '../ports/notifier.js';
@@ -380,6 +381,10 @@ async function complete(deps: FlowDeps, city: City, front: Front, day: number, o
   const twist = front.key?.twist ?? null;
   let ops = await resolveModify(deps, city, front.stake, (front.description || frontGist(front)));
   if (twist) ops = await applyTwist(deps, city, ops, twist);
+  // Помеха, которую так и не обошли и которая бьёт по итогу, оставляет в готовом свой след.
+  for (const flaw of hindrancesOf(city, front.id).filter((o) => biting(o) && effectOf(o) === 'outcome')) {
+    ops = await applyTwist(deps, city, ops, `В готовом остался след того, что мешало работе: ${flaw.name}. ${flaw.description}`);
+  }
   const near = neighbors(city, front)
     .filter((n) => n.capacity > 0)
     .slice(0, MAX_NEIGHBORS);

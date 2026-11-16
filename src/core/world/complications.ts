@@ -3,7 +3,7 @@
  * Смысл (кто, что, почему) приходит от агентов; ёмкость, срок и ставку считает этот файл.
  */
 
-import { STAT_IDS, type ObjectType, type Rules, type StatMap } from '../rules.js';
+import { STAT_IDS, type HindranceEffect, type ObjectType, type Rules, type StatMap } from '../rules.js';
 import type { City, Front, FrontKey, StakeOp, WorldObject } from '../city.js';
 import type { Rng } from '../random.js';
 import { createFront, settleProgress } from './fronts.js';
@@ -28,6 +28,8 @@ export interface EventDress {
   description: string;
   outburst: string;
   newObject: { type: ObjectType; name: string; description: string } | null;
+  /** Только у помехи: чем бьёт по делу и как ведущий может с ней справиться по ходу работы. */
+  hindrance?: { effect: HindranceEffect; counters: string[] } | null;
 }
 
 const ZERO: StatMap = { prosperity: 0, security: 0, knowledge: 0, influence: 0 };
@@ -41,7 +43,13 @@ function burstDay(rules: Rules, day: number, rng: Rng): number {
 /** Помеха на фронте: объект с отрицательной скоростью. Не путать с осложнением — это его итог. */
 export function hindranceOp(rules: Rules, parent: Pick<Front, 'id'>, dress: EventDress): StakeOp {
   const object = dress.newObject ?? { type: 'threat' as const, name: dress.title, description: dress.outburst };
-  return { op: 'attach', frontId: parent.id, rate: rules.fronts.hindrance.unitsPerMonth, object: { ...object, points: { ...ZERO } } };
+  return {
+    op: 'attach',
+    frontId: parent.id,
+    rate: rules.fronts.hindrance.unitsPerMonth,
+    object: { ...object, points: { ...ZERO } },
+    ...(dress.hindrance ? { effect: dress.hindrance.effect, counters: dress.hindrance.counters } : {}),
+  };
 }
 
 /**

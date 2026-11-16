@@ -17,6 +17,7 @@ import { closeAssignment, leadOf, officerOf } from './assignments.js';
 import type { Change } from './changes.js';
 import { attachRatePerDay, leadRatePerDay, officerFit, rawToPoints, temperTempo } from './numbers.js';
 import { attachedTo, deleteObject, findObject } from './objects.js';
+import { paceOf } from './hindrance.js';
 import { recomputeStats } from './stats.js';
 
 const EPS = 1e-9;
@@ -168,7 +169,7 @@ export function recomputeRate(rules: Rules, city: City, front: Front, day: numbe
       fit: officerFit(rules, city, officer, front.profile),
     });
   }
-  for (const obj of attachedTo(city, front.id)) rate += attachRatePerDay(rules, obj.attach?.rate ?? 0, front.tempo);
+  for (const obj of attachedTo(city, front.id)) rate += attachRatePerDay(rules, paceOf(obj), front.tempo);
   front.ratePerDay = Math.max(0, rate);
   return front.ratePerDay;
 }
