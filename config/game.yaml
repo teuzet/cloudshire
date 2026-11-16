@@ -136,7 +136,7 @@ officers:
     statId: influence
     title: Канцлер
     titleGen: канцлера
-    focus: переговоры, гильдия, слух, дипломатия сопряжения, суд чести, указ в народе
+    focus: переговоры, гильдия, слух, суд чести, указ в народе
     strategy: В основном интересуется людьми и наплевательски относится к ресурсам и собственности.
 # Система фронтов. Все значения условные: баланс сводится позже.
 # Единица работы — труд одного сановника за игровую неделю. Описание: docs/design/fronts.md.
@@ -2081,9 +2081,10 @@ fronts:
       engine: success
       source: custom
       sphere: influence
+    # Ждёт сопряжения: в одиночной игре сопряжений нет (Ник 2026-11-16).
     - id: goods-for-meeting
       title: Товар к сопряжению
-      enabled: true
+      enabled: false
       class: plus
       when: [completion]
       light: opportunity

@@ -179,7 +179,12 @@ describe('сценарий', () => {
   test('все заготовки сажаются: масштаб задан, возможность живёт окно, беда успевается', () => {
     const dir = path.resolve(import.meta.dirname, '../../scenarios');
     const kinds = { trouble: 0, chance: 0 };
-    for (const file of fs.readdirSync(dir)) {
+    // Заготовки про сопряжение лежат отдельно и в одиночной игре не грузятся, но проверяются так же.
+    const files = [
+      ...fs.readdirSync(dir).filter((f) => f.endsWith('.yaml')),
+      ...fs.readdirSync(path.join(dir, 'conjunction')).filter((f) => f.endsWith('.yaml')).map((f) => `conjunction/${f}`),
+    ];
+    for (const file of files) {
       const scenario = parseScenario(yaml.load(fs.readFileSync(path.join(dir, file), 'utf8')));
       expect(scenario.scale, file).toBeDefined();
       const kind = storyKind(scenario);
