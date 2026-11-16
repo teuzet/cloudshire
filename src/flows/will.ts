@@ -412,7 +412,22 @@ async function setStrategy(deps: FlowDeps, city: City, officer: Officer, will: W
   }
   if (will.projectTempo != null) front.tempo = will.projectTempo;
   refreshAllFronts(deps, city, day);
-  return { ok: true, say: [`${title(deps, officer)} ведёт «${frontGist(front)}» так, как велено.`, waitWords(deps, front, day)].filter(Boolean).join(' ') };
+  return {
+    ok: true,
+    say: [`${title(deps, officer)} ведёт «${frontGist(front)}» так, как велено.`, waitWords(deps, front, day), leftBehind(city, officer, front, day)]
+      .filter(Boolean)
+      .join(' '),
+  };
+}
+
+/** Дело, с которого сановника сняли сегодня, если оно другое и стоит без ведущего: жрец должен сказать об этом честно. */
+function leftBehind(city: City, officer: Officer, front: Front, day: number): string {
+  const prev = city.assignments
+    .filter((a) => a.office === officer.office && a.endDay === day && a.frontId !== front.id)
+    .at(-1);
+  const old = prev ? findFront(city, prev.frontId) : null;
+  if (!old || old.status !== 'active' || leadOf(city, old.id)) return '';
+  return `Это другое дело. Прежнее дело «${frontGist(old)}» по-прежнему стоит без ведущего.`;
 }
 
 // ───────────────────────────── атомарное дело ─────────────────────────────
