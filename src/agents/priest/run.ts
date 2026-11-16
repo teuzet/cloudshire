@@ -22,6 +22,7 @@ import {
   existenceCheckSchema,
   noteSchema,
   orderChangeSchema,
+  queueOrderSchema,
   replySchema,
   standingOrderSchema,
   withdrawSchema,
@@ -30,6 +31,7 @@ import {
   type ExistenceCheckArgs,
   type NoteArgs,
   type OrderChangeArgs,
+  type QueueOrderArgs,
   type StandingOrderArgs,
   type WithdrawArgs,
 } from './schema.js';
@@ -42,6 +44,7 @@ export interface PriestHandlers {
   orderChange(args: OrderChangeArgs): Promise<ToolOutcome>;
   withdraw(args: WithdrawArgs): Promise<ToolOutcome>;
   writeNote(args: NoteArgs): Promise<ToolOutcome>;
+  queueOrder(args: QueueOrderArgs): Promise<ToolOutcome>;
   setStandingOrder(args: StandingOrderArgs): Promise<ToolOutcome>;
   consultLoremaster(args: ConsultArgs): Promise<ToolOutcome>;
   checkExistence(args: ExistenceCheckArgs): Promise<ToolOutcome>;
@@ -67,7 +70,7 @@ export interface PriestTurn {
 }
 
 const prompt = loadPrompt(import.meta.url);
-const ACTIONS = new Set(['assign_officer', 'order_change', 'withdraw_assignment']);
+const ACTIONS = new Set(['assign_officer', 'order_change', 'withdraw_assignment', 'queue_order']);
 
 const MODE_WORDS = { act: 'сразу ставить свободного сановника и сообщать', wait: 'ждать слова покровителя', report: 'только сообщать и ждать слова' } as const;
 const WAIT_WORDS = { days: 'считанные дни', weeks: 'недели', season: 'сезон' } as const;
@@ -77,6 +80,13 @@ function standingOrderLine(rules: Rules, city: City): string {
   const how = o.mode === 'wait' ? `${MODE_WORDS.wait} ${WAIT_WORDS[o.wait]}, потом ставить свободного самой` : MODE_WORDS[o.mode];
   const spare = o.spare.length ? ` Не трогать: ${o.spare.map((s) => city.officers.find((x) => x.office === s)?.name ?? s).join(', ')}.` : '';
   return `${o.text ? `«${o.text}» — ` : 'Покровитель наказа не давал, по обычаю: '}${how}.${spare}`;
+}
+
+function queueLines(city: City): string[] {
+  return (city.queue ?? []).map((q) => {
+    const who = q.office ? (city.officers.find((o) => o.office === q.office)?.name ?? q.office) : 'первый освободившийся';
+    return `${who}: ${q.task}`;
+  });
 }
 
 /** Блок хода: всё, что жрец знает о городе сейчас. */
@@ -111,6 +121,7 @@ export function priestTurnBlock(rules: Rules, city: City, day: number): string {
     section('Состояние города', qualitativeStats(rules, city.stats)),
     section('Сановники', bullets(officers)),
     section('Наказ покровителя на беду, пока он молчит', standingOrderLine(rules, city)),
+    section('Поручения на потом, по очереди', bullets(queueLines(city))),
     section('Что сейчас идёт в городе (id: что идёт)', bullets(fronts)),
     section('Замыслы, которые ждут слова покровителя (id: что дальше)', bullets(waiting)),
     section('Что в городе выбыло из строя', bullets(lost)),
@@ -142,6 +153,12 @@ const TOOLS: LoopTool<PriestHandlers>[] = [
   tool<OrderChangeArgs>('order_change', 'Воля изменить сам город: построить, учредить, снести.', orderChangeSchema, (h, a) => h.orderChange(a)),
   tool<WithdrawArgs>('withdraw_assignment', 'Снять сановника с его дела. Дело остаётся стоять без ведущего. Прекратить дело совсем — order_change «отменить дело …».', withdrawSchema, (h, a) => h.withdraw(a)),
   tool<NoteArgs>('write_note', 'Постоянная заметка памяти.', noteSchema, (h, a) => h.writeNote(a)),
+  tool<QueueOrderArgs>(
+    'queue_order',
+    'Поручение на потом: сановник возьмётся за него, как только освободится, раньше любой новой беды.',
+    queueOrderSchema,
+    (h, a) => h.queueOrder(a),
+  ),
   tool<StandingOrderArgs>(
     'set_standing_order',
     'Наказ покровителя: как поступать с новой бедой, пока он молчит. Заменяет прежний наказ.',

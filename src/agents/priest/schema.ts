@@ -15,6 +15,14 @@ export const withdrawSchema = z.object({ office: z.enum(OFFICES) });
 
 export const noteSchema = z.object({ text: z.string().trim().min(1).max(300) });
 
+export const queueOrderSchema = z.object({
+  office: z
+    .enum(OFFICES)
+    .nullable()
+    .describe('Кому поручено, когда освободится. null — первому, кто освободится.'),
+  task: z.string().trim().min(1).max(400).describe('Что поручено, одной-двумя фразами, как приказ сановнику.'),
+});
+
 export const consultSchema = z.object({
   question: z.string().trim().min(1).describe('Один вопрос о факте мира: что есть, что было, кто, где, как устроено.'),
   story_id: z
@@ -44,6 +52,7 @@ export type AssignOfficerArgs = z.infer<typeof assignOfficerSchema>;
 export type OrderChangeArgs = z.infer<typeof orderChangeSchema>;
 export type WithdrawArgs = z.infer<typeof withdrawSchema>;
 export type NoteArgs = z.infer<typeof noteSchema>;
+export type QueueOrderArgs = z.infer<typeof queueOrderSchema>;
 export type ConsultArgs = z.infer<typeof consultSchema>;
 export type StandingOrderArgs = z.infer<typeof standingOrderSchema>;
 export type ExistenceCheckArgs = z.infer<typeof existenceCheckSchema>;

@@ -359,6 +359,15 @@ export interface PriestNote {
   day: number;
 }
 
+/** Поручение покровителя на потом: первый освободившийся (или названный) сановник берётся за него. */
+export interface QueuedOrder {
+  id: string;
+  /** null — кто первым освободится. */
+  office: Office | null;
+  task: string;
+  day: number;
+}
+
 // ───────────────────────────── очередь ─────────────────────────────
 
 /** front_event — ближайшее событие фронта: веха, срок или месячный бросок. */
@@ -439,6 +448,8 @@ export interface City {
   chronicle: ChronicleEntry[];
   dialog: DialogEntry[];
   notes: PriestNote[];
+  /** Отложенные поручения покровителя: исполняются раньше наказа, по порядку. */
+  queue?: QueuedOrder[];
   jobs: Job[];
   /** Сценарии, которые уже сыграли в этом городе. */
   scenariosUsed: string[];

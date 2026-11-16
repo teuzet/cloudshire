@@ -46,6 +46,12 @@ function handlersFor(deps: FlowDeps, city: City, day: number): PriestHandlers {
       if (city.notes.length > MAX_NOTES) city.notes.splice(0, city.notes.length - MAX_NOTES);
       return { ok: true, say: 'Запомнил.' };
     },
+    async queueOrder({ office, task }) {
+      if (!canAfford(city, withAction)) return tired();
+      city.queue = [...(city.queue ?? []), { id: newId(deps, 'queue'), office, task, day }];
+      const who = office ? (city.officers.find((o) => o.office === office)?.name ?? office) : 'первый, кто освободится';
+      return { ok: true, say: `Поручение в очереди: ${who} возьмётся за него, как только освободится, раньше новых бед.` };
+    },
     async setStandingOrder({ mode, wait, spare, text }) {
       city.steward = { mode, wait, spare: [...new Set(spare)], text };
       return { ok: true, say: 'Наказ принят: так и будет, пока покровитель не скажет иначе.' };

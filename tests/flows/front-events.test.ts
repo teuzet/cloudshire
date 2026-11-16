@@ -299,6 +299,26 @@ describe('наказ жрецу', () => {
     expect(city.chronicle.at(-1)).toMatchObject({ source: 'steward', frontId: tension.id });
     expect(city.chronicle.at(-1)?.text).toContain('Поставить дозор у башни');
   });
+
+  test('поручение на потом берёт освободившийся сановник раньше беды и раньше бережения наказа', async () => {
+    const s = await town([]);
+    const { city } = s;
+    city.steward = { mode: 'act', wait: 'days', spare: ['marshal'], text: 'Цевора беречь' };
+    const busy = ['treasurer', 'keeper', 'chancellor'] as const;
+    for (const office of busy) city.officers.find((o) => o.office === office)!.assignmentId = `asg_${office}`;
+    city.queue = [{ id: 'q1', office: null, task: 'Построить баллисту', day: 0 }];
+    await at(s, 1);
+    // Свободен только бережёный маршал: безымянное поручение его не трогает.
+    expect(city.queue).toHaveLength(1);
+
+    city.queue = [{ id: 'q2', office: 'marshal', task: 'Построить баллисту', day: 1 }];
+    s.llm.script('will-interpreter', will({ label: 'project' })).script('risk-appraiser', toolReply('submit_risk', { step: 'safe' }));
+    await at(s, 2);
+    expect(city.queue).toEqual([]);
+    const front = city.fronts.at(-1)!;
+    expect(leadOf(city, front.id)?.office).toBe('marshal');
+    expect(city.chronicle.at(-1)).toMatchObject({ source: 'steward', frontId: front.id });
+  });
 });
 
 describe('сроки', () => {
