@@ -29,8 +29,8 @@ export async function runSteward(deps: FlowDeps, city: City, day: number): Promi
     const gist = frontGist(front).replace(/[.!]+$/, '');
     const msg = await record(deps, city, {
       gist:
-        `${city.priest.name} не ${she ? 'дождалась' : 'дождался'} слова покровителя и ${she ? 'сама поставила' : 'сам поставил'} ` +
-        `${who} на беду: ${gist.charAt(0).toLowerCase()}${gist.slice(1)}. ` +
+        `${city.priest.name} не ${she ? 'дождалась' : 'дождался'} слова покровителя, и по ${she ? 'её' : 'его'} слову ` +
+        `${who} ${officer.gender === 'female' ? 'встала' : 'встал'} на беду: ${gist.charAt(0).toLowerCase()}${gist.slice(1)}. ` +
         `${officer.gender === 'female' ? 'Она начала' : 'Он начал'} так: ${move.replace(/[.!]+$/, '')}.`,
       changes: [],
       source: 'steward',
