@@ -95,7 +95,9 @@ export function priestTurnBlock(rules: Rules, city: City, day: number): string {
   const officers = city.officers.map((o) => {
     const a = assignments.find((x) => x.id === o.assignmentId);
     const front = a ? findFront(city, a.frontId) : null;
-    return `${officerLine(o)} — ${a ? `занят: ${front ? frontGist(front) : 'дело'}${a.text ? ` (наказ: ${a.text})` : ''}` : 'свободен'}`;
+    const project = front ? city.projects.find((p) => p.frontId === front.id && p.status === 'running') : null;
+    const step = project ? `замысел «${project.title}», шаг ${project.stageIndex + 1} из ${project.stages.length}: ` : '';
+    return `${officerLine(o)} — ${a ? `занят: ${step}${front ? frontGist(front) : 'дело'}${a.text ? ` (наказ: ${a.text})` : ''}` : 'свободен'}`;
   });
   const fronts = activeFronts(city).map((f) => frontLine(city, f, day, rules));
   const waiting = city.projects
