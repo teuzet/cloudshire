@@ -123,7 +123,9 @@ export function describeChanges(rules: Pick<Rules, 'stats'>, changes: readonly C
         if (c.hidden) break;
         const shift = statShiftWords(rules, c.points);
         const head = c.temporary ? null : c.story ? 'В событии' : 'Появилось';
-        out.push(head ? `${head}: ${c.name} (${TYPE_WORDS[c.type]})${shift ? `. В жизни города: ${shift}` : ''}` : `Там, где идёт работа: ${c.name}`);
+        // Объект истории описан в самом событии; слово типа («группа людей» о стае ворон) только сбивает.
+        const kind = c.story ? '' : ` (${TYPE_WORDS[c.type]})`;
+        out.push(head ? `${head}: ${c.name}${kind}${shift ? `. В жизни города: ${shift}` : ''}` : `Там, где идёт работа: ${c.name}`);
         break;
       }
       case 'object_changed': {
