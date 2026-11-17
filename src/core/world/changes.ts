@@ -7,7 +7,17 @@ import { STAT_IDS, type FrontForm, type ObjectType, type Rules, type StatMap } f
 import { magnitude } from './numbers.js';
 
 export type Change =
-  | { kind: 'object_created'; objectId: string; name: string; type: ObjectType; points: StatMap; temporary: boolean; hidden: boolean }
+  | {
+      kind: 'object_created';
+      objectId: string;
+      name: string;
+      type: ObjectType;
+      points: StatMap;
+      temporary: boolean;
+      hidden: boolean;
+      /** Объект истории: мог стоять в городе давно, а мог появиться сейчас — это скажет его описание. */
+      story?: boolean;
+    }
   | { kind: 'object_changed'; objectId: string; name: string; delta: StatMap; description: string | null }
   | { kind: 'object_removed'; objectId: string; name: string; points: StatMap; hidden: boolean }
   /** Объект выбыл: остался в городе, но ничего не даёт. */
@@ -112,7 +122,8 @@ export function describeChanges(rules: Pick<Rules, 'stats'>, changes: readonly C
       case 'object_created': {
         if (c.hidden) break;
         const shift = statShiftWords(rules, c.points);
-        out.push(c.temporary ? `Там, где идёт работа: ${c.name}` : `Появилось: ${c.name} (${TYPE_WORDS[c.type]})${shift ? `. В жизни города: ${shift}` : ''}`);
+        const head = c.temporary ? null : c.story ? 'В событии' : 'Появилось';
+        out.push(head ? `${head}: ${c.name} (${TYPE_WORDS[c.type]})${shift ? `. В жизни города: ${shift}` : ''}` : `Там, где идёт работа: ${c.name}`);
         break;
       }
       case 'object_changed': {

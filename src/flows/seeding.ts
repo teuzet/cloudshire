@@ -151,6 +151,7 @@ export async function plantStory(deps: FlowDeps, city: City, day: number, kind: 
     points: rawToPoints(city, o.statEffect),
     temporary: false,
     hidden: o.hidden,
+    story: true,
   }));
   return record(deps, city, { gist: gist || planted.pitch || planted.title, changes, source: 'scenario', frontId: fronts[0]?.id ?? null, day, kind: 'beat', officer: null, announce: true });
 }
