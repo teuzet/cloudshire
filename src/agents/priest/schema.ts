@@ -44,7 +44,7 @@ export const existenceCheckSchema = z.object({
 export const standingOrderSchema = z.object({
   mode: z
     .enum(STEWARD_MODES)
-    .describe('act — сразу ставить свободного сановника на новую беду и сообщать; wait — ждать слова покровителя, потом ставить самой; report — только сообщать и ждать слова.'),
+    .describe('act — ставить свободного сановника на новую беду в тот же день и сообщать; wait — сперва ждать слова покровителя срок из поля wait, хоть день, потом ставить самой; report — только сообщать и ждать слова.'),
   wait: z.enum(STEWARD_WAITS).describe('Сколько ждать слова покровителя при wait: days — считанные дни, weeks — недели, season — сезон.'),
   spare: z.array(z.enum(OFFICES)).describe('Сановники, которых покровитель велел самой не трогать. Пустой список — можно любого.'),
   text: z.string().trim().min(1).max(300).describe('Наказ словами покровителя.'),
