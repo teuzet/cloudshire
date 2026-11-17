@@ -85,6 +85,15 @@ describe('посев и генезис объектов', () => {
     expect(out.fronts[0]?.refs).toEqual(['tower']);
   });
 
+  test('scenario-writer: id без последнего знака правится на объект города', async () => {
+    const s = { id: 'x', title: 'x', fronts: [{ id: 'f', description: 'Трещина в башне', impact: 'MINOR', refs: ['towe'], stake: { delete: { target: 'towe' } } }] };
+    const llm = new FakeLlm().script('scenario-writer', toolReply('submit_scenario', s));
+    const out = await writeScenario(deps(llm), { cityBrief: '', objects: [tower()], template: null, seed: 'трещина', names: [], unknowns: [] });
+    expect(out.fronts[0]?.refs).toEqual(['tower']);
+    expect(out.fronts[0]?.stake).toEqual({ delete: { target: 'tower' } });
+    expect(llm.requests).toHaveLength(1);
+  });
+
   test('scenario-writer: объект тайны острова закрыт для посадки', async () => {
     const touching = { id: 'x', title: 'x', fronts: [{ id: 'f', description: 'Трещина в башне', impact: 'MINOR', refs: ['tower'], stake: null }] };
     const clean = { id: 'x', title: 'x', fronts: [{ id: 'f', description: 'Спор на рынке', impact: 'MINOR', stake: null }] };

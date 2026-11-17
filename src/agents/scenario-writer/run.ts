@@ -34,7 +34,28 @@ function mysteryBlock(unknowns: readonly CanonicalUnknown[]): string {
   );
 }
 
+/**
+ * Модель иногда теряет последний знак длинного id («obj_x3hnqjnnb24» вместо «obj_x3hnqjnnb24e»).
+ * Такую ссылку правим на единственный объект города, чей id с неё начинается.
+ */
+function repairRefs(raw: Scenario, existing: Set<string>, local: Set<string>): void {
+  const fix = (id: string): string => {
+    if (local.has(id) || existing.has(id)) return id;
+    const hits = [...existing].filter((e) => e.startsWith(id) && e.length - id.length <= 2);
+    return hits.length === 1 ? hits[0]! : id;
+  };
+  for (const o of raw.objects) o.refs = o.refs.map(fix);
+  for (const f of raw.fronts) {
+    f.refs = f.refs.map(fix);
+    const s = f.stake;
+    if (s && 'modify' in s) s.modify.target = fix(s.modify.target);
+    if (s && 'delete' in s) s.delete.target = fix(s.delete.target);
+    if (s && 'uncover' in s) s.uncover.target = fix(s.uncover.target);
+  }
+}
+
 function checkIds(raw: Scenario, existing: Set<string>): string | null {
+  repairRefs(raw, existing, new Set([...raw.objects.map((o) => o.id), ...raw.fronts.map((f) => f.id)]));
   const local = new Set<string>();
   for (const id of [...raw.objects.map((o) => o.id), ...raw.fronts.map((f) => f.id)]) {
     if (local.has(id)) return `id ${id} повторяется`;
