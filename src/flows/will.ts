@@ -393,6 +393,10 @@ async function setStrategy(deps: FlowDeps, city: City, officer: Officer, will: W
   if (!front || front.status !== 'active') return refuse('no_front', 'Неясно, какого дела это касается. Пусть покровитель назовёт его.');
   if (front.form === 'clock') return refuse('only_wait', `«${frontGist(front)}»: работой это не сдвинуть, остаётся дождаться срока.`);
   const lead = leadOf(city, front.id);
+  // Свободный сановник на чужом деле помогает ему разовым вкладом: ведущий у дела один.
+  if (lead && lead.office !== officer.office && !officer.assignmentId) {
+    return atomicDeed(deps, city, officer, { ...will, label: 'deed', deedKind: 'push' }, day);
+  }
   if (lead && lead.office !== officer.office) {
     const other = officerOf(city, lead);
     return refuse('has_lead', `«${frontGist(front)}» уже ведёт ${other ? title(deps, other) : 'другой сановник'}. Сначала снять его с этого дела.`);

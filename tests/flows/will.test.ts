@@ -199,8 +199,18 @@ describe('стратегия, темп, отмена', () => {
     expect(leadOf(city, 'thr')).toMatchObject({ verdict: 'spot_on', text: 'Подвести контрфорсы', tempo: -1 });
     expect(city.assignments).toHaveLength(1);
 
+    // Свободный маршал на чужом деле помогает разовым вкладом, ведущий остаётся прежним.
+    s.llm
+      .script('will-interpreter', will({ label: 'strategy', front_id: 'thr', goal: 'Помочь подпорками' }))
+      .script('alignment-judge', toolReply('submit_alignment', { verdict: 'fits' }))
+      .script('risk-appraiser', toolReply('submit_risk', { step: 'normal' }));
+    expect(await playerWill(s.deps, city, 'marshal', 'Маршал, помоги', 3)).toMatchObject({ ok: true });
+    expect(leadOf(city, 'thr')).toMatchObject({ office: 'keeper' });
+    expect(city.fronts.at(-1)).toMatchObject({ origin: 'deed', parentId: 'thr', deed: { kind: 'push' } });
+
+    // Занятый сановник на чужое дело не встаёт.
     s.llm.script('will-interpreter', will({ label: 'strategy', front_id: 'thr', goal: 'Помочь' }));
-    expect(await playerWill(s.deps, city, 'marshal', 'Маршал, помоги', 3)).toMatchObject({ ok: false, error: 'has_lead' });
+    expect(await playerWill(s.deps, city, 'marshal', 'Маршал, помоги ещё', 3)).toMatchObject({ ok: false });
   });
 
   test('часы работой не сдвинуть', async () => {
