@@ -14,7 +14,7 @@
  *   wait <дни>                         глазами игрока, который был в отлучке: прожить дни по одному
  *                                      и показать все вести за это время с датами, без хроники и перемен
  *   undo                               вернуть город к слепку перед последним say/next/skip
- *   rerun <n> [раз] [--prompt]         повторить вызов агента n из calls/ (по умолчанию 3 раза) и показать ответы;
+ *   rerun <n> [раз] [--prompt] [--effort none|low|medium|high]   повторить вызов агента n из calls/ (по умолчанию 3 раза);
  *                                      --prompt подставляет текущий prompt.md агента вместо записанного
  *   state | fronts | objects [id] | chronicle [n] | facts | calls [n]
  *   save <имя> | load <имя> | saves
@@ -402,14 +402,17 @@ async function main(): Promise<void> {
     }
     case 'rerun': {
       const n = Number(args[0]);
-      const times = Number(args.find((a, i) => i > 0 && /^\d+$/.test(a)) ?? 3);
+      const effortAt = args.indexOf('--effort');
+      const effort = effortAt >= 0 ? (args[effortAt + 1] as LlmRequest['effort']) : undefined;
+      const times = Number(args.find((a, i) => i > 0 && /^\d+$/.test(a) && i !== effortAt + 1) ?? 3);
       const file = fs.readdirSync(CALLS).find((f) => f.startsWith(`${String(n).padStart(4, '0')}-`) && f.endsWith('.json'));
       if (!file) throw new Error(`нет записанного запроса ${n} (запросы пишутся в .json с этой версии)`);
       const request = JSON.parse(fs.readFileSync(path.join(CALLS, file), 'utf8')) as LlmRequest;
       if (args.includes('--prompt')) request.system = freshPrompt(request);
+      if (effort) request.effort = effort;
       for (let i = 1; i <= times; i++) {
         const r = await deps.agents.llm.complete(request);
-        out(`\n### ${request.agent} · повтор ${i}\n${r.text}${r.toolCalls.map((c) => `\n\`${c.name}\` ${c.arguments}`).join('')}`);
+        out(`\n### ${request.agent} · повтор ${i} · effort ${request.effort ?? 'умолч.'} · вых ${r.usage.outputTokens} (рассужд ${r.usage.reasoningTokens ?? 0})\n${r.text}${r.toolCalls.map((c) => `\n\`${c.name}\` ${c.arguments}`).join('')}`);
       }
       break;
     }

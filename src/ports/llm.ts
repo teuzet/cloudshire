@@ -39,7 +39,7 @@ export interface LlmRequest {
   toolChoice?: 'auto' | 'required' | { name: string };
   maxOutputTokens?: number;
   /** Глубина рассуждения, если модель это умеет. */
-  effort?: 'low' | 'medium' | 'high';
+  effort?: 'none' | 'low' | 'medium' | 'high';
   signal?: AbortSignal;
 }
 
@@ -47,6 +47,10 @@ export interface LlmUsage {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;
+  /** Часть выхода, ушедшая на рассуждение (оплачивается как выход). */
+  reasoningTokens?: number;
+  /** Часть входа, записанная в кэш (у OpenAI стоит 1,25 обычного входа). */
+  cacheWriteTokens?: number;
 }
 
 export interface LlmResponse {

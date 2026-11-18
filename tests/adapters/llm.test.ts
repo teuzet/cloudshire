@@ -5,7 +5,7 @@ import { describe, expect, test } from 'vitest';
 import { anthropicToolChoice, toAnthropicMessages } from '../../src/adapters/llm/anthropic.js';
 import { RecordingLlm, ReplayLlm, requestKey } from '../../src/adapters/llm/cassette.js';
 import { FakeLlm, toolReply } from '../../src/adapters/llm/fake.js';
-import { openAiToolChoice, toOpenAiInput } from '../../src/adapters/llm/openai.js';
+import { explicitCacheInput, openAiToolChoice, StablePrefixes, toOpenAiInput } from '../../src/adapters/llm/openai.js';
 import { RoutingLlm, splitModel } from '../../src/adapters/llm/router.js';
 import type { LlmMessage, LlmRequest } from '../../src/ports/llm.js';
 
@@ -79,5 +79,40 @@ describe('кассеты', () => {
     expect(await replay.complete({ ...req })).toEqual(recorded);
     await expect(replay.complete({ ...req, system: 's2' })).rejects.toThrow(/перезапиши кассету/);
     expect(requestKey(req)).toBe(requestKey(structuredClone(req)));
+  });
+});
+
+describe('явный кэш OpenAI', () => {
+  const head = 'Шаблон промпта.\n'.repeat(300);
+
+  test('граница — общее начало промптов агента, срезанное до конца строки', () => {
+    const p = new StablePrefixes();
+    expect(p.boundary('herald', `${head}Сегодня: день 1`)).toBe(0);
+    expect(p.boundary('herald', `${head}Сегодня: день 2`)).toBe(head.length);
+    expect(p.boundary('herald', `${head}Сегодня: день 3`)).toBe(head.length);
+    expect(p.boundary('chronicler', `${head}x`)).toBe(0);
+  });
+
+  test('короткое общее начало не кэшируется', () => {
+    const p = new StablePrefixes();
+    p.boundary('judge', 'Коротко.\nа');
+    expect(p.boundary('judge', 'Коротко.\nб')).toBe(0);
+  });
+
+  test('точка кэша стоит после шаблона, хвост идёт отдельным блоком', () => {
+    const system = `${head}Сегодня: день 2`;
+    const { input, mode } = explicitCacheInput(system, head.length, [{ role: 'user', content: 'весть' }]);
+    expect(mode).toBe('explicit');
+    const dev = input[0] as { role: string; content: Array<{ text: string; prompt_cache_breakpoint?: unknown }> };
+    expect(dev.role).toBe('developer');
+    expect(dev.content[0]!.text).toBe(head);
+    expect(dev.content[0]!.prompt_cache_breakpoint).toEqual({ mode: 'explicit' });
+    expect(dev.content[1]!.text).toBe('Сегодня: день 2');
+  });
+
+  test('многошаговый запрос с известной границей держит и неявную точку', () => {
+    const msgs = toOpenAiInput(turn);
+    expect(explicitCacheInput(head, head.length, msgs).mode).toBe('implicit');
+    expect(explicitCacheInput(head, 0, msgs).mode).toBe('explicit');
   });
 });

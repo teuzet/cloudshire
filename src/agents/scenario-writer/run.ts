@@ -4,7 +4,7 @@
  */
 
 import type { CanonicalUnknown, PoolName, WorldObject } from '../../core/city.js';
-import { scenarioDraftSchema, touchedMysteries, type Scenario } from '../../core/world/scenario.js';
+import { scenarioDraftSchema, scenarioLooseDraftSchema, touchedMysteries, type Scenario } from '../../core/world/scenario.js';
 import { composeSystem, loadPrompt } from '../_shared/canon.js';
 import { bullets, namesBlock, objectsBlock, section } from '../_shared/format.js';
 import { runStructured, type AgentDeps, type StructuredAgent } from '../_shared/runtime.js';
@@ -140,7 +140,8 @@ export const scenarioWriter: StructuredAgent<ScenarioWriterInput, Scenario, Scen
   name: 'scenario-writer',
   tool: 'submit_scenario',
   description: 'Объекты и фронты новой истории.',
-  schema: scenarioDraftSchema,
+  // Черновик сверяется по итогу: по заготовке — после слияния с ней, без заготовки — как есть.
+  schema: scenarioLooseDraftSchema as unknown as typeof scenarioDraftSchema,
   system: ({ cityBrief, objects, names, unknowns, focus }) =>
     composeSystem(
       ['world', 'style-names'],
@@ -155,7 +156,11 @@ export const scenarioWriter: StructuredAgent<ScenarioWriterInput, Scenario, Scen
     template
       ? `Заготовка (id объектов и фронтов сохрани как есть):\n${JSON.stringify(template, null, 2)}`
       : `Зерно истории: ${seed ?? 'на твой выбор, по городу'}`,
-  check: (raw, { objects, unknowns }) => {
+  check: (raw, { objects, unknowns, template }) => {
+    const whole = scenarioDraftSchema.safeParse(template ? keepTemplate(raw, template) : raw);
+    if (!whole.success) {
+      return whole.error.issues.slice(0, 5).map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
+    }
     const touched = touchedMysteries(raw, new Set(unknowns.flatMap((u) => u.objectIds)));
     if (touched.length) return `история касается тайны острова: ${touched.join(', ')}. Эти объекты не трогай`;
     return checkIds(raw, new Set(objects.filter((o) => o.status === 'active').map((o) => o.id)));

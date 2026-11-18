@@ -33,6 +33,56 @@ export function toOpenAiInput(messages: LlmMessage[]): InputItem[] {
   return out;
 }
 
+/** Примерно 1024 токена русского текста: короче OpenAI не кэширует. */
+const MIN_CACHED_CHARS = 3500;
+
+/**
+ * Неизменное начало системного промпта агента. Промпт агента — шаблон, в хвост которого
+ * подставлены данные мира, поэтому общее начало всех его промптов и есть шаблон. Граница
+ * срезается до конца строки, чтобы она стояла на одном и том же месте от вызова к вызову.
+ */
+export class StablePrefixes {
+  private readonly seen = new Map<string, string>();
+
+  /** Сколько первых знаков промпта можно кэшировать (0 — пока нечего). */
+  boundary(agent: string, system: string): number {
+    const known = this.seen.get(agent);
+    if (known == null) {
+      this.seen.set(agent, system);
+      return 0;
+    }
+    let i = 0;
+    const max = Math.min(known.length, system.length);
+    while (i < max && known.charCodeAt(i) === system.charCodeAt(i)) i++;
+    const cut = i === system.length ? i : system.lastIndexOf('\n', i - 1) + 1;
+    if (cut < known.length) this.seen.set(agent, known.slice(0, cut));
+    return cut >= MIN_CACHED_CHARS ? cut : 0;
+  }
+}
+
+/**
+ * Явный кэш OpenAI: системный промпт идёт developer-сообщением, неизменное начало — отдельным
+ * блоком с точкой кэша. Так в кэш пишется только шаблон, а хвост с данными мира не пишется
+ * (запись стоит 1,25 входа). Многошаговым запросам (тулы, повторы, история) оставлена и неявная точка
+ * в конце: следующий шаг того же агента продолжает этот же префикс.
+ */
+export function explicitCacheInput(system: string, boundary: number, messages: InputItem[]): {
+  input: InputItem[];
+  mode: 'explicit' | 'implicit';
+} {
+  const content: OpenAI.Responses.ResponseInputMessageContentList = boundary > 0
+    ? [
+        { type: 'input_text', text: system.slice(0, boundary), prompt_cache_breakpoint: { mode: 'explicit' } },
+        ...(boundary < system.length ? [{ type: 'input_text' as const, text: system.slice(boundary) }] : []),
+      ]
+    : [{ type: 'input_text', text: system }];
+  return {
+    input: [{ role: 'developer', content }, ...messages],
+    // Пока граница не известна (первый вызов агента), ничего не пишем: запись без чтения дороже.
+    mode: boundary > 0 && messages.length > 1 ? 'implicit' : 'explicit',
+  };
+}
+
 export function openAiToolChoice(choice: LlmRequest['toolChoice']): OpenAI.Responses.ResponseCreateParams['tool_choice'] {
   if (!choice) return undefined;
   if (choice === 'auto' || choice === 'required') return choice;
@@ -42,18 +92,31 @@ export function openAiToolChoice(choice: LlmRequest['toolChoice']): OpenAI.Respo
 export class OpenAiLlm implements Llm {
   private readonly client: OpenAI;
 
-  constructor(opts: { apiKey: string; timeoutMs?: number }) {
+  private readonly cacheKey: boolean;
+  private readonly explicitCache: boolean;
+  private readonly prefixes = new StablePrefixes();
+
+  constructor(opts: { apiKey: string; timeoutMs?: number; cacheKey?: boolean; explicitCache?: boolean }) {
+    this.cacheKey = opts.cacheKey ?? true;
+    this.explicitCache = opts.explicitCache ?? true;
     this.client = new OpenAI({ apiKey: opts.apiKey, timeout: opts.timeoutMs ?? 120_000, maxRetries: 0 });
   }
 
   async complete(request: LlmRequest): Promise<LlmResponse> {
     const reasoning = isReasoningModel(request.model);
+    const messages = toOpenAiInput(request.messages);
+    const cached = this.explicitCache
+      ? explicitCacheInput(request.system, this.prefixes.boundary(request.agent, request.system), messages)
+      : null;
     const response = await this.client.responses.create(
       {
         model: request.model,
-        instructions: request.system,
-        input: toOpenAiInput(request.messages),
+        ...(cached
+          ? { input: cached.input, prompt_cache_options: { mode: cached.mode } }
+          : { instructions: request.system, input: messages }),
         store: false,
+        // Ключ кэша по агенту: запросы одного агента с общим началом промпта попадают в один кэш.
+        ...(this.cacheKey ? { prompt_cache_key: request.agent } : {}),
         ...(request.tools?.length
           ? {
               tools: request.tools.map((t) => ({
@@ -98,6 +161,8 @@ export class OpenAiLlm implements Llm {
         inputTokens: response.usage?.input_tokens ?? 0,
         outputTokens: response.usage?.output_tokens ?? 0,
         cachedInputTokens: response.usage?.input_tokens_details?.cached_tokens ?? 0,
+        cacheWriteTokens: response.usage?.input_tokens_details?.cache_write_tokens ?? 0,
+        reasoningTokens: response.usage?.output_tokens_details?.reasoning_tokens ?? 0,
       },
       model: response.model,
       stop: truncated ? 'length' : refusal ? 'refusal' : 'done',
