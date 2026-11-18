@@ -54,7 +54,7 @@ export const consoleLog: FlowLog = {
 
 export function buildLlm(env: NodeJS.ProcessEnv): Llm {
   const providers: Record<string, Llm> = {};
-  if (env.OPENAI_API_KEY) providers.openai = new OpenAiLlm({ apiKey: env.OPENAI_API_KEY });
+  if (env.OPENAI_API_KEY) providers.openai = new OpenAiLlm({ apiKey: env.OPENAI_API_KEY, cacheKey: env.LLM_CACHE_KEY !== '0', explicitCache: env.LLM_CACHE_EXPLICIT !== '0', ...(env.LLM_PREFIX_FILE ? { prefixFile: env.LLM_PREFIX_FILE } : {}) });
   if (env.ANTHROPIC_API_KEY) providers.anthropic = new AnthropicLlm({ apiKey: env.ANTHROPIC_API_KEY });
   if (!Object.keys(providers).length) throw new Error('нет ключей моделей: задай OPENAI_API_KEY и/или ANTHROPIC_API_KEY');
   const router = new RoutingLlm(providers);

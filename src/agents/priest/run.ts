@@ -120,20 +120,22 @@ export function priestTurnBlock(rules: Rules, city: City, day: number): string {
     .slice(0, 10)
     .map((o) => `${o.name}: ${(o.log ?? []).slice(-2).map((l) => `${gameDate(l.day).label}: ${l.text}`).join(' / ')}`);
   return [
+    // Порядок под кэш промптов: что меняется реже, то выше; дата меняется каждый день и стоит последней.
     section('ОПИСАНИЕ ГОРОДА', city.brief),
-    `Город: ${city.name}. Покровитель: ${city.patronName}. Сегодня: ${gameDate(day).label}.`,
     `Ты: ${city.priest.name} (${city.priest.gender === 'female' ? 'она' : 'он'}), ${city.priest.nature}`,
+    `Город: ${city.name}. Покровитель: ${city.patronName}.`,
     section('Состояние города', qualitativeStats(rules, city.stats)),
-    section('Сановники', bullets(officers)),
     section('Наказ покровителя на беду, пока он молчит', standingOrderLine(rules, city)),
-    section('Поручения на потом, по очереди', bullets(queueLines(city))),
-    section('Что сейчас идёт в городе (id: что идёт)', bullets(fronts)),
-    section('Замыслы, которые ждут слова покровителя (id: что дальше)', bullets(waiting)),
+    section('Память', bullets(city.notes.map((n) => n.text))),
+    section('Известные факты', bullets(facts)),
     section('Что в городе выбыло из строя', bullets(lost)),
     section('Что случалось с частями города', bullets(memory)),
-    section('Известные факты', bullets(facts)),
+    section('Замыслы, которые ждут слова покровителя (id: что дальше)', bullets(waiting)),
+    section('Поручения на потом, по очереди', bullets(queueLines(city))),
+    section('Сановники', bullets(officers)),
+    section('Что сейчас идёт в городе (id: что идёт)', bullets(fronts)),
     section('Последние записи хроники', chronicleBlock(city.chronicle.slice(-5))),
-    section('Память', bullets(city.notes.map((n) => n.text))),
+    `Сегодня: ${gameDate(day).label}.`,
   ]
     .filter(Boolean)
     .join('\n\n');

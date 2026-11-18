@@ -8,7 +8,7 @@ import type { AgentSettings } from './runtime.js';
 const entry = z.object({
   model: z.string().min(3).optional(),
   maxOutputTokens: z.number().int().positive().optional(),
-  effort: z.enum(['low', 'medium', 'high']).optional(),
+  effort: z.enum(['none', 'low', 'medium', 'high']).optional(),
 });
 
 const fileSchema = z.object({

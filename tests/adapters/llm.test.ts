@@ -5,7 +5,7 @@ import { describe, expect, test } from 'vitest';
 import { anthropicToolChoice, toAnthropicMessages } from '../../src/adapters/llm/anthropic.js';
 import { RecordingLlm, ReplayLlm, requestKey } from '../../src/adapters/llm/cassette.js';
 import { FakeLlm, toolReply } from '../../src/adapters/llm/fake.js';
-import { openAiToolChoice, toOpenAiInput } from '../../src/adapters/llm/openai.js';
+import { explicitCacheInput, openAiToolChoice, StablePrefixes, toOpenAiInput } from '../../src/adapters/llm/openai.js';
 import { RoutingLlm, splitModel } from '../../src/adapters/llm/router.js';
 import type { LlmMessage, LlmRequest } from '../../src/ports/llm.js';
 
@@ -79,5 +79,41 @@ describe('кассеты', () => {
     expect(await replay.complete({ ...req })).toEqual(recorded);
     await expect(replay.complete({ ...req, system: 's2' })).rejects.toThrow(/перезапиши кассету/);
     expect(requestKey(req)).toBe(requestKey(structuredClone(req)));
+  });
+});
+
+describe('явный кэш OpenAI', () => {
+  const head = 'Шаблон промпта.\n'.repeat(300);
+  const data = 'Объект города.\n'.repeat(200);
+
+  test('точки: общее начало всех промптов агента и общее начало с прошлым', () => {
+    const p = new StablePrefixes();
+    expect(p.boundaries('herald', `${head}${data}день 1`)).toEqual([]);
+    expect(p.boundaries('herald', `${head}${data}день 2`)).toEqual([head.length + data.length]);
+    expect(p.boundaries('herald', `${head}другое\n${data}день 3`)).toEqual([head.length]);
+    expect(p.boundaries('herald', `${head}другое\n${data}день 4`)).toEqual([head.length, head.length + 'другое\n'.length + data.length]);
+    expect(p.boundaries('chronicler', `${head}x`)).toEqual([]);
+  });
+
+  test('короткое общее начало не кэшируется', () => {
+    const p = new StablePrefixes();
+    p.boundaries('judge', 'Коротко.\nа');
+    expect(p.boundaries('judge', 'Коротко.\nб')).toEqual([]);
+  });
+
+  test('точки кэша режут промпт на куски, хвост идёт без точки', () => {
+    const system = `${head}${data}день 2`;
+    const { input, mode } = explicitCacheInput(system, [head.length, head.length + data.length], [{ role: 'user', content: 'весть' }]);
+    expect(mode).toBe('explicit');
+    const dev = input[0] as { role: string; content: Array<{ text: string; prompt_cache_breakpoint?: unknown }> };
+    expect(dev.role).toBe('developer');
+    expect(dev.content.map((c) => c.text)).toEqual([head, data, 'день 2']);
+    expect(dev.content.map((c) => Boolean(c.prompt_cache_breakpoint))).toEqual([true, true, false]);
+  });
+
+  test('многошаговый запрос с точками держит и неявную', () => {
+    const msgs = toOpenAiInput(turn);
+    expect(explicitCacheInput(head, [head.length], msgs).mode).toBe('implicit');
+    expect(explicitCacheInput(head, [], msgs).mode).toBe('explicit');
   });
 });

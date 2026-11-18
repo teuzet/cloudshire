@@ -112,6 +112,11 @@ const axesSchema = z.object({ engine: z.enum(ENGINES), source: z.enum(SOURCES), 
 export const scenarioSchema = scenarioBase.extend({ axes: axesSchema.optional(), scale: z.enum(SCALES).optional() }).superRefine(checkScenario);
 /** То, что пишет посевщик: оси ему не нужны, их ставит код. */
 export const scenarioDraftSchema = scenarioBase.superRefine(checkScenario);
+/**
+ * Черновик писателя по заготовке: дрейф, род и толчки код всё равно берёт из заготовки,
+ * поэтому их сверка идёт после слияния (scenarioDraftSchema по итогу), а не по черновику.
+ */
+export const scenarioLooseDraftSchema = scenarioBase;
 
 export type Scenario = z.infer<typeof scenarioSchema>;
 

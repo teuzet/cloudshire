@@ -18,6 +18,10 @@ export interface CallSummary {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;
+  reasoningTokens: number;
+  cacheWriteTokens: number;
+  /** Глубина рассуждения, с которой шёл вызов (нет — умолчание провайдера). */
+  effort?: string;
   file: string;
   error?: string;
 }
@@ -96,6 +100,9 @@ export class LoggingLlm implements Llm {
         inputTokens: response?.usage.inputTokens ?? 0,
         outputTokens: response?.usage.outputTokens ?? 0,
         cachedInputTokens: response?.usage.cachedInputTokens ?? 0,
+        reasoningTokens: response?.usage.reasoningTokens ?? 0,
+        cacheWriteTokens: response?.usage.cacheWriteTokens ?? 0,
+        ...(request.effort ? { effort: request.effort } : {}),
         file,
         ...(error ? { error } : {}),
       };

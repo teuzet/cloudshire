@@ -59,6 +59,8 @@ export function addUsage(a: LlmUsage, b: LlmUsage): LlmUsage {
     inputTokens: a.inputTokens + b.inputTokens,
     outputTokens: a.outputTokens + b.outputTokens,
     cachedInputTokens: a.cachedInputTokens + b.cachedInputTokens,
+    reasoningTokens: (a.reasoningTokens ?? 0) + (b.reasoningTokens ?? 0),
+    cacheWriteTokens: (a.cacheWriteTokens ?? 0) + (b.cacheWriteTokens ?? 0),
   };
 }
 

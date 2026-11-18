@@ -78,7 +78,7 @@ export class AnthropicLlm implements Llm {
               ...(choice ? { tool_choice: choice } : {}),
             }
           : {}),
-        ...(request.effort ? { output_config: { effort: request.effort } } : {}),
+        ...(request.effort && request.effort !== 'none' ? { output_config: { effort: request.effort } } : {}),
         ...(fallback ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const } : {}),
       },
       request.signal ? { signal: request.signal } : undefined,
