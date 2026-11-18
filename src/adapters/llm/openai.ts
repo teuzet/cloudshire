@@ -8,6 +8,7 @@
  * и в следующем ходе того же агента отдаются назад как есть.
  */
 
+import fs from 'node:fs';
 import OpenAI from 'openai';
 import type { Llm, LlmMessage, LlmRequest, LlmResponse } from '../../ports/llm.js';
 
@@ -44,18 +45,43 @@ const MIN_CACHED_CHARS = 3500;
 export class StablePrefixes {
   private readonly seen = new Map<string, string>();
 
+  /** file — где хранить границы между запусками (плейтест и перезапуски бота), иначе только в памяти. */
+  constructor(private readonly file?: string) {
+    if (!file || !fs.existsSync(file)) return;
+    try {
+      for (const [agent, prefix] of Object.entries(JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, string>)) {
+        this.seen.set(agent, prefix);
+      }
+    } catch {
+      // Испорченный файл — начинаем с пустого.
+    }
+  }
+
+  private save(): void {
+    if (!this.file) return;
+    try {
+      fs.writeFileSync(this.file, JSON.stringify(Object.fromEntries(this.seen)));
+    } catch {
+      // Кэш не должен ронять игру.
+    }
+  }
+
   /** Сколько первых знаков промпта можно кэшировать (0 — пока нечего). */
   boundary(agent: string, system: string): number {
     const known = this.seen.get(agent);
     if (known == null) {
       this.seen.set(agent, system);
+      this.save();
       return 0;
     }
     let i = 0;
     const max = Math.min(known.length, system.length);
     while (i < max && known.charCodeAt(i) === system.charCodeAt(i)) i++;
     const cut = i === system.length ? i : system.lastIndexOf('\n', i - 1) + 1;
-    if (cut < known.length) this.seen.set(agent, known.slice(0, cut));
+    if (cut < known.length) {
+      this.seen.set(agent, known.slice(0, cut));
+      this.save();
+    }
     return cut >= MIN_CACHED_CHARS ? cut : 0;
   }
 }
@@ -94,9 +120,10 @@ export class OpenAiLlm implements Llm {
 
   private readonly cacheKey: boolean;
   private readonly explicitCache: boolean;
-  private readonly prefixes = new StablePrefixes();
+  private readonly prefixes: StablePrefixes;
 
-  constructor(opts: { apiKey: string; timeoutMs?: number; cacheKey?: boolean; explicitCache?: boolean }) {
+  constructor(opts: { apiKey: string; timeoutMs?: number; cacheKey?: boolean; explicitCache?: boolean; prefixFile?: string }) {
+    this.prefixes = new StablePrefixes(opts.prefixFile);
     this.cacheKey = opts.cacheKey ?? true;
     this.explicitCache = opts.explicitCache ?? true;
     this.client = new OpenAI({ apiKey: opts.apiKey, timeout: opts.timeoutMs ?? 120_000, maxRetries: 0 });

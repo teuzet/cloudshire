@@ -58,6 +58,8 @@ const SAVES = path.join(DIR, 'saves');
 const TRANSCRIPT = path.join(DIR, 'transcript.md');
 process.env.DATA_DIR = path.join(DIR, 'data');
 process.env.AGENT_LOG_DIR = CALLS;
+// Границы кэша промптов живут между командами, как в долгоживущем боте.
+process.env.LLM_PREFIX_FILE ??= path.join(DIR, 'cache-prefixes.json');
 
 const calls: CallSummary[] = [];
 
