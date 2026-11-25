@@ -11,8 +11,11 @@ import { createFront } from '../../src/core/world/fronts.js';
 import { blankCity } from '../helpers/fixtures.js';
 import { lanternIsle, lastUser, scriptFrontAgents, stand } from '../helpers/game.js';
 
-async function plantedCity() {
+async function plantedCity(gap = 0) {
   const s = await stand();
+  s.deps.rules.seeding.storyGapDays = gap;
+  // Беды по зерну мелкие, чтобы хранитель к развязке был свободен.
+  s.deps.rules.seeding.freeMaxScale = 'situation';
   const world = (await s.deps.storage.getWorld())!;
   const city = blankCity({ worldId: world.id, ownerId: 'u1', brief: 'Мерв живёт камнем.' });
   scheduleJob(city, { id: 'job_seed', kind: 'seed', dueDay: 3 });
@@ -90,6 +93,22 @@ describe('история от посева до развязки', () => {
     // Вести: две посадки, две вехи, развязка; остальное — беды по зерну, которые режиссёр досадил за это время.
     expect(s.inbox.sent.length).toBeGreaterThanOrEqual(5);
     expect(s.llm.callsTo('herald').at(-1)?.messages[0]?.content).toContain('развязка');
+  });
+
+  test('после посадки следующая история не раньше storyGapDays дней', async () => {
+    const s = await plantedCity(30);
+    s.passDays(3);
+    await runDueCities(s.deps, s.locks);
+    let city = (await s.deps.storage.getCity(s.cityId))!;
+    expect(city.storyLog?.map((m) => m.kind)).toEqual(['trouble']);
+    s.passDays(s.r.seeding.checkEveryDays);
+    await runDueCities(s.deps, s.locks);
+    city = (await s.deps.storage.getCity(s.cityId))!;
+    expect(city.storyLog?.filter((m) => m.kind)).toHaveLength(1);
+    s.passDays(30);
+    await runDueCities(s.deps, s.locks);
+    city = (await s.deps.storage.getCity(s.cityId))!;
+    expect(city.storyLog?.filter((m) => m.kind).length).toBeGreaterThanOrEqual(2);
   });
 
   test('без маны жрец не слышит и модель не зовётся', async () => {

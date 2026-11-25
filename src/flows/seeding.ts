@@ -103,7 +103,7 @@ export function storyCount(city: City): number {
 export async function plantStory(deps: FlowDeps, city: City, day: number, kind: Kind | null = null): Promise<OutboundMessage | null> {
   const fresh = deps.scenarios.filter((s) => !city.scenariosUsed.includes(s.id) && (!kind || storyKind(s) === kind));
   const uniform = deps.rules.fronts.director.uniform;
-  const template = weightedOrder(fresh, (s) => (uniform ? 1 : varietyWeight(deps.rules, city, scenarioTags(s), day)), deps.random.rng)[0] ?? null;
+  const template = weightedOrder(fresh, (s) => (uniform ? 1 : varietyWeight(deps.rules, city, scenarioTags(s), day)) * deps.rules.seeding.scale[s.scale ?? 'situation'].weight, deps.random.rng)[0] ?? null;
   const lean = template ? null : leanOf(deps.rules, city, day, deps.random.rng);
   const names = await takeNames(deps, deps.rules.seeding.namesPerCall);
   const scenario: Scenario | null = await tryAgent(
@@ -171,8 +171,12 @@ export async function seedStories(deps: FlowDeps, city: City, day: number): Prom
   fadeDormant(deps, city, day);
   // activeStories — потолок числа историй. За проверку приходит не больше одной беды и одной возможности:
   // беда — пока город получает меньше работы над бедами, чем хочет режиссёр, и у него есть место;
-  // возможность — пока их посажено меньше, чем бед.
-  const room = () => storyCount(city) < deps.rules.seeding.activeStories;
+  // возможность — пока их посажено меньше, чем бед. Между посадками не меньше storyGapDays дней.
+  const rested = () => {
+    const last = Math.max(-Infinity, ...(city.storyLog ?? []).filter((m) => m.kind).map((m) => m.day));
+    return day - last >= deps.rules.seeding.storyGapDays;
+  };
+  const room = () => rested() && storyCount(city) < deps.rules.seeding.activeStories;
   if (room() && roomForTrouble(deps.rules, city) > 0 && wantsTrouble(deps.rules, city, day)) {
     const msg = await plantStory(deps, city, day, 'trouble');
     if (msg) out.push(msg);

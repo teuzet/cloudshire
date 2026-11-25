@@ -2912,6 +2912,9 @@ fronts:
 seeding:
   activeStories: 10
   checkEveryDays: 15
+  # Ритм: игровой год — одни сутки, игрок даёт 10–20 значимых приказов. Поэтому посадки не чаще
+  # раза в storyGapDays дней (около 12 историй в год, беды и возможности вместе).
+  storyGapDays: 30
   firstStoryDay: 3
   # Поиск или дело истории, за которые никто не взялся за столько дней, тихо уходят из дел города
   # (их люди, места и вещи остаются): так брошенный город не копит нетронутое и посев идёт дальше.
@@ -2946,9 +2949,11 @@ seeding:
   #   следующие события вокруг таких объектов. pullDays: за сколько дней тяга сходит на нет (null — не сходит).
   # weight: вес жребия масштаба для истории по зерну (не выше freeMaxScale). У заготовок частоту задаёт их число.
   scale:
-    situation: { budget: 3, pull: 0, pullDays: null, weight: 4 }
+    # weight — вес масштаба в жребии заготовок (и историй по зерну): историй мало (storyGapDays),
+    # поэтому чаще эпизоды и кризисы, мелкие ситуации реже.
+    situation: { budget: 3, pull: 0, pullDays: null, weight: 1 }
     episode: { budget: 6, pull: 1, pullDays: 360, weight: 3 }
-    crisis: { budget: 12, pull: 2, pullDays: 1080, weight: 2 }
+    crisis: { budget: 12, pull: 2, pullDays: 1080, weight: 3 }
     rupture: { budget: 24, pull: 4, pullDays: null, weight: 1 }
   freeMaxScale: episode
   # Фронт с выигрышем в истории с масштабом: ёмкость = выигрыш в пунктах × gainShare.

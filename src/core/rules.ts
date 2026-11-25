@@ -287,6 +287,8 @@ export const rulesSchema = z.object({
   seeding: z.object({
     activeStories: z.number().int().nonnegative(),
     checkEveryDays: z.number().int().positive(),
+    /** Не чаще: после посаженной истории следующая не раньше стольких дней. */
+    storyGapDays: z.number().int().nonnegative(),
     firstStoryDay: z.number().int().nonnegative(),
     dormantDays: z.number().int().positive(),
     freeMaxFronts: z.number().int().positive(),
