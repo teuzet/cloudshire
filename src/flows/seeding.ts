@@ -177,14 +177,18 @@ export async function seedStories(deps: FlowDeps, city: City, day: number): Prom
     return day - last >= deps.rules.seeding.storyGapDays;
   };
   const room = () => rested() && storyCount(city) < deps.rules.seeding.activeStories;
+  // Возможность — и до беды, и после: при редких посадках (storyGapDays) иначе приходили бы одни беды.
+  const chance = async () => {
+    if (!room() || !wantsChance(deps.rules, city, day)) return;
+    const msg = await plantStory(deps, city, day, 'chance');
+    if (msg) out.push(msg);
+  };
+  await chance();
   if (room() && roomForTrouble(deps.rules, city) > 0 && wantsTrouble(deps.rules, city, day)) {
     const msg = await plantStory(deps, city, day, 'trouble');
     if (msg) out.push(msg);
   }
-  if (room() && wantsChance(deps.rules, city, day)) {
-    const msg = await plantStory(deps, city, day, 'chance');
-    if (msg) out.push(msg);
-  }
+  await chance();
   scheduleJob(city, { id: newId(deps, 'job'), kind: 'seed', dueDay: day + deps.rules.seeding.checkEveryDays });
   return out;
 }
