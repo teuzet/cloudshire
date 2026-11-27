@@ -14,6 +14,7 @@ const spiritSchema = z.object({
   id: z.string().min(1),
   family: z.string().min(1),
   name: z.string().min(1),
+  /** Пояснение для людей, которые правят книгу. Клерку не подаётся: он видит семью и название. */
   line: z.string().min(1),
 });
 

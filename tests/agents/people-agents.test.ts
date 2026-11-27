@@ -104,11 +104,11 @@ describe('генезис и онбординг', () => {
     const pitch = 'Город каменотёсов на крутом острове.';
     const llm = new FakeLlm().script(
       'onboarding-guide',
-      toolReply('submit_onboarding', { reply: 'Каким ты видишь город?', ready: false }),
+      toolReply('submit_onboarding', { path: 'knows', reply: 'Каким ты видишь город?', ready: false }),
       // Клерк торопится: питча игрок ещё не видел — поправляется после замечания.
-      toolReply('submit_onboarding', { reply: 'Начинаем.', pitch, patron_name: 'Алаэр', patron_gender: 'female', ready: true }),
-      toolReply('submit_onboarding', { reply: 'Вот что вышло. Всё так?', pitch, patron_name: 'Алаэр', patron_gender: 'female', ready: false }),
-      toolReply('submit_onboarding', { reply: 'Записано.', pitch, patron_name: 'Алаэр', patron_gender: 'female', ready: true }),
+      toolReply('submit_onboarding', { path: 'knows', reply: 'Начинаем.', pitch, patron_name: 'Алаэр', patron_gender: 'female', ready: true }),
+      toolReply('submit_onboarding', { path: 'knows', reply: 'Вот что вышло. Всё так?', pitch, patron_name: 'Алаэр', patron_gender: 'female', ready: false }),
+      toolReply('submit_onboarding', { path: 'knows', reply: 'Записано.', pitch, patron_name: 'Алаэр', patron_gender: 'female', ready: true }),
     );
     expect((await guideOnboarding(deps(llm), { turns: [] })).seed).toBeNull();
     const shown = await guideOnboarding(deps(llm), { turns: [{ role: 'patron', text: 'Я Алаэр, город каменотёсов' }] });
@@ -122,16 +122,21 @@ describe('генезис и онбординг', () => {
     const questions = [{ id: 'q1', kind: 'open' as const, theme: 'people' as const, text: 'Про что здесь шутят?' }];
     const llm = new FakeLlm().script(
       'onboarding-guide',
-      toolReply('submit_onboarding', { reply: 'А про что шутят?', used_question: 'q9', ready: false }),
-      toolReply('submit_onboarding', { reply: 'А про что шутят?', used_question: 'q1', themes_heard: ['people'], ready: false }),
-      toolReply('submit_onboarding', { reply: 'Начинаем.', pitch: 'Другой текст', patron_name: 'Тарн', patron_gender: 'male', ready: true }),
-      toolReply('submit_onboarding', { reply: 'Поправил, глянь.', pitch: 'Другой текст', patron_name: 'Тарн', patron_gender: 'male', ready: false }),
+      toolReply('submit_onboarding', { path: 'knows', reply: 'А про что шутят?', used_question: 'q9', ready: false }),
+      toolReply('submit_onboarding', { path: 'knows', reply: 'А про что шутят?', used_question: 'q1', themes_heard: ['people'], ready: false }),
+      toolReply('submit_onboarding', { path: 'knows', reply: 'Начинаем.', pitch: 'Другой текст', patron_name: 'Тарн', patron_gender: 'male', ready: true }),
+      toolReply('submit_onboarding', { path: 'knows', reply: 'Поправил, глянь.', pitch: 'Другой текст', patron_name: 'Тарн', patron_gender: 'male', ready: false }),
     );
     const asked = await guideOnboarding(deps(llm), { turns: [], questions });
     expect(asked).toMatchObject({ usedQuestion: 'q1', themesHeard: ['people'] });
     expect(llm.requests[0]?.messages[0]?.content).toContain('q1: Про что здесь шутят?');
-    const edited = await guideOnboarding(deps(llm), { turns: [], pitch: 'Старый текст' });
+    const old = 'Город рыбаков на краю острова, где сети закидывают прямо в облака и ловят серебристых летучих рыб, а по вечерам чинят снасти у храма.';
+    const edited = await guideOnboarding(deps(llm), { turns: [], pitch: old });
     expect(edited).toMatchObject({ seed: null, pitch: 'Другой текст' });
+    // Имя и род слов о боге в момент согласия нового показа не требуют.
+    const named = old.replace('у храма', 'у храма своей богини Илы');
+    llm.script('onboarding-guide', toolReply('submit_onboarding', { path: 'knows', reply: 'Записано.', pitch: named, patron_name: 'Ила', patron_gender: 'female', ready: true }));
+    expect((await guideOnboarding(deps(llm), { turns: [], pitch: old })).seed?.pitch).toBe(named);
   });
 });
 

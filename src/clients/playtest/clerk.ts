@@ -62,9 +62,9 @@ async function main(): Promise<void> {
     const fresh = asked.filter((id) => !before.includes(id));
     const notes = [`${seconds} с`];
     if (fresh.length) notes.push(`вопрос из базы: ${fresh.join(', ')}`);
-    if ((after?.clerk?.spiritsUsed.length ?? 0) > (draft?.clerk?.spiritsUsed.length ?? 0)) {
-      notes.push(`наброски по настроениям: ${(draft?.clerk?.spirits ?? after?.clerk?.spiritsUsed ?? []).map((id) => book.spirits.find((s) => s.id === id)?.name ?? id).join(' | ')}`);
-    }
+    const usedBefore = draft?.clerk?.spiritsUsed ?? [];
+    const sketched = (after?.clerk?.spiritsUsed ?? []).filter((id) => !usedBefore.includes(id));
+    if (sketched.length) notes.push(`наброски по настроениям: ${sketched.map((id) => book.spirits.find((x) => x.id === id)?.name ?? id).join(' | ')}`);
     out(`\n_${notes.join('; ')}_`);
     if (r.ready && after?.seed) {
       out(`\n_Готово. Имя города: ${after.seed.cityName ?? 'на выбор мира'}; покровитель: ${after.seed.patronName} (${after.seed.patronGender === 'female' ? 'покровительница' : 'покровитель'}). Генезис не запускался._`);
