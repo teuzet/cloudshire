@@ -107,17 +107,21 @@ describe('воля игрока', () => {
 
   test('influence-appraiser: слова переводятся в виды связи, чужие id отбиваются, повторы схлопываются', async () => {
     const nearby = [
-      { id: 'f1', kind: 'угроза со сроком', description: 'Шайка грабит хутора.', carrier: 'Шайка с плато', helps: ['разбить шайку в логове'] },
-      { id: 'f2', kind: 'дело', description: 'Каменщики кладут стену.', carrier: null, helps: [] },
+      { id: 'f1', kind: 'угроза со сроком', people: false, description: 'Шайка грабит хутора.', carrier: 'Шайка с плато', helps: ['разбить шайку в логове'] },
+      { id: 'f2', kind: 'дело', people: true, description: 'Каменщики кладут стену.', carrier: null, helps: [] },
+      { id: 'f3', kind: 'поиск', people: true, description: 'Ищут логово шайки.', carrier: null, helps: [] },
     ];
     const llm = new FakeLlm().script(
       'influence-appraiser',
       toolReply('submit_influence', { effects: [{ id: 'f9', effect: 'stops' }], sides: [] }),
+      // Работу людей «замедлить» нельзя словом для беды: переспрос.
+      toolReply('submit_influence', { effects: [{ id: 'f3', effect: 'slows' }], sides: [] }),
       toolReply('submit_influence', {
         effects: [
           { id: 'f1', effect: 'slows', basis: 'word' },
           { id: 'f1', effect: 'stops' },
           { id: 'f2', effect: 'removes_cause', basis: 'word' },
+          { id: 'f3', effect: 'helps_work', basis: 'word' },
         ],
         sides: [
           { id: 'o2', stance: 'harms' },
@@ -130,11 +134,14 @@ describe('воля игрока', () => {
     expect(out.links).toEqual([
       { frontId: 'f1', effect: 'slow', word: true },
       { frontId: 'f2', effect: 'removes', word: false },
+      { frontId: 'f3', effect: 'hurry', word: true },
     ]);
     expect(out.sides).toEqual([{ objectId: 'o2', stance: 'harms' }]);
-    expect(llm.callsTo('influence-appraiser')).toHaveLength(2);
+    expect(llm.callsTo('influence-appraiser')).toHaveLength(3);
+    expect(JSON.stringify(llm.callsTo('influence-appraiser')[2]!.messages)).toContain('f3 ведут люди: вместо slows бери helps_work');
     const user = lastUser(llm, 'influence-appraiser');
-    expect(user).toContain('- f1 (угроза со сроком): Шайка грабит хутора. Держится на: Шайка с плато. Что тут на деле помогает: разбить шайку в логове.');
+    expect(user).toContain('- f1 (угроза со сроком, надвигается само): Шайка грабит хутора. Держится на: Шайка с плато. Что тут на деле помогает: разбить шайку в логове.');
+    expect(user).toContain('- f3 (поиск, ведут люди): Ищут логово шайки.');
     expect(user).toContain('o2 — Артель каменщиков (группа людей)');
     expect(llm.callsTo('influence-appraiser')[0]!.system).toContain('МИР, В КОТОРОМ ВСЁ ПРОИСХОДИТ');
   });

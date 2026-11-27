@@ -17,7 +17,7 @@ import { realWaitLabel, spanBand, DAYS_PER_MONTH } from '../core/time.js';
 import { assignmentOf, closeAssignment, createAssignment, leadOf, officerOf } from '../core/world/assignments.js';
 import type { Change } from '../core/world/changes.js';
 import { activeFronts, childFronts, closeFront, createFront, daysLeft, deadlineOf, findFront, frontGist, occupyFootprint } from '../core/world/fronts.js';
-import { carriedWork, frontsOn } from '../core/world/links.js';
+import { carriedWork, frontsOn, linkLines } from '../core/world/links.js';
 import {
   basePrice,
   changeCapacity,
@@ -26,6 +26,7 @@ import {
   hindranceRemovalCapacity,
   magnitude,
   newObjectCapacity,
+  patchCapacity,
   pushCapacity,
   rawToPoints,
   scaleOf,
@@ -158,7 +159,8 @@ async function newProject(deps: FlowDeps, city: City, officer: Officer, will: Wi
   const ruling = await tryAgent(
     deps,
     'canon-warden',
-    () => judgeCanon(deps.agents, { goal: will.goal, facts: activeFacts(city).slice(-30).map((f) => f.text), objects }),
+    // Страж судит о мире, а не о событиях: то, что идёт рядом, приказ как раз и меняет, поэтому он видит только место.
+    () => judgeCanon(deps.agents, { goal: will.goal, facts: activeFacts(city).slice(-30).map((f) => f.text), objects: visibleBriefs(city, false) }),
     { verdict: 'possible' as const, reason: '', goal: will.goal, gaps: [] as string[] },
   );
 
@@ -225,13 +227,29 @@ interface StagePlan {
   target: WorldObject | null;
 }
 
-async function planStake(deps: FlowDeps, city: City, stage: ProjectStage, day: number): Promise<StagePlan | string> {
+/** Чем этап не может начаться: того, что он меняет, больше нет. */
+function stageBlock(city: City, stage: ProjectStage): string | null {
+  const r = stage.result;
+  if (r.kind === 'new_object' || r.kind === 'fact') return null;
+  const target = r.objectId ? findObject(city, r.objectId) : null;
+  if (!target || target.status !== 'active') {
+    return r.kind === 'restore_object' ? 'Того, что этот шаг должен был вернуть, в городе больше нет.' : r.kind === 'change_object' ? 'Того, что этот шаг должен был изменить, в городе больше нет.' : 'Того, что этот шаг должен был убрать, в городе больше нет.';
+  }
+  if (r.kind === 'remove_object' && target.protected) return `${target.name} убрать нельзя: на этом держится сам город.`;
+  return null;
+}
+
+/**
+ * Цена и ставка этапа. `apart` — что результат переменит в идущем рядом: это посчитано отдельной ценой,
+ * и оценщик вклада его не считает второй раз.
+ */
+async function planStake(deps: FlowDeps, city: City, stage: ProjectStage, day: number, apart: readonly string[] = []): Promise<StagePlan | string> {
   const r = stage.result;
   const target = r.objectId ? findObject(city, r.objectId) : null;
   switch (r.kind) {
     case 'new_object': {
       const type = r.type ?? 'building';
-      const { points } = await appraise(deps, city, { type, name: r.name, description: r.description });
+      const { points } = await appraise(deps, city, { type, name: r.name, description: r.description }, null, apart);
       const parent = r.parentId ? findObject(city, r.parentId) : null;
       return {
         capacity: newObjectCapacity(deps.rules, type, points),
@@ -247,12 +265,12 @@ async function planStake(deps: FlowDeps, city: City, stage: ProjectStage, day: n
         const delta = diffPoints(target.out.was, rawToPoints(city, target.statEffect));
         return { capacity: changeCapacity(deps.rules, target.type, delta), stake: [{ op: 'restore', target: target.id, description: r.description }], points: delta, target };
       }
-      return planStake(deps, city, { ...stage, result: { ...r, kind: 'change_object' } }, day);
+      return planStake(deps, city, { ...stage, result: { ...r, kind: 'change_object' } }, day, apart);
     }
     case 'change_object': {
       if (!target || target.status !== 'active') return 'Того, что этот шаг должен был изменить, в городе больше нет.';
       const before = rawToPoints(city, target.statEffect);
-      const { points } = await appraise(deps, city, { type: target.type, name: target.name, description: r.description }, { points: before, event: stage.work });
+      const { points } = await appraise(deps, city, { type: target.type, name: target.name, description: r.description }, { points: before, event: stage.work }, apart);
       const delta = diffPoints(points, before);
       return {
         capacity: changeCapacity(deps.rules, target.type, delta),
@@ -281,10 +299,10 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
     project.status = 'done';
     return refuse('no_stage', 'Этот замысел уже доведён до конца.');
   }
-  const plan = await planStake(deps, city, stage, day);
-  if (typeof plan === 'string') {
+  const lost = stageBlock(city, stage);
+  if (lost) {
     project.status = 'cancelled';
-    return refuse('stage_lost', plan);
+    return refuse('stage_lost', lost);
   }
 
   const work = `${stage.title}. ${stage.work}`;
@@ -304,24 +322,36 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
 
   // Как готовый результат повлияет на то, что идёт рядом: слово агента, цена и связи от кода.
   const kind = stage.result.kind;
-  const made = plan.stake.find((op) => op.op === 'create');
-  const resultType = made?.op === 'create' ? made.object.type : plan.target?.type;
+  const target = stage.result.objectId ? (findObject(city, stage.result.objectId) ?? null) : null;
+  const parent = kind === 'new_object' && stage.result.parentId ? findObject(city, stage.result.parentId) : null;
+  const resultType = kind === 'new_object' ? (stage.result.type ?? 'building') : target?.type;
   const patch = project.unattainable
     ? null
     : await influenceOf(deps, city, {
         work,
         result: `${stage.result.name}${resultType ? ` (${TYPE_WORDS[resultType]})` : ''}: ${stage.result.description}`,
         cause: stage.result.name,
-        objectIds: [...new Set([...footprint.map((l) => l.objectId), ...(plan.target ? [plan.target.id] : []), ...(made?.op === 'create' && made.object.parentId ? [made.object.parentId] : [])])],
+        objectIds: [...new Set([...footprint.map((l) => l.objectId), ...(target ? [target.id] : []), ...(parent?.status === 'active' ? [parent.id] : [])])],
         named: project.answers ?? null,
         // Что живёт на убираемом, кончится само: это уже в цене.
-        settled: kind === 'remove_object' && plan.target ? frontsOn(city, plan.target).map((f) => f.id) : [],
+        settled: kind === 'remove_object' && target ? frontsOn(city, target).map((f) => f.id) : [],
         anchor: kind === 'new_object' || kind === 'change_object' || kind === 'restore_object',
         day,
+        later: project.stages.slice(project.stageIndex + 1).map((st) => st.title),
       });
-  // Вещь, которая сама городу ничего не даёт, входит в цену того, что она держит.
-  const bare = kind === 'new_object' && magnitude(plan.points) === 0 && (patch?.price ?? 0) > 0;
-  const capacity = Math.round(((bare ? 0 : plan.capacity) + (patch?.price ?? 0)) * 100) / 100;
+
+  // Вклад результата оценивается после влияний: то, что он держит, уже посчитано своей ценой.
+  const plan = await planStake(deps, city, stage, day, patch ? linkLines(city, patch.links, stage.result.name) : []);
+  if (typeof plan === 'string') {
+    project.status = 'cancelled';
+    return refuse('stage_lost', plan);
+  }
+  // Вещь платит за свой вклад и за большее из двух: изготовление или то, что она держит и закрывает.
+  // Снос и факт вещи не оставляют: у них влияние прибавляется к цене работы.
+  const own = magnitude(plan.points);
+  const price = patch?.price ?? 0;
+  const lasting = kind === 'new_object' || kind === 'change_object' || kind === 'restore_object';
+  const capacity = lasting && price > 0 ? patchCapacity(own, plan.capacity - own, price) : Math.round((plan.capacity + price) * 100) / 100;
   const linkedStake = plan.stake.map((op): StakeOp => (op.op === 'create' ? { ...op, object: { ...op.object, refs: linked } } : op));
   const stake = patch ? withLinks(linkedStake, patch, plan.target?.id ?? null) : linkedStake;
 

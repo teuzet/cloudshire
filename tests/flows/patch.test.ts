@@ -11,7 +11,7 @@ import { toolReply } from '../../src/adapters/llm/fake.js';
 import { priestTurnBlock } from '../../src/agents/priest/run.js';
 import type { City, Front } from '../../src/core/city.js';
 import { deadlineOf, nextEventDay, progressAt } from '../../src/core/world/fronts.js';
-import { newObjectCapacity } from '../../src/core/world/numbers.js';
+import { basePrice, newObjectCapacity, patchCapacity } from '../../src/core/world/numbers.js';
 import { clockToll, linkPrice } from '../../src/core/world/patch.js';
 import { parseScenario, plantScenario, type Scenario } from '../../src/core/world/scenario.js';
 import { newId, today } from '../../src/flows/context.js';
@@ -75,14 +75,21 @@ describe('вещь из приказа держит то, что идёт ряд
     // Оценщик видел всё, что идёт вокруг островка, и на чём оно держится.
     const asked = lastUser(s.llm.callsTo('influence-appraiser').at(-1)!);
     expect(asked).toContain('Результат: Причальные цепи (вещь): Толстые цепи держат островок у кромки.');
-    expect(asked).toContain(`- ${clock.id} (отложенная перемена): Островок с фонарями отчалит`);
-    expect(asked).toContain(`- ${find.id} (удобный случай): Добраться до рецепта`);
+    expect(asked).toContain(`- ${clock.id} (отложенная перемена, надвигается само): Островок с фонарями отчалит`);
+    expect(asked).toContain(`- ${find.id} (удобный случай, ведут люди): Добраться до рецепта`);
     expect(asked).toContain('Держится на: Островок с горящими фонарями.');
 
     // Узкие агенты видят окрестность: что где стоит и что на чём держится.
     const footprint = lastUser(s.llm.callsTo('footprint-mapper').at(-1)!);
     expect(footprint).toContain('Башня на островке (большое сооружение): Закрытая башня. Дверь держит старый засов, окна темны. Находится здесь: Островок с горящими фонарями.');
     expect(footprint).toContain('Здесь находится: Башня на островке. На этом держится: «Добраться до рецепта, который спрятан в башне»; «Островок с фонарями отчалит и уйдёт вместе с башней');
+
+    // Страж канона судит о мире, а не о событиях: место он видит, а то, что идёт рядом, нет.
+    const warden = lastUser(s.llm.callsTo('canon-warden').at(-1)!);
+    expect(warden).toContain('Здесь находится: Башня на островке.');
+    expect(warden).not.toContain('На этом держится');
+    // Оценщик вклада знает, что удержание посчитано отдельно, и не считает его второй раз.
+    expect(lastUser(s.llm.callsTo('contribution-appraiser').at(-1)!)).toContain('Отдельно посчитано: пока есть Причальные цепи, не случится: «Островок с фонарями отчалит');
 
     // Цепи сами городу ничего не дают: вся цена — удержание. Часы унесли бы поиск в башне.
     const deed = city.fronts.at(-1)!;
@@ -109,7 +116,7 @@ describe('вещь из приказа держит то, что идёт ряд
     expect(state).toContain('держится на: Островок с горящими фонарями');
   });
 
-  test('ночная стража: вещь со своим вкладом стоит свою цену плюс долю беды, которую замедляет', async () => {
+  test('ночная стража: вещь со своим вкладом стоит вклад плюс большее из двух — изготовление или долю беды', async () => {
     const s = await planted(template('arsonist'), { 'Ночная стража': [{ stat: 'security', direction: 'up', size: 'medium' }] });
     const { city } = s;
     const fire = s.fronts.find((f) => f.form === 'threat')!;
@@ -120,10 +127,12 @@ describe('вещь из приказа держит то, что идёт ряд
       .script('influence-appraiser', influence([{ id: fire.id, effect: 'slows' }], [{ id: named(city, 'Ночные пожары').id, stance: 'harms' }]));
     expect((await playerWill(s.deps, city, 'marshal', 'Учредите ночную стражу против поджогов', 0)).ok).toBe(true);
     const deed = city.fronts.at(-1)!;
-    const own = newObjectCapacity(s.r, 'organization', { security: 5 });
+    const make = basePrice(s.r, 'organization');
     const hold = linkPrice(s.r, city, fire, { effect: 'slow' }, 0);
     expect(hold).toBeCloseTo((fire.capacity - progressAt(fire, 0)) * s.r.fronts.hold.price.slow);
-    expect(deed.capacity).toBeCloseTo(own + hold);
+    expect(hold).toBeGreaterThan(make);
+    expect(deed.capacity).toBeCloseTo(5 + hold);
+    expect(patchCapacity(5, make, 1)).toBe(5 + make);
     // Приказ назвал беду сам: она рядом, хотя стража ни с чем в городе не связана.
     expect(lastUser(s.llm.callsTo('influence-appraiser').at(-1)!)).toContain('Что тут на деле помогает:');
 
@@ -171,7 +180,7 @@ describe('вещь из приказа держит то, что идёт ряд
     const deed = city.fronts.at(-1)!;
     expect(deed.links).toBeUndefined();
     expect(deed.capacity).toBe(s.r.fronts.basePrice.fact);
-    expect(warned.find((w) => w.event === 'influence_gap')?.data.dropped).toEqual([{ frontId: fire.id, effect: 'stop', word: true }]);
+    expect(warned.find((w) => w.event === 'influence_gap')?.data.dropped).toEqual([{ frontId: fire.id, effect: 'stop', word: true, why: 'no_anchor' }]);
   });
 
   test('влияние не на пользу бесплатно, но случается: склад пороха делает стройку опаснее', async () => {

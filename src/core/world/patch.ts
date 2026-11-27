@@ -8,7 +8,7 @@
 
 import type { City, Front, FrontLink, HoldSpec, StakeOp } from '../city.js';
 import type { LinkEffect, Rules } from '../rules.js';
-import { activeFronts, findFront, frontTouches, progressAt, withOuter } from './fronts.js';
+import { activeFronts, deadlineOf, findFront, frontTouches, progressAt, withOuter } from './fronts.js';
 import { feasibleHold, ownMotion } from './hold.js';
 import { diffPoints, magnitude, rawToPoints } from './numbers.js';
 import { findObject } from './objects.js';
@@ -94,23 +94,28 @@ export function linkPrice(rules: Rules, city: Pick<City, 'objects' | 'fronts' | 
 }
 
 /**
- * Фронты рядом с правкой: те, что касаются её объектов или того, во что они вложены.
- * `named` — фронт, на который приказ отвечает прямо: он рядом всегда.
+ * Что идёт в городе, если смотреть от правки: сначала фронт, на который приказ отвечает прямо (`named`),
+ * потом те, что касаются её объектов или того, во что они вложены, потом остальные по близости срока.
+ * Остальные нужны, чтобы связь нашлась и там, где её не подсказали ни приказ, ни объекты.
  */
 export function nearFronts(city: Pick<City, 'fronts' | 'objects'>, objectIds: readonly string[], opts: { named?: string | null; except?: readonly string[]; limit?: number } = {}): Front[] {
   const mine = new Set(objectIds);
   const outer = withOuter(city, objectIds);
   const except = new Set(opts.except ?? []);
-  const near = activeFronts(city).filter((f) => {
-    if (except.has(f.id) || (f.parentId && except.has(f.parentId))) return false;
-    if (f.id === opts.named) return true;
+  const touches = (f: Front): boolean => {
     const theirs = frontTouches(city, f);
     if (theirs.some((id) => outer.has(id))) return true;
     for (const id of withOuter(city, theirs)) if (mine.has(id)) return true;
     return false;
-  });
-  near.sort((a, b) => Number(b.id === opts.named) - Number(a.id === opts.named));
-  return near.slice(0, opts.limit ?? 8);
+  };
+  const rank = (f: Front): number => (f.id === opts.named ? 0 : touches(f) ? 1 : 2);
+  const soon = (f: Front): number => deadlineOf(city, f) ?? Number.POSITIVE_INFINITY;
+  return activeFronts(city)
+    .filter((f) => !except.has(f.id) && !(f.parentId && except.has(f.parentId)))
+    .map((f) => ({ f, rank: rank(f), soon: soon(f) }))
+    .sort((a, b) => a.rank - b.rank || a.soon - b.soon)
+    .slice(0, opts.limit ?? 8)
+    .map((x) => x.f);
 }
 
 export interface PatchLinks {
@@ -121,8 +126,11 @@ export interface PatchLinks {
   /** Операции, которые ставка дела исполнит после результата. */
   ops: StakeOp[];
   price: number;
-  /** Слова, которые код не смог исполнить: такого влияния словарь пока не знает или ему не на чем стоять. */
-  dropped: LinkSpec[];
+  /**
+   * Слова, которые код не исполнил, и почему: `unsupported` — такого словарь пока не умеет,
+   * `no_anchor` — у результата нет вещи, которая держала бы, `no_effect` — фронту это ничего не меняет.
+   */
+  dropped: Array<LinkSpec & { why: 'unsupported' | 'no_anchor' | 'no_effect' }>;
 }
 
 /**
@@ -141,17 +149,17 @@ export function planLinks(
   for (const spec of specs) {
     const front = findFront(city, spec.frontId);
     if (!front || front.status !== 'active' || seen.has(front.id)) continue;
-    const drop = () => out.dropped.push(spec);
+    const drop = (why: PatchLinks['dropped'][number]['why']) => out.dropped.push({ ...spec, why });
     if (spec.effect === 'removes') {
       // Своё дело город закрывает сам, словом покровителя, а не чужим результатом.
       if (front.origin === 'player' || front.origin === 'deed') {
-        drop();
+        drop('unsupported');
         continue;
       }
       // Часы трудом не закрыть: их можно только удержать вещью или убрать то, на чём они живут.
       if (front.form === 'clock') {
         if (!args.anchor || !feasibleHold(city, front, { effect: 'stop' })) {
-          drop();
+          drop(args.anchor ? 'no_effect' : 'no_anchor');
           continue;
         }
         seen.add(front.id);
@@ -170,7 +178,7 @@ export function planLinks(
     }
     // Исход якорем меняют отдельной правкой со своими ставками: одного слова для этого мало.
     if (spec.effect === 'outcome' || !args.anchor || !feasibleHold(city, front, { effect: spec.effect })) {
-      drop();
+      drop(spec.effect === 'outcome' ? 'unsupported' : args.anchor ? 'no_effect' : 'no_anchor');
       continue;
     }
     seen.add(front.id);

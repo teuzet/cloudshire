@@ -47,15 +47,17 @@ export function resultName(city: Pick<City, 'objects'>, front: Pick<Front, 'stak
 /**
  * Окрестность объекта словами: где он находится, что находится на нём, что он держит и что на нём
  * держится. Это видят агенты, чтобы «сбить цепи» могло прийти в голову и жрецу, и беде по соседству.
- * Скрытое названо только тем, кому `seeHidden` разрешает его видеть.
+ * Скрытое названо только тем, кому `seeHidden` разрешает его видеть. Без `events` названо только место.
  */
-export function nearWords(city: Pick<City, 'fronts' | 'objects'>, obj: Pick<WorldObject, 'id' | 'parentId' | 'holds'>, seeHidden = false): string {
+export function nearWords(city: Pick<City, 'fronts' | 'objects'>, obj: Pick<WorldObject, 'id' | 'parentId' | 'holds'>, seeHidden = false, events = true): string {
   const seen = (o: WorldObject | undefined | null): o is WorldObject => Boolean(o && o.status === 'active' && (seeHidden || !o.hidden));
   const parts: string[] = [];
   const parent = obj.parentId ? findObject(city, obj.parentId) : null;
   if (seen(parent)) parts.push(`Находится здесь: ${parent.name}.`);
   const inside = city.objects.filter((o) => o.parentId === obj.id && !o.temporary && seen(o)).map((o) => o.name);
   if (inside.length) parts.push(`Здесь находится: ${inside.join(', ')}.`);
+  // Тому, кто судит о мире, а не о событиях, хватает места: идущее рядом приказ как раз и меняет.
+  if (!events) return parts.join(' ');
   for (const hold of obj.holds ?? []) {
     const front = findFront(city, hold.frontId);
     if (front && front.status === 'active') parts.push(`${HELD_WORDS[ownMotion(front)][hold.effect](frontGist(front), 'это')}.`);

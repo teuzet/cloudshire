@@ -15,6 +15,8 @@ export interface ContributionInput {
   keyObjects: Array<{ name: string; type: ObjectBrief['type']; effects: StatGrade[] }>;
   /** Переоценка: прежний вклад и что случилось. */
   before?: { effects: StatGrade[]; event: string } | null;
+  /** Что предмет меняет в идущих событиях города: посчитано отдельно, во вклад не входит. */
+  apart?: string[];
 }
 
 export interface Contribution {
@@ -28,10 +30,11 @@ export const contributionAppraiser: StructuredAgent<ContributionInput, Contribut
   description: 'Влияние одной части города на показатели: показатель, направление, размер.',
   schema: contributionSchema,
   system: ({ rules }) => composeSystem([], prompt, block('Показатели города', statDefinitions(rules))),
-  user: ({ subject, cityStats, keyObjects, before }) =>
+  user: ({ subject, cityStats, keyObjects, before, apart }) =>
     join(
       `Предмет: «${subject.name}», ${TYPE_WORDS[subject.type]}. ${subject.description}`,
       before ? `Прежнее влияние: ${gradesLine(before.effects)}.\nСлучилось: ${before.event}` : null,
+      apart?.length ? `Отдельно посчитано: ${apart.join('; ')}.` : null,
       block('Показатели города сейчас', cityStats),
       block(
         'Самые весомые части города',

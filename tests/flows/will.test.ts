@@ -221,7 +221,7 @@ describe('стратегия, темп, отмена', () => {
     expect(s.city.projects.at(-1)).toMatchObject({ answers: 'clk', status: 'running' });
     expect(s.city.fronts.find((f) => f.id === 'clk')).toMatchObject({ status: 'active', deadlineDay: 120 });
     // О часах спросили оценщика влияния: приказ отвечал на них.
-    expect(lastUser(s.llm.callsTo('influence-appraiser').at(-1)!)).toContain('- clk (отложенная перемена)');
+    expect(lastUser(s.llm.callsTo('influence-appraiser').at(-1)!)).toContain('- clk (отложенная перемена, надвигается само)');
   });
 
   test('темп проекта и темп поручения — разные рычаги', async () => {

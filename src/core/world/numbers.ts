@@ -117,6 +117,16 @@ export function changeCapacity(rules: Rules, type: ObjectType, delta: Partial<St
   return round2(magnitude(delta) + basePrice(rules, type) / 2);
 }
 
+/**
+ * Ёмкость дела, результат которого держит или закрывает что-то рядом. `own` — сумма модулей вклада,
+ * `make` — цена изготовления (базовая или её половина), `patch` — цена влияний.
+ * Платят за вклад и за большее из двух: изготовление или влияние. Вещь, которая нужна только чтобы
+ * держать, стоит цену удержания; нужная и сама по себе не дорожает оттого, что пригодилась против беды.
+ */
+export function patchCapacity(own: number, make: number, patch: number): number {
+  return round2(own + Math.max(make, patch));
+}
+
 export function scaleOf(rules: Rules, capacity: number): { id: string; milestones: number } {
   const rows = rules.fronts.scale;
   const row = rows.find((r) => r.upTo == null || capacity <= r.upTo) ?? rows[rows.length - 1];

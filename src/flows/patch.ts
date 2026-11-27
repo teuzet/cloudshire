@@ -7,6 +7,7 @@ import type { City, Front, FrontLink, StakeOp, WorldObject } from '../core/city.
 import type { ObjectType } from '../core/rules.js';
 import { FORM_WORDS } from '../core/world/changes.js';
 import { activeFronts, frontObjectIds } from '../core/world/fronts.js';
+import { ownMotion } from '../core/world/hold.js';
 import { linkLines } from '../core/world/links.js';
 import { nearFronts, planLinks, type PatchLinks } from '../core/world/patch.js';
 import { findObject } from '../core/world/objects.js';
@@ -42,11 +43,12 @@ function sidesNear(city: City, objectIds: readonly string[], fronts: readonly Fr
  * Как результат этапа повлияет на идущее рядом. `objectIds` — объекты правки: то, что она меняет,
  * и то, с чем работа связана. `anchor` — останется ли вещь, которая может держать.
  * Фронты из `settled` уже решены самой правкой (живут на том, что она убирает): о них не спрашивают.
+ * `later` — следующие шаги замысла: чего результат достигнет только вместе с ними, посчитают при них.
  */
 export async function influenceOf(
   deps: FlowDeps,
   city: City,
-  args: { work: string; result: string; cause: string; objectIds: string[]; named: string | null; settled: string[]; anchor: boolean; day: number },
+  args: { work: string; result: string; cause: string; objectIds: string[]; named: string | null; settled: string[]; anchor: boolean; day: number; later?: string[] },
 ): Promise<PatchPlan> {
   // Свои задания при делах сюда не входят: на них влияют через само дело.
   const own = activeFronts(city)
@@ -67,19 +69,24 @@ export async function influenceOf(
           return {
             id: f.id,
             kind: f.plus ? 'удобный случай' : FORM_WORDS[f.form],
+            people: ownMotion(f) === 'work',
             description: f.description || f.title,
             carrier: carrier && carrier.status === 'active' && !carrier.hidden ? carrier.name : null,
-            helps: (f.key?.moves ?? []).slice(0, HELPS_MAX),
+            // Ходы из заготовок бывают целыми фразами: в перечень они идут без точки на конце.
+            helps: (f.key?.moves ?? []).slice(0, HELPS_MAX).map((m) => m.trim().replace(/[.,;:]+$/, '')).filter(Boolean),
           };
         }),
         sides: sides.map((o) => briefOf(o)),
+        later: args.later ?? [],
       }),
     { links: [], sides: [], reason: '' },
   );
   if (!said.links.length && !said.sides.length) return NONE;
   const plan = planLinks(deps.rules, city, said.links, { anchor: args.anchor, cause: args.cause, day: args.day });
   // Влияние названо, а исполнить его нечем: это пробел словаря, он идёт в лог для разбора.
-  if (plan.dropped.length) deps.log?.warn('influence_gap', { cityId: city.id, work: args.work, dropped: plan.dropped, reason: said.reason });
+  // То, что фронту просто ничего не меняет (обезопасить и без того спокойное), пробелом не считается.
+  const gaps = plan.dropped.filter((d) => d.why !== 'no_effect');
+  if (gaps.length) deps.log?.warn('influence_gap', { cityId: city.id, work: args.work, dropped: gaps, reason: said.reason });
   return { ...plan, sides: said.sides };
 }
 

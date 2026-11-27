@@ -7,6 +7,7 @@ import { refreshTargets } from '../../src/core/world/echo.js';
 import { closeFront, createFront, dueEvent, frontObjectIds, isFrozen, neighbors, nextEventDay, recomputeRate } from '../../src/core/world/fronts.js';
 import { holdersOf, isAsleep } from '../../src/core/world/hold.js';
 import { nearWords } from '../../src/core/world/links.js';
+import { nearFronts } from '../../src/core/world/patch.js';
 import { createObject } from '../../src/core/world/objects.js';
 import { applyStake } from '../../src/core/world/stake.js';
 import { recomputeStats } from '../../src/core/world/stats.js';
@@ -323,6 +324,22 @@ describe('условия фронта изменились: обновляютс
     expect(refreshTargets(r, city, [], [], changedFrontIds(made.changes)).map((f) => f.id)).toEqual(['trip']);
     expect(refreshTargets(r, city, [], ['trip'], changedFrontIds(made.changes))).toEqual([]);
     expect(refreshTargets(r, city, [], [])).toEqual([]);
+  });
+
+  test('что идёт рядом с правкой: названное приказом, потом задетое её объектами, потом остальное по близости срока', () => {
+    const city = islet();
+    city.objects.push(createObject(r, { id: 'wall', type: 'structure', name: 'Стена', description: 'Городская стена.', day: 0 }));
+    city.fronts.push(
+      createFront({ id: 'far', form: 'deed', origin: 'player', title: 'Маяк', description: '', capacity: 4, refs: ['wall'], day: 0 }),
+      createFront({ id: 'crack', form: 'threat', origin: 'story', title: 'Трещина', description: 'Трещина в стене ширится.', capacity: 6, deadlineDay: 30, refs: ['wall'], day: 0 }),
+    );
+    const ids = (objects: string[], opts: Parameters<typeof nearFronts>[2] = {}) => nearFronts(city, objects, opts).map((f) => f.id);
+    // Работа у башни: сначала поиск в башне и часы островка (башня вложена в островок), потом прочее: беда со сроком раньше дела без срока.
+    expect(ids(['tower'])).toEqual(['drift', 'trip', 'crack', 'far']);
+    expect(ids(['tower'], { named: 'far' })).toEqual(['far', 'drift', 'trip', 'crack']);
+    // Работа на островке задевает и то, что вложено в него.
+    expect(ids(['islet']).slice(0, 2)).toEqual(['drift', 'trip']);
+    expect(ids(['pier'], { except: ['drift'], limit: 2 })).toEqual(['crack', 'trip']);
   });
 
   test('окрестность объекта словами: где он, что на нём, что он держит и что на нём держится', () => {

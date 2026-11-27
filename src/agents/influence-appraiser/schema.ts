@@ -1,8 +1,11 @@
 import { z } from 'zod';
 
-export const INFLUENCE_WORDS = ['removes_cause', 'stops', 'slows', 'hurries', 'safer', 'riskier', 'changes_outcome'] as const;
+export const INFLUENCE_WORDS = ['removes_cause', 'stops', 'slows', 'hurries', 'helps_work', 'hinders_work', 'safer', 'riskier', 'changes_outcome'] as const;
 export type InfluenceWord = (typeof INFLUENCE_WORDS)[number];
 
+/** Слова только для того, что надвигается само, и только для того, что ведут люди. */
+export const SELF_WORDS: readonly InfluenceWord[] = ['slows', 'hurries'];
+export const PEOPLE_WORDS: readonly InfluenceWord[] = ['helps_work', 'hinders_work', 'safer', 'riskier'];
 export const influenceSchema = z.object({
   effects: z
     .array(

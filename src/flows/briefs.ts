@@ -18,19 +18,22 @@ import { tryAgent, type FlowDeps } from './context.js';
 
 const KEY_OBJECTS = 8;
 
-/** Объект для узкого агента. С городом к описанию приписана окрестность: где он, что держит, что на нём держится. */
-export function briefOf(o: Pick<WorldObject, 'id' | 'type' | 'name' | 'description' | 'out' | 'parentId' | 'holds'>, city?: Pick<City, 'fronts' | 'objects'>): ObjectBrief {
+/**
+ * Объект для узкого агента. С городом к описанию приписана окрестность: где он, что держит, что на нём
+ * держится. `events: false` оставляет только место: так объект видит тот, кто судит о мире, а не о событиях.
+ */
+export function briefOf(o: Pick<WorldObject, 'id' | 'type' | 'name' | 'description' | 'out' | 'parentId' | 'holds'>, city?: Pick<City, 'fronts' | 'objects'>, events = true): ObjectBrief {
   // Выбывшее агенты видят как есть: оно в городе, но не служит, и его можно вернуть.
   const state = o.out ? ` Сейчас не действует (после беды «${o.out.cause}») и ждёт восстановления.` : '';
-  const near = city ? nearWords(city, o) : '';
+  const near = city ? nearWords(city, o, false, events) : '';
   return { id: o.id, type: o.type, name: o.name, description: `${o.description}${state}${near ? ` ${near}` : ''}`.trim() };
 }
 
 /** То, что агентам можно показать как «в городе есть»: видимое и долговечное. */
-export function visibleBriefs(city: City): ObjectBrief[] {
+export function visibleBriefs(city: City, events = true): ObjectBrief[] {
   return visibleObjects(city)
     .filter((o) => !o.temporary)
-    .map((o) => briefOf(o, city));
+    .map((o) => briefOf(o, city, events));
 }
 
 /** Должность и имя; пол в скобках, чтобы агенты верно склоняли глаголы. */
@@ -113,7 +116,9 @@ export async function appraise(
   deps: FlowDeps,
   city: City,
   subject: Omit<ObjectBrief, 'id'>,
-  before?: { points: StatMap; event: string },
+  before?: { points: StatMap; event: string } | null,
+  /** Что предмет меняет в идущих событиях: это посчитано отдельно и во вклад не входит. */
+  apart: readonly string[] = [],
 ): Promise<Appraisal> {
   const fallback = before ? { ...before.points } : gradePoints(deps.rules, []);
   const out = await tryAgent(
@@ -126,6 +131,7 @@ export async function appraise(
         cityStats: qualitativeStats(deps.rules, city.stats),
         keyObjects: keyObjects(deps, city),
         before: before ? { effects: pointsToGrades(deps.rules, before.points), event: before.event } : null,
+        apart: [...apart],
       }),
     null,
   );
