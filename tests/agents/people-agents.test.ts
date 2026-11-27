@@ -100,8 +100,8 @@ describe('генезис и онбординг', () => {
     const brief = 'Мерв живёт камнем. '.repeat(90);
     const llm = new FakeLlm().script(
       'city-brief',
-      toolReply('submit_city_brief', { brief, unknowns: [{ text: 'Кто построил башню, не установлено.', object_ids: ['nowhere'] }] }),
-      toolReply('submit_city_brief', { brief, unknowns: [{ text: '- Кто построил башню, не установлено.', object_ids: ['tower'] }, { text: 'нет' }] }),
+      // Ссылка на несуществующий объект отбрасывается кодом, без лишнего вызова модели.
+      toolReply('submit_city_brief', { brief, unknowns: [{ text: '- Кто построил башню, не установлено.', object_ids: ['tower', 'nowhere'] }, { text: 'нет' }] }),
     );
     const out = await writeCityBrief(deps(llm), { cityName: 'Мерв', patronName: 'Алаэр', patronGender: 'female', description: 'Город', objects });
     expect(out.unknowns).toEqual([{ text: 'Кто построил башню, не установлено.', objectIds: ['tower'] }]);
@@ -110,13 +110,15 @@ describe('генезис и онбординг', () => {
 
   test('city-brief: бриф не называет людей и объекты с собственными именами', async () => {
     const gate = createObject(r, { id: 'gate', type: 'structure', name: 'Ворота Ирмы', description: 'Ворота.', statEffect: { security: 1 }, day: 0 });
-    const brief = 'Мерв живёт камнем и помнит прошлое. '.repeat(45);
+    const stone = createObject(r, { id: 'stone', type: 'resource', name: 'Камень Мерва', description: 'Камень.', statEffect: { prosperity: 1 }, day: 0 });
+    // Имя города в чужом имени не в счёт: бриф свободно говорит «камень Мерва».
+    const brief = 'Мерв живёт камнем Мерва и помнит прошлое. '.repeat(40);
     const llm = new FakeLlm().script(
       'city-brief',
       toolReply('submit_city_brief', { brief: `${brief} Жрица Таэн правит у ворот Ирмы.`, unknowns: [] }),
       toolReply('submit_city_brief', { brief, unknowns: [] }),
     );
-    const out = await writeCityBrief(deps(llm), { cityName: 'Мерв', patronName: 'Алаэр', patronGender: 'female', description: 'Город', objects: [gate, tower()], people: ['Таэн'] });
+    const out = await writeCityBrief(deps(llm), { cityName: 'Мерв', patronName: 'Алаэр', patronGender: 'female', description: 'Город', objects: [gate, stone, tower()], people: ['Таэн'] });
     expect(out.brief).toBe(brief.trim());
     expect(JSON.stringify(llm.requests[1]?.messages)).toContain('Ворота Ирмы, Таэн');
   });

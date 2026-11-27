@@ -42,14 +42,13 @@ function nameStems(name: string, person: boolean): string[] {
 
 /** Почему бриф не годится, или null. Экспорт для тестов. */
 export function briefProblem(raw: CityBriefRaw, input: Pick<CityBriefInput, 'objects' | 'people' | 'cityName' | 'patronName'>): string | null {
-  const known = new Set(input.objects.map((o) => o.id));
-  const bad = raw.unknowns.flatMap((u) => u.object_ids).filter((id) => !known.has(id));
-  if (bad.length) return `нет таких объектов: ${[...new Set(bad)].join(', ')}`;
+  // Ссылки неизвестностей на несуществующие объекты код отбрасывает сам (normalizeUnknowns).
   if (raw.brief.length > BRIEF_MAX + 400) return `бриф ${raw.brief.length} знаков, нужно до ${BRIEF_MAX}`;
   // Имена города и покровителя бриф называет свободно.
-  const own = new Set([...nameStems(input.cityName, true), ...nameStems(input.patronName, true)]);
+  const ownStems = [...nameStems(input.cityName, true), ...nameStems(input.patronName, true)];
+  const isOwn = (st: string): boolean => ownStems.some((o) => o.startsWith(st) || st.startsWith(o));
   const hits = (stems: string[]): boolean =>
-    stems.length > 0 && stems.every((st) => own.has(st) || new RegExp(`(^|[^А-ЯЁа-яёA-Za-z])${st}`).test(raw.brief)) && stems.some((st) => !own.has(st));
+    stems.some((st) => !isOwn(st)) && stems.every((st) => isOwn(st) || new RegExp(`(^|[^А-ЯЁа-яёA-Za-z])${st}`).test(raw.brief));
   const named = [
     ...input.objects.filter((o) => hits(nameStems(o.name, o.type === 'person'))).map((o) => o.name),
     ...(input.people ?? []).filter((n) => hits(nameStems(n, true))),

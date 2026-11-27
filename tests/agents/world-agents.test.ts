@@ -5,7 +5,7 @@ import { describe, expect, test } from 'vitest';
 import { FakeLlm, toolReply } from '../../src/adapters/llm/fake.js';
 import { fixedSettings, parseAgentSettings } from '../../src/agents/_shared/settings.js';
 import { writeScenario } from '../../src/agents/scenario-writer/run.js';
-import { describeWorldObjects, listProblem, planWorldObjects } from '../../src/agents/world-objects-genesis/run.js';
+import { describeWorldObjects, keepArcs, listProblem, planWorldObjects } from '../../src/agents/world-objects-genesis/run.js';
 import { objectPlan } from '../helpers/genesis.js';
 import { createObject } from '../../src/core/world/objects.js';
 import { parseScenario } from '../../src/core/world/scenario.js';
@@ -112,12 +112,16 @@ describe('посев и генезис объектов', () => {
     const ok = objectPlan(n);
     expect(listProblem(list(ok), { rules: r })).toBeNull();
     expect(listProblem(list(ok.slice(0, 3)), { rules: r })).toMatch(/объектов 3/);
-    expect(listProblem(list(ok.map((o, i) => (i === 5 ? { ...o, links: ['Нигде'] } : o))), { rules: r })).toMatch(/Нигде/);
+    // Связь к несуществующему просто не считается: объект без других связей становится сиротой.
+    expect(listProblem(list(ok.map((o, i) => (i === 5 ? { ...o, links: ['Нигде', ...(o.links as string[])] } : o))), { rules: r })).toBeNull();
     // Объект без связей: ни своих, ни чужих.
     const lonely = [...ok.slice(0, -1).map((o, i) => (i === n - 2 ? { ...o, links: ['Мастерская 0'] } : o)), { ...ok[n - 1]!, name: 'Сирота', links: [] }];
     expect(listProblem(list(lonely), { rules: r })).toMatch(/Сирота/);
     expect(listProblem(list(ok.map((o) => ({ ...o, arc: 'none' }))), { rules: r })).toMatch(/от двух до четырёх/);
     expect(listProblem(list(ok.map((o, i) => ({ ...o, arc: i < 2 ? 'danger' : 'none' }))), { rules: r })).toMatch(/одного рода/);
+    // Лишние большие вещи снимаются кодом: остаётся по одной каждого рода, всего не больше четырёх.
+    expect(keepArcs(['danger', 'danger', 'danger', 'mystery', 'promise', null, 'danger'])).toEqual(['danger', 'danger', null, 'mystery', 'promise', null, null]);
+    expect(listProblem(list(ok.map((o, i) => (i === 3 ? { ...o, name: 'Таэн' } : o))), { rules: r, people: ['Таэн'] })).toMatch(/жреца и сановников/);
     // Добор: малый список, связи к уже существующим, большие вещи не нужны.
     const topup = list([{ name: 'Колокол', type: 'object', links: ['Мастерская 0'], parent: '', hidden: false, arc: 'none' }]);
     expect(listProblem(topup, { rules: r, mustCover: ['колокол'], existing: ['Мастерская 0'] })).toBeNull();

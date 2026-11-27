@@ -93,8 +93,14 @@ const PEOPLE = 5;
 /** Шаги сборки города для полоски прогресса: номер шага и что сейчас делается. */
 export type GenesisProgress = (step: number, total: number, label: string) => Promise<void>;
 
-/** Портрет, список объектов, описания, сановники, бриф, сверка, стартовая сцена и готовый город. */
+/** Портрет, сановники, список объектов, описания, бриф, сверка, стартовая сцена и готовый город. */
 export const GENESIS_STEPS = 8;
+
+/** Есть ли имя в тексте отдельным словом, в любом падеже (по основе). */
+function mentions(text: string, name: string): boolean {
+  const stem = name.length > 4 ? name.slice(0, -1) : name;
+  return new RegExp(`(^|[^А-ЯЁа-яё])${stem}`).test(text);
+}
 
 /** Запасная стартовая сцена, если агент сцены сломался. */
 function fallbackIntro(cityName: string, patronName: string): { view: string; priestCall: string[] } {
@@ -140,7 +146,7 @@ export async function runGenesis(deps: FlowDeps, ownerId: string, onProgress?: G
   if (!draft?.seed || draft.status !== 'generating') return null;
   const world = await requireWorld(deps);
   const day = today(deps, world);
-  const names = await takeNames(deps, PEOPLE + 3);
+  const names = await takeNames(deps, PEOPLE + 10);
 
   const progress = async (step: number, label: string): Promise<void> => {
     try {
@@ -155,22 +161,23 @@ export async function runGenesis(deps: FlowDeps, ownerId: string, onProgress?: G
     await progress(0, 'начинаю…');
     // 1. Портрет: свободный текст о городе, скрытая правда, имя и жрец.
     const portrait = await writeCityPortrait(deps.agents, { seed, names, seasonRules: world.season.rules });
-    const text = { rules: deps.rules, cityName: portrait.cityName, portrait: portrait.portrait, hidden: portrait.hidden };
-    // 2–3. Объекты: список со связями, затем описания и вклад.
-    await progress(1, 'расставляю места, людей и обычаи…');
-    const plan = await planWorldObjects(deps.agents, text);
-    await progress(2, 'описываю каждое место…');
-    const objects = buildObjects(deps, await describeWorldObjects(deps.agents, { ...text, plan }), day);
-    // 4. Сановники.
-    await progress(3, 'выбираю сановников…');
+    // 2. Сановники: до объектов, чтобы среди объектов не было их двойников.
+    await progress(1, 'выбираю сановников…');
     const officers = await writeOfficerNatures(deps.agents, {
       rules: deps.rules,
       cityName: portrait.cityName,
       description: portrait.portrait,
-      names: names.filter((n) => n.name !== portrait.priest.name),
+      // Горожане, названные в портрете, станут объектами: сановникам нужны другие имена.
+      names: names.filter((n) => n.name !== portrait.priest.name && !mentions(`${portrait.portrait}\n${portrait.hidden}`, n.name)),
       taken: [portrait.priest.name],
     });
     const people = [portrait.priest.name, ...Object.values(officers).map((p) => p.name)];
+    const text = { rules: deps.rules, cityName: portrait.cityName, portrait: portrait.portrait, hidden: portrait.hidden, people };
+    // 3–4. Объекты: список со связями, затем описания и вклад.
+    await progress(2, 'расставляю места, людей и обычаи…');
+    const plan = await planWorldObjects(deps.agents, text);
+    await progress(3, 'описываю каждое место…');
+    const objects = buildObjects(deps, await describeWorldObjects(deps.agents, { ...text, plan }), day);
     // 5. Бриф: неизменное в городе, после объектов.
     await progress(4, 'записываю, чем живёт город…');
     const briefInput = {
@@ -243,18 +250,20 @@ export async function runGenesis(deps: FlowDeps, ownerId: string, onProgress?: G
       manaStart: deps.rules.mana.start,
       day,
     });
-    const patronWord = seed.patronGender === 'female' ? 'своей покровительнице' : 'своему покровителю';
+    const she = portrait.priest.gender === 'female';
+    const patronWord = seed.patronGender === 'female' ? 'своей богине-покровительнице' : 'своему богу-покровителю';
     appendChronicle(city, {
       id: newId(deps, 'chr'),
       day,
-      text: `Верховный жрец ${portrait.priest.name} подготовил ритуал и впервые воззвал к ${patronWord} ${seed.patronName}.`,
+      text: `${she ? 'Верховная жрица' : 'Верховный жрец'} ${portrait.priest.name} ${she ? 'подготовила' : 'подготовил'} ритуал, и город впервые воззвал к ${patronWord} по имени ${seed.patronName}.`,
       source: 'genesis',
       frontId: null,
     });
     for (const line of intro.priestCall) appendDialog(city, { role: 'priest', text: line, day, kind: 'news' });
     scheduleJob(city, { id: newId(deps, 'job'), kind: 'seed', dueDay: day + deps.rules.seeding.firstStoryDay });
 
-    const used = new Set(people);
+    // Имена из пула, ставшие горожанами-объектами, тоже заняты.
+    const used = new Set([...people, ...names.filter((n) => objects.some((o) => mentions(o.name, n.name))).map((n) => n.name)]);
     await returnNames(deps, names.filter((n) => !used.has(n.name)));
     const saved = await deps.storage.saveCity(city);
     await deps.storage.deleteDraft(ownerId);

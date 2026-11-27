@@ -51,6 +51,8 @@ async function main(): Promise<void> {
       return;
     }
     if (rest[0] === '--genesis') {
+      // Повтор после сбоя: готовая «рыба» снова идёт в сборку.
+      if (draft?.seed && draft.status === 'failed') await app.deps.storage.saveDraft({ ...draft, status: 'generating' });
       out(`\n_${GENESIS_TUTORIAL.replace(/\n\n/g, '_\n\n_')}_`);
       const t0 = Date.now();
       const city = await runGenesis(app.deps, OWNER, async (step, total, label) => {

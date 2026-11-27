@@ -386,7 +386,7 @@ fronts:
     logMax: 5
   genesisObjects:
     minCount: 30
-    maxCount: 45
+    maxCount: 70
     profileRange: 5
   # Словарь динамик: скелеты осложнений без конкретики города.
   #   class    — bound (бьёт по делу), side (бьёт по объекту), plus (удобный случай);
