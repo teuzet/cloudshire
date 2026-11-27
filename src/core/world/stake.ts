@@ -28,13 +28,20 @@ export function applyStake(
   rules: Rules,
   city: City,
   ops: readonly StakeOp[],
-  ctx: { day: number; newId: (prefix: string) => string; frontId?: string | null; /** Ставку исполняет случившаяся беда: её имя. Беда выводит объекты из строя, а не стирает. */ trouble?: string | null; /** Тяга истории: ложится на всё, что ставка породила или изменила. */ pull?: Pull | null },
+  ctx: { day: number; newId: (prefix: string) => string; frontId?: string | null; /** Ставку исполняет случившаяся беда: её имя. Беда выводит объекты из строя, а не стирает. */ trouble?: string | null; /** Тяга истории: ложится на всё, что ставка породила или изменила. */ pull?: Pull | null; /** Может ли ставка унести человека с должности: крупная история или воля покровителя. */ holderLoss?: boolean },
 ): StakeResult {
   const changes: Change[] = [];
   let resultId: string | null = null;
   const day = Math.max(0, Math.round(ctx.day));
 
   const zero = (): StatMap => ({ prosperity: 0, security: 0, knowledge: 0, influence: 0 });
+  /** Человек на должности: без права на потерю ставка его не трогает, с правом — уносит совсем (преемника назначит поток). */
+  const guarded = (obj: WorldObject): boolean => Boolean(obj.holds) && !ctx.holderLoss;
+  const takeHolder = (obj: WorldObject): void => {
+    for (const gone of deleteWithChildren(city, obj, day)) {
+      changes.push({ kind: 'object_removed', objectId: gone.id, name: gone.name, points: rawToPoints(city, gone.statEffect), hidden: gone.hidden });
+    }
+  };
   const keeps = (obj: WorldObject) => rules.fronts.objects.keepLost.includes(obj.type) && !obj.temporary && !obj.hidden;
   /** Вывести объект из строя: вклад снят (минус остаётся минусом), прежний запомнен. */
   const retire = (obj: WorldObject, points: StatMap, description: string, cause: string) => {
@@ -68,7 +75,7 @@ export function applyStake(
       }
       case 'revalue': {
         const obj = findObject(city, op.target);
-        if (!obj || obj.status !== 'active') break;
+        if (!obj || obj.status !== 'active' || guarded(obj)) break;
         const before = rawToPoints(city, obj.statEffect);
         const description = op.description?.trim() || obj.description;
         tug(obj, ctx.pull);
@@ -88,7 +95,11 @@ export function applyStake(
         break;
       case 'delete': {
         const obj = findObject(city, op.target);
-        if (!obj || obj.status !== 'active' || obj.protected) break;
+        if (!obj || obj.status !== 'active' || obj.protected || guarded(obj)) break;
+        if (obj.holds) {
+          takeHolder(obj);
+          break;
+        }
         if (ctx.trouble && keeps(obj)) {
           tug(obj, ctx.pull);
           if (!obj.out) retire(obj, zero(), obj.description, ctx.trouble);
@@ -102,7 +113,11 @@ export function applyStake(
       }
       case 'retire': {
         const obj = findObject(city, op.target);
-        if (!obj || obj.status !== 'active' || obj.protected || obj.out) break;
+        if (!obj || obj.status !== 'active' || obj.protected || obj.out || guarded(obj)) break;
+        if (obj.holds) {
+          takeHolder(obj);
+          break;
+        }
         if (keeps(obj)) retire(obj, zero(), obj.description, ctx.trouble ?? 'беда');
         else for (const gone of deleteWithChildren(city, obj, day)) changes.push({ kind: 'object_removed', objectId: gone.id, name: gone.name, points: rawToPoints(city, gone.statEffect), hidden: gone.hidden });
         break;

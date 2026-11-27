@@ -12,7 +12,7 @@
 import { newCity, type City } from '../core/city.js';
 import { appendChronicle, appendDialog } from '../core/chronicle.js';
 import { scheduleJob } from '../core/jobs.js';
-import { createOfficers, rollTemper } from '../core/officers.js';
+import { createHolder, createOfficers, rollTemper } from '../core/officers.js';
 import { createObject } from '../core/world/objects.js';
 import { genesisStats, objectContribution } from '../core/world/stats.js';
 import type { OnboardingDraft } from '../ports/storage.js';
@@ -230,6 +230,15 @@ export async function runGenesis(deps: FlowDeps, ownerId: string, onProgress?: G
       fallbackIntro(portrait.cityName, seed.patronName),
     );
 
+    // Жрец и сановники — люди-объекты города: их можно потерять, должность тогда занимает преемник.
+    const priestObj = createHolder(deps.rules, { id: newId(deps, 'obj'), post: 'priest', ...portrait.priest, day });
+    const officerList = createOfficers(deps.rules, officers).map((o) => {
+      const obj = createHolder(deps.rules, { id: newId(deps, 'obj'), post: o.office, name: o.name, gender: o.gender, nature: o.nature, day });
+      objects.push(obj);
+      // Характер-темп сановника бросается при рождении города и от должности не зависит.
+      return { ...o, temper: rollTemper(deps.random.rng), objectId: obj.id };
+    });
+    objects.push(priestObj);
     const city = newCity({
       id: newId(deps, 'city'),
       worldId: world.id,
@@ -240,9 +249,8 @@ export async function runGenesis(deps: FlowDeps, ownerId: string, onProgress?: G
       brief: brief.brief,
       unknowns: brief.unknowns,
       facts: [],
-      priest: portrait.priest,
-      // Характер-темп сановника бросается при рождении города и от должности не зависит.
-      officers: createOfficers(deps.rules, officers).map((o) => ({ ...o, temper: rollTemper(deps.random.rng) })),
+      priest: { ...portrait.priest, objectId: priestObj.id },
+      officers: officerList,
       objects,
       stats: stats.stats,
       statScale: stats.statScale,

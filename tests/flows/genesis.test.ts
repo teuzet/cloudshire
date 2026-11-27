@@ -5,6 +5,8 @@ import { onboardingMessage, runGenesis, GENESIS_STEPS } from '../../src/flows/on
 import { PORTRAIT, scriptGenesis } from '../helpers/genesis.js';
 import { lastUser, stand } from '../helpers/game.js';
 
+const findObjectName = (city: { objects: Array<{ id: string; name: string }> }, id: string | null | undefined) => city.objects.find((o) => o.id === id)?.name;
+
 describe('онбординг → генезис', () => {
   test('город поднимается из разговора, статы в бюджете, первое слово доходит', async () => {
     const s = await stand();
@@ -55,7 +57,13 @@ describe('онбординг → генезис', () => {
     ]);
     expect(JSON.stringify(s.llm.callsTo('world-objects-genesis')[2]!.messages)).toContain('колокол на скале');
     expect(city!.objects.map((o) => o.name)).toContain('Добор');
-    expect(city!.objects).toHaveLength(s.r.fronts.genesisObjects.minCount + 1);
+    // Объекты из списка, один добор и пять людей на должностях.
+    expect(city!.objects).toHaveLength(s.r.fronts.genesisObjects.minCount + 1 + 5);
+    const holders = city!.objects.filter((o) => o.holds);
+    expect(holders.map((o) => o.holds).sort()).toEqual(['chancellor', 'keeper', 'marshal', 'priest', 'treasurer']);
+    expect(holders.every((o) => o.type === 'person' && STAT_IDS.every((id) => o.statEffect[id] === 0))).toBe(true);
+    expect(city!.priest.objectId).toBe(holders.find((o) => o.holds === 'priest')!.id);
+    for (const o of city!.officers) expect(findObjectName(city!, o.objectId)).toBe(o.name);
     // Связи стали ссылками в обе стороны, скрытое и большие вещи на месте.
     const [first, second] = city!.objects;
     expect(first!.refs).toContain(second!.id);

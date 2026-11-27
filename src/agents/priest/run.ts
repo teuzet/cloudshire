@@ -92,6 +92,9 @@ function queueLines(city: City): string[] {
   });
 }
 
+/** Сколько дней новый жрец помнит, что он недавно на месте. */
+const NEW_PRIEST_DAYS = 60;
+
 /** Блок хода: всё, что жрец знает о городе сейчас. */
 export function priestTurnBlock(rules: Rules, city: City, day: number): string {
   const assignments = activeAssignments(city);
@@ -123,6 +126,10 @@ export function priestTurnBlock(rules: Rules, city: City, day: number): string {
     // Порядок под кэш промптов: что меняется реже, то выше; дата меняется каждый день и стоит последней.
     section('ОПИСАНИЕ ГОРОДА', city.brief),
     `Ты: ${city.priest.name} (${city.priest.gender === 'female' ? 'она' : 'он'}), ${city.priest.nature}`,
+    // Новый жрец знает, что недавно на месте и кого сменил.
+    city.priest.predecessor && day - city.priest.predecessor.day <= NEW_PRIEST_DAYS
+      ? `Ты недавно занял${city.priest.gender === 'female' ? 'а' : ''} место верховного жреца. Прежде на нём был человек по имени ${city.priest.predecessor.name}; что с ним случилось: ${city.priest.predecessor.cause}.`
+      : '',
     `Город: ${city.name}. Покровитель: ${city.patronName}.`,
     // Стартовая сцена: жрец позвал первым; первый ответ бога — радость, дела потом.
     city.dialog.some((d) => d.role === 'patron')

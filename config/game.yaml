@@ -109,6 +109,10 @@ genesis:
   statBudget: 220
   statMin: 35
   statMax: 75
+# Жрец и сановники смертны: человека на должности уносит только ставка крупной истории
+# (или воля покровителя). Должность не пустует: преемник встаёт в тот же день.
+succession:
+  lossScales: [crisis, rupture]
 officers:
   - office: treasurer
     statId: prosperity
