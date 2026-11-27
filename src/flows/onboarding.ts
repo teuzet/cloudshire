@@ -92,7 +92,8 @@ const PEOPLE = 5;
 /** Шаги сборки города для полоски прогресса: номер шага и что сейчас делается. */
 export type GenesisProgress = (step: number, total: number, label: string) => Promise<void>;
 
-export const GENESIS_STEPS = 6;
+/** Ядро, каждая пачка описания, объекты, сановники, бриф и готовый город. */
+export const GENESIS_STEPS = aspectBatches().length + 4;
 
 export async function runGenesis(deps: FlowDeps, ownerId: string, onProgress?: GenesisProgress): Promise<City | null> {
   const draft = await deps.storage.getDraft(ownerId);
@@ -114,14 +115,15 @@ export async function runGenesis(deps: FlowDeps, ownerId: string, onProgress?: G
     await progress(0, 'начинаю…');
     // 1. Ядро: имя, жрец, первое слово, стартовые факты.
     const core = await writeGenesisCore(deps.agents, { seed, names, seasonRules: world.season.rules });
-    await progress(1, 'описываю город…');
     // 2. Описание города: аспекты пачками.
     const aspects: Record<string, string> = {};
+    let done = 1;
     for (const batch of aspectBatches()) {
+      await progress(done++, 'описываю город…');
       Object.assign(aspects, await writeGenesisAspects(deps.agents, { seed, core, batch, already: aspects }));
     }
     const description = assembleDescription(aspects);
-    await progress(2, 'расставляю места, людей и обычаи…');
+    await progress(done, 'расставляю места, людей и обычаи…');
     // 3. Объекты мира из описания — из них же статы.
     const drafts = await extractWorldObjects(deps.agents, { rules: deps.rules, cityName: core.cityName, description });
     const objects = drafts.map((d) =>
@@ -135,7 +137,7 @@ export async function runGenesis(deps: FlowDeps, ownerId: string, onProgress?: G
       }),
     );
     const stats = genesisStats(deps.rules, objects.map((o) => o.statEffect));
-    await progress(3, 'выбираю сановников…');
+    await progress(done + 1, 'выбираю сановников…');
     // 4. Сановники.
     const officers = await writeOfficerNatures(deps.agents, {
       rules: deps.rules,
@@ -144,7 +146,7 @@ export async function runGenesis(deps: FlowDeps, ownerId: string, onProgress?: G
       names: names.filter((n) => n.name !== core.priest.name),
       taken: [core.priest.name],
     });
-    await progress(4, 'записываю, чем живёт город…');
+    await progress(done + 2, 'записываю, чем живёт город…');
     // 5. Бриф и канонические неизвестности, привязанные к объектам.
     const brief = await tryAgent(
       deps,

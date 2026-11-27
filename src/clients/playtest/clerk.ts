@@ -4,6 +4,7 @@
  *
  *   npm run clerk -- <имя прогона> <реплика игрока>     (пустая реплика — игрок только пришёл)
  *   npm run clerk -- <имя прогона> --state               черновик: питч, настроения, заданные вопросы
+ *   npm run clerk -- <имя прогона> --genesis             собрать город из готовой «рыбы» (настоящие модели)
  *
  *   PLAYTEST_DIR — папка плейтеста (по умолчанию ./playtest); прогон живёт в clerk/<имя>/:
  *   data/ (черновик), calls/ (вызовы агента), transcript.md
@@ -13,7 +14,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { MemoryNotifier } from '../../adapters/notifier/memory.js';
 import { clerkBook } from '../../agents/onboarding-guide/book.js';
-import { onboardingMessage } from '../../flows/onboarding.js';
+import { onboardingMessage, runGenesis } from '../../flows/onboarding.js';
+import { GENESIS_TUTORIAL, genesisProgressBar } from '../genesis-progress.js';
 import { buildApp, loadDotEnv, ROOT } from '../app.js';
 
 const OWNER = 'dev';
@@ -45,6 +47,20 @@ async function main(): Promise<void> {
       console.log(`темы: ${(state?.heard ?? []).join(', ') || '—'}`);
       console.log(`питч:\n${draft?.pitch ?? '—'}`);
       if (draft?.seed) console.log(`рыба: ${JSON.stringify(draft.seed, null, 2)}`);
+      return;
+    }
+    if (rest[0] === '--genesis') {
+      out(`\n_${GENESIS_TUTORIAL.replace(/\n\n/g, '_\n\n_')}_`);
+      const t0 = Date.now();
+      const city = await runGenesis(app.deps, OWNER, async (step, total, label) => {
+        out(`\n\`${genesisProgressBar(step, total, label).replace('\n', ' · ')}\` (${((Date.now() - t0) / 1000).toFixed(0)} с)`);
+      });
+      if (!city) return out('\n_Генезис не удался, подробности в calls/_');
+      fs.writeFileSync(path.join(dir, 'city.json'), JSON.stringify(city, null, 2));
+      out(`\n## ${city.name}\n\n**Жрец:** ${city.priest.name}\n\n**Сановники:** ${city.officers.map((o) => `${o.title} ${o.name}`).join('; ')}`);
+      out(`\n**Объекты (${city.objects.length}):**\n${city.objects.map((o) => `- ${o.name} (${o.type}): ${o.description}`).join('\n')}`);
+      out(`\n**Бриф:**\n\n${city.brief}`);
+      out(`\n**Первое слово жреца:**\n\n${city.dialog.at(-1)?.text ?? '—'}`);
       return;
     }
     const text = rest.join(' ').trim();
