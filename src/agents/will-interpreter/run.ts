@@ -11,7 +11,16 @@ export interface WillInput {
   order: string;
   /** «казначей Ада». */
   officer: string;
-  fronts: Array<{ id: string; title: string; description: string; kind: string; lead: string | null; hindrances: Array<{ name: string; description: string }> }>;
+  fronts: Array<{
+    id: string;
+    title: string;
+    description: string;
+    kind: string;
+    lead: string | null;
+    /** Что держит это дело: пока оно цело, дело идёт иначе (стоит, медленнее). */
+    holders?: string[];
+    hindrances: Array<{ name: string; description: string }>;
+  }>;
   projects: Array<{ id: string; title: string; next: string }>;
 }
 
@@ -38,6 +47,7 @@ function frontLine(f: WillInput['fronts'][number]): string {
   return [
     `- ${f.id} (${f.kind}): ${f.description}`,
     f.lead ? `Ведёт: ${f.lead}.` : 'Ведущего нет.',
+    f.holders?.length ? `Сейчас его держит: ${f.holders.join(', ')}.` : '',
     f.hindrances.length ? `Помехи на нём: ${f.hindrances.map((h) => `«${h.name}» — ${h.description}`).join('; ')}.` : '',
   ]
     .filter(Boolean)

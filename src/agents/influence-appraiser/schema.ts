@@ -21,7 +21,8 @@ export const influenceSchema = z.object({
     .array(
       z.object({
         id: z.string().trim().min(1),
-        stance: z.enum(['harms', 'helps']),
+        // Что сторона получает от готового результата: loses — теряет, gains — выигрывает.
+        stance: z.enum(['loses', 'gains']),
       }),
     )
     .max(8)

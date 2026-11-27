@@ -7,11 +7,11 @@ import { STAT_IDS, type Rules, type StatMap } from '../rules.js';
 import type { City, Pull, StakeOp, WorldObject } from '../city.js';
 import { addFact } from '../lore.js';
 import type { Change } from './changes.js';
-import { closeFront, findFront, frontGist, rollbackMilestone, settleProgress } from './fronts.js';
+import { closeFront, findFront, frontGist, rollbackMilestone, settleProgress, withOuter } from './fronts.js';
 import { diffPoints, pointsToRaw, rawToPoints } from './numbers.js';
 import { addObjectVersion, createObject, deleteWithChildren, findObject, tug } from './objects.js';
 import { applyHindrance, feasibleEffect, liftHindrance } from './hindrance.js';
-import { holdFront, objectsGone } from './links.js';
+import { holdFront, objectsGone, releaseFront } from './links.js';
 import { addToLedger, recomputeStats } from './stats.js';
 
 export interface StakeResult {
@@ -131,6 +131,11 @@ export function applyStake(
         changes.push(...holdFront(rules, city, obj, op, day));
         break;
       }
+      case 'release': {
+        const obj = findObject(city, op.target);
+        if (obj) changes.push(...releaseFront(rules, city, obj, op.frontId, op.effect, day));
+        break;
+      }
       case 'restore': {
         const obj = findObject(city, op.target);
         if (!obj || obj.status !== 'active' || !obj.out) break;
@@ -142,6 +147,19 @@ export function applyStake(
         tug(obj, ctx.pull);
         addObjectVersion(rules, obj, { description, statEffect: pointsToRaw(city, points), day });
         changes.push({ kind: 'object_back', objectId: obj.id, name: obj.name, delta: diffPoints(points, before), description: rewritten ? obj.description : null });
+        break;
+      }
+      case 'move': {
+        const obj = findObject(city, op.target);
+        if (!obj || obj.status !== 'active' || obj.out) break;
+        const to = op.parentId ? findObject(city, op.parentId) : null;
+        // Место должно быть в городе и не лежать внутри самого объекта.
+        if (op.parentId && (!to || to.status !== 'active' || withOuter(city, [to.id]).has(obj.id))) break;
+        if ((obj.parentId ?? null) === (to?.id ?? null)) break;
+        const from = obj.parentId ? findObject(city, obj.parentId) : null;
+        obj.parentId = to?.id ?? null;
+        tug(obj, ctx.pull);
+        changes.push({ kind: 'object_moved', objectId: obj.id, name: obj.name, from: from?.name ?? null, to: to?.name ?? null });
         break;
       }
       case 'reveal': {

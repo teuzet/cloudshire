@@ -50,12 +50,57 @@ interface OrderCase {
   office: Office;
   /** Приказы по очереди. */
   orders: string[];
+  /** Что дописать в город после посадки: объекты, которых нет в заготовке. */
+  setup?: (deps: FlowDeps, city: City) => void;
 }
+
+const named = (city: City, name: string) => city.objects.find((o) => o.name === name);
 
 export const ORDERS: OrderCase[] = [
   { name: 'цепи', scenario: 'lantern-isle', office: 'marshal', orders: ['Прикуй прибившийся островок цепями к причалам, чтобы его не унесло.'] },
   { name: 'ночная стража', scenario: 'arsonist', office: 'marshal', orders: ['Учреди ночную стражу с баграми и вёдрами, пусть обходит кварталы до рассвета.'] },
   { name: 'клятва наследников', scenario: 'house-feud', office: 'chancellor', orders: ['Сведи обоих наследников знатного дома в храме и возьми с них клятву мира до жатвы.'] },
+  {
+    name: 'сбить цепи',
+    scenario: 'lantern-isle',
+    office: 'marshal',
+    orders: ['Сбейте цепи, которыми островок прикован к причалам.'],
+    setup: (deps, city) => {
+      const tower = named(city, 'Башня на островке')!;
+      const isle = named(city, 'Островок с горящими фонарями')!;
+      const clock = city.fronts.find((f) => f.form === 'clock')!;
+      city.objects.push(createObject(deps.rules, { id: newId(deps, 'obj'), type: 'community', name: 'Бунтовщики в башне', description: 'Два десятка беглых засели в башне, грабят причалы и зовут к себе бедноту.', parentId: tower.id, day: 0 }));
+      const chains = createObject(deps.rules, { id: newId(deps, 'obj'), type: 'object', name: 'Причальные цепи', description: 'Толстые цепи держат островок у причалов.', parentId: isle.id, day: 0 });
+      chains.holds = [{ frontId: clock.id, effect: 'stop', day: 0 }];
+      city.objects.push(chains);
+    },
+  },
+  {
+    name: 'сбить цепи ночью',
+    scenario: 'lantern-isle',
+    office: 'marshal',
+    orders: ['Сбейте цепи островка ночью, с лодок, пока бунтовщики из башни ушли в набег.'],
+    setup: (deps, city) => ORDERS.find((c) => c.name === 'сбить цепи')!.setup!(deps, city),
+  },
+  {
+    name: 'вывезти книги',
+    scenario: 'lantern-isle',
+    office: 'keeper',
+    orders: ['Перевезите книги из башни в городскую библиотеку, пока островок не ушёл.'],
+    setup: (deps, city) => {
+      const tower = named(city, 'Башня на островке')!;
+      city.objects.push(
+        createObject(deps.rules, { id: newId(deps, 'obj'), type: 'resource', name: 'Книги башни', description: 'Полки старых книг на нижнем ярусе башни: травники, звёздные таблицы, записи о составах.', parentId: tower.id, statEffect: { knowledge: 6 }, day: 0 }),
+        createObject(deps.rules, { id: newId(deps, 'obj'), type: 'building', name: 'Городская библиотека', description: 'Каменная библиотека у храма.', statEffect: { knowledge: 5 }, day: 0 }),
+      );
+    },
+  },
+  {
+    name: 'стенки от огня',
+    scenario: 'arsonist',
+    office: 'marshal',
+    orders: ['Поставьте вокруг городского амбара и храма глиняные стенки от огня.'],
+  },
 ];
 
 /** Маленький обжитой город, чтобы агентам было на что опереться. */
@@ -92,6 +137,7 @@ async function runCase(c: OrderCase, base: Pick<FlowDeps, 'rules' | 'agents' | '
   const scenario = base.scenarios.find((s) => s.id === c.scenario);
   if (!scenario) throw new Error(`нет заготовки ${c.scenario}`);
   plantScenario(deps.rules, city, scenario, { day: 0, newId: (p) => newId(deps, p) });
+  c.setup?.(deps, city);
   refreshAllFronts(deps, city, 0);
 
   console.log(`\n══ ${c.name} (${c.scenario}) ══`);
@@ -107,6 +153,7 @@ async function runCase(c: OrderCase, base: Pick<FlowDeps, 'rules' | 'agents' | '
       console.log(`    влияния: ${JSON.stringify(f.links ?? [])}`);
       console.log(`    ставка: ${JSON.stringify(f.stake)}`);
       console.log(`    риск: ${f.risk}, отпечаток: ${f.footprint.map((x) => `${city.objects.find((o) => o.id === x.objectId)?.name} (${x.relation})`).join(', ')}`);
+      if (f.resist?.length) console.log(`    против: ${f.resist.map((r) => `${city.objects.find((o) => o.id === r.objectId)?.name}${r.answered ? ' (способ снимает)' : ''}`).join(', ')}`);
     }
   }
   if (warns.length) console.log(`Предупреждения:\n  ${warns.join('\n  ')}`);

@@ -2,13 +2,14 @@
  * Связи между объектами и фронтами, последствия которых код разносит сам.
  *
  *   живёт на — фронт живёт на объекте: объект исчез или выбыл, фронт кончился без ставки;
- *   держит   — объект держит фронт, пока цел: объект исчез или выбыл, фронт идёт как прежде.
+ *   держит   — объект держит фронт, пока цел: объект исчез, выбыл или изменился так, что больше
+ *              не держит, — фронт идёт как прежде.
  *
  * Волна конечна: она идёт от объекта к фронтам и от фронта к его дочерним фронтам, кругов тут нет.
  */
 
 import type { City, Front, FrontLink, HoldSpec, WorldObject } from '../city.js';
-import type { Rules } from '../rules.js';
+import type { HoldEffect, Rules } from '../rules.js';
 import { HELD_WORDS, type Change } from './changes.js';
 import { activeFronts, closeFront, findFront, frontGist, progressAt, recomputeRate } from './fronts.js';
 import { applyHold, liftHold, ownMotion } from './hold.js';
@@ -39,7 +40,7 @@ export function resultName(city: Pick<City, 'objects'>, front: Pick<Front, 'stak
     if (op.op === 'create' && op.result) return op.object.name;
   }
   for (const op of front.stake) {
-    if (op.op === 'hold' || op.op === 'revalue') return findObject(city, op.target)?.name ?? null;
+    if (op.op === 'hold' || op.op === 'revalue' || op.op === 'move' || op.op === 'restore') return findObject(city, op.target)?.name ?? null;
   }
   return null;
 }
@@ -105,6 +106,17 @@ export function holdFront(rules: Rules, city: City, obj: WorldObject, spec: Hold
   if (!hold) return [];
   recomputeRate(rules, city, front, day);
   return [{ kind: 'front_held', frontId: front.id, title: frontGist(front), objectId: obj.id, name: obj.name, effect: hold.effect, motion: ownMotion(front) }];
+}
+
+/** Объект изменился и больше не держит фронт: тот идёт как прежде. */
+export function releaseFront(rules: Rules, city: City, obj: WorldObject, frontId: string, effect: HoldEffect, day: number): Change[] {
+  const hold = obj.holds?.find((h) => h.frontId === frontId && h.effect === effect);
+  if (!hold) return [];
+  const front = findFront(city, frontId);
+  liftHold(rules, city, front, obj, hold, day);
+  if (!front || front.status !== 'active') return [];
+  recomputeRate(rules, city, front, day);
+  return [{ kind: 'front_freed', frontId: front.id, title: frontGist(front), objectId: obj.id, name: obj.name, effect: hold.effect, motion: ownMotion(front) }];
 }
 
 /**

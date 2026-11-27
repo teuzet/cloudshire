@@ -124,7 +124,7 @@ describe('вещь из приказа держит то, что идёт ряд
     s.llm
       .script('will-interpreter', toolReply('submit_will', { label: 'project', front_id: fire.id, goal: 'Учредить ночную стражу' }))
       .script('stage-planner', stages({ kind: 'new_object', type: 'organization', name: 'Ночная стража', description: 'Сотня дозорных с баграми обходит кварталы ночью.' }, 'Ночная стража'))
-      .script('influence-appraiser', influence([{ id: fire.id, effect: 'slows' }], [{ id: named(city, 'Ночные пожары').id, stance: 'harms' }]));
+      .script('influence-appraiser', influence([{ id: fire.id, effect: 'slows' }], [{ id: named(city, 'Ночные пожары').id, stance: 'loses' }]));
     expect((await playerWill(s.deps, city, 'marshal', 'Учредите ночную стражу против поджогов', 0)).ok).toBe(true);
     const deed = city.fronts.at(-1)!;
     const make = basePrice(s.r, 'organization');

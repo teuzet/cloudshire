@@ -135,7 +135,7 @@ const faithRow = table(
 );
 
 /** Откуда берётся объект в роль записи словаря динамик. */
-export const ROLE_SOURCES = [...RELATIONS, 'helper', 'site', 'result', 'nearby', 'same-type', 'struck'] as const;
+export const ROLE_SOURCES = [...RELATIONS, 'helper', 'site', 'result', 'nearby', 'same-type', 'struck', 'opponent'] as const;
 export type RoleSource = (typeof ROLE_SOURCES)[number];
 
 /** Двигатель истории: почему сюжет идёт вперёд. Мягкая ось режиссёра. */
@@ -239,6 +239,8 @@ export const rulesSchema = z.object({
       /** Якорь «на слове» стоит эту долю от прочного. */
       wordShare: z.number().positive().max(1),
       priceMin: z.number().positive(),
+      /** Смягчённый удар: какая доля прежнего удара остаётся, пока якорь цел. */
+      softenKeep: z.number().min(0).max(1),
     }),
     push: z.object({ share: z.number().positive(), min: z.number().positive() }),
     threat: z.object({ capacityShare: z.number().positive(), boundShare: z.number().positive(), capacityMin: z.number().positive() }),
@@ -273,6 +275,8 @@ export const rulesSchema = z.object({
       calmTroubles: z.number().int().positive(),
       /** Насколько тяга объекта умножает его вес в жребии осложнений: 1 + pullWeight × тяга. */
       pullWeight: z.number().nonnegative(),
+      /** Противник дела (сторона, которой результат во вред) охотнее становится участником осложнения: вес × opponentWeight. */
+      opponentWeight: z.number().positive(),
       /** Поток бед: сколько сановников и какую долю их времени беды должны занимать при хорошей игре. */
       pressure: z.object({ officers: z.number().positive(), share: z.number().min(0).max(1), verdict: z.enum(VERDICTS), windowMonths: z.number().int().positive() }),
       plusBase: z.number().min(0).max(1),

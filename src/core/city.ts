@@ -72,6 +72,12 @@ export interface HoldSpec {
   failStake?: StakeOp[];
 }
 
+/** Сторона, которая сопротивляется делу. */
+export interface Resist {
+  objectId: string;
+  answered: boolean;
+}
+
 /** Влияние результата дела на другой фронт, заявленное в приказе. */
 export interface FrontLink {
   frontId: string;
@@ -172,6 +178,10 @@ export type StakeOp =
   | { op: 'retire'; target: string; forever?: boolean }
   /** Существующий объект начинает держать фронт. */
   | ({ op: 'hold'; target: string } & HoldSpec)
+  /** Объект перестаёт держать фронт: изменился так, что больше на него не влияет. */
+  | { op: 'release'; target: string; frontId: string; effect: HoldEffect }
+  /** Перенести объект: теперь он находится в parentId (null — просто в городе) и уходит только с ним. */
+  | { op: 'move'; target: string; parentId: string | null }
   /** Вернуть выбывший объект к жизни с прежним вкладом. */
   | { op: 'restore'; target: string; description?: string | null }
   | { op: 'reveal'; target: string }
@@ -273,6 +283,13 @@ export interface Front {
    * за это назначил код. Хранится, чтобы одни слова всегда стоили одинаково.
    */
   links?: FrontLink[];
+  /**
+   * Стороны, которым готовый результат во вред и которые стоят на месте работ: они сопротивляются.
+   * answered — способ работы не даёт этой стороне помешать.
+   */
+  resist?: Resist[];
+  /** На сколько ступеней сопротивление подняло риск дела: вернётся, когда помешать станет некому. */
+  resistShift?: number;
   /** Материал посаженной истории. */
   script: {
     events: Array<{ id: string; description: string; fired: boolean }>;
@@ -337,7 +354,7 @@ export interface ProjectStage {
   title: string;
   work: string;
   result: {
-    kind: 'new_object' | 'change_object' | 'remove_object' | 'restore_object' | 'fact';
+    kind: 'new_object' | 'change_object' | 'remove_object' | 'restore_object' | 'move_object' | 'fact';
     objectId: string | null;
     type: ObjectType | null;
     name: string;

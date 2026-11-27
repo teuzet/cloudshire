@@ -124,8 +124,8 @@ describe('воля игрока', () => {
           { id: 'f3', effect: 'helps_work', basis: 'word' },
         ],
         sides: [
-          { id: 'o2', stance: 'harms' },
-          { id: 'o2', stance: 'helps' },
+          { id: 'o2', stance: 'loses' },
+          { id: 'o2', stance: 'gains' },
         ],
         reason: 'Слух мешает шайке.',
       }),

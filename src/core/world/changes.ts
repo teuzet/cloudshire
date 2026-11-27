@@ -25,6 +25,8 @@ export type Change =
   /** Выбывший объект вернулся к жизни. */
   | { kind: 'object_back'; objectId: string; name: string; delta: StatMap; description: string | null }
   | { kind: 'object_revealed'; objectId: string; name: string; description?: string }
+  /** Объект перенесли: теперь он находится в другом месте и уходит только вместе с ним. */
+  | { kind: 'object_moved'; objectId: string; name: string; from: string | null; to: string | null }
   | { kind: 'fact'; text: string }
   | { kind: 'linked'; a: string; b: string; names: [string, string] }
   | { kind: 'stats'; points: Partial<StatMap> }
@@ -123,7 +125,7 @@ export const HELD_WORDS: Record<'clock' | 'work', HeldWords> = {
     hurry: (t, n) => `Пока есть ${n}, быстрее надвигается: «${t}»`,
     riskier: (t, n) => `Пока есть ${n}, опаснее стало: «${t}»`,
     safer: (t, n) => `Пока есть ${n}, спокойнее стало: «${t}»`,
-    outcome: (t, n) => `Пока есть ${n}, иначе кончится: «${t}»`,
+    outcome: (t, n) => `Пока есть ${n}, слабее ударит: «${t}»`,
   },
   work: {
     stop: (t, n) => `Пока есть ${n}, стоит работа над «${t}»`,
@@ -191,6 +193,9 @@ export function describeChanges(rules: Pick<Rules, 'stats'>, changes: readonly C
       case 'object_revealed':
         out.push(`Открылось: ${c.name}${c.description ? ` — ${c.description}` : ''}`);
         break;
+      case 'object_moved':
+        out.push(`Перенесено: ${c.name}.${c.from ? ` Больше не находится здесь: ${c.from}.` : ''}${c.to ? ` Теперь находится здесь: ${c.to}.` : ''}`.replace(/\.$/, ''));
+        break;
       case 'fact':
         out.push(`Стало известно: ${c.text}`);
         break;
@@ -237,7 +242,7 @@ export function changedObjectIds(changes: readonly Change[]): string[] {
     if (c.kind === 'object_created' && !c.temporary) ids.add(c.objectId);
     if (c.kind === 'object_changed' && (magnitude(c.delta) > 0 || c.description)) ids.add(c.objectId);
     if (c.kind === 'object_removed' || c.kind === 'object_out' || c.kind === 'object_back') ids.add(c.objectId);
-    if (c.kind === 'object_revealed') ids.add(c.objectId);
+    if (c.kind === 'object_revealed' || c.kind === 'object_moved') ids.add(c.objectId);
   }
   return [...ids];
 }

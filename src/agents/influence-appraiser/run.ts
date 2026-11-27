@@ -23,11 +23,15 @@ export interface InfluenceInput {
     carrier: string | null;
     /** Что против этого на деле помогает или что двигает это дело. */
     helps: string[];
+    /** Как запись держит сейчас сам изменяемый предмет, если держит. */
+    now?: string | null;
   }>;
   /** Те, кто рядом и имеет свою волю. */
   sides: ObjectBrief[];
   /** Шаги замысла, которые будут после этой работы. */
   later?: string[];
+  /** Что из-за результата случится само: код делает это без чьих-либо усилий. Нужно, чтобы судить о сторонах. */
+  follows?: string[];
 }
 
 export interface Influence {
@@ -50,7 +54,7 @@ const EFFECT: Record<InfluenceWord, LinkEffect> = {
 };
 
 function nearbyLine(n: InfluenceInput['nearby'][number]): string {
-  return [`- ${n.id} (${n.kind}, ${n.people ? 'ведут люди' : 'надвигается само'}): ${n.description}`, n.carrier ? `Держится на: ${n.carrier}.` : '', n.helps.length ? `Что тут на деле помогает: ${n.helps.join('; ')}.` : '']
+  return [`- ${n.id} (${n.kind}, ${n.people ? 'ведут люди' : 'надвигается само'}): ${n.description}`, n.carrier ? `Держится на: ${n.carrier}.` : '', n.helps.length ? `Что тут на деле помогает: ${n.helps.join('; ')}.` : '', n.now ? `Сейчас так: ${n.now}.` : '']
     .filter(Boolean)
     .join(' ');
 }
@@ -61,12 +65,13 @@ export const influenceAppraiser: StructuredAgent<InfluenceInput, InfluenceRaw, I
   description: 'Как готовый результат работы влияет на то, что идёт рядом, и на тех, кто рядом.',
   schema: influenceSchema,
   system: () => composeSystem([], prompt, canon('setting')),
-  user: ({ work, result, nearby, sides, later }) =>
+  user: ({ work, result, nearby, sides, later, follows }) =>
     join(
       `Работа: «${work}»`,
       `Результат: ${result}`,
       later?.length ? `Впереди ещё шаги: ${later.map((t) => `«${t}»`).join('; ')}.` : null,
-      block('Что идёт рядом', nearby.map(nearbyLine).join('\n')),
+      follows?.length ? `Само случится: ${follows.join('; ')}.` : null,
+      block('Что идёт рядом', nearby.length ? nearby.map(nearbyLine).join('\n') : 'ничего'),
       block('Кто рядом', sides.length ? briefList(sides) : 'никого'),
     ),
   check: (raw, input) => {
@@ -96,7 +101,7 @@ export const influenceAppraiser: StructuredAgent<InfluenceInput, InfluenceRaw, I
     for (const s of raw.sides) {
       if (who.has(s.id)) continue;
       who.add(s.id);
-      sides.push({ objectId: s.id, stance: s.stance });
+      sides.push({ objectId: s.id, stance: s.stance === 'loses' ? 'harms' : 'helps' });
     }
     return { links, sides, reason: raw.reason };
   },

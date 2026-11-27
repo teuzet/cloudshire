@@ -16,8 +16,11 @@ import { emptyStatMap } from '../core/rules.js';
 import { realWaitLabel, spanBand, DAYS_PER_MONTH } from '../core/time.js';
 import { assignmentOf, closeAssignment, createAssignment, leadOf, officerOf } from '../core/world/assignments.js';
 import type { Change } from '../core/world/changes.js';
-import { activeFronts, childFronts, closeFront, createFront, daysLeft, deadlineOf, findFront, frontGist, occupyFootprint } from '../core/world/fronts.js';
-import { carriedWork, frontsOn, linkLines } from '../core/world/links.js';
+import { activeFronts, childFronts, closeFront, createFront, daysLeft, deadlineOf, findFront, frontGist, occupyFootprint, withOuter } from '../core/world/fronts.js';
+import { moveSaving, withNested } from '../core/world/patch.js';
+import { carriedWork, frontsOn, linkLines, resultName } from '../core/world/links.js';
+import { setResistance } from '../core/world/resist.js';
+import { holdersOf, ownMotion } from '../core/world/hold.js';
 import {
   basePrice,
   changeCapacity,
@@ -45,7 +48,7 @@ import { appraise, leadLabel, officerLabel, seal, situationOf, touchesOf, visibl
 import { record } from './chronicle.js';
 import { newId, tryAgent, type FlowDeps } from './context.js';
 import { refreshAllFronts } from './fronts.js';
-import { influenceOf, linkWords, withLinks } from './patch.js';
+import { answerResist, influenceOf, linkWords, resistOf, resistWords, withLinks } from './patch.js';
 import { answerHindrances, answerWords } from './hindrances.js';
 
 export type WillOutcome = { ok: true; say: string } | { ok: false; error: string; say: string };
@@ -92,6 +95,10 @@ function willInput(city: City) {
       kind: f.plus ? (deadlineOf(city, f) != null ? 'удобный случай со сроком' : 'удобный случай') : FORM_WORDS[f.form],
       description: f.description,
       lead: leadLabel(city, f).label,
+      // Что держит дело: без этого приказ «сбить цепи» не отличить от приказа «удержать островок».
+      holders: holdersOf(city, f.id)
+        .filter((h) => !h.obj.hidden)
+        .map((h) => h.obj.name),
       hindrances: attachedTo(city, f.id)
         .filter((o) => (o.attach?.rate ?? 0) < 0)
         .map((o) => ({ name: o.name, description: o.description })),
@@ -227,15 +234,37 @@ interface StagePlan {
   target: WorldObject | null;
 }
 
+/** Фронты, которые держит объект или вложенное в него: когда его не станет, они пойдут как прежде. */
+function heldBy(city: City, objectId: string): string[] {
+  const ids = withNested(city, [objectId]);
+  return [...new Set(city.objects.filter((o) => ids.has(o.id)).flatMap((o) => (o.holds ?? []).map((h) => h.frontId)))];
+}
+
+/** Что результат отпустит: оно пойдёт как прежде, и жрецу надо это знать заранее. */
+function freedWords(city: City, ids: readonly string[]): string {
+  const parts = [...new Set(ids)].flatMap((id) => {
+    const f = findFront(city, id);
+    if (!f || f.status !== 'active') return [];
+    return [ownMotion(f) === 'clock' ? `снова надвигается «${frontGist(f)}»` : `снова пойдёт работа над «${frontGist(f)}»`];
+  });
+  return parts.length ? `Когда будет готово, ${parts.join('; ')}.` : '';
+}
+
 /** Чем этап не может начаться: того, что он меняет, больше нет. */
 function stageBlock(city: City, stage: ProjectStage): string | null {
   const r = stage.result;
   if (r.kind === 'new_object' || r.kind === 'fact') return null;
   const target = r.objectId ? findObject(city, r.objectId) : null;
   if (!target || target.status !== 'active') {
-    return r.kind === 'restore_object' ? 'Того, что этот шаг должен был вернуть, в городе больше нет.' : r.kind === 'change_object' ? 'Того, что этот шаг должен был изменить, в городе больше нет.' : 'Того, что этот шаг должен был убрать, в городе больше нет.';
+    const verb = { restore_object: 'вернуть', change_object: 'изменить', remove_object: 'убрать', move_object: 'перенести' }[r.kind];
+    return `Того, что этот шаг должен был ${verb}, в городе больше нет.`;
   }
   if (r.kind === 'remove_object' && target.protected) return `${target.name} убрать нельзя: на этом держится сам город.`;
+  if (r.kind === 'move_object') {
+    if (target.out) return `${target.name} сейчас не действует: переносить нечего, сначала это нужно вернуть.`;
+    const to = r.parentId ? findObject(city, r.parentId) : null;
+    if (to && withOuter(city, [to.id]).has(target.id)) return `${target.name} нельзя перенести внутрь самого себя.`;
+  }
   return null;
 }
 
@@ -287,6 +316,20 @@ async function planStake(deps: FlowDeps, city: City, stage: ProjectStage, day: n
       const capacity = changeCapacity(deps.rules, target.type, before) + carriedWork(city, target, day);
       return { capacity, stake: [{ op: 'delete', target: target.id }], points: before, target };
     }
+    case 'move_object': {
+      if (!target || target.status !== 'active') return 'Того, что этот шаг должен был перенести, в городе больше нет.';
+      const to = r.parentId ? findObject(city, r.parentId) : null;
+      // Перенос стоит половину цены вида, а если уводит вещь из-под удара, ещё и спасённое (со скидкой сдерживания).
+      const { saved } = moveSaving(city, target.id, to?.status === 'active' ? to.id : null, day);
+      const h = deps.rules.fronts.hold;
+      const rescue = saved > 0 ? Math.max(h.priceMin, saved * h.price.stop) : 0;
+      return {
+        capacity: Math.round((basePrice(deps.rules, target.type) / 2 + rescue) * 100) / 100,
+        stake: [{ op: 'move', target: target.id, parentId: to?.status === 'active' ? to.id : null }],
+        points: emptyStatMap(),
+        target,
+      };
+    }
     case 'fact':
       return { capacity: basePrice(deps.rules, 'fact'), stake: [{ op: 'fact', text: r.description }], points: emptyStatMap(), target: null };
   }
@@ -313,9 +356,6 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
     [],
   );
   const footprint = links.filter((l) => findObject(city, l.objectId)?.status === 'active');
-  const risk: RiskStep = project.unattainable
-    ? 'impossible'
-    : (await tryAgent(deps, 'risk-appraiser', () => appraiseRisk(deps.agents, { work, touches: touchesOf(city, { footprint }) }), { step: 'normal' as const, reason: '' })).step;
 
   // Новое привязывается к тому, с чем работа его связала: по этим связям потом пойдёт эхо.
   const linked = footprint.filter((l) => l.relation === 'linked').map((l) => l.objectId);
@@ -323,21 +363,51 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
   // Как готовый результат повлияет на то, что идёт рядом: слово агента, цена и связи от кода.
   const kind = stage.result.kind;
   const target = stage.result.objectId ? (findObject(city, stage.result.objectId) ?? null) : null;
-  const parent = kind === 'new_object' && stage.result.parentId ? findObject(city, stage.result.parentId) : null;
+  // Новое место: куда кладут новое или куда переносят то, что есть.
+  const parent = (kind === 'new_object' || kind === 'move_object') && stage.result.parentId ? findObject(city, stage.result.parentId) : null;
   const resultType = kind === 'new_object' ? (stage.result.type ?? 'building') : target?.type;
+  const resultText = `${stage.result.name}${resultType ? ` (${TYPE_WORDS[resultType]})` : ''}: ${stage.result.description}`;
+  const patchIds = [...new Set([...footprint.map((l) => l.objectId), ...(target ? [target.id] : []), ...(parent?.status === 'active' ? [parent.id] : [])])];
+  // Что код сделает сам, когда результат будет готов: оценщику это нужно, чтобы судить о сторонах.
+  const settled =
+    kind === 'remove_object' && target
+      ? { ends: frontsOn(city, target).map((f) => f.id), freed: heldBy(city, target.id), saved: [] as string[] }
+      : kind === 'move_object' && target
+        ? { ends: [], freed: [], saved: moveSaving(city, target.id, parent?.status === 'active' ? parent.id : null, day).fronts }
+        : { ends: [], freed: [], saved: [] };
+  const gist = (id: string) => {
+    const f = findFront(city, id);
+    return f ? `«${frontGist(f)}»` : '';
+  };
+  const follows = [
+    ...settled.ends.map((id) => `кончится: ${gist(id)}`),
+    ...settled.freed.map((id) => {
+      const f = findFront(city, id);
+      return `${f && ownMotion(f) === 'clock' ? 'снова надвигается' : 'снова идёт как прежде'}: ${gist(id)}`;
+    }),
+    ...settled.saved.map((id) => `больше не унесёт это: ${gist(id)}`),
+  ];
   const patch = project.unattainable
     ? null
     : await influenceOf(deps, city, {
         work,
-        result: `${stage.result.name}${resultType ? ` (${TYPE_WORDS[resultType]})` : ''}: ${stage.result.description}`,
+        result: resultText,
         cause: stage.result.name,
-        objectIds: [...new Set([...footprint.map((l) => l.objectId), ...(target ? [target.id] : []), ...(parent?.status === 'active' ? [parent.id] : [])])],
+        objectIds: patchIds,
         named: project.answers ?? null,
-        // Что живёт на убираемом, кончится само: это уже в цене.
-        settled: kind === 'remove_object' && target ? frontsOn(city, target).map((f) => f.id) : [],
-        anchor: kind === 'new_object' || kind === 'change_object' || kind === 'restore_object',
+        // Что живёт на убираемом, кончится само, что оно держало, пойдёт как прежде, а от чего перенос
+        // уводит вещь, уже не унесёт её: это код делает сам, и это уже в цене.
+        settled: [...settled.ends, ...settled.freed, ...settled.saved],
+        follows,
+        // Вещь, которая остаётся (новая, изменённая, возвращённая, перенесённая), может держать.
+        anchor: kind !== 'remove_object' && kind !== 'fact',
         day,
         later: project.stages.slice(project.stageIndex + 1).map((st) => st.title),
+        // Изменённое или возвращённое правкой само уходит из-под смягчённого удара.
+        shielded: (kind === 'change_object' || kind === 'restore_object') && target ? [target.id] : [],
+        workers: footprint.filter((l) => l.relation === 'occupies').map((l) => l.objectId),
+        // Изменённое может перестать держать то, что держало: это решает оценщик по новому описанию.
+        held: kind === 'change_object' && target?.holds?.length ? { objectId: target.id, holds: target.holds } : undefined,
       });
 
   // Вклад результата оценивается после влияний: то, что он держит, уже посчитано своей ценой.
@@ -366,6 +436,23 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
   });
   city.objects.push(site);
 
+  // Кому готовое во вред и кто стоит на месте работ, тот сопротивляется: риск дела выше, пока способ это не снимет.
+  const lastStage = project.stageIndex >= project.stages.length - 1;
+  const resist = patch ? await resistOf(deps, city, { plan: patch, objectIds: patchIds, work, result: resultText, manner: lastStage ? will.manner : null }) : [];
+  const opposed = resist.some((r) => !r.answered);
+  // Риск самой работы. Противников оценщик риска не видит: за них код поднимет ступень сам, иначе они посчитаны дважды.
+  const against = new Set(resist.map((r) => r.objectId));
+  const risk: RiskStep = project.unattainable
+    ? 'impossible'
+    : (
+        await tryAgent(
+          deps,
+          'risk-appraiser',
+          () => appraiseRisk(deps.agents, { work, touches: touchesOf(city, { footprint: footprint.filter((l) => !against.has(l.objectId)) }) }),
+          { step: 'normal' as const, reason: '' },
+        )
+      ).step;
+
   const o = deps.rules.fronts.outcome;
   const twistNeeded = !stage.outcomeKnown && !project.unattainable && deps.random.rng() * (o.asPlanned + o.twist) >= o.asPlanned;
   const scale = scaleOf(deps.rules, capacity).milestones;
@@ -378,7 +465,8 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
     title: stage.title,
     description: stage.work,
     capacity,
-    milestones: project.unattainable ? Math.max(2, scale) : scale,
+    // Малому делу с противником нужна веха посередине: иначе сопротивлению негде сказаться.
+    milestones: project.unattainable || opposed ? Math.max(2, scale) : scale,
     pulseDay: pulse ? day + DAYS_PER_MONTH : null,
     stake,
     risk,
@@ -392,6 +480,7 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
     day,
   });
   if (patch?.links.length) front.links = patch.links;
+  setResistance(front, resist);
   city.fronts.push(front);
   const occupied = occupyFootprint(city, front);
   recomputeStats(city, deps.rules);
@@ -411,7 +500,6 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
       : 'fits';
   // Способ из приказа описывает замысел целиком. Пока идёт не последний этап, рассказчики его не видят:
   // иначе этап «разработать методику» описывают как уже построенную обсерваторию.
-  const lastStage = project.stageIndex >= project.stages.length - 1;
   createAssignment(city, { id: newId(deps, 'asg'), front, officer, text: lastStage ? (will.manner ?? '') : '', verdict, tempo: will.workTempo ?? 0, day });
   project.frontId = front.id;
   project.status = 'running';
@@ -437,10 +525,12 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
   return {
     ok: true,
     say: [
-      `${title(deps, officer)} начал работу: ${frontGist(front)}.`,
+      `${title(deps, officer)} ${officer.gender === 'female' ? 'начала' : 'начал'} работу: ${frontGist(front)}.`,
       waitWords(deps, city, front, day),
-      RISK_WORDS[risk],
+      RISK_WORDS[front.risk],
+      resistWords(city, front.resist ?? []),
       linkWords(city, front.links ?? [], stage.result.name),
+      freedWords(city, [...settled.freed, ...(patch?.released ?? [])]),
       names.length ? `На время работ заняты и дают городу меньше: ${names.join(', ')}.` : '',
       later.length ? `Это первый шаг замысла. Дальше, по слову покровителя: ${later.join('; ')}.` : '',
     ]
@@ -485,10 +575,21 @@ async function setStrategy(deps: FlowDeps, city: City, officer: Officer, will: W
   }
   if (will.projectTempo != null) front.tempo = will.projectTempo;
   const answer = await answerHindrances(deps, city, front, manner, day);
+  // Новый способ может снять сопротивление стороны или вернуть его.
+  if (front.resist?.length) {
+    const made = resultName(city, front);
+    setResistance(front, await answerResist(deps, city, front.resist, { work: front.description, result: made ?? frontGist(front), manner }));
+  }
   refreshAllFronts(deps, city, day);
   return {
     ok: true,
-    say: [`${title(deps, officer)} ведёт «${front.title || frontGist(front)}» так, как велено.`, answerWords(answer), waitWords(deps, city, front, day), leftBehind(city, officer, front, day)]
+    say: [
+      `${title(deps, officer)} ведёт «${front.title || frontGist(front)}» так, как велено.`,
+      answerWords(answer),
+      front.resist?.length ? `${resistWords(city, front.resist)} ${RISK_WORDS[front.risk]}` : '',
+      waitWords(deps, city, front, day),
+      leftBehind(city, officer, front, day),
+    ]
       .filter(Boolean)
       .join(' '),
   };

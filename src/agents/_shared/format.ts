@@ -43,7 +43,7 @@ const FRONT_FORM_WORDS: Record<Front['form'], string> = {
 
 /** Что якорь делает с фронтом, словами мира: для беды со сроком и для дела. */
 const HOLD_WORDS: Record<'clock' | 'work', Record<HoldEffect, string>> = {
-  clock: { stop: 'срок не идёт', slow: 'надвигается медленнее', hurry: 'надвигается быстрее', riskier: 'стало опаснее', safer: 'стало спокойнее', outcome: 'кончится иначе' },
+  clock: { stop: 'срок не идёт', slow: 'надвигается медленнее', hurry: 'надвигается быстрее', riskier: 'стало опаснее', safer: 'стало спокойнее', outcome: 'ударит слабее' },
   work: { stop: 'работа стоит', slow: 'работа идёт медленнее', hurry: 'работа идёт быстрее', riskier: 'работа опаснее', safer: 'работа безопаснее', outcome: 'кончится иначе' },
 };
 
@@ -103,6 +103,12 @@ export function frontLine(
   // Что дело переменит рядом, когда будет готово: это уже оплачено его работой.
   const after = front.links?.length ? linkLines(city, front.links, resultName(city, front) ?? 'это') : [];
   if (after.length) parts.push(`когда будет готово: ${after.join(', ')}`);
+  // Кто против дела: готовое ему во вред. Скрытых жрец не знает.
+  for (const r of front.resist ?? []) {
+    const side = findObject(city, r.objectId);
+    if (!side || side.status !== 'active' || side.hidden || side.out) continue;
+    parts.push(r.answered ? `${side.name} против, но нынешний способ работы не даёт помешать` : `противится: ${side.name}`);
+  }
   if (officer) parts.push(`ведёт ${officer.title.toLowerCase()} ${officer.name}`);
   // Что мешает делу и как: словами мира. Как с этим быть, решает покровитель.
   for (const obj of hindrancesOf(city, front.id)) {

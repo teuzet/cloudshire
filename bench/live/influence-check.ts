@@ -254,7 +254,7 @@ const WILL: WillCase[] = [
   { name: 'быки под скалой', order: 'Подопри Сизую скалу каменными быками.', expect: { label: ['project'], frontId: ['f4'] } },
   { name: 'увести людей из-под скалы', order: 'Выведи гончаров из домов под скалой, пока она не легла.', expect: { label: ['project', 'strategy'], frontId: ['f4'] } },
   { name: 'вторая артель на собор', order: 'Найми вторую артель на стройку собора.', officer: 'маршал Бран (мужчина)', expect: { label: ['deed'], frontId: ['f5'] } },
-  { name: 'купить семена', order: 'Купи у бродячих торговцев семена, пока они не ушли.', expect: { label: ['strategy'], frontId: ['f6'] } },
+  { name: 'купить семена', order: 'Купи у бродячих торговцев семена, пока они не ушли.', expect: { label: ['strategy', 'deed'], frontId: ['f6'] } },
   { name: 'теплица для семян', order: 'Построй теплицу для горных трав, что продают бродячие торговцы.', expect: { label: ['project'], frontId: ['f6', null] } },
   { name: 'ополчение у кромки', order: 'Собери из рыбаков ополчение с гарпунами, пусть стережёт наши воды от китобоев.', expect: { label: ['project'], frontId: ['f2'] } },
   { name: 'собор не торопить', order: 'С собором не спешите, берегите людей.', expect: { label: ['tempo'], frontId: ['f5'] } },

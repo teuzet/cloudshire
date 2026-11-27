@@ -93,6 +93,13 @@ function roleObjects(city: City, front: Front, dynamic: Dynamic, resultId: strin
         }
         break;
       }
+      case 'opponent':
+        for (const r of front.resist ?? []) {
+          if (r.answered) continue;
+          const obj = findObject(city, r.objectId);
+          if (obj && !obj.hidden) push(obj, 'противится работе: готовый результат ему во вред');
+        }
+        break;
       case 'same-type': {
         const result = resultId ? findObject(city, resultId) : null;
         if (!result) break;
@@ -151,7 +158,9 @@ export function candidateWeight(rules: Rules, city: DrawCity, c: Candidate, day:
   const recency = 1 + Math.min(2, (2 * idle) / d.freshDays);
   // Объект с тягой (история его породила или изменила) охотнее становится участником следующего события.
   const pull = c.object ? 1 + d.pullWeight * pullOf(c.object, day) : 1;
-  return fresh * recency * pull * varietyWeight(rules, city, dynamicTags(c.dynamic), day);
+  // Противник дела ждёт своего часа: его осложнение выпадает охотнее прочих.
+  const opponent = c.dynamic.from.includes('opponent') ? d.opponentWeight : 1;
+  return fresh * recency * pull * opponent * varietyWeight(rules, city, dynamicTags(c.dynamic), day);
 }
 
 /** Взвешенная перестановка: первый элемент — взвешенный жребий, второй — жребий среди оставшихся и так далее. */

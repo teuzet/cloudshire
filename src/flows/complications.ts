@@ -5,6 +5,7 @@
  * коротким текстом, код считает ёмкость, срок и ставку.
  */
 
+import { reapplyResistance } from '../core/world/resist.js';
 import type { City, Front, StakeOp, StoryTags, WorldObject } from '../core/city.js';
 import type { Dynamic, Shape, StatMap } from '../core/rules.js';
 import { DAYS_PER_MONTH } from '../core/time.js';
@@ -474,6 +475,8 @@ export async function refreshAfterChange(
           { step: front.risk, reason: '' },
         )
       ).step;
+      // Сопротивление сторон ложится поверх новой оценки.
+      reapplyResistance(front);
       // Месячный бросок есть только у ступени «невозможно».
       if (front.risk !== 'impossible') front.pulseDay = null;
       else front.pulseDay ??= day + DAYS_PER_MONTH;

@@ -40,7 +40,7 @@ function remember(deps: FlowDeps, city: City, changes: readonly Change[], text: 
   const ids = new Set<string>();
   for (const c of changes) {
     if (c.kind === 'object_created' && (c.temporary || c.hidden)) continue;
-    if (c.kind === 'object_created' || c.kind === 'object_changed' || c.kind === 'object_out' || c.kind === 'object_back' || c.kind === 'object_removed' || c.kind === 'object_revealed') ids.add(c.objectId);
+    if (c.kind === 'object_created' || c.kind === 'object_changed' || c.kind === 'object_out' || c.kind === 'object_back' || c.kind === 'object_removed' || c.kind === 'object_revealed' || c.kind === 'object_moved') ids.add(c.objectId);
   }
   for (const id of ids) {
     const obj = city.objects.find((o) => o.id === id);
