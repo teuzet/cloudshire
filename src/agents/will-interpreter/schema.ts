@@ -18,6 +18,7 @@ export const willSchema = z.object({
   manner: z.string().trim().max(400).nullable().default(null),
   project_tempo: tempo,
   work_tempo: tempo,
+  report: z.boolean().nullable().default(null),
 });
 
 export type WillRaw = z.infer<typeof willSchema>;

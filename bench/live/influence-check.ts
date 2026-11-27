@@ -229,7 +229,7 @@ interface WillCase {
   name: string;
   order: string;
   officer?: string;
-  expect: { label: string[]; frontId?: Array<string | null> };
+  expect: { label: string[]; frontId?: Array<string | null>; report?: boolean };
 }
 
 const FRONTS: WillInput['fronts'] = [
@@ -258,6 +258,10 @@ const WILL: WillCase[] = [
   { name: 'теплица для семян', order: 'Построй теплицу для горных трав, что продают бродячие торговцы.', expect: { label: ['project'], frontId: ['f6', null] } },
   { name: 'ополчение у кромки', order: 'Собери из рыбаков ополчение с гарпунами, пусть стережёт наши воды от китобоев.', expect: { label: ['project'], frontId: ['f2'] } },
   { name: 'собор не торопить', order: 'С собором не спешите, берегите людей.', expect: { label: ['tempo'], frontId: ['f5'] } },
+  { name: 'кто за обвесом', order: 'Разузнай, кто из купцов подбивает остальных обвешивать.', expect: { label: ['project'], frontId: ['f1'] } },
+  { name: 'что со скалой', order: 'Выясни, отчего сползает Сизая скала.', expect: { label: ['project'], frontId: ['f4'] } },
+  { name: 'маяк с докладом', order: 'Поставь маяк на кромке, только докладывай мне после каждого шага.', expect: { label: ['project'], frontId: [null], report: true } },
+  { name: 'маяк без доклада', order: 'Поставь маяк на кромке.', expect: { label: ['project'], frontId: [null], report: false } },
 ];
 
 interface ContributionCase {
@@ -331,7 +335,7 @@ async function runWill(deps: AgentDeps, repeat: number): Promise<number> {
   for (const c of WILL) {
     for (let i = 0; i < repeat; i++) {
       const out = await interpretWill(deps, { order: c.order, officer: c.officer ?? 'хранитель Ивер (мужчина)', fronts: FRONTS, projects: [] });
-      const ok = c.expect.label.includes(out.label) && (!c.expect.frontId || c.expect.frontId.includes(out.frontId));
+      const ok = c.expect.label.includes(out.label) && (!c.expect.frontId || c.expect.frontId.includes(out.frontId)) && (c.expect.report == null || Boolean(out.report) === c.expect.report);
       if (!ok) bad++;
       console.log(`${ok ? '✓' : '✗'} ${c.name}: ${out.label} ${out.frontId ?? '—'} «${out.goal}»${out.manner ? ` [${out.manner}]` : ''}${ok ? '' : `\n    ждали ${c.expect.label.join('|')} ${c.expect.frontId?.map((f) => f ?? '—').join('|') ?? ''}`}`);
     }

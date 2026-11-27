@@ -84,7 +84,7 @@ describe('воля игрока', () => {
       toolReply('submit_will', { label: 'deed', front_id: 'f1', deed_kind: 'push', goal: 'Привезти гранит', work_tempo: 'hurry' }),
     );
     const will = await interpretWill(deps(llm), { order: 'Привези гранит, и поскорее', officer: 'маршал Борислав', fronts, projects: [] });
-    expect(will).toEqual({ label: 'deed', frontId: 'f1', projectId: null, deedKind: 'push', goal: 'Привезти гранит', manner: null, projectTempo: null, workTempo: 1 });
+    expect(will).toEqual({ label: 'deed', frontId: 'f1', projectId: null, deedKind: 'push', goal: 'Привезти гранит', manner: null, projectTempo: null, workTempo: 1, report: false });
     expect(llm.callsTo('will-interpreter')).toHaveLength(2);
     expect(lastUser(llm, 'will-interpreter')).not.toContain('Стройка башни');
     expect(lastUser(llm, 'will-interpreter')).toContain('- f1 (');

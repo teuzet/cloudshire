@@ -14,10 +14,11 @@ import { findOfficer, officeDef } from '../core/officers.js';
 import type { Office, RiskStep, StatMap, Tempo, Verdict } from '../core/rules.js';
 import { emptyStatMap } from '../core/rules.js';
 import { realWaitLabel, spanBand, DAYS_PER_MONTH } from '../core/time.js';
-import { assignmentOf, closeAssignment, createAssignment, leadOf, officerOf } from '../core/world/assignments.js';
+import { assignmentOf, canDetour, closeAssignment, createAssignment, detour, leadOf, officerOf } from '../core/world/assignments.js';
 import type { Change } from '../core/world/changes.js';
 import { activeFronts, childFronts, closeFront, createFront, daysLeft, deadlineOf, findFront, frontGist, occupyFootprint, withOuter } from '../core/world/fronts.js';
 import { moveSaving, withNested } from '../core/world/patch.js';
+import { hiddenAbout, prizeFronts, type HiddenAbout } from '../core/world/hidden.js';
 import { carriedWork, frontsOn, linkLines, resultName } from '../core/world/links.js';
 import { setResistance } from '../core/world/resist.js';
 import { holdersOf, ownMotion } from '../core/world/hold.js';
@@ -72,7 +73,21 @@ function title(deps: FlowDeps, officer: Officer): string {
 function busy(deps: FlowDeps, city: City, officer: Officer): WillOutcome {
   const a = assignmentOf(city, officer);
   const front = a ? findFront(city, a.frontId) : null;
-  return refuse('officer_busy', `${title(deps, officer)} уже занят${front ? `: ${frontGist(front)}` : ''}. Сначала снять его с этого дела или взять другого.`);
+  const she = officer.gender === 'female';
+  const now = `${title(deps, officer)} уже ${she ? 'занята' : 'занят'}${front ? `: ${frontGist(front)}` : ''}.`;
+  // Отвлечься можно на малое дело и только раз: с малого дела не отвлекаются.
+  const more = a?.returnTo
+    ? `Это малое дело, ради него ${she ? 'она уже отвлеклась' : 'он уже отвлёкся'} от большого; пусть закончит, или возьмётся другой.`
+    : `Отвлечься ${she ? 'она' : 'он'} может только на малое дело, а это большое. Сначала снять с нынешнего дела или взять другого.`;
+  return refuse('officer_busy', `${now} ${more}`);
+}
+
+/** Что жрец скажет, когда занятый сановник отвлекается на малое дело. Пусто — сановник свободен. */
+function detourWords(deps: FlowDeps, city: City, officer: Officer): string {
+  const a = assignmentOf(city, officer);
+  const front = a ? findFront(city, a.frontId) : null;
+  if (!front) return '';
+  return `Ради этого ${officer.gender === 'female' ? 'она' : 'он'} отвлекается от дела «${frontGist(front)}»: оно постоит и пойдёт дальше само, когда малое будет сделано.`;
 }
 
 /** Сколько ждать: словами и в реальном времени. */
@@ -161,7 +176,8 @@ function doomedStage(goal: string, planned: PlannedStage[] | null): ProjectStage
 }
 
 async function newProject(deps: FlowDeps, city: City, officer: Officer, will: Will, day: number): Promise<WillOutcome> {
-  if (officer.assignmentId) return busy(deps, city, officer);
+  // Занятый сановник берётся только за малое: насколько дело мало, станет ясно по его цене.
+  if (officer.assignmentId && !canDetour(city, officer)) return busy(deps, city, officer);
   const objects = visibleBriefs(city);
   const ruling = await tryAgent(
     deps,
@@ -199,6 +215,7 @@ async function newProject(deps: FlowDeps, city: City, officer: Officer, will: Wi
   const planned = await tryAgent(deps, 'stage-planner', () => planStages(deps.agents, { goal: ruling.goal, gaps: ruling.gaps, objects }), null);
   if (!planned && !unattainable) return refuse('failed', 'Волю не удалось облечь в дело. Пусть покровитель скажет иначе.');
   const stages: ProjectStage[] = unattainable ? [doomedStage(ruling.goal, planned)] : (planned ?? []);
+  if (officer.assignmentId && (unattainable || stages.length > 1)) return busy(deps, city, officer);
 
   const project: Project = {
     id: newId(deps, 'proj'),
@@ -211,6 +228,10 @@ async function newProject(deps: FlowDeps, city: City, officer: Officer, will: Wi
     status: 'waiting',
     createdDay: day,
     answers: will.frontId,
+    report: Boolean(will.report),
+    manner: will.manner,
+    projectTempo: will.projectTempo,
+    workTempo: will.workTempo,
   };
   city.projects.push(project);
   const started = await startStage(deps, city, project, officer, will, day);
@@ -223,7 +244,41 @@ async function continueProject(deps: FlowDeps, city: City, officer: Officer, wil
   const project = waiting.find((p) => p.id === will.projectId) ?? (waiting.length === 1 ? waiting[0] : null);
   if (!project) return refuse('no_project', 'Замысла, который ждёт продолжения, нет. Если это новое дело, пусть покровитель назовёт цель.');
   if (officer.assignmentId) return busy(deps, city, officer);
-  return startStage(deps, city, project, officer, will, day);
+  // Новое слово о способе и темпе остаётся с замыслом и на следующие шаги.
+  if (will.manner) project.manner = will.manner;
+  if (will.projectTempo != null) project.projectTempo = will.projectTempo;
+  if (will.workTempo != null) project.workTempo = will.workTempo;
+  if (will.report) project.report = true;
+  return startStage(deps, city, project, officer, { ...will, manner: project.manner ?? null, projectTempo: project.projectTempo ?? null, workTempo: project.workTempo ?? null }, day);
+}
+
+/**
+ * Следующий шаг замысла начинается сам, если покровитель не велел докладывать: тот же сановник,
+ * тот же способ и темп. Пусто — шаг может начаться; иначе причина, почему замысел ждёт слова.
+ */
+export function autoStageBlock(city: City, project: Project, officer: Officer | null): string | null {
+  if (project.status !== 'waiting') return 'замысел не ждёт продолжения';
+  if (project.report) return 'покровитель велел докладывать между шагами';
+  if (!officer || officer.assignmentId) return 'сановник занят другим';
+  const stage = project.stages[project.stageIndex];
+  if (!stage) return 'шагов больше нет';
+  return stageBlock(city, stage, project.answers ?? null);
+}
+
+export async function autoStage(deps: FlowDeps, city: City, project: Project, officer: Officer, day: number): Promise<WillOutcome> {
+  const will: Will = {
+    label: 'continue',
+    frontId: project.answers ?? null,
+    projectId: project.id,
+    deedKind: null,
+    goal: project.goal,
+    manner: project.manner ?? null,
+    projectTempo: project.projectTempo ?? null,
+    workTempo: project.workTempo ?? null,
+  };
+  const out = await startStage(deps, city, project, officer, will, day);
+  refreshAllFronts(deps, city, day);
+  return out;
 }
 
 interface StagePlan {
@@ -250,10 +305,24 @@ function freedWords(city: City, ids: readonly string[]): string {
   return parts.length ? `Когда будет готово, ${parts.join('; ')}.` : '';
 }
 
+/** Узнавать нечего: жрец говорит это до начала дела, как о недостижимом. */
+function revealBlock(city: City, about: HiddenAbout): string | null {
+  const front = about.frontId ? findFront(city, about.frontId) : null;
+  const obj = about.objectId ? findObject(city, about.objectId) : null;
+  if (!front && !obj) return 'Неясно, о чём узнавать. Пусть покровитель назовёт дело или место.';
+  if (hiddenAbout(city, about).length) return null;
+  const subject = front ? `«${frontGist(front)}»` : obj!.name;
+  // Остальное — приз идущего дела: его открывает только успех самого дела.
+  const prize = prizeFronts(city, about)[0];
+  if (prize) return `Расспросами больше ничего не узнать (${subject}): остальное откроется, только когда будет доведено до конца «${frontGist(prize)}».`;
+  return `Узнавать больше нечего: всё, что можно узнать здесь (${subject}), городу уже известно.`;
+}
+
 /** Чем этап не может начаться: того, что он меняет, больше нет. */
-function stageBlock(city: City, stage: ProjectStage): string | null {
+function stageBlock(city: City, stage: ProjectStage, about: string | null): string | null {
   const r = stage.result;
   if (r.kind === 'new_object' || r.kind === 'fact') return null;
+  if (r.kind === 'reveal') return revealBlock(city, { frontId: about, objectId: r.objectId });
   const target = r.objectId ? findObject(city, r.objectId) : null;
   if (!target || target.status !== 'active') {
     const verb = { restore_object: 'вернуть', change_object: 'изменить', remove_object: 'убрать', move_object: 'перенести' }[r.kind];
@@ -272,7 +341,7 @@ function stageBlock(city: City, stage: ProjectStage): string | null {
  * Цена и ставка этапа. `apart` — что результат переменит в идущем рядом: это посчитано отдельной ценой,
  * и оценщик вклада его не считает второй раз.
  */
-async function planStake(deps: FlowDeps, city: City, stage: ProjectStage, day: number, apart: readonly string[] = []): Promise<StagePlan | string> {
+async function planStake(deps: FlowDeps, city: City, stage: ProjectStage, day: number, apart: readonly string[] = [], about: string | null = null): Promise<StagePlan | string> {
   const r = stage.result;
   const target = r.objectId ? findObject(city, r.objectId) : null;
   switch (r.kind) {
@@ -332,6 +401,9 @@ async function planStake(deps: FlowDeps, city: City, stage: ProjectStage, day: n
     }
     case 'fact':
       return { capacity: basePrice(deps.rules, 'fact'), stake: [{ op: 'fact', text: r.description }], points: emptyStatMap(), target: null };
+    case 'reveal':
+      // Узнать скрытое стоит как факт: что именно откроется, решит код в день готовности.
+      return { capacity: basePrice(deps.rules, 'fact'), stake: [{ op: 'uncover', frontId: about, objectId: target?.status === 'active' ? target.id : null }], points: emptyStatMap(), target: null };
   }
 }
 
@@ -342,7 +414,7 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
     project.status = 'done';
     return refuse('no_stage', 'Этот замысел уже доведён до конца.');
   }
-  const lost = stageBlock(city, stage);
+  const lost = stageBlock(city, stage, project.answers ?? null);
   if (lost) {
     project.status = 'cancelled';
     return refuse('stage_lost', lost);
@@ -387,9 +459,11 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
     }),
     ...settled.saved.map((id) => `больше не унесёт это: ${gist(id)}`),
   ];
-  const patch = project.unattainable
-    ? null
-    : await influenceOf(deps, city, {
+  // Знание само ничего не держит и не меняет: на что оно повлияет, решит следующий приказ.
+  const patch =
+    project.unattainable || kind === 'reveal'
+      ? null
+      : await influenceOf(deps, city, {
         work,
         result: resultText,
         cause: stage.result.name,
@@ -411,7 +485,7 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
       });
 
   // Вклад результата оценивается после влияний: то, что он держит, уже посчитано своей ценой.
-  const plan = await planStake(deps, city, stage, day, patch ? linkLines(city, patch.links, stage.result.name) : []);
+  const plan = await planStake(deps, city, stage, day, patch ? linkLines(city, patch.links, stage.result.name) : [], project.answers ?? null);
   if (typeof plan === 'string') {
     project.status = 'cancelled';
     return refuse('stage_lost', plan);
@@ -422,6 +496,11 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
   const price = patch?.price ?? 0;
   const lasting = kind === 'new_object' || kind === 'change_object' || kind === 'restore_object';
   const capacity = lasting && price > 0 ? patchCapacity(own, plan.capacity - own, price) : Math.round((plan.capacity + price) * 100) / 100;
+  // Занятый сановник отвлекается только на малое: этап замысла не дороже предела.
+  if (officer.assignmentId && (project.stages.length > 1 || capacity > deps.rules.fronts.detour.maxCapacity)) {
+    project.status = 'cancelled';
+    return busy(deps, city, officer);
+  }
   const linkedStake = plan.stake.map((op): StakeOp => (op.op === 'create' ? { ...op, object: { ...op.object, refs: linked } } : op));
   const stake = patch ? withLinks(linkedStake, patch, plan.target?.id ?? null) : linkedStake;
 
@@ -454,7 +533,8 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
       ).step;
 
   const o = deps.rules.fronts.outcome;
-  const twistNeeded = !stage.outcomeKnown && !project.unattainable && deps.random.rng() * (o.asPlanned + o.twist) >= o.asPlanned;
+  // Узнанное подвоха не бывает: что откроется, и так решает мир.
+  const twistNeeded = !stage.outcomeKnown && kind !== 'reveal' && !project.unattainable && deps.random.rng() * (o.asPlanned + o.twist) >= o.asPlanned;
   const scale = scaleOf(deps.rules, capacity).milestones;
   const pulse = risk === 'impossible' || Boolean(project.unattainable);
 
@@ -500,7 +580,8 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
       : 'fits';
   // Способ из приказа описывает замысел целиком. Пока идёт не последний этап, рассказчики его не видят:
   // иначе этап «разработать методику» описывают как уже построенную обсерваторию.
-  createAssignment(city, { id: newId(deps, 'asg'), front, officer, text: lastStage ? (will.manner ?? '') : '', verdict, tempo: will.workTempo ?? 0, day });
+  const away = detourWords(deps, city, officer);
+  detour(city, { id: newId(deps, 'asg'), front, officer, text: lastStage ? (will.manner ?? '') : '', verdict, tempo: will.workTempo ?? 0, day });
   project.frontId = front.id;
   project.status = 'running';
   refreshAllFronts(deps, city, day);
@@ -526,6 +607,7 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
     ok: true,
     say: [
       `${title(deps, officer)} ${officer.gender === 'female' ? 'начала' : 'начал'} работу: ${frontGist(front)}.`,
+      away,
       waitWords(deps, city, front, day),
       RISK_WORDS[front.risk],
       resistWords(city, front.resist ?? []),
@@ -611,7 +693,8 @@ async function atomicDeed(deps: FlowDeps, city: City, officer: Officer, will: Wi
   const parent = will.frontId ? findFront(city, will.frontId) : null;
   if (!parent || parent.status !== 'active') return refuse('no_front', 'Неясно, какому делу это должно помочь. Пусть покровитель назовёт его.');
   if (parent.capacity <= 0) return refuse('only_wait', `«${frontGist(parent)}»: работой это не сдвинуть, остаётся дождаться срока.`);
-  if (officer.assignmentId) return busy(deps, city, officer);
+  // Разовое задание — малое дело: занятый сановник отвлекается на него и возвращается.
+  if (officer.assignmentId && !canDetour(city, officer)) return busy(deps, city, officer);
   const kind = will.deedKind ?? 'push';
   const proposal = will.manner ?? will.goal;
   const verdict = (
@@ -669,12 +752,20 @@ async function atomicDeed(deps: FlowDeps, city: City, officer: Officer, will: Wi
     day,
   });
   city.fronts.push(front);
+  const away = detourWords(deps, city, officer);
   // У разового вклада вердикт уже учтён в размере толчка; у остальных он задаёт скорость самого задания.
-  createAssignment(city, { id: newId(deps, 'asg'), front, officer, text: will.manner ?? '', verdict: kind === 'push' ? 'fits' : verdict, tempo: will.workTempo ?? 0, day });
+  detour(city, { id: newId(deps, 'asg'), front, officer, text: will.manner ?? '', verdict: kind === 'push' ? 'fits' : verdict, tempo: will.workTempo ?? 0, day });
   refreshAllFronts(deps, city, day);
   return {
     ok: true,
-    say: [`${title(deps, officer)} взялся за задание для дела «${frontGist(parent)}»: ${frontGist(front)}.`, waitWords(deps, city, front, day), RISK_WORDS[risk]].filter(Boolean).join(' '),
+    say: [
+      `${title(deps, officer)} ${officer.gender === 'female' ? 'взялась' : 'взялся'} за задание для дела «${frontGist(parent)}»: ${frontGist(front)}.`,
+      away,
+      waitWords(deps, city, front, day),
+      RISK_WORDS[risk],
+    ]
+      .filter(Boolean)
+      .join(' '),
   };
 }
 
@@ -742,5 +833,9 @@ export function withdraw(deps: FlowDeps, city: City, office: Office, day: number
   }
   refreshAllFronts(deps, city, day);
   const left = front && front.status === 'active' ? ` Дело «${frontGist(front)}» осталось без ведущего и стоит.` : front ? ` Задание «${frontGist(front)}» брошено.` : '';
-  return { ok: true, say: `${title(deps, officer)} снят с дела.${left}` };
+  // Снятый с малого дела возвращается к большому, от которого отвлекался.
+  const back = assignmentOf(city, officer);
+  const backFront = back ? findFront(city, back.frontId) : null;
+  const returned = backFront ? ` ${officer.gender === 'female' ? 'Она вернулась' : 'Он вернулся'} к делу «${frontGist(backFront)}».` : '';
+  return { ok: true, say: `${title(deps, officer)} ${officer.gender === 'female' ? 'снята' : 'снят'} с дела.${left}${returned}` };
 }

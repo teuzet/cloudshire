@@ -170,7 +170,8 @@ export function recomputeRate(rules: Rules, city: City, front: Front, day: numbe
   let rate = 0;
   const lead = leadOf(city, front.id);
   const officer = lead ? officerOf(city, lead) : null;
-  if (lead && officer) {
+  // Ведущий отвлёкся на малое дело: его работа здесь стоит, пока он не вернётся.
+  if (lead && officer && !lead.paused) {
     rate += leadRatePerDay(rules, {
       verdict: lead.verdict,
       tempoSum: tempoSum(city, front),
@@ -351,7 +352,8 @@ export function closeFront(
   dropHoldsOn(city, front.id);
 
   const lead = leadOf(city, front.id);
-  if (lead) closeAssignment(city, lead, day);
+  // Сановник, отвлёкшийся на это дело, возвращается к прежнему: оно снова идёт.
+  const back = lead ? closeAssignment(city, lead, day) : null;
   releaseOccupied(city, front.id);
 
   for (const obj of attachedTo(city, front.id)) {
@@ -371,6 +373,8 @@ export function closeFront(
     }
   }
   for (const child of childFronts(city, front.id)) changes.push(...closeFront(rules, city, child, 'cancelled', day));
+  const resumed = back ? findFront(city, back.frontId) : null;
+  if (resumed && resumed.status === 'active') recomputeRate(rules, city, resumed, day);
   recomputeStats(city, rules);
   return changes;
 }

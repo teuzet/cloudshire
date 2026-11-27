@@ -11,6 +11,7 @@ import { closeFront, findFront, frontGist, rollbackMilestone, settleProgress, wi
 import { diffPoints, pointsToRaw, rawToPoints } from './numbers.js';
 import { addObjectVersion, createObject, deleteWithChildren, findObject, tug } from './objects.js';
 import { applyHindrance, feasibleEffect, liftHindrance } from './hindrance.js';
+import { hiddenAbout } from './hidden.js';
 import { holdFront, objectsGone, releaseFront } from './links.js';
 import { addToLedger, recomputeStats } from './stats.js';
 
@@ -169,6 +170,20 @@ export function applyStake(
         obj.freshDay = day;
         tug(obj, ctx.pull);
         changes.push({ kind: 'object_revealed', objectId: obj.id, name: obj.name, description: obj.description });
+        break;
+      }
+      case 'uncover': {
+        // Что открыть, решает код в день готовности: за время работы скрытое могло открыться само.
+        const next = hiddenAbout(city, { frontId: op.frontId, objectId: op.objectId })[0];
+        if (!next) break;
+        if (next.kind === 'object') {
+          changes.push(...applyStake(rules, city, [{ op: 'reveal', target: next.objectId }], ctx).changes);
+          break;
+        }
+        const clue = findFront(city, next.frontId)?.script?.clues.find((c) => c.id === next.clueId);
+        if (clue) clue.revealed = true;
+        const added = addFact(city, { id: ctx.newId('fact'), text: next.fact, day, frontId: next.frontId, author: 'event' });
+        if (added.ok) changes.push({ kind: 'fact', text: added.fact.text });
         break;
       }
       case 'fact': {

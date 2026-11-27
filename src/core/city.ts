@@ -185,6 +185,8 @@ export type StakeOp =
   /** Вернуть выбывший объект к жизни с прежним вкладом. */
   | { op: 'restore'; target: string; description?: string | null }
   | { op: 'reveal'; target: string }
+  /** Открыть следующее скрытое о деле или о части города: улику, потом участника. */
+  | { op: 'uncover'; frontId: string | null; objectId: string | null }
   | { op: 'fact'; text: string }
   | { op: 'link'; a: string; b: string }
   | { op: 'progress'; frontId: string; amount: number }
@@ -346,6 +348,10 @@ export interface Assignment {
   status: 'active' | 'ended';
   startDay: number;
   endDay: number | null;
+  /** Сановник отвлёкся на малое дело: это поручение стоит и ждёт его. */
+  paused?: boolean;
+  /** Малое дело, на которое сановник отвлёкся: к этому поручению он вернётся, когда закончит. */
+  returnTo?: string;
 }
 
 // ───────────────────────────── проекты ─────────────────────────────
@@ -354,7 +360,7 @@ export interface ProjectStage {
   title: string;
   work: string;
   result: {
-    kind: 'new_object' | 'change_object' | 'remove_object' | 'restore_object' | 'move_object' | 'fact';
+    kind: 'new_object' | 'change_object' | 'remove_object' | 'restore_object' | 'move_object' | 'reveal' | 'fact';
     objectId: string | null;
     type: ObjectType | null;
     name: string;
@@ -365,7 +371,10 @@ export interface ProjectStage {
   outcomeKnown: boolean;
 }
 
-/** Цепочка этапов. Идёт один этап за раз; следующий ждёт слова игрока. */
+/**
+ * Цепочка этапов. Идёт один этап за раз; следующий начинается сам, если покровитель не велел
+ * докладывать между шагами, этап не сорван и по делу не пришла беда. Иначе ждёт слова игрока.
+ */
 export interface Project {
   id: string;
   title: string;
@@ -379,6 +388,12 @@ export interface Project {
   createdDay: number;
   /** Идущее дело, на которое замысел отвечает: беда или случай, названные в приказе. */
   answers?: string | null;
+  /** Покровитель велел докладывать между шагами: следующий шаг ждёт его слова. */
+  report?: boolean;
+  /** Способ и темп из приказа: с ними замысел идёт дальше сам. */
+  manner?: string | null;
+  projectTempo?: Tempo | null;
+  workTempo?: Tempo | null;
 }
 
 // ───────────────────────────── люди и речь ─────────────────────────────

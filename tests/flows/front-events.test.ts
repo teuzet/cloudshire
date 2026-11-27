@@ -65,8 +65,8 @@ async function town(dynamics: string[], tweak: (r: Rules) => void = () => {}, ap
   return { ...s, city };
 }
 
-async function start(s: Stand, risk: string, text = 'Построить баллисту'): Promise<Front> {
-  s.llm.script('will-interpreter', will({ label: 'project' })).script('risk-appraiser', toolReply('submit_risk', { step: risk }));
+async function start(s: Stand, risk: string, text = 'Построить баллисту', opts: { report?: boolean } = {}): Promise<Front> {
+  s.llm.script('will-interpreter', will({ label: 'project', report: opts.report ?? null })).script('risk-appraiser', toolReply('submit_risk', { step: risk }));
   const out = await playerWill(s.deps, s.city, 'marshal', text, await now(s));
   expect(out.ok).toBe(true);
   return s.city.fronts.at(-1)!;
@@ -416,7 +416,7 @@ describe('сроки', () => {
 });
 
 describe('этапы, подвох, эхо и обновление', () => {
-  test('исход с подвохом меняет результат; следующий этап ждёт слова игрока', async () => {
+  test('исход с подвохом меняет результат; покровитель велел докладывать — следующий этап ждёт его слова', async () => {
     const s = await town([], (r) => {
       r.fronts.outcome = { asPlanned: 0, twist: 1 };
     }, { 'Поющая шахта': [up('knowledge', 'medium')], 'Школа резонанса': [up('knowledge', 'large')] });
@@ -430,7 +430,7 @@ describe('этапы, подвох, эхо и обновление', () => {
         ],
       }),
     );
-    const front = await start(s, 'safe', 'Добыть поющие кристаллы и открыть при них школу');
+    const front = await start(s, 'safe', 'Добыть поющие кристаллы и открыть при них школу, докладывай после каждого шага', { report: true });
     expect(front.key?.twist).toBe('У результата есть скрытая сторона.');
     expect(front.capacity).toBe(9);
     expect(priestTurnBlock(s.deps.rules, city, 0)).not.toContain('скрытая сторона');
@@ -460,6 +460,32 @@ describe('этапы, подвох, эхо и обновление', () => {
     while (second.status === 'active') await next(s, second);
     expect(city.projects[0]?.status).toBe('done');
     expect(city.objects.some((o) => o.name === 'Школа резонанса')).toBe(true);
+  });
+
+  test('большой приказ идёт по этапам сам: готов прежний шаг — тот же сановник берётся за следующий', async () => {
+    const s = await town([], () => {}, { 'Поющая шахта': [up('knowledge', 'medium')], 'Школа резонанса': [up('knowledge', 'large')] });
+    const { city } = s;
+    s.llm.always(
+      'stage-planner',
+      toolReply('submit_stages', {
+        stages: [
+          stage('Пробить шахту к поющим кристаллам', { kind: 'new_object', type: 'site', name: 'Поющая шахта', description: 'Шахта к жиле кристаллов.' }),
+          stage('Открыть школу резонанса', { kind: 'new_object', type: 'organization', name: 'Школа резонанса', description: 'Школа при шахте.' }),
+        ],
+      }),
+    );
+    const first = await start(s, 'safe', 'Добыть поющие кристаллы и открыть при них школу');
+    while (first.status === 'active') await next(s, first);
+    expect(city.objects.some((o) => o.name === 'Поющая шахта')).toBe(true);
+    expect(city.projects[0]).toMatchObject({ status: 'running', stageIndex: 1 });
+    const second = city.fronts.at(-1)!;
+    expect(second).toMatchObject({ title: 'Открыть школу резонанса', status: 'active', projectId: city.projects[0]!.id });
+    const marshal = city.officers.find((o) => o.office === 'marshal')!;
+    expect(city.assignments.find((a) => a.id === marshal.assignmentId)?.frontId).toBe(second.id);
+    expect(city.chronicle.some((e) => e.text.includes('идёт дальше сам: он взялся за следующий шаг: Открыть школу резонанса'))).toBe(true);
+    expect(priestTurnBlock(s.deps.rules, city, await now(s))).not.toContain('Замыслы, которые ждут слова покровителя');
+    while (second.status === 'active') await next(s, second);
+    expect(city.projects[0]?.status).toBe('done');
   });
 
   test('перемена обновляет соседние дела, но сама новых фронтов не рождает', async () => {

@@ -7,7 +7,7 @@
 import { stewardOrder } from '../../core/world/steward.js';
 import type { City, DialogEntry } from '../../core/city.js';
 import type { Rules } from '../../core/rules.js';
-import { activeAssignments } from '../../core/world/assignments.js';
+import { activeAssignments, pausedFor } from '../../core/world/assignments.js';
 import { activeFronts, findFront, frontGist } from '../../core/world/fronts.js';
 import { activeFacts } from '../../core/lore.js';
 import { qualitativeStats } from '../../core/world/stats.js';
@@ -100,7 +100,11 @@ export function priestTurnBlock(rules: Rules, city: City, day: number): string {
     const front = a ? findFront(city, a.frontId) : null;
     const project = front ? city.projects.find((p) => p.frontId === front.id && p.status === 'running') : null;
     const step = project ? `замысел «${project.title}», шаг ${project.stageIndex + 1} из ${project.stages.length}: ` : '';
-    return `${officerLine(o)} — ${a ? `занят: ${step}${front ? frontGist(front) : 'дело'}${a.text ? ` (наказ: ${a.text})` : ''}` : 'свободен'}`;
+    // Малое дело, на которое сановник отвлёкся: к прежнему он вернётся сам.
+    const paused = a ? pausedFor(city, a) : null;
+    const pausedFront = paused ? findFront(city, paused.frontId) : null;
+    const back = pausedFront ? `; потом вернётся к делу «${frontGist(pausedFront)}»` : '';
+    return `${officerLine(o)} — ${a ? `занят: ${step}${front ? frontGist(front) : 'дело'}${a.text ? ` (наказ: ${a.text})` : ''}${back}` : 'свободен'}`;
   });
   const fronts = activeFronts(city).map((f) => frontLine(city, f, day, rules));
   const waiting = city.projects

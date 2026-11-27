@@ -34,6 +34,8 @@ export interface Will {
   manner: string | null;
   projectTempo: Tempo | null;
   workTempo: Tempo | null;
+  /** Покровитель велел докладывать между шагами большого дела: следующий шаг ждёт его слова. */
+  report?: boolean;
 }
 
 const NEEDS_FRONT: readonly WillLabel[] = ['strategy', 'deed', 'tempo', 'cancel'];
@@ -88,6 +90,7 @@ export const willInterpreter: StructuredAgent<WillInput, WillRaw, Will> = {
     manner: raw.manner?.trim() ? raw.manner.trim() : null,
     projectTempo: tempoOf(raw.project_tempo),
     workTempo: tempoOf(raw.work_tempo),
+    report: raw.report === true,
   }),
 };
 

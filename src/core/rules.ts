@@ -243,6 +243,7 @@ export const rulesSchema = z.object({
       softenKeep: z.number().min(0).max(1),
     }),
     push: z.object({ share: z.number().positive(), min: z.number().positive() }),
+    detour: z.object({ maxCapacity: z.number().positive() }),
     threat: z.object({ capacityShare: z.number().positive(), boundShare: z.number().positive(), capacityMin: z.number().positive() }),
     tension: z.object({
       quenchShare: z.number().positive(),

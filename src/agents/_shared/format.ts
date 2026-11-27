@@ -13,6 +13,7 @@ import { daysLeft, deadlineOf, isFrozen, progressAt, shareDone } from '../../cor
 import { holdersOf, ownMotion } from '../../core/world/hold.js';
 import { linkLines, resultName } from '../../core/world/links.js';
 import { findObject } from '../../core/world/objects.js';
+import { anyHidden } from '../../core/world/hidden.js';
 import type { HoldEffect } from '../../core/rules.js';
 import { leadRatePerDay } from '../../core/world/numbers.js';
 
@@ -109,7 +110,9 @@ export function frontLine(
     if (!side || side.status !== 'active' || side.hidden || side.out) continue;
     parts.push(r.answered ? `${side.name} против, но нынешний способ работы не даёт помешать` : `противится: ${side.name}`);
   }
-  if (officer) parts.push(`ведёт ${officer.title.toLowerCase()} ${officer.name}`);
+  // Что здесь скрыто, жрец не знает, но знает, что знает не всё: это можно выяснить делом.
+  if (anyHidden(city, { frontId: front.id, objectId: null })) parts.push('об этом знают не всё');
+  if (officer) parts.push(`ведёт ${officer.title.toLowerCase()} ${officer.name}${lead?.paused ? `, но сейчас ${officer.gender === 'female' ? 'отвлеклась' : 'отвлёкся'} на малое дело и вернётся, когда его сделает` : ''}`);
   // Что мешает делу и как: словами мира. Как с этим быть, решает покровитель.
   for (const obj of hindrancesOf(city, front.id)) {
     parts.push(obj.attach?.answered ? `рядом ${obj.name}, но нынешний способ работы с этим справляется` : `мешает ${obj.name}: ${EFFECT_WORDS[effectOf(obj)]}`);

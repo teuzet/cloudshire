@@ -96,6 +96,12 @@ export const ORDERS: OrderCase[] = [
     },
   },
   {
+    name: 'кто поджигает',
+    scenario: 'arsonist',
+    office: 'keeper',
+    orders: ['Выясни, кто стоит за ночными пожарами.', 'Узнай про поджоги ещё что-нибудь.'],
+  },
+  {
     name: 'стенки от огня',
     scenario: 'arsonist',
     office: 'marshal',
@@ -153,6 +159,7 @@ async function runCase(c: OrderCase, base: Pick<FlowDeps, 'rules' | 'agents' | '
       console.log(`    влияния: ${JSON.stringify(f.links ?? [])}`);
       console.log(`    ставка: ${JSON.stringify(f.stake)}`);
       console.log(`    риск: ${f.risk}, отпечаток: ${f.footprint.map((x) => `${city.objects.find((o) => o.id === x.objectId)?.name} (${x.relation})`).join(', ')}`);
+      if (f.stake.some((op) => op.op === 'uncover')) console.log(`    узнать: ${JSON.stringify(f.stake)}`);
       if (f.resist?.length) console.log(`    против: ${f.resist.map((r) => `${city.objects.find((o) => o.id === r.objectId)?.name}${r.answered ? ' (способ снимает)' : ''}`).join(', ')}`);
     }
   }

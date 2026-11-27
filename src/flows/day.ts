@@ -32,6 +32,7 @@ import { runSteward } from './steward.js';
 import { complicateRolled, describeHits, refreshAfterChange, resolveModify, rollFor, rollForFailure } from './complications.js';
 import { newId, requireWorld, sendAll, today, tryAgent, type FlowDeps } from './context.js';
 import { faithEvent, refreshAllFronts, willWords } from './fronts.js';
+import { autoStage, autoStageBlock } from './will.js';
 import { seedStories } from './seeding.js';
 
 /** Сколько заданий разбирать за один проход, чтобы проход не тянулся вечно. */
@@ -396,6 +397,8 @@ async function complete(deps: FlowDeps, city: City, front: Front, day: number, o
   const applied = applyStake(deps.rules, city, ops, stakeCtx(deps, front, day));
   changes.push(...applied.changes);
   const result = applied.resultId ? findObject(city, applied.resultId) : null;
+  // Что дело узнало: это и есть его итог, рассказчик называет его прямо.
+  const found = front.stake.some((op) => op.op === 'uncover') ? foundWords(applied.changes) : null;
   if (result) {
     result.themes = await tryAgent(deps, 'theme-tagger', () => tagThemes(deps.agents, { subject: briefOf(result), themes: themeNames(city) }), []);
   }
@@ -421,16 +424,21 @@ async function complete(deps: FlowDeps, city: City, front: Front, day: number, o
         lead: lead.label,
         manner: lead.manner,
         result: expected,
-        reveal: twist,
-        allowed: twist ? ['reveal'] : ['none'],
+        reveal: [twist, found].filter(Boolean).join(' ') || null,
+        allowed: twist || found ? ['reveal'] : ['none'],
       }),
-    { text: `Сделано: ${frontGist(front)}.${twist ? ` ${twist}` : ''}`, effect: 'none' },
+    { text: `Сделано: ${frontGist(front)}.${twist ? ` ${twist}` : ''}${found ? ` ${found}` : ''}`, effect: 'none' },
   );
   await faithEvent(deps, city, { event: beat.text, will, day });
   const trouble = await complicateRolled(deps, city, front, rolled, { moment: 'completion', resultId: applied.resultId }, day);
   const helped = result ? await offerHelp(deps, city, result, near) : [];
 
-  const gist = [beat.text, trouble?.gist, next && project ? `Замысел «${project.title}» ждёт слова покровителя. Следующий шаг: ${next.title}.` : null].filter(Boolean).join(' ');
+  // Следующий шаг идёт сам, если покровитель не велел докладывать и по делу не пришла беда.
+  const officer = lead.officer;
+  const held = project && next ? (trouble ? 'по делу пришла беда' : autoStageBlock(city, project, officer)) : null;
+  const onward = project && next && !held && officer;
+  const nextWords = !project || !next ? null : onward ? `Замысел «${project.title}» идёт дальше сам: ${officer.gender === 'female' ? 'она взялась' : 'он взялся'} за следующий шаг: ${next.title}.` : `Замысел «${project.title}» ждёт слова покровителя. Следующий шаг: ${next.title}.`;
+  const gist = [beat.text, trouble?.gist, nextWords].filter(Boolean).join(' ');
   await finish(
     deps,
     city,
@@ -439,6 +447,20 @@ async function complete(deps: FlowDeps, city: City, front: Front, day: number, o
     [front.id],
     out,
   );
+  if (onward && project && officer) {
+    const started = await autoStage(deps, city, project, officer, day);
+    // Шаг не начался: замысел ждёт слова покровителя, как прежде.
+    if (!started.ok) {
+      if (project.status === 'running') project.status = 'waiting';
+      deps.log?.warn('auto_stage_failed', { cityId: city.id, projectId: project.id, error: started.error, say: started.say });
+    }
+  }
+}
+
+/** Что открыло дело «узнать»: улика или участник. */
+function foundWords(changes: readonly Change[]): string | null {
+  const words = changes.flatMap((c) => (c.kind === 'fact' ? [c.text] : c.kind === 'object_revealed' ? [`Открылось: ${c.name}. ${c.description}`] : []));
+  return words.length ? words.join(' ') : null;
 }
 
 async function onCompletion(deps: FlowDeps, city: City, front: Front, day: number, out: OutboundMessage[]): Promise<void> {

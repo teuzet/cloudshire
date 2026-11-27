@@ -107,7 +107,7 @@ describe('воля игрока: новый проект', () => {
     expect(s.llm.callsTo('will-interpreter')[0]?.messages[0]?.content).toContain('маршал Борислав');
   });
 
-  test('занятый сановник: приказ на новое дело не принимается', async () => {
+  test('занятый сановник: большое новое дело не принимается', async () => {
     const s = await town();
     await running(s, s.city);
     s.llm.script('will-interpreter', will({ label: 'project', goal: 'Вырыть колодец' }));

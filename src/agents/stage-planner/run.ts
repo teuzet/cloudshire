@@ -52,6 +52,7 @@ export const stagePlanner: StructuredAgent<StagesInput, StagesRaw, PlannedStage[
       }
       if (r.kind === 'move_object' && r.parent_id === r.object_id) return `${at}: для move_object parent_id — новое место, оно не может быть самим объектом`;
       if (r.kind === 'new_object' && !r.type) return `${at}: для new_object нужен type`;
+      if (r.kind === 'reveal' && r.object_id && !ids.has(r.object_id)) return `${at}: для reveal object_id берётся из списка «В городе есть» или равен null`;
       if (r.parent_id && !ids.has(r.parent_id)) return `${at}: parent_id берётся из списка «В городе есть» или равен null`;
     }
     return null;
@@ -62,14 +63,15 @@ export const stagePlanner: StructuredAgent<StagesInput, StagesRaw, PlannedStage[
       work: s.work,
       result: {
         kind: s.result.kind,
-        objectId: EXISTING.includes(s.result.kind) ? s.result.object_id : null,
+        objectId: EXISTING.includes(s.result.kind) || s.result.kind === 'reveal' ? s.result.object_id : null,
         type: s.result.kind === 'new_object' ? s.result.type : null,
         name: s.result.name,
         description: s.result.description,
         parentId: s.result.parent_id,
       },
       site: s.result.kind === 'fact' ? null : s.site,
-      outcomeKnown: s.outcome_known,
+      // Что откроется, заранее не знает никто.
+      outcomeKnown: s.result.kind === 'reveal' ? false : s.outcome_known,
     })),
 };
 
