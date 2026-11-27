@@ -12,6 +12,7 @@ import path from 'node:path';
 import { MemoryNotifier } from '../../adapters/notifier/memory.js';
 import { requireWorld, today } from '../../flows/context.js';
 import { onboardingMessage, resetPlayer, runGenesis } from '../../flows/onboarding.js';
+import { GENESIS_TUTORIAL } from '../genesis-progress.js';
 import { patronMessage } from '../../flows/priest-turn.js';
 import { runDueCities } from '../../flows/scheduler.js';
 import { exportGame, importGame, type GameSave } from '../../flows/save.js';
@@ -95,7 +96,7 @@ async function main(): Promise<void> {
         const r = r0.kind === 'reply' && r0.pitch ? { ...r0, text: `${r0.text}\n\n${r0.pitch}` } : r0;
         if (r.kind === 'reply' && r.ready) {
           const city = await runGenesis(deps, owner);
-          return send(res, 200, { reply: r.text, kind: city ? 'genesis' : 'genesis_failed' });
+          return send(res, 200, { reply: `${r.text}\n\n${GENESIS_TUTORIAL}`, kind: city ? 'genesis' : 'genesis_failed' });
         }
         return send(res, 200, { reply: r.kind === 'has_city' ? null : r.text, kind: r.kind });
       }

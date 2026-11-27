@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { toolReply } from '../../src/adapters/llm/fake.js';
 import { STAT_IDS } from '../../src/core/rules.js';
-import { onboardingMessage, runGenesis } from '../../src/flows/onboarding.js';
+import { onboardingMessage, runGenesis, GENESIS_STEPS } from '../../src/flows/onboarding.js';
 import { ASPECTS } from '../../src/agents/city-genesis/aspects.js';
 import { scriptGenesis } from '../helpers/genesis.js';
 import { lastUser, stand } from '../helpers/game.js';
@@ -24,7 +24,15 @@ describe('онбординг → генезис', () => {
     expect(await onboardingMessage(s.deps, { ownerId: 'u1', text: 'Да, начинай' })).toMatchObject({ ready: true, pitch: null });
     expect(await onboardingMessage(s.deps, { ownerId: 'u1', text: 'ну что?' })).toMatchObject({ kind: 'busy' });
 
-    const city = await runGenesis(s.deps, 'u1');
+    const steps: number[] = [];
+    const city = await runGenesis(s.deps, 'u1', async (step, total) => {
+      expect(total).toBe(GENESIS_STEPS);
+      steps.push(step);
+    });
+    // Полоска прогресса идёт вперёд от нуля до конца.
+    expect(steps).toEqual([...steps].sort((a, b) => a - b));
+    expect(steps[0]).toBe(0);
+    expect(steps.at(-1)).toBe(GENESIS_STEPS);
     expect(city?.name).toBe('Мерв');
     expect(city?.patronName).toBe('Алаэр');
     const sum = STAT_IDS.reduce((a, id) => a + city!.stats[id], 0);

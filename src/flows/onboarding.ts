@@ -89,23 +89,39 @@ const PEOPLE = 5;
  * Собрать город из «рыбы». Сломалась модель — черновик помечается failed,
  * игрок получает служебное сообщение и может начать заново.
  */
-export async function runGenesis(deps: FlowDeps, ownerId: string): Promise<City | null> {
+/** Шаги сборки города для полоски прогресса: номер шага и что сейчас делается. */
+export type GenesisProgress = (step: number, total: number, label: string) => Promise<void>;
+
+export const GENESIS_STEPS = 6;
+
+export async function runGenesis(deps: FlowDeps, ownerId: string, onProgress?: GenesisProgress): Promise<City | null> {
   const draft = await deps.storage.getDraft(ownerId);
   if (!draft?.seed || draft.status !== 'generating') return null;
   const world = await requireWorld(deps);
   const day = today(deps, world);
   const names = await takeNames(deps, PEOPLE + 3);
 
+  const progress = async (step: number, label: string): Promise<void> => {
+    try {
+      await onProgress?.(step, GENESIS_STEPS, label);
+    } catch (err) {
+      deps.log?.warn('genesis_progress_failed', { ownerId, error: String(err) });
+    }
+  };
+
   try {
     const seed = draft.seed;
+    await progress(0, 'начинаю…');
     // 1. Ядро: имя, жрец, первое слово, стартовые факты.
     const core = await writeGenesisCore(deps.agents, { seed, names, seasonRules: world.season.rules });
+    await progress(1, 'описываю город…');
     // 2. Описание города: аспекты пачками.
     const aspects: Record<string, string> = {};
     for (const batch of aspectBatches()) {
       Object.assign(aspects, await writeGenesisAspects(deps.agents, { seed, core, batch, already: aspects }));
     }
     const description = assembleDescription(aspects);
+    await progress(2, 'расставляю места, людей и обычаи…');
     // 3. Объекты мира из описания — из них же статы.
     const drafts = await extractWorldObjects(deps.agents, { rules: deps.rules, cityName: core.cityName, description });
     const objects = drafts.map((d) =>
@@ -119,6 +135,7 @@ export async function runGenesis(deps: FlowDeps, ownerId: string): Promise<City 
       }),
     );
     const stats = genesisStats(deps.rules, objects.map((o) => o.statEffect));
+    await progress(3, 'выбираю сановников…');
     // 4. Сановники.
     const officers = await writeOfficerNatures(deps.agents, {
       rules: deps.rules,
@@ -127,6 +144,7 @@ export async function runGenesis(deps: FlowDeps, ownerId: string): Promise<City 
       names: names.filter((n) => n.name !== core.priest.name),
       taken: [core.priest.name],
     });
+    await progress(4, 'записываю, чем живёт город…');
     // 5. Бриф и канонические неизвестности, привязанные к объектам.
     const brief = await tryAgent(
       deps,
@@ -169,6 +187,7 @@ export async function runGenesis(deps: FlowDeps, ownerId: string): Promise<City 
     const used = new Set([core.priest.name, ...Object.values(officers).map((p) => p.name)]);
     await returnNames(deps, names.filter((n) => !used.has(n.name)));
     const saved = await deps.storage.saveCity(city);
+    await progress(GENESIS_STEPS, 'город готов');
     await deps.storage.deleteDraft(ownerId);
     await sendAll(deps, [{ ownerId, text: core.greeting, kind: 'news', cityId: saved.id }]);
     return saved;
