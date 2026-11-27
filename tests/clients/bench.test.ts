@@ -17,8 +17,9 @@ function scripted(): FakeLlm {
   const llm = new FakeLlm()
     .script(
       'onboarding-guide',
-      toolReply('submit_onboarding', { reply: 'Как тебя звать, покровитель?' }),
-      toolReply('submit_onboarding', { reply: 'Начинаем.', seed: { patron_name: 'Тарн', patron_gender: 'male', pitch: 'Город облачных рыбаков' } }),
+      toolReply('submit_onboarding', { reply: 'Каким ты видишь город?', ready: false }),
+      toolReply('submit_onboarding', { reply: 'Всё так?', pitch: 'Город облачных рыбаков', patron_name: 'Тарн', patron_gender: 'male', ready: false }),
+      toolReply('submit_onboarding', { reply: 'Записано.', pitch: 'Город облачных рыбаков', patron_name: 'Тарн', patron_gender: 'male', ready: true }),
     )
     .always('chronicler', toolReply('submit_chronicle', { text: 'К краю прибило островок с фонарями.' }))
     .always('herald', toolReply('submit_news', { text: 'Покровитель, у края горят чужие фонари.' }))

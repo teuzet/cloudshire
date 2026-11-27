@@ -91,7 +91,8 @@ async function main(): Promise<void> {
           const r = await patronMessage(deps, locks, { ownerId: owner, text, quote });
           return send(res, 200, { reply: r.kind === 'no_city' ? null : r.text, kind: r.kind });
         }
-        const r = await onboardingMessage(deps, { ownerId: owner, text });
+        const r0 = await onboardingMessage(deps, { ownerId: owner, text });
+        const r = r0.kind === 'reply' && r0.pitch ? { ...r0, text: `${r0.text}\n\n${r0.pitch}` } : r0;
         if (r.kind === 'reply' && r.ready) {
           const city = await runGenesis(deps, owner);
           return send(res, 200, { reply: r.text, kind: city ? 'genesis' : 'genesis_failed' });

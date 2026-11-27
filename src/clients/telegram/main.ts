@@ -18,6 +18,8 @@ import { cityStatus } from '../views.js';
 
 const TICK_MS = 20_000;
 
+const escapeHtml = (text: string): string => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 async function main(): Promise<void> {
   loadDotEnv();
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -65,6 +67,8 @@ async function main(): Promise<void> {
     }
     const r = await onboardingMessage(deps, { ownerId, text: text === '/start' ? '' : text });
     if (r.kind === 'reply' || r.kind === 'busy') await sendText(bot, chatId, r.text, r.kind === 'reply');
+    // Питч идёт отдельным сообщением-цитатой: это текст города, а не слова клерка.
+    if (r.kind === 'reply' && r.pitch) await sendText(bot, chatId, `<blockquote>${escapeHtml(r.pitch)}</blockquote>`, true);
     if (r.kind === 'reply' && r.ready) await startGenesis(ownerId, chatId);
   }
 

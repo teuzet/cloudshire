@@ -100,16 +100,38 @@ describe('генезис и онбординг', () => {
     expect(llm.requests[0]?.system).toContain('ОБЪЕКТЫ');
   });
 
-  test('onboarding-guide: seed появляется, только когда агент его дал', async () => {
+  test('onboarding-guide: seed появляется, только когда игрок видел питч и согласился', async () => {
+    const pitch = 'Город каменотёсов на крутом острове.';
     const llm = new FakeLlm().script(
       'onboarding-guide',
-      toolReply('submit_onboarding', { reply: 'Как тебя звать?' }),
-      toolReply('submit_onboarding', { reply: 'Начинаем.', seed: { patron_name: 'Алаэр', patron_gender: 'female', pitch: 'Город каменотёсов' } }),
+      toolReply('submit_onboarding', { reply: 'Каким ты видишь город?', ready: false }),
+      // Клерк торопится: питча игрок ещё не видел — поправляется после замечания.
+      toolReply('submit_onboarding', { reply: 'Начинаем.', pitch, patron_name: 'Алаэр', patron_gender: 'female', ready: true }),
+      toolReply('submit_onboarding', { reply: 'Вот что вышло. Всё так?', pitch, patron_name: 'Алаэр', patron_gender: 'female', ready: false }),
+      toolReply('submit_onboarding', { reply: 'Записано.', pitch, patron_name: 'Алаэр', patron_gender: 'female', ready: true }),
     );
     expect((await guideOnboarding(deps(llm), { turns: [] })).seed).toBeNull();
-    const done = await guideOnboarding(deps(llm), { turns: [{ role: 'patron', text: 'Я Алаэр' }] });
-    expect(done.seed).toEqual({ cityName: null, patronName: 'Алаэр', patronGender: 'female', pitch: 'Город каменотёсов' });
+    const shown = await guideOnboarding(deps(llm), { turns: [{ role: 'patron', text: 'Я Алаэр, город каменотёсов' }] });
+    expect(shown).toMatchObject({ seed: null, pitch });
+    const done = await guideOnboarding(deps(llm), { turns: [{ role: 'patron', text: 'Да, начинай' }], pitch });
+    expect(done.seed).toEqual({ cityName: null, patronName: 'Алаэр', patronGender: 'female', pitch });
     expect(llm.requests[0]?.system).toContain('КОНТРАКТ БЕЗОПАСНОСТИ');
+  });
+
+  test('onboarding-guide: вопрос только из выданного списка, питч после показа не подменяется', async () => {
+    const questions = [{ id: 'q1', kind: 'open' as const, theme: 'people' as const, text: 'Про что здесь шутят?' }];
+    const llm = new FakeLlm().script(
+      'onboarding-guide',
+      toolReply('submit_onboarding', { reply: 'А про что шутят?', used_question: 'q9', ready: false }),
+      toolReply('submit_onboarding', { reply: 'А про что шутят?', used_question: 'q1', themes_heard: ['people'], ready: false }),
+      toolReply('submit_onboarding', { reply: 'Начинаем.', pitch: 'Другой текст', patron_name: 'Тарн', patron_gender: 'male', ready: true }),
+      toolReply('submit_onboarding', { reply: 'Поправил, глянь.', pitch: 'Другой текст', patron_name: 'Тарн', patron_gender: 'male', ready: false }),
+    );
+    const asked = await guideOnboarding(deps(llm), { turns: [], questions });
+    expect(asked).toMatchObject({ usedQuestion: 'q1', themesHeard: ['people'] });
+    expect(llm.requests[0]?.messages[0]?.content).toContain('q1: Про что здесь шутят?');
+    const edited = await guideOnboarding(deps(llm), { turns: [], pitch: 'Старый текст' });
+    expect(edited).toMatchObject({ seed: null, pitch: 'Другой текст' });
   });
 });
 

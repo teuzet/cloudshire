@@ -17,6 +17,8 @@ import { createObject } from '../core/world/objects.js';
 import { genesisStats, objectContribution } from '../core/world/stats.js';
 import type { OnboardingDraft } from '../ports/storage.js';
 import { guideOnboarding } from '../agents/onboarding-guide/run.js';
+import { clerkBook } from '../agents/onboarding-guide/book.js';
+import { drawSpirits, shortlistQuestions } from '../core/clerk.js';
 import { writeGenesisAspects, writeGenesisCore } from '../agents/city-genesis/run.js';
 import { aspectBatches, assembleDescription } from '../agents/city-genesis/aspects.js';
 import { writeOfficerNatures } from '../agents/officer-nature/run.js';
@@ -26,12 +28,18 @@ import { newFact } from '../core/lore.js';
 import { newId, requireWorld, returnNames, sendAll, takeNames, today, tryAgent, type FlowDeps } from './context.js';
 
 export type OnboardingReply =
-  | { kind: 'reply'; text: string; ready: boolean }
+  /** text — реплика клерка; pitch — текст питча, если его надо показать игроку под репликой (новый или изменённый). */
+  | { kind: 'reply'; text: string; pitch: string | null; ready: boolean }
   | { kind: 'busy'; text: string }
   | { kind: 'has_city' };
 
+/**
+ * Ход разговора с клерком. Клерк пишет реплику и текст питча; поток хранит питч, который игрок видел,
+ * подаёт клерку настроения для набросков и вопросы на выбор и запускает сборку только после согласия игрока.
+ */
 export async function onboardingMessage(deps: FlowDeps, args: { ownerId: string; text: string }): Promise<OnboardingReply> {
   if (await deps.storage.getCityByOwner(args.ownerId)) return { kind: 'has_city' };
+  const book = clerkBook();
   const draft: OnboardingDraft = (await deps.storage.getDraft(args.ownerId)) ?? {
     ownerId: args.ownerId,
     messages: [],
@@ -42,18 +50,37 @@ export async function onboardingMessage(deps: FlowDeps, args: { ownerId: string;
   if (draft.status === 'generating') return { kind: 'busy', text: 'Город ещё поднимается. Жрец напишет, когда всё будет готово.' };
 
   draft.status = 'talking';
+  const state = (draft.clerk ??= { spirits: [], spiritsUsed: [], asked: [], heard: [] });
+  if (!state.spirits.length) state.spirits = drawSpirits(book, deps.random.rng, state.spiritsUsed).map((s) => s.id);
+  const spirits = state.spirits.flatMap((id) => book.spirits.find((s) => s.id === id) ?? []);
+  const questions = shortlistQuestions(book, deps.random.rng, state.asked, state.heard);
+  const shown = draft.pitch ?? null;
+
   if (args.text.trim()) draft.messages.push({ role: 'patron', text: args.text.trim() });
-  const out = await tryAgent(deps, 'onboarding-guide', () => guideOnboarding(deps.agents, { turns: draft.messages }), {
-    reply: 'Не расслышал. Скажи ещё раз, каким ты видишь свой город?',
-    seed: null,
-  });
-  draft.messages.push({ role: 'guide', text: out.reply });
+  const out = await tryAgent(deps, 'onboarding-guide', () => guideOnboarding(deps.agents, { turns: draft.messages, pitch: shown, spirits, questions }), null);
+  if (!out) {
+    const text = 'Не расслышал. Скажи ещё раз, каким ты видишь свой город?';
+    draft.messages.push({ role: 'guide', text });
+    await deps.storage.saveDraft(draft);
+    return { kind: 'reply', text, pitch: null, ready: false };
+  }
+
+  const changed = out.pitch != null && out.pitch !== shown;
+  draft.pitch = out.pitch ?? shown;
+  draft.messages.push({ role: 'guide', text: changed ? `${out.reply}\n\n[Питч, показанный игроку]\n${out.pitch}` : out.reply });
+  if (out.usedQuestion && !state.asked.includes(out.usedQuestion)) state.asked.push(out.usedQuestion);
+  state.heard = [...new Set([...state.heard, ...out.themesHeard])];
+  if (out.usedSketches) {
+    // Эти настроения показаны: попросит игрок другие варианты — придут свежие.
+    state.spiritsUsed = [...new Set([...state.spiritsUsed, ...state.spirits])];
+    state.spirits = [];
+  }
   if (out.seed) {
     draft.seed = out.seed;
     draft.status = 'generating';
   }
   await deps.storage.saveDraft(draft);
-  return { kind: 'reply', text: out.reply, ready: Boolean(out.seed) };
+  return { kind: 'reply', text: out.reply, pitch: changed ? out.pitch : null, ready: Boolean(out.seed) };
 }
 
 const PEOPLE = 5;

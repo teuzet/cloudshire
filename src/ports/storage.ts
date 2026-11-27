@@ -17,6 +17,10 @@ export interface OnboardingDraft {
   messages: Array<{ role: 'patron' | 'guide'; text: string }>;
   /** Готовая «рыба» для генезиса, когда игрок её подтвердил. */
   seed: CitySeed | null;
+  /** Питч, который игрок уже видел: клерк правит его по просьбам игрока. */
+  pitch?: string | null;
+  /** Книга клерка: настроения, выданные на наброски сейчас и раньше, заданные вопросы, прозвучавшие темы. */
+  clerk?: { spirits: string[]; spiritsUsed: string[]; asked: string[]; heard: string[] };
   status: 'talking' | 'generating' | 'failed';
   revision: number;
 }
