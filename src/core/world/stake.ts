@@ -7,6 +7,7 @@ import { STAT_IDS, type Rules, type StatMap } from '../rules.js';
 import type { City, Pull, StakeOp, WorldObject } from '../city.js';
 import { addFact } from '../lore.js';
 import type { Change } from './changes.js';
+import { namePerson, type Namer } from '../people.js';
 import { closeFront, findFront, frontGist, rollbackMilestone, settleProgress } from './fronts.js';
 import { diffPoints, pointsToRaw, rawToPoints } from './numbers.js';
 import { addObjectVersion, createObject, deleteWithChildren, findObject, tug } from './objects.js';
@@ -28,7 +29,7 @@ export function applyStake(
   rules: Rules,
   city: City,
   ops: readonly StakeOp[],
-  ctx: { day: number; newId: (prefix: string) => string; frontId?: string | null; /** Ставку исполняет случившаяся беда: её имя. Беда выводит объекты из строя, а не стирает. */ trouble?: string | null; /** Тяга истории: ложится на всё, что ставка породила или изменила. */ pull?: Pull | null; /** Может ли ставка унести человека с должности: крупная история или воля покровителя. */ holderLoss?: boolean },
+  ctx: { day: number; newId: (prefix: string) => string; frontId?: string | null; /** Ставку исполняет случившаяся беда: её имя. Беда выводит объекты из строя, а не стирает. */ trouble?: string | null; /** Тяга истории: ложится на всё, что ставка породила или изменила. */ pull?: Pull | null; /** Может ли ставка унести человека с должности: крупная история или воля покровителя. */ holderLoss?: boolean; /** Кто даёт имена новым людям: без него люди остаются с тем названием, что пришло. */ namer?: Namer | null },
 ): StakeResult {
   const changes: Change[] = [];
   let resultId: string | null = null;
@@ -59,7 +60,7 @@ export function applyStake(
         const obj = createObject(rules, {
           id: ctx.newId('obj'),
           type: op.object.type,
-          name: op.object.name,
+          name: namePerson(op.object.type, op.object.name, ctx.namer),
           description: op.object.description,
           statEffect: pointsToRaw(city, op.object.points),
           refs,
@@ -185,7 +186,7 @@ export function applyStake(
         const obj = createObject(rules, {
           id: ctx.newId('obj'),
           type: op.object.type,
-          name: op.object.name,
+          name: namePerson(op.object.type, op.object.name, ctx.namer),
           description: op.object.description,
           statEffect: pointsToRaw(city, op.object.points),
           parentId: front.siteId,

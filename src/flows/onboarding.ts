@@ -24,8 +24,9 @@ import { writeOfficerNatures } from '../agents/officer-nature/run.js';
 import { writeCityBrief } from '../agents/city-brief/run.js';
 import { auditPitch } from '../agents/pitch-auditor/run.js';
 import { writeCityIntro } from '../agents/city-intro/run.js';
-import { describeWorldObjects, planWorldObjects, type GenesisObjectDraft } from '../agents/world-objects-genesis/run.js';
-import type { WorldObject } from '../core/city.js';
+import { describeWorldObjects, planWorldObjects, type GenesisObjectDraft, type ObjectPlan } from '../agents/world-objects-genesis/run.js';
+import { namePerson, type Namer } from '../core/people.js';
+import type { PoolName, World, WorldObject } from '../core/city.js';
 import { newId, requireWorld, returnNames, sendAll, takeNames, today, tryAgent, type FlowDeps } from './context.js';
 
 export type OnboardingReply =
@@ -97,6 +98,32 @@ export type GenesisProgress = (step: number, total: number, label: string) => Pr
 export const GENESIS_STEPS = 8;
 
 /** Есть ли имя в тексте отдельным словом, в любом падеже (по основе). */
+/** Раздатчик имён из вынутых генезисом: занятые (жрец, сановники, горожане портрета) пропускает. */
+function localNamer(world: World, names: readonly PoolName[], taken: readonly string[]): Namer {
+  const used = new Set(taken);
+  return {
+    known: new Set([...(world.allNames ?? []), ...names.map((n) => n.name), ...world.namePool.map((n) => n.name)]),
+    take(gender) {
+      const pick = names.find((n) => !used.has(n.name) && n.gender === gender) ?? names.find((n) => !used.has(n.name));
+      if (!pick) return null;
+      used.add(pick.name);
+      return pick.name;
+    },
+  };
+}
+
+/** Дать имена безымянным людям списка; связи и родители идут за новым названием. */
+function namePlanPeople(plan: ObjectPlan[], namer: Namer): ObjectPlan[] {
+  const renamed = new Map<string, string>();
+  for (const o of plan) {
+    const name = namePerson(o.type, o.name, namer);
+    if (name !== o.name) renamed.set(o.name, name);
+  }
+  if (!renamed.size) return plan;
+  const to = (name: string) => renamed.get(name) ?? name;
+  return plan.map((o) => ({ ...o, name: to(o.name), links: o.links.map(to), parent: o.parent ? to(o.parent) : null }));
+}
+
 function mentions(text: string, name: string): boolean {
   const stem = name.length > 4 ? name.slice(0, -1) : name;
   return new RegExp(`(^|[^А-ЯЁа-яё])${stem}`).test(text);
@@ -175,7 +202,9 @@ export async function runGenesis(deps: FlowDeps, ownerId: string, onProgress?: G
     const text = { rules: deps.rules, cityName: portrait.cityName, portrait: portrait.portrait, hidden: portrait.hidden, people };
     // 3–4. Объекты: список со связями, затем описания и вклад.
     await progress(2, 'расставляю места, людей и обычаи…');
-    const plan = await planWorldObjects(deps.agents, text);
+    // Безымянные люди из списка получают имена из тех, что генезис держит под рукой.
+    const namer = localNamer(world, names, [...people, ...names.filter((n) => mentions(`${portrait.portrait}\n${portrait.hidden}`, n.name)).map((n) => n.name)]);
+    const plan = namePlanPeople(await planWorldObjects(deps.agents, text), namer);
     await progress(3, 'описываю каждое место…');
     const objects = buildObjects(deps, await describeWorldObjects(deps.agents, { ...text, plan }), day);
     // 5. Бриф: неизменное в городе, после объектов.
@@ -203,7 +232,7 @@ export async function runGenesis(deps: FlowDeps, ownerId: string, onProgress?: G
         deps,
         'genesis-topup',
         async () => {
-          const more = await planWorldObjects(deps.agents, { ...text, mustCover: audit.missing, existing: objects.map((o) => o.name) });
+          const more = namePlanPeople(await planWorldObjects(deps.agents, { ...text, mustCover: audit.missing, existing: objects.map((o) => o.name) }), namer);
           return buildObjects(deps, await describeWorldObjects(deps.agents, { ...text, plan: more }), day, objects);
         },
         [],

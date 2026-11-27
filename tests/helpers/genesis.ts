@@ -16,10 +16,13 @@ export const PORTRAIT = 'Город каменотёсов на крутом о�
 
 /** Список объектов: цепочка связей, две большие вещи разного рода, один скрытый. */
 export function objectPlan(count: number): Array<Record<string, unknown>> {
+  // Двое людей без личного имени: генезис даёт им имена сам.
+  const people: Record<number, string> = { 3: 'Старшая ткачиха', 4: 'Молодой стрелок' };
+  const nameOf = (i: number) => people[i] ?? `Мастерская ${i}`;
   return Array.from({ length: count }, (_, i) => ({
-    name: `Мастерская ${i}`,
-    type: 'building',
-    links: [`Мастерская ${(i + 1) % count}`],
+    name: nameOf(i),
+    type: people[i] ? 'person' : 'building',
+    links: [nameOf((i + 1) % count)],
     parent: '',
     hidden: i === 2,
     arc: i === 0 ? 'mystery' : i === 1 ? 'danger' : 'none',

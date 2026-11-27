@@ -20,7 +20,7 @@ import { plantScenario, scenarioTags, storyKind, touchedMysteries, type Scenario
 import type { OutboundMessage } from '../ports/notifier.js';
 import { writeScenario } from '../agents/scenario-writer/run.js';
 import { record } from './chronicle.js';
-import { namesUsed, newId, returnNames, takeNames, tryAgent, type FlowDeps } from './context.js';
+import { namesUsed, newId, returnNames, takeNames, tryAgent, withNamer, type FlowDeps } from './context.js';
 import { refreshFront } from './fronts.js';
 
 /** История по зерну: не больше freeMaxFronts фронтов и freeMaxDrifting идущих к сроку. */
@@ -101,6 +101,10 @@ export function storyCount(city: City): number {
 
 /** Посадить одну историю: заготовку, которая тут ещё не играла, или по зерну. `kind` — заказанный знак, без него любой. */
 export async function plantStory(deps: FlowDeps, city: City, day: number, kind: Kind | null = null): Promise<OutboundMessage | null> {
+  return withNamer(deps, (d) => plant(d, city, day, kind));
+}
+
+async function plant(deps: FlowDeps, city: City, day: number, kind: Kind | null): Promise<OutboundMessage | null> {
   const fresh = deps.scenarios.filter((s) => !city.scenariosUsed.includes(s.id) && (!kind || storyKind(s) === kind));
   const uniform = deps.rules.fronts.director.uniform;
   const template = weightedOrder(fresh, (s) => (uniform ? 1 : varietyWeight(deps.rules, city, scenarioTags(s), day)) * deps.rules.seeding.scale[s.scale ?? 'situation'].weight, deps.random.rng)[0] ?? null;
@@ -138,7 +142,7 @@ export async function plantStory(deps: FlowDeps, city: City, day: number, kind: 
 
   const tags = scenarioTags(planted);
   markStory(city, lean ? { ...lean, mystery: tags.mystery } : tags, day, { kind: storyKind(planted), scale: planted.scale ?? null });
-  const { objects, fronts } = plantScenario(deps.rules, city, planted, { day, newId: (p) => newId(deps, p) });
+  const { objects, fronts } = plantScenario(deps.rules, city, planted, { day, newId: (p) => newId(deps, p), namer: deps.namer ?? null });
   for (const front of fronts) refreshFront(deps, city, front, day);
   // Скрытое в истории город пока не видел: оно не идёт ни в весть, ни в хронику.
   const seen = objects.filter((o) => !o.hidden);

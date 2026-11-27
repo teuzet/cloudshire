@@ -199,7 +199,7 @@ export async function complicate(
   };
 
   const dress: EventDress = { title: plainTitle(costume.title), description: costume.description, outburst: costume.outburst, newObject: costume.newObject, hindrance: costume.hindrance };
-  const ctx = { day, newId: (p: string) => newId(deps, p), frontId: parent.id };
+  const ctx = { day, newId: (p: string) => newId(deps, p), frontId: parent.id, namer: deps.namer ?? null };
   const changes: Change[] = [];
 
   // Помеха: объект с отрицательной скоростью, фронта нет.

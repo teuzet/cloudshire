@@ -64,6 +64,18 @@ describe('онбординг → генезис', () => {
     expect(holders.every((o) => o.type === 'person' && STAT_IDS.every((id) => o.statEffect[id] === 0))).toBe(true);
     expect(city!.priest.objectId).toBe(holders.find((o) => o.holds === 'priest')!.id);
     for (const o of city!.officers) expect(findObjectName(city!, o.objectId)).toBe(o.name);
+    // Безымянные люди из списка получили имена из пула, пол по роли, связи пошли за новым названием.
+    const weaver = city!.objects.find((o) => o.name.endsWith(', старшая ткачиха'))!;
+    const shooter = city!.objects.find((o) => o.name.endsWith(', молодой стрелок'))!;
+    expect(weaver).toBeTruthy();
+    expect(shooter).toBeTruthy();
+    expect(city!.objects.find((o) => o.name === 'Мастерская 2')!.refs).toContain(weaver.id);
+    const pool = (await s.deps.storage.getWorld())!.namePool;
+    const nameOf = (o: { name: string }) => o.name.split(',')[0]!;
+    expect(pool.map((n) => n.name)).not.toContain(nameOf(weaver));
+    expect(s.names.female).toContain(nameOf(weaver));
+    expect(s.names.male).toContain(nameOf(shooter));
+    expect(new Set(city!.objects.filter((o) => o.type === 'person').map(nameOf)).size).toBe(7);
     // Связи стали ссылками в обе стороны, скрытое и большие вещи на месте.
     const [first, second] = city!.objects;
     expect(first!.refs).toContain(second!.id);
@@ -94,7 +106,8 @@ describe('онбординг → генезис', () => {
     // Характер-темп брошен кодом при рождении города.
     for (const o of city!.officers) expect(['slow', 'even', 'hasty']).toContain(o.temper);
     expect(city!.faith).toEqual({ value: expect.any(Number), day: city!.createdDay });
-    expect(world!.namePool.length + people.length).toBe(10);
+    // Ещё два имени ушли безымянным горожанам из списка.
+    expect(world!.namePool.length + people.length + 2).toBe(10);
     expect(await onboardingMessage(s.deps, { ownerId: 'u1', text: 'ещё' })).toEqual({ kind: 'has_city' });
   });
 
