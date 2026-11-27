@@ -7,6 +7,7 @@ import type { City, Front, FrontKey, Officer, WorldObject } from '../core/city.j
 import type { Relation, StatMap } from '../core/rules.js';
 import { leadOf, officerOf } from '../core/world/assignments.js';
 import { diffPoints, gradePoints, magnitude, pointsToGrades, rawToPoints } from '../core/world/numbers.js';
+import { nearWords } from '../core/world/links.js';
 import { attachedTo, findObject, visibleObjects } from '../core/world/objects.js';
 import { qualitativeStats } from '../core/world/stats.js';
 import type { ObjectBrief } from '../agents/_shared/blocks.js';
@@ -17,17 +18,19 @@ import { tryAgent, type FlowDeps } from './context.js';
 
 const KEY_OBJECTS = 8;
 
-export function briefOf(o: Pick<WorldObject, 'id' | 'type' | 'name' | 'description' | 'out'>): ObjectBrief {
+/** Объект для узкого агента. С городом к описанию приписана окрестность: где он, что держит, что на нём держится. */
+export function briefOf(o: Pick<WorldObject, 'id' | 'type' | 'name' | 'description' | 'out' | 'parentId' | 'holds'>, city?: Pick<City, 'fronts' | 'objects'>): ObjectBrief {
   // Выбывшее агенты видят как есть: оно в городе, но не служит, и его можно вернуть.
   const state = o.out ? ` Сейчас не действует (после беды «${o.out.cause}») и ждёт восстановления.` : '';
-  return { id: o.id, type: o.type, name: o.name, description: `${o.description}${state}`.trim() };
+  const near = city ? nearWords(city, o) : '';
+  return { id: o.id, type: o.type, name: o.name, description: `${o.description}${state}${near ? ` ${near}` : ''}`.trim() };
 }
 
 /** То, что агентам можно показать как «в городе есть»: видимое и долговечное. */
 export function visibleBriefs(city: City): ObjectBrief[] {
   return visibleObjects(city)
     .filter((o) => !o.temporary)
-    .map(briefOf);
+    .map((o) => briefOf(o, city));
 }
 
 /** Должность и имя; пол в скобках, чтобы агенты верно склоняли глаголы. */
@@ -65,9 +68,10 @@ export function touchesOf(city: City, front: Pick<Front, 'footprint'>): Array<{ 
 /** Участники ситуации строками для Запечатывателя. */
 export function rolesOf(city: City, front: Front): string[] {
   const lines = touchesOf(city, front).map((t) => `${t.name} — ${RELATION_WORDS[t.relation]}: ${t.reason}`);
-  for (const id of front.refs) {
+  // Участники и носитель идут с окрестностью: где стоят, что держат, что на них держится.
+  for (const id of new Set([...front.refs, ...(front.livesOn ? [front.livesOn] : [])])) {
     const obj = findObject(city, id);
-    if (obj && obj.status === 'active') lines.push(`${obj.name}: ${obj.description}`);
+    if (obj && obj.status === 'active') lines.push([`${obj.name}: ${obj.description}`, nearWords(city, obj, true)].filter(Boolean).join(' '));
   }
   for (const obj of attachedTo(city, front.id)) lines.push(`${obj.name} — ${(obj.attach?.rate ?? 0) < 0 ? 'мешает делу' : 'помогает делу'}: ${obj.description}`);
   return [...new Set(lines)];

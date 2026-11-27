@@ -29,8 +29,11 @@ export type Change =
   | { kind: 'linked'; a: string; b: string; names: [string, string] }
   | { kind: 'stats'; points: Partial<StatMap> }
   | { kind: 'front_opened'; frontId: string; title: string; form: FrontForm; plus: boolean }
-  /** Не стало того, на чём это держалось (cause): gone — беда отпала сама, cut — дело или поиск оборвались. */
-  | { kind: 'front_closed'; frontId: string; title: string; outcome: 'done' | 'averted' | 'failed' | 'cancelled' | 'expired' | 'gone' | 'cut'; cause?: string }
+  /**
+   * Не стало того, на чём это держалось (cause): gone — беда отпала сама, cut — дело или поиск оборвались.
+   * solved — причину устранило то, что сделал город (cause).
+   */
+  | { kind: 'front_closed'; frontId: string; title: string; outcome: 'done' | 'averted' | 'failed' | 'cancelled' | 'expired' | 'gone' | 'cut' | 'solved'; cause?: string }
   /** Объект стал якорем: пока он цел, фронт идёт иначе. motion — что у фронта держат: срок или работу. */
   | { kind: 'front_held'; frontId: string; title: string; objectId: string; name: string; effect: HoldEffect; motion: 'clock' | 'work' }
   /** Якорь пал: фронт идёт как прежде. */
@@ -107,12 +110,13 @@ const CLOSED_WORDS = {
   expired: 'Упущено',
   gone: 'Отпало само',
   cut: 'Оборвалось',
+  solved: 'Больше не грозит',
 } as const;
 
 type HeldWords = Record<HoldEffect, (title: string, name: string) => string>;
 
 /** Якорь встал, словами мира: что теперь иначе и благодаря чему. */
-const HELD_WORDS: Record<'clock' | 'work', HeldWords> = {
+export const HELD_WORDS: Record<'clock' | 'work', HeldWords> = {
   clock: {
     stop: (t, n) => `Пока есть ${n}, не случится: «${t}»`,
     slow: (t, n) => `Пока есть ${n}, медленнее надвигается: «${t}»`,
@@ -206,7 +210,7 @@ export function describeChanges(rules: Pick<Rules, 'stats'>, changes: readonly C
         );
         break;
       case 'front_closed':
-        out.push(`${CLOSED_WORDS[c.outcome]}: «${c.title}»${c.cause ? `. Не стало того, на чём это держалось: ${c.cause}` : ''}`);
+        out.push(`${CLOSED_WORDS[c.outcome]}: «${c.title}»${c.cause ? `. ${c.outcome === 'solved' ? 'Причину устранило' : 'Не стало того, на чём это держалось'}: ${c.cause}` : ''}`);
         break;
       case 'front_held':
         out.push(HELD_WORDS[c.motion][c.effect](c.title, c.name));

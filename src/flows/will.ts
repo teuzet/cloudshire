@@ -17,13 +17,14 @@ import { realWaitLabel, spanBand, DAYS_PER_MONTH } from '../core/time.js';
 import { assignmentOf, closeAssignment, createAssignment, leadOf, officerOf } from '../core/world/assignments.js';
 import type { Change } from '../core/world/changes.js';
 import { activeFronts, childFronts, closeFront, createFront, daysLeft, deadlineOf, findFront, frontGist, occupyFootprint } from '../core/world/fronts.js';
-import { carriedWork } from '../core/world/links.js';
+import { carriedWork, frontsOn } from '../core/world/links.js';
 import {
   basePrice,
   changeCapacity,
   diffPoints,
   dominantStat,
   hindranceRemovalCapacity,
+  magnitude,
   newObjectCapacity,
   pushCapacity,
   rawToPoints,
@@ -31,6 +32,7 @@ import {
 } from '../core/world/numbers.js';
 import { attachedTo, createObject, findObject } from '../core/world/objects.js';
 import { recomputeStats } from '../core/world/stats.js';
+import { TYPE_WORDS } from '../agents/_shared/blocks.js';
 import { judgeAlignment } from '../agents/alignment-judge/run.js';
 import { judgeCanon } from '../agents/canon-warden/run.js';
 import { mapFootprint } from '../agents/footprint-mapper/run.js';
@@ -42,6 +44,7 @@ import { appraise, leadLabel, officerLabel, seal, situationOf, touchesOf, visibl
 import { record } from './chronicle.js';
 import { newId, tryAgent, type FlowDeps } from './context.js';
 import { refreshAllFronts } from './fronts.js';
+import { influenceOf, linkWords, withLinks } from './patch.js';
 import { answerHindrances, answerWords } from './hindrances.js';
 
 export type WillOutcome = { ok: true; say: string } | { ok: false; error: string; say: string };
@@ -198,6 +201,7 @@ async function newProject(deps: FlowDeps, city: City, officer: Officer, will: Wi
     unattainable,
     status: 'waiting',
     createdDay: day,
+    answers: will.frontId,
   };
   city.projects.push(project);
   const started = await startStage(deps, city, project, officer, will, day);
@@ -297,7 +301,29 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
 
   // Новое привязывается к тому, с чем работа его связала: по этим связям потом пойдёт эхо.
   const linked = footprint.filter((l) => l.relation === 'linked').map((l) => l.objectId);
-  const stake = plan.stake.map((op): StakeOp => (op.op === 'create' ? { ...op, object: { ...op.object, refs: linked } } : op));
+
+  // Как готовый результат повлияет на то, что идёт рядом: слово агента, цена и связи от кода.
+  const kind = stage.result.kind;
+  const made = plan.stake.find((op) => op.op === 'create');
+  const resultType = made?.op === 'create' ? made.object.type : plan.target?.type;
+  const patch = project.unattainable
+    ? null
+    : await influenceOf(deps, city, {
+        work,
+        result: `${stage.result.name}${resultType ? ` (${TYPE_WORDS[resultType]})` : ''}: ${stage.result.description}`,
+        cause: stage.result.name,
+        objectIds: [...new Set([...footprint.map((l) => l.objectId), ...(plan.target ? [plan.target.id] : []), ...(made?.op === 'create' && made.object.parentId ? [made.object.parentId] : [])])],
+        named: project.answers ?? null,
+        // Что живёт на убираемом, кончится само: это уже в цене.
+        settled: kind === 'remove_object' && plan.target ? frontsOn(city, plan.target).map((f) => f.id) : [],
+        anchor: kind === 'new_object' || kind === 'change_object' || kind === 'restore_object',
+        day,
+      });
+  // Вещь, которая сама городу ничего не даёт, входит в цену того, что она держит.
+  const bare = kind === 'new_object' && magnitude(plan.points) === 0 && (patch?.price ?? 0) > 0;
+  const capacity = Math.round(((bare ? 0 : plan.capacity) + (patch?.price ?? 0)) * 100) / 100;
+  const linkedStake = plan.stake.map((op): StakeOp => (op.op === 'create' ? { ...op, object: { ...op.object, refs: linked } } : op));
+  const stake = patch ? withLinks(linkedStake, patch, plan.target?.id ?? null) : linkedStake;
 
   const site = createObject(deps.rules, {
     id: newId(deps, 'obj'),
@@ -312,7 +338,7 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
 
   const o = deps.rules.fronts.outcome;
   const twistNeeded = !stage.outcomeKnown && !project.unattainable && deps.random.rng() * (o.asPlanned + o.twist) >= o.asPlanned;
-  const scale = scaleOf(deps.rules, plan.capacity).milestones;
+  const scale = scaleOf(deps.rules, capacity).milestones;
   const pulse = risk === 'impossible' || Boolean(project.unattainable);
 
   const front = createFront({
@@ -321,20 +347,21 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
     origin: 'player',
     title: stage.title,
     description: stage.work,
-    capacity: plan.capacity,
+    capacity,
     milestones: project.unattainable ? Math.max(2, scale) : scale,
     pulseDay: pulse ? day + DAYS_PER_MONTH : null,
     stake,
     risk,
     tempo: will.projectTempo ?? 0,
     footprint,
-    atStake: plan.capacity,
+    atStake: capacity,
     unattainable: project.unattainable,
     projectId: project.id,
     siteId: site.id,
     profile: dominantStat(plan.points),
     day,
   });
+  if (patch?.links.length) front.links = patch.links;
   city.fronts.push(front);
   const occupied = occupyFootprint(city, front);
   recomputeStats(city, deps.rules);
@@ -383,6 +410,7 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
       `${title(deps, officer)} начал работу: ${frontGist(front)}.`,
       waitWords(deps, city, front, day),
       RISK_WORDS[risk],
+      linkWords(city, front.links ?? [], stage.result.name),
       names.length ? `На время работ заняты и дают городу меньше: ${names.join(', ')}.` : '',
       later.length ? `Это первый шаг замысла. Дальше, по слову покровителя: ${later.join('; ')}.` : '',
     ]
@@ -396,7 +424,8 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
 async function setStrategy(deps: FlowDeps, city: City, officer: Officer, will: Will, day: number): Promise<WillOutcome> {
   const front = will.frontId ? findFront(city, will.frontId) : null;
   if (!front || front.status !== 'active') return refuse('no_front', 'Неясно, какого дела это касается. Пусть покровитель назовёт его.');
-  if (front.form === 'clock') return refuse('only_wait', `«${frontGist(front)}»: работой это не сдвинуть, остаётся дождаться срока.`);
+  // Часы работой не сдвинуть: их держат вещью. Приказ о них — новое дело, которое на них отвечает.
+  if (front.form === 'clock') return newProject(deps, city, officer, { ...will, label: 'project' }, day);
   const lead = leadOf(city, front.id);
   // Свободный сановник на чужом деле помогает ему разовым вкладом: ведущий у дела один.
   if (lead && lead.office !== officer.office && !officer.assignmentId) {

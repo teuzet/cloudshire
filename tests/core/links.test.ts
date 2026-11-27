@@ -6,6 +6,7 @@ import { buildBound, buildOpportunity, buildSide, tensionToThreat, type EventDre
 import { refreshTargets } from '../../src/core/world/echo.js';
 import { closeFront, createFront, dueEvent, frontObjectIds, isFrozen, neighbors, nextEventDay, recomputeRate } from '../../src/core/world/fronts.js';
 import { holdersOf, isAsleep } from '../../src/core/world/hold.js';
+import { nearWords } from '../../src/core/world/links.js';
 import { createObject } from '../../src/core/world/objects.js';
 import { applyStake } from '../../src/core/world/stake.js';
 import { recomputeStats } from '../../src/core/world/stats.js';
@@ -322,6 +323,20 @@ describe('условия фронта изменились: обновляютс
     expect(refreshTargets(r, city, [], [], changedFrontIds(made.changes)).map((f) => f.id)).toEqual(['trip']);
     expect(refreshTargets(r, city, [], ['trip'], changedFrontIds(made.changes))).toEqual([]);
     expect(refreshTargets(r, city, [], [])).toEqual([]);
+  });
+
+  test('окрестность объекта словами: где он, что на нём, что он держит и что на нём держится', () => {
+    const city = islet();
+    const made = applyStake(r, city, [chains()], ctx(40));
+    const at = (id: string) => nearWords(city, city.objects.find((o) => o.id === id)!);
+    expect(at('tower')).toBe('Находится здесь: Прибившийся островок. На этом держится: «Найти рецепт в башне».');
+    expect(at('islet')).toBe('Здесь находится: Башня на островке. На этом держится: «Островок уносит ветром».');
+    expect(at(made.resultId!)).toBe('Пока есть это, не случится: «Островок уносит ветром».');
+    expect(at('pier')).toBe('');
+    // Скрытое названо только тем, кому можно.
+    city.objects.push(createObject(r, { id: 'vault', type: 'object', name: 'Тайник в башне', description: 'Замурованная ниша.', parentId: 'tower', hidden: true, day: 0 }));
+    expect(at('tower')).not.toContain('Тайник');
+    expect(nearWords(city, city.objects.find((o) => o.id === 'tower')!, true)).toContain('Здесь находится: Тайник в башне.');
   });
 
   test('перемены якоря словами мира', () => {

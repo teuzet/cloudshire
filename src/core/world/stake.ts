@@ -188,6 +188,14 @@ export function applyStake(
         changes.push(...closeFront(rules, city, front, 'cancelled', day));
         break;
       }
+      case 'end': {
+        const front = findFront(city, op.frontId);
+        if (!front || front.status !== 'active') break;
+        // Беда лишилась причины: это успех города. Случай и поиск просто пропадают.
+        const trouble = !front.plus && (front.form === 'threat' || front.form === 'tension');
+        changes.push(...closeFront(rules, city, front, trouble ? 'done' : 'cancelled', day, { outcome: trouble ? 'solved' : front.plus ? 'expired' : 'gone', cause: op.cause }));
+        break;
+      }
       case 'attach': {
         const front = findFront(city, op.frontId);
         if (!front || front.status !== 'active') break;

@@ -11,6 +11,7 @@ import { leadOf, officerOf } from '../../core/world/assignments.js';
 import { EFFECT_WORDS, effectOf, hindrancesOf } from '../../core/world/hindrance.js';
 import { daysLeft, deadlineOf, isFrozen, progressAt, shareDone } from '../../core/world/fronts.js';
 import { holdersOf, ownMotion } from '../../core/world/hold.js';
+import { linkLines, resultName } from '../../core/world/links.js';
 import { findObject } from '../../core/world/objects.js';
 import type { HoldEffect } from '../../core/rules.js';
 import { leadRatePerDay } from '../../core/world/numbers.js';
@@ -94,7 +95,14 @@ export function frontLine(
   }
   // Носитель: без него фронту не на чем держаться.
   const carrier = front.livesOn ? findObject(city, front.livesOn) : null;
-  if (carrier && carrier.status === 'active' && !carrier.hidden) parts.push(`держится на: ${carrier.name}`);
+  if (carrier && carrier.status === 'active' && !carrier.hidden) {
+    // Где стоит носитель: с тем, во что он вложен, уйдёт и он.
+    const outer = carrier.parentId ? findObject(city, carrier.parentId) : null;
+    parts.push(`держится на: ${carrier.name}${outer && outer.status === 'active' && !outer.hidden ? ` (находится здесь: ${outer.name})` : ''}`);
+  }
+  // Что дело переменит рядом, когда будет готово: это уже оплачено его работой.
+  const after = front.links?.length ? linkLines(city, front.links, resultName(city, front) ?? 'это') : [];
+  if (after.length) parts.push(`когда будет готово: ${after.join(', ')}`);
   if (officer) parts.push(`ведёт ${officer.title.toLowerCase()} ${officer.name}`);
   // Что мешает делу и как: словами мира. Как с этим быть, решает покровитель.
   for (const obj of hindrancesOf(city, front.id)) {

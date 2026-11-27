@@ -8,7 +8,7 @@ import { recomputeStats } from '../../src/core/world/stats.js';
 import { addFront } from '../../src/flows/fronts.js';
 import { playerWill, withdraw } from '../../src/flows/will.js';
 import { blankCity } from '../helpers/fixtures.js';
-import { scriptFrontAgents, stand } from '../helpers/game.js';
+import { lastUser, scriptFrontAgents, stand } from '../helpers/game.js';
 
 const BALLISTA = [
   { stat: 'security', direction: 'up' as const, size: 'large' },
@@ -213,11 +213,15 @@ describe('стратегия, темп, отмена', () => {
     expect(await playerWill(s.deps, city, 'marshal', 'Маршал, помоги ещё', 3)).toMatchObject({ ok: false });
   });
 
-  test('часы работой не сдвинуть', async () => {
+  test('часы работой не сдвинуть: приказ о них становится новым делом, которое на них отвечает', async () => {
     const s = await town();
     addFront(s.deps, s.city, createFront({ id: 'clk', form: 'clock', origin: 'complication', title: 'Старая кузня пустеет', description: '', capacity: 0, deadlineDay: 120, day: 0 }), 0);
     s.llm.script('will-interpreter', will({ label: 'strategy', front_id: 'clk', goal: 'Спасти кузню' }));
-    expect(await playerWill(s.deps, s.city, 'keeper', 'Спасти кузню', 0)).toMatchObject({ ok: false, error: 'only_wait' });
+    expect(await playerWill(s.deps, s.city, 'keeper', 'Спасти кузню', 0)).toMatchObject({ ok: true });
+    expect(s.city.projects.at(-1)).toMatchObject({ answers: 'clk', status: 'running' });
+    expect(s.city.fronts.find((f) => f.id === 'clk')).toMatchObject({ status: 'active', deadlineDay: 120 });
+    // О часах спросили оценщика влияния: приказ отвечал на них.
+    expect(lastUser(s.llm.callsTo('influence-appraiser').at(-1)!)).toContain('- clk (отложенная перемена)');
   });
 
   test('темп проекта и темп поручения — разные рычаги', async () => {

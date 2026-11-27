@@ -6,7 +6,7 @@
  */
 
 import type { ClockState } from './time.js';
-import type { Engine, FrontForm, HindranceEffect, HoldEffect, ObjectType, Office, Relation, RiskStep, Scale, Source, StatId, StatMap, StewardMode, StewardWait, Temper, Tempo, Verdict } from './rules.js';
+import type { Engine, FrontForm, HindranceEffect, HoldEffect, LinkEffect, ObjectType, Office, Relation, RiskStep, Scale, Source, StatId, StatMap, StewardMode, StewardWait, Temper, Tempo, Verdict } from './rules.js';
 
 // ───────────────────────────── мир ─────────────────────────────
 
@@ -70,6 +70,15 @@ export interface HoldSpec {
   word?: boolean;
   stake?: StakeOp[];
   failStake?: StakeOp[];
+}
+
+/** Влияние результата дела на другой фронт, заявленное в приказе. */
+export interface FrontLink {
+  frontId: string;
+  effect: LinkEffect;
+  word?: boolean;
+  /** Сколько работы это добавило делу. Ноль — влияние городу не на пользу, за него не платят. */
+  price: number;
 }
 
 /**
@@ -171,6 +180,8 @@ export type StakeOp =
   | { op: 'progress'; frontId: string; amount: number }
   | { op: 'rollback'; frontId: string }
   | { op: 'cancel'; frontId: string }
+  /** Причины больше нет: фронт закрыт без ставки. cause — что её устранило. */
+  | { op: 'end'; frontId: string; cause: string }
   /** Помощник (rate > 0) или помеха (rate < 0) на фронте. */
   | {
       op: 'attach';
@@ -257,6 +268,11 @@ export interface Front {
   profile: StatId | null;
   /** Атомарное дело: вид и вердикт Судьи на его формулировку. */
   deed: { kind: DeedKind; verdict: Verdict; targetId: string | null } | null;
+  /**
+   * На что результат дела повлияет, когда будет готов: слово оценщика влияния и цена, которую
+   * за это назначил код. Хранится, чтобы одни слова всегда стоили одинаково.
+   */
+  links?: FrontLink[];
   /** Материал посаженной истории. */
   script: {
     events: Array<{ id: string; description: string; fired: boolean }>;
@@ -344,6 +360,8 @@ export interface Project {
   unattainable: string | null;
   status: 'running' | 'waiting' | 'done' | 'cancelled';
   createdDay: number;
+  /** Идущее дело, на которое замысел отвечает: беда или случай, названные в приказе. */
+  answers?: string | null;
 }
 
 // ───────────────────────────── люди и речь ─────────────────────────────

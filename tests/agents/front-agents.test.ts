@@ -19,6 +19,7 @@ import { rewriteDescription } from '../../src/agents/description-rewriter/run.js
 import { composeDynamic } from '../../src/agents/dynamics-composer/run.js';
 import { appraiseFaith } from '../../src/agents/faith-appraiser/run.js';
 import { mapFootprint } from '../../src/agents/footprint-mapper/run.js';
+import { appraiseInfluence } from '../../src/agents/influence-appraiser/run.js';
 import { sealKey } from '../../src/agents/key-sealer/run.js';
 import { resolveEvent } from '../../src/agents/resolver/run.js';
 import { appraiseRisk } from '../../src/agents/risk-appraiser/run.js';
@@ -42,7 +43,7 @@ const masons: ObjectBrief = { id: 'o2', type: 'community', name: 'Артель �
 const fronts = [{ id: 'f1', title: 'Стройка башни', kind: 'дело', description: 'Артель кладёт цоколь.', lead: 'казначей Ада', hindrances: [{ name: 'Грозовые птицы', description: 'Стая вьёт гнёзда на лесах.' }] }];
 
 const GENERATORS = ['stage-planner', 'key-sealer', 'costumer', 'dynamics-composer', 'beat-writer', 'resolver', 'description-rewriter', 'chronicler'];
-const EVALUATORS = ['existence-judge', 'will-interpreter', 'canon-warden', 'contribution-appraiser', 'risk-appraiser', 'footprint-mapper', 'alignment-judge', 'role-fitter', 'faith-appraiser', 'theme-tagger'];
+const EVALUATORS = ['existence-judge', 'will-interpreter', 'canon-warden', 'contribution-appraiser', 'risk-appraiser', 'footprint-mapper', 'influence-appraiser', 'alignment-judge', 'role-fitter', 'faith-appraiser', 'theme-tagger'];
 
 describe('гигиена промптов системы фронтов', () => {
   const read = (agent: string) => fs.readFileSync(path.join(ROOT, 'src/agents', agent, 'prompt.md'), 'utf8');
@@ -90,10 +91,52 @@ describe('воля игрока', () => {
     expect(lastUser(llm, 'will-interpreter')).toContain('«Грозовые птицы»');
   });
 
-  test('will-interpreter: у проекта поля чужих веток обнуляются', async () => {
-    const llm = new FakeLlm().script('will-interpreter', toolReply('submit_will', { label: 'project', front_id: 'f1', deed_kind: 'push', goal: 'Построить маяк', project_tempo: 'careful' }));
+  test('will-interpreter: у проекта поля чужих веток обнуляются; дело, на которое он отвечает, остаётся', async () => {
+    const llm = new FakeLlm().script(
+      'will-interpreter',
+      toolReply('submit_will', { label: 'project', front_id: 'f1', deed_kind: 'push', goal: 'Построить маяк', project_tempo: 'careful' }),
+      toolReply('submit_will', { label: 'project', front_id: 'ghost', goal: 'Построить маяк' }),
+    );
     const will = await interpretWill(deps(llm), { order: 'Построй маяк, не спеша', officer: 'казначей Ада', fronts, projects: [] });
-    expect(will).toMatchObject({ label: 'project', frontId: null, deedKind: null, projectTempo: -1 });
+    expect(will).toMatchObject({ label: 'project', frontId: 'f1', deedKind: null, projectTempo: -1 });
+    // Чужой id у нового дела отбрасывается без переспроса.
+    const stray = await interpretWill(deps(llm), { order: 'Построй маяк', officer: 'казначей Ада', fronts, projects: [] });
+    expect(stray.frontId).toBeNull();
+    expect(llm.callsTo('will-interpreter')).toHaveLength(2);
+  });
+
+  test('influence-appraiser: слова переводятся в виды связи, чужие id отбиваются, повторы схлопываются', async () => {
+    const nearby = [
+      { id: 'f1', kind: 'угроза со сроком', description: 'Шайка грабит хутора.', carrier: 'Шайка с плато', helps: ['разбить шайку в логове'] },
+      { id: 'f2', kind: 'дело', description: 'Каменщики кладут стену.', carrier: null, helps: [] },
+    ];
+    const llm = new FakeLlm().script(
+      'influence-appraiser',
+      toolReply('submit_influence', { effects: [{ id: 'f9', effect: 'stops' }], sides: [] }),
+      toolReply('submit_influence', {
+        effects: [
+          { id: 'f1', effect: 'slows', basis: 'word' },
+          { id: 'f1', effect: 'stops' },
+          { id: 'f2', effect: 'removes_cause', basis: 'word' },
+        ],
+        sides: [
+          { id: 'o2', stance: 'harms' },
+          { id: 'o2', stance: 'helps' },
+        ],
+        reason: 'Слух мешает шайке.',
+      }),
+    );
+    const out = await appraiseInfluence(deps(llm), { work: 'Пустить слух', result: 'Слух (обычай или порядок): говорят, что на плато мор.', nearby, sides: [masons] });
+    expect(out.links).toEqual([
+      { frontId: 'f1', effect: 'slow', word: true },
+      { frontId: 'f2', effect: 'removes', word: false },
+    ]);
+    expect(out.sides).toEqual([{ objectId: 'o2', stance: 'harms' }]);
+    expect(llm.callsTo('influence-appraiser')).toHaveLength(2);
+    const user = lastUser(llm, 'influence-appraiser');
+    expect(user).toContain('- f1 (угроза со сроком): Шайка грабит хутора. Держится на: Шайка с плато. Что тут на деле помогает: разбить шайку в логове.');
+    expect(user).toContain('o2 — Артель каменщиков (группа людей)');
+    expect(llm.callsTo('influence-appraiser')[0]!.system).toContain('МИР, В КОТОРОМ ВСЁ ПРОИСХОДИТ');
   });
 
   test('canon-warden: поправка меняет цель, недостижимое не несёт нехваток', async () => {

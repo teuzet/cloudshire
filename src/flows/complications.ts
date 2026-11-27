@@ -180,7 +180,7 @@ export async function complicate(
         skeleton: plan.skeleton,
         shape: plan.shape,
         cause: `${frontGist(parent)}. ${workWords(parent)}`,
-        actor: role ? { object: briefOf(role), touch: plan.touch } : null,
+        actor: role ? { object: briefOf(role, city), touch: plan.touch } : null,
         themes: themeNames(city),
         names: names.map((n) => `${n.name} (${n.gender === 'female' ? 'ж' : 'м'})`),
         needsNew: plan.needsNew,

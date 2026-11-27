@@ -28,7 +28,7 @@ describe('настройки моделей', () => {
   test('узкие агенты системы фронтов работают на модели по умолчанию', () => {
     const raw = yaml.load(fs.readFileSync(path.join(ROOT, 'config/agents.yaml'), 'utf8'));
     const settings = parseAgentSettings(raw);
-    const narrow = ['will-interpreter', 'canon-warden', 'stage-planner', 'contribution-appraiser', 'risk-appraiser', 'footprint-mapper', 'key-sealer', 'alignment-judge', 'role-fitter', 'costumer', 'dynamics-composer', 'beat-writer', 'resolver', 'faith-appraiser', 'theme-tagger', 'description-rewriter', 'chronicler'];
+    const narrow = ['will-interpreter', 'canon-warden', 'stage-planner', 'contribution-appraiser', 'risk-appraiser', 'footprint-mapper', 'influence-appraiser', 'key-sealer', 'alignment-judge', 'role-fitter', 'costumer', 'dynamics-composer', 'beat-writer', 'resolver', 'faith-appraiser', 'theme-tagger', 'description-rewriter', 'chronicler'];
     for (const name of narrow) expect(settings(name).model).toBe('openai:gpt-5.6-luna');
   });
 });

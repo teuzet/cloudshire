@@ -17,6 +17,7 @@ export interface WillInput {
 
 export interface Will {
   label: WillLabel;
+  /** Идущее дело, к которому относится приказ. У нового дела — то, на что оно отвечает, если такое есть. */
   frontId: string | null;
   projectId: string | null;
   deedKind: DeedKind | null;
@@ -27,6 +28,11 @@ export interface Will {
 }
 
 const NEEDS_FRONT: readonly WillLabel[] = ['strategy', 'deed', 'tempo', 'cancel'];
+
+/** Новое дело может отвечать на идущее: беду или случай из списка. Чужой id молча отбрасывается. */
+function answered(raw: WillRaw, input: WillInput): string | null {
+  return raw.front_id && input.fronts.some((f) => f.id === raw.front_id) ? raw.front_id : null;
+}
 
 function frontLine(f: WillInput['fronts'][number]): string {
   return [
@@ -63,9 +69,9 @@ export const willInterpreter: StructuredAgent<WillInput, WillRaw, Will> = {
     if (raw.label === 'deed' && !raw.deed_kind) return 'для deed нужен deed_kind: push, helper или clear';
     return null;
   },
-  finish: (raw) => ({
+  finish: (raw, input) => ({
     label: raw.label,
-    frontId: NEEDS_FRONT.includes(raw.label) ? raw.front_id : null,
+    frontId: NEEDS_FRONT.includes(raw.label) ? raw.front_id : raw.label === 'project' ? answered(raw, input) : null,
     projectId: raw.label === 'continue' ? raw.project_id : null,
     deedKind: raw.label === 'deed' ? raw.deed_kind : null,
     goal: raw.goal,

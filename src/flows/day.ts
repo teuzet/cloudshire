@@ -51,7 +51,7 @@ function participants(city: City, front: Front): ObjectBrief[] {
     .map((id) => findObject(city, id))
     .filter((o): o is WorldObject => Boolean(o) && o?.status === 'active' && !o.hidden)
     .slice(0, MAX_PARTICIPANTS)
-    .map(briefOf);
+    .map((o) => briefOf(o));
 }
 
 /** Что получится в конце, словами: чтобы вехи вели к результату. */
@@ -236,7 +236,7 @@ async function avert(deps: FlowDeps, city: City, front: Front, day: number, out:
   const culprits = unmasked.flatMap((c) => (c.kind === 'object_revealed' ? [`${c.name}: ${c.description ?? ''}`.trim()] : []));
   const description = culprits.length ? `${front.description} Выяснилось, кто за этим стоял: ${culprits.join('; ')}.` : front.description;
   const helpers = attachedTo(city, front.id).filter((o) => o.temporary && (o.attach?.rate ?? 0) > 0);
-  const people = [...participants(city, front), ...helpers.map(briefOf)];
+  const people = [...participants(city, front), ...helpers.map((o) => briefOf(o))];
   const resolution = await tryAgent<Resolution>(
     deps,
     'resolver',

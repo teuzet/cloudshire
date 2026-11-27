@@ -1,0 +1,89 @@
+import type { LinkEffect } from '../../core/rules.js';
+import { block, briefList, join, type ObjectBrief } from '../_shared/blocks.js';
+import { canon, composeSystem, loadPrompt } from '../_shared/canon.js';
+import { runStructured, type AgentDeps, type StructuredAgent } from '../_shared/runtime.js';
+import { influenceSchema, type InfluenceRaw, type InfluenceWord } from './schema.js';
+
+const prompt = loadPrompt(import.meta.url);
+
+export interface InfluenceInput {
+  /** Что делают. */
+  work: string;
+  /** Каким результат будет, когда работа закончена: название, вид и описание. */
+  result: string;
+  /** Что идёт рядом с работой. */
+  nearby: Array<{
+    id: string;
+    /** Род словами: «угроза со сроком», «дело», «удобный случай». */
+    kind: string;
+    description: string;
+    /** На чём это держится, если известно. */
+    carrier: string | null;
+    /** Что против этого на деле помогает или что двигает это дело. */
+    helps: string[];
+  }>;
+  /** Те, кто рядом и имеет свою волю. */
+  sides: ObjectBrief[];
+}
+
+export interface Influence {
+  links: Array<{ frontId: string; effect: LinkEffect; word: boolean }>;
+  /** Кому из сторон готовый результат вредит и кому помогает. */
+  sides: Array<{ objectId: string; stance: 'harms' | 'helps' }>;
+  reason: string;
+}
+
+const EFFECT: Record<InfluenceWord, LinkEffect> = {
+  removes_cause: 'removes',
+  stops: 'stop',
+  slows: 'slow',
+  hurries: 'hurry',
+  safer: 'safer',
+  riskier: 'riskier',
+  changes_outcome: 'outcome',
+};
+
+function nearbyLine(n: InfluenceInput['nearby'][number]): string {
+  return [`- ${n.id} (${n.kind}): ${n.description}`, n.carrier ? `Держится на: ${n.carrier}.` : '', n.helps.length ? `Что тут на деле помогает: ${n.helps.join('; ')}.` : '']
+    .filter(Boolean)
+    .join(' ');
+}
+
+export const influenceAppraiser: StructuredAgent<InfluenceInput, InfluenceRaw, Influence> = {
+  name: 'influence-appraiser',
+  tool: 'submit_influence',
+  description: 'Как готовый результат работы влияет на то, что идёт рядом, и на тех, кто рядом.',
+  schema: influenceSchema,
+  system: () => composeSystem([], prompt, canon('setting')),
+  user: ({ work, result, nearby, sides }) =>
+    join(`Работа: «${work}»`, `Результат: ${result}`, block('Что идёт рядом', nearby.map(nearbyLine).join('\n')), block('Кто рядом', sides.length ? briefList(sides) : 'никого')),
+  check: (raw, input) => {
+    const fronts = new Set(input.nearby.map((n) => n.id));
+    const alien = raw.effects.find((e) => !fronts.has(e.id));
+    if (alien) return `id «${alien.id}» нет в списке «Что идёт рядом»; бери id только оттуда`;
+    const sides = new Set(input.sides.map((s) => s.id));
+    const stranger = raw.sides.find((s) => !sides.has(s.id));
+    return stranger ? `id «${stranger.id}» нет в списке «Кто рядом»; бери id только оттуда` : null;
+  },
+  finish: (raw) => {
+    const seen = new Set<string>();
+    const links: Influence['links'] = [];
+    for (const e of raw.effects) {
+      if (seen.has(e.id)) continue;
+      seen.add(e.id);
+      links.push({ frontId: e.id, effect: EFFECT[e.effect], word: e.basis === 'word' && e.effect !== 'removes_cause' });
+    }
+    const who = new Set<string>();
+    const sides: Influence['sides'] = [];
+    for (const s of raw.sides) {
+      if (who.has(s.id)) continue;
+      who.add(s.id);
+      sides.push({ objectId: s.id, stance: s.stance });
+    }
+    return { links, sides, reason: raw.reason };
+  },
+};
+
+export async function appraiseInfluence(deps: AgentDeps, input: InfluenceInput): Promise<Influence> {
+  return (await runStructured(deps, influenceAppraiser, input)).value;
+}

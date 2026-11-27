@@ -81,6 +81,7 @@ export function scriptFrontAgents(llm: FakeLlm, appraisals: Record<string, Effec
       return toolReply('submit_contribution', { effects: appraisals[name] ?? [], reason: 'По таблице теста.' });
     })
     .always('footprint-mapper', toolReply('submit_footprint', { relations: [] }))
+    .always('influence-appraiser', toolReply('submit_influence', { effects: [], sides: [] }))
     .always('risk-appraiser', toolReply('submit_risk', { step: 'safe', reason: 'Спокойное дело.' }))
     .always('key-sealer', (req) =>
       toolReply('submit_key', {

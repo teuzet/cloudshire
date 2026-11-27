@@ -103,6 +103,12 @@ export type HindranceEffect = (typeof HINDRANCE_EFFECTS)[number];
  */
 export const HOLD_EFFECTS = ['stop', 'slow', 'hurry', 'riskier', 'safer', 'outcome'] as const;
 export type HoldEffect = (typeof HOLD_EFFECTS)[number];
+/**
+ * Как результат дела влияет на то, что идёт рядом: устраняет причину (фронт закрыт в день
+ * готовности) или держит его как якорь, пока цел.
+ */
+export const LINK_EFFECTS = ['removes', ...HOLD_EFFECTS] as const;
+export type LinkEffect = (typeof LINK_EFFECTS)[number];
 export type Shape = (typeof SHAPES)[number];
 
 /** Случаи и сила события для веры. */
@@ -224,7 +230,16 @@ export const rulesSchema = z.object({
     helper: z.object({ unitsPerMonth: z.number().positive(), maxShare: z.number().positive() }),
     hindrance: z.object({ unitsPerMonth: z.number().negative(), removalShare: z.number().positive(), removalMin: z.number().positive(), deadlineShare: z.number().min(0).max(1) }),
     /** Якорь: объект держит фронт, пока цел. Беда со сроком идёт медленнее или быстрее, дело получает или теряет работу. */
-    hold: z.object({ slowFactor: z.number().positive().max(1), hurryFactor: z.number().min(1), unitsPerMonth: z.number().positive() }),
+    hold: z.object({
+      slowFactor: z.number().positive().max(1),
+      hurryFactor: z.number().min(1),
+      unitsPerMonth: z.number().positive(),
+      /** Цена якоря: доля остатка шкалы фронта, который он держит на пользу городу. */
+      price: z.object({ stop: z.number().positive(), slow: z.number().positive(), hurry: z.number().positive(), safer: z.number().positive(), outcome: z.number().positive() }),
+      /** Якорь «на слове» стоит эту долю от прочного. */
+      wordShare: z.number().positive().max(1),
+      priceMin: z.number().positive(),
+    }),
     push: z.object({ share: z.number().positive(), min: z.number().positive() }),
     threat: z.object({ capacityShare: z.number().positive(), boundShare: z.number().positive(), capacityMin: z.number().positive() }),
     tension: z.object({

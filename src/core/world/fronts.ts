@@ -277,7 +277,7 @@ export function frontTouches(city: Pick<City, 'objects'>, front: Front): string[
 }
 
 /** Сами объекты и всё, во что они вложены. */
-function withOuter(city: Pick<City, 'objects'>, ids: readonly string[]): Set<string> {
+export function withOuter(city: Pick<City, 'objects'>, ids: readonly string[]): Set<string> {
   const out = new Set<string>();
   for (const id of ids) {
     let at: string | null = id;

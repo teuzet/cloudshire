@@ -11,6 +11,7 @@ import { activeFronts, closeFront, endersOf } from '../core/world/fronts.js';
 import { leadOf } from '../core/world/assignments.js';
 import { monthsToDays, rawToPoints } from '../core/world/numbers.js';
 import { mysteryObjectIds } from '../core/lore.js';
+import { nearWords } from '../core/world/links.js';
 import type { City, StoryTags } from '../core/city.js';
 import { IMPACT_LEVELS, SCALES, type Scale } from '../core/rules.js';
 import { leanOf, markStory, roomForTrouble, varietyWeight, wantsChance, wantsTrouble } from '../core/world/director.js';
@@ -113,7 +114,8 @@ export async function plantStory(deps: FlowDeps, city: City, day: number, kind: 
     () =>
       writeScenario(deps.agents, {
         cityBrief: city.brief,
-        objects: city.objects.filter((o) => o.status === 'active'),
+        // Сценарист видит окрестность: что где стоит, что чем удержано и что на чём держится.
+        objects: city.objects.filter((o) => o.status === 'active').map((o) => ({ ...o, description: [o.description, nearWords(city, o, true)].filter(Boolean).join(' ') })),
         template,
         seed: lean ? seedWords(deps, city, lean, kind) : null,
         names,
