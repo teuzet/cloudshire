@@ -3,7 +3,7 @@
  * Летописец оформляет его в запись хроники, эхо и обновление ищут по нему задетое.
  */
 
-import { STAT_IDS, type FrontForm, type ObjectType, type Rules, type StatMap } from '../rules.js';
+import { STAT_IDS, type FrontForm, type HoldEffect, type ObjectType, type Rules, type StatMap } from '../rules.js';
 import { magnitude } from './numbers.js';
 
 export type Change =
@@ -29,7 +29,12 @@ export type Change =
   | { kind: 'linked'; a: string; b: string; names: [string, string] }
   | { kind: 'stats'; points: Partial<StatMap> }
   | { kind: 'front_opened'; frontId: string; title: string; form: FrontForm; plus: boolean }
-  | { kind: 'front_closed'; frontId: string; title: string; outcome: 'done' | 'averted' | 'failed' | 'cancelled' | 'expired' }
+  /** gone — беда ушла сама: не стало того, на чём она держалась (cause). */
+  | { kind: 'front_closed'; frontId: string; title: string; outcome: 'done' | 'averted' | 'failed' | 'cancelled' | 'expired' | 'gone'; cause?: string }
+  /** Объект стал якорем: пока он цел, фронт идёт иначе. motion — что у фронта держат: срок или работу. */
+  | { kind: 'front_held'; frontId: string; title: string; objectId: string; name: string; effect: HoldEffect; motion: 'clock' | 'work' }
+  /** Якорь пал: фронт идёт как прежде. */
+  | { kind: 'front_freed'; frontId: string; title: string; objectId: string; name: string; effect: HoldEffect; motion: 'clock' | 'work' }
   | { kind: 'front_moved'; frontId: string; title: string; how: 'rollback' | 'pushed' | 'eased' | 'frozen' | 'slowed' | 'helped' | 'cleared' | 'setback' | 'burst' };
 
 const TYPE_WORDS: Record<ObjectType, string> = {
@@ -100,7 +105,36 @@ const CLOSED_WORDS = {
   failed: 'Случилось',
   cancelled: 'Брошено',
   expired: 'Упущено',
+  gone: 'Ушло само',
 } as const;
+
+type HeldWords = Record<HoldEffect, (title: string, name: string) => string>;
+
+/** Якорь встал, словами мира: что теперь иначе и благодаря чему. */
+const HELD_WORDS: Record<'clock' | 'work', HeldWords> = {
+  clock: {
+    stop: (t, n) => `Пока держится ${n}, не случится: «${t}»`,
+    slow: (t, n) => `Пока держится ${n}, медленнее надвигается: «${t}»`,
+    hurry: (t, n) => `Пока держится ${n}, быстрее надвигается: «${t}»`,
+    riskier: (t, n) => `Пока держится ${n}, опаснее стало: «${t}»`,
+    safer: (t, n) => `Пока держится ${n}, спокойнее стало: «${t}»`,
+    outcome: (t, n) => `Пока держится ${n}, иначе кончится: «${t}»`,
+  },
+  work: {
+    stop: (t, n) => `Пока держится ${n}, стоит работа над «${t}»`,
+    slow: (t, n) => `Пока держится ${n}, медленнее идёт работа над «${t}»`,
+    hurry: (t, n) => `Пока держится ${n}, быстрее идёт работа над «${t}»`,
+    riskier: (t, n) => `Пока держится ${n}, опаснее работа над «${t}»`,
+    safer: (t, n) => `Пока держится ${n}, безопаснее работа над «${t}»`,
+    outcome: (t, n) => `Пока держится ${n}, иначе кончится: «${t}»`,
+  },
+};
+
+/** Якорь пал, словами мира. */
+function freedWords(c: Extract<Change, { kind: 'front_freed' }>): string {
+  if (c.effect === 'stop') return c.motion === 'clock' ? `Больше не держит: ${c.name}. Снова надвигается: «${c.title}»` : `Больше не держит: ${c.name}. Работа над «${c.title}» пошла снова`;
+  return `Больше не держит: ${c.name}. Идёт как прежде: «${c.title}»`;
+}
 
 const MOVED_WORDS: Record<Extract<Change, { kind: 'front_moved' }>['how'], (t: string) => string> = {
   rollback: (t) => `Работу над «${t}» отбросило назад`,
@@ -171,7 +205,13 @@ export function describeChanges(rules: Pick<Rules, 'stats'>, changes: readonly C
         );
         break;
       case 'front_closed':
-        out.push(`${CLOSED_WORDS[c.outcome]}: «${c.title}»`);
+        out.push(`${CLOSED_WORDS[c.outcome]}: «${c.title}»${c.cause ? `. Не стало того, на чём это держалось: ${c.cause}` : ''}`);
+        break;
+      case 'front_held':
+        out.push(HELD_WORDS[c.motion][c.effect](c.title, c.name));
+        break;
+      case 'front_freed':
+        out.push(freedWords(c));
         break;
       case 'front_moved':
         out.push(MOVED_WORDS[c.how](c.title));
@@ -194,6 +234,13 @@ export function changedObjectIds(changes: readonly Change[]): string[] {
     if (c.kind === 'object_removed' || c.kind === 'object_out' || c.kind === 'object_back') ids.add(c.objectId);
     if (c.kind === 'object_revealed') ids.add(c.objectId);
   }
+  return [...ids];
+}
+
+/** Фронты, у которых изменились условия: якорь встал или пал. От них обновляются они сами и их соседи. */
+export function changedFrontIds(changes: readonly Change[]): string[] {
+  const ids = new Set<string>();
+  for (const c of changes) if (c.kind === 'front_held' || c.kind === 'front_freed') ids.add(c.frontId);
   return [...ids];
 }
 

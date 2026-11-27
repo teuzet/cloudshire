@@ -7,6 +7,7 @@ import { STAT_IDS, type HindranceEffect, type ObjectType, type Rules, type StatM
 import type { City, Front, FrontKey, StakeOp, WorldObject } from '../city.js';
 import type { Rng } from '../random.js';
 import { createFront, settleProgress } from './fronts.js';
+import { setClock } from './hold.js';
 import {
   boundThreat,
   diffPoints,
@@ -182,7 +183,7 @@ export function tensionToThreat(rules: Rules, front: Front, day: number): void {
   front.milestones = 1;
   front.milestonesFired = 0;
   const months = front.origin === 'echo' ? rules.fronts.deadlines.worldMonths : rules.fronts.deadlines.ownRiskMonths;
-  front.deadlineDay = Math.round(day) + troubleDays(rules, front.capacity - front.progress, months);
+  setClock(front, day, troubleDays(rules, front.capacity - front.progress, months));
 }
 
 /** Авария: мгновенный удар. Часть набранного прогресса теряется. Возвращает потерю. */

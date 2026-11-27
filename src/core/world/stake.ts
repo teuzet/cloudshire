@@ -11,6 +11,7 @@ import { closeFront, findFront, frontGist, rollbackMilestone, settleProgress } f
 import { diffPoints, pointsToRaw, rawToPoints } from './numbers.js';
 import { addObjectVersion, createObject, deleteWithChildren, findObject, tug } from './objects.js';
 import { applyHindrance, feasibleEffect, liftHindrance } from './hindrance.js';
+import { holdFront, objectsGone } from './links.js';
 import { addToLedger, recomputeStats } from './stats.js';
 
 export interface StakeResult {
@@ -42,6 +43,15 @@ export function applyStake(
     obj.out = { day, cause, was: obj.out?.was ?? { ...before } };
     addObjectVersion(rules, obj, { description, statEffect: pointsToRaw(city, points), day });
     changes.push({ kind: 'object_out', objectId: obj.id, name: obj.name, delta: diffPoints(points, before) });
+    changes.push(...objectsGone(rules, city, [obj], day));
+  };
+  /** Стереть объект со всем вложенным; что на них жило, кончилось, что они держали, идёт как прежде. */
+  const remove = (obj: WorldObject) => {
+    if (obj.attach) liftHindrance(findFront(city, obj.attach.frontId), obj);
+    const gone = deleteWithChildren(city, obj, day);
+    for (const o of gone) changes.push({ kind: 'object_removed', objectId: o.id, name: o.name, points: rawToPoints(city, o.statEffect), hidden: o.hidden });
+    changes.push(...objectsGone(rules, city, gone, day));
+    return gone;
   };
 
   for (const op of ops) {
@@ -64,6 +74,7 @@ export function applyStake(
         city.objects.push(obj);
         if (op.result) resultId = obj.id;
         changes.push({ kind: 'object_created', objectId: obj.id, name: obj.name, type: obj.type, points: { ...op.object.points }, temporary: false, hidden: obj.hidden });
+        for (const spec of op.object.holds ?? []) changes.push(...holdFront(rules, city, obj, spec, day));
         break;
       }
       case 'revalue': {
@@ -94,17 +105,30 @@ export function applyStake(
           if (!obj.out) retire(obj, zero(), obj.description, ctx.trouble);
           break;
         }
-        if (obj.attach) liftHindrance(findFront(city, obj.attach.frontId), obj);
-        for (const gone of deleteWithChildren(city, obj, day)) {
-          changes.push({ kind: 'object_removed', objectId: gone.id, name: gone.name, points: rawToPoints(city, gone.statEffect), hidden: gone.hidden });
-        }
+        remove(obj);
         break;
       }
       case 'retire': {
         const obj = findObject(city, op.target);
-        if (!obj || obj.status !== 'active' || obj.protected || obj.out) break;
+        if (!obj || obj.status !== 'active' || obj.protected) break;
+        if (op.forever) {
+          // Ушло навсегда вместе со всем вложенным: в городе этого больше нет, остаётся только память.
+          const cause = obj.out?.cause ?? ctx.trouble ?? 'беда';
+          for (const gone of remove(obj)) {
+            if (!keeps(gone) && !gone.out) continue;
+            gone.out = { day: gone.out?.day ?? day, cause: gone.out?.cause ?? cause, was: gone.out?.was ?? { ...rawToPoints(city, gone.statEffect) }, forever: true };
+          }
+          break;
+        }
+        if (obj.out) break;
         if (keeps(obj)) retire(obj, zero(), obj.description, ctx.trouble ?? 'беда');
-        else for (const gone of deleteWithChildren(city, obj, day)) changes.push({ kind: 'object_removed', objectId: gone.id, name: gone.name, points: rawToPoints(city, gone.statEffect), hidden: gone.hidden });
+        else remove(obj);
+        break;
+      }
+      case 'hold': {
+        const obj = findObject(city, op.target);
+        if (!obj) break;
+        changes.push(...holdFront(rules, city, obj, op, day));
         break;
       }
       case 'restore': {

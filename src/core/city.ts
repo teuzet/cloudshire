@@ -6,7 +6,7 @@
  */
 
 import type { ClockState } from './time.js';
-import type { Engine, FrontForm, HindranceEffect, ObjectType, Office, Relation, RiskStep, Scale, Source, StatId, StatMap, StewardMode, StewardWait, Temper, Tempo, Verdict } from './rules.js';
+import type { Engine, FrontForm, HindranceEffect, HoldEffect, ObjectType, Office, Relation, RiskStep, Scale, Source, StatId, StatMap, StewardMode, StewardWait, Temper, Tempo, Verdict } from './rules.js';
 
 // ───────────────────────────── мир ─────────────────────────────
 
@@ -59,6 +59,35 @@ export interface Attachment {
   riskBefore?: RiskStep;
 }
 
+/**
+ * Что объект должен держать: фронт и то, как он его держит. С исходом идут новые ставки:
+ * они заменяют ставки фронта, пока объект цел.
+ */
+export interface HoldSpec {
+  frontId: string;
+  effect: HoldEffect;
+  /** Держится на слове: ложь, обещание, перемирие. Такой якорь дешевле и падает чаще. */
+  word?: boolean;
+  stake?: StakeOp[];
+  failStake?: StakeOp[];
+}
+
+/**
+ * Якорь: постоянный объект держит фронт, пока цел и в строю. Объект исчез или выбыл —
+ * фронт идёт как прежде, срок продолжается с того места, где встал.
+ */
+export interface Hold {
+  frontId: string;
+  effect: HoldEffect;
+  word?: boolean;
+  /** День, с которого объект держит фронт. */
+  day: number;
+  /** На сколько ступеней якорь сдвинул риск: вернётся, когда якорь падёт. */
+  riskShift?: number;
+  /** Ставки фронта до якоря: вернутся, когда якорь падёт. */
+  saved?: { stake: StakeOp[]; failStake: StakeOp[] };
+}
+
 export interface WorldObject {
   id: string;
   type: ObjectType;
@@ -85,6 +114,8 @@ export interface WorldObject {
   temporary: boolean;
   /** Помощник (rate > 0) или помеха (rate < 0) фронта: единиц работы в игровой месяц. */
   attach: Attachment | null;
+  /** Фронты, которые объект держит, пока цел: якорь постоянный и своего срока не имеет. */
+  holds?: Hold[];
   /** Одна или две темы города. */
   themes: string[];
   /** День создания или последней перемены: год после него объект «свежий» для подбора ролей. */
@@ -114,6 +145,8 @@ export type StakeOp =
         parentId?: string | null;
         refs?: string[];
         hidden?: boolean;
+        /** Заранее заявленные связи: с готовности объект держит эти фронты. */
+        holds?: HoldSpec[];
       };
       /** Этот объект и есть результат этапа: к нему привяжутся связи отпечатка. */
       result?: boolean;
@@ -123,8 +156,13 @@ export type StakeOp =
   /** Переписать и переоценить по намерению: поток заранее превращает её в revalue. */
   | { op: 'modify'; target: string; intent: string }
   | { op: 'delete'; target: string }
-  /** Объект выбывает: остаётся в городе без вклада. Вид, который не хранится, удаляется. */
-  | { op: 'retire'; target: string }
+  /**
+   * Объект выбывает: остаётся в городе без вклада. Вид, который не хранится, удаляется.
+   * forever — ушёл навсегда вместе со всем вложенным: остаётся только в памяти.
+   */
+  | { op: 'retire'; target: string; forever?: boolean }
+  /** Существующий объект начинает держать фронт. */
+  | ({ op: 'hold'; target: string } & HoldSpec)
   /** Вернуть выбывший объект к жизни с прежним вкладом. */
   | { op: 'restore'; target: string; description?: string | null }
   | { op: 'reveal'; target: string }
@@ -180,8 +218,12 @@ export interface Front {
   /** Вехи делят шкалу поровну; последняя веха — завершение. */
   milestones: number;
   milestonesFired: number;
-  /** Срок: у угроз, часов, возможностей; у напряжения это день прорыва. */
+  /** Срок: у угроз, часов, возможностей; у напряжения это день прорыва. У остановленного якорем фронта срока нет. */
   deadlineDay: number | null;
+  /** Во сколько раз быстрее обычного фронт идёт к сроку из-за якорей; нет — единица. */
+  clockRate?: number;
+  /** Фронт остановлен якорем и спит: сколько дней оставалось до срока. Якорь падёт — срок пойдёт с этого места. */
+  sleepLeft?: number | null;
   /** День следующего месячного броска: у дел «невозможно» и недостижимых. */
   pulseDay: number | null;
   /** Что случится, когда шкала заполнена (у часов — когда выйдет срок). */
@@ -196,6 +238,8 @@ export interface Front {
   /** Объекты-участники: роль осложнения, цели ставки. */
   refs: string[];
   parentId: string | null;
+  /** Носитель: объект, на котором фронт живёт. Объект исчез или выбыл — фронт кончился без ставки. */
+  livesOn?: string | null;
   /** Чем привязанное осложнение грозит родителю. */
   bound: 'slow' | 'rollback' | 'cancel' | null;
   /** Сколько стоит на кону (в единицах работы): из этого считается ёмкость угрозы и напряжения. */

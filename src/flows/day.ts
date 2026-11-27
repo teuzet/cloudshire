@@ -15,7 +15,7 @@ import { DAYS_PER_MONTH } from '../core/time.js';
 import { describeChanges, type Change } from '../core/world/changes.js';
 import { tensionToThreat } from '../core/world/complications.js';
 import { dueEvent, findFront, frontGist, frontObjectIds, neighbors, closeFront, settleProgress, shareDone } from '../core/world/fronts.js';
-import { attachedTo, findObject, deleteWithChildren, scalePull } from '../core/world/objects.js';
+import { attachedTo, findObject, scalePull } from '../core/world/objects.js';
 import { biting, effectOf, hindrancesOf } from '../core/world/hindrance.js';
 import { applyStake } from '../core/world/stake.js';
 import { themeNames } from '../core/world/themes.js';
@@ -480,8 +480,9 @@ async function strike(deps: FlowDeps, city: City, front: Front, stake: readonly 
   for (const id of resolution.lostForever ?? []) {
     const obj = findObject(city, id);
     if (!obj?.out || obj.protected) continue;
-    obj.out.forever = true;
-    deleteWithChildren(city, obj, day);
+    // Об утрате уже сказано выше; сюда идёт только то, что утрата потянула за собой.
+    const lost = applyStake(deps.rules, city, [{ op: 'retire', target: obj.id, forever: true }], { ...stakeCtx(deps, front, day), trouble: front.title }).changes;
+    changes.push(...lost.filter((c) => c.kind !== 'object_removed'));
   }
   changes.push(...(await applyEffect(deps, city, front, resolution, day)));
   await faithEvent(deps, city, { event: resolution.text, will, day });

@@ -58,7 +58,11 @@ export function applyHindrance(rules: Rules, front: Front, obj: WorldObject, day
 export function liftHindrance(front: Front | null, obj: WorldObject): void {
   const a = obj.attach;
   if (!a) return;
-  if (front && a.shift && front.deadlineDay != null) front.deadlineDay += a.shift;
+  if (front && a.shift) {
+    if (front.deadlineDay != null) front.deadlineDay += a.shift;
+    // Фронт остановлен якорем: отнятые дни возвращаются к тому, что осталось до срока.
+    else if (front.sleepLeft != null) front.sleepLeft += a.shift;
+  }
   if (front && a.riskBefore) front.risk = a.riskBefore;
   a.shift = 0;
   delete a.riskBefore;

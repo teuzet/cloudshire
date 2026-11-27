@@ -18,6 +18,7 @@ import type { Change } from './changes.js';
 import { attachRatePerDay, leadRatePerDay, officerFit, rawToPoints, temperTempo } from './numbers.js';
 import { attachedTo, deleteObject, findObject } from './objects.js';
 import { paceOf } from './hindrance.js';
+import { dropHoldsOn, holdersOf, retime, workHold } from './hold.js';
 import { recomputeStats } from './stats.js';
 
 const EPS = 1e-9;
@@ -40,6 +41,7 @@ export function createFront(args: {
   footprint?: FootprintEntry[];
   refs?: string[];
   parentId?: string | null;
+  livesOn?: string | null;
   bound?: Front['bound'];
   atStake?: number;
   plus?: boolean;
@@ -80,6 +82,7 @@ export function createFront(args: {
     footprint: args.footprint ?? [],
     refs: [...new Set(args.refs ?? [])],
     parentId: args.parentId ?? null,
+    livesOn: args.livesOn ?? null,
     bound: args.bound ?? null,
     atStake: Math.max(0, args.atStake ?? 0),
     plus: Boolean(args.plus),
@@ -152,10 +155,15 @@ export function tempoSum(city: Pick<City, 'assignments' | 'officers'>, front: Pi
   return front.tempo + lead.tempo + (officer ? temperTempo(officer.temper) : 0);
 }
 
-/** Пересчитать скорость фронта: работа ведущего плюс помощники минус помехи. */
+/**
+ * Пересчитать скорость фронта: работа ведущего плюс помощники минус помехи, с поправкой на якоря.
+ * Заодно срок переставляется под нынешние якоря.
+ */
 export function recomputeRate(rules: Rules, city: City, front: Front, day: number): number {
   settleProgress(front, day);
-  if (front.status !== 'active' || front.form === 'clock' || isFrozen(city, front)) {
+  if (front.status === 'active') retime(rules, city, front, day);
+  const held = workHold(rules, city, front);
+  if (front.status !== 'active' || front.form === 'clock' || isFrozen(city, front) || held.stopped) {
     front.ratePerDay = 0;
     return 0;
   }
@@ -170,6 +178,7 @@ export function recomputeRate(rules: Rules, city: City, front: Front, day: numbe
     });
   }
   for (const obj of attachedTo(city, front.id)) rate += attachRatePerDay(rules, paceOf(obj), front.tempo);
+  if (held.unitsPerMonth) rate += attachRatePerDay(rules, held.unitsPerMonth, front.tempo);
   front.ratePerDay = Math.max(0, rate);
   return front.ratePerDay;
 }
@@ -221,10 +230,11 @@ export function daysLeft(front: Front, day: number): number | null {
 
 // ───────────────────────────── соседство ─────────────────────────────
 
-/** Все объекты, которых фронт касается: отпечаток, участники, цели ставок, место работ. */
+/** Все объекты, которых фронт касается: отпечаток, участники, цели ставок, место работ, носитель. */
 export function frontObjectIds(front: Front): string[] {
   const ids = new Set<string>([...front.footprint.map((f) => f.objectId), ...front.refs]);
   if (front.siteId) ids.add(front.siteId);
+  if (front.livesOn) ids.add(front.livesOn);
   for (const op of [...front.stake, ...front.failStake]) {
     if ('target' in op) ids.add(op.target);
     if (op.op === 'link') {
@@ -235,10 +245,39 @@ export function frontObjectIds(front: Front): string[] {
   return [...ids];
 }
 
-/** Соседи: активные фронты с общим объектом. */
-export function neighbors(city: Pick<City, 'fronts'>, front: Front): Front[] {
-  const mine = new Set(frontObjectIds(front));
-  return activeFronts(city).filter((f) => f.id !== front.id && frontObjectIds(f).some((id) => mine.has(id)));
+/** Объекты фронта вместе с его якорями. */
+export function frontTouches(city: Pick<City, 'objects'>, front: Front): string[] {
+  return [...new Set([...frontObjectIds(front), ...holdersOf(city, front.id).map((h) => h.obj.id)])];
+}
+
+/** Сами объекты и всё, во что они вложены. */
+function withOuter(city: Pick<City, 'objects'>, ids: readonly string[]): Set<string> {
+  const out = new Set<string>();
+  for (const id of ids) {
+    let at: string | null = id;
+    while (at && !out.has(at)) {
+      out.add(at);
+      at = findObject(city, at)?.parentId ?? null;
+    }
+  }
+  return out;
+}
+
+/**
+ * Соседи: активные фронты с общим объектом. Общим считается и то, во что объект вложен:
+ * дело в башне соседствует с тем, что происходит с островком, на котором башня стоит.
+ */
+export function neighbors(city: Pick<City, 'fronts' | 'objects'>, front: Front): Front[] {
+  const mine = frontTouches(city, front);
+  const mineSet = new Set(mine);
+  const mineOuter = withOuter(city, mine);
+  return activeFronts(city).filter((f) => {
+    if (f.id === front.id) return false;
+    const theirs = frontTouches(city, f);
+    if (theirs.some((id) => mineOuter.has(id))) return true;
+    for (const id of withOuter(city, theirs)) if (mineSet.has(id)) return true;
+    return false;
+  });
 }
 
 // ───────────────────────────── занятость и конец ─────────────────────────────
@@ -264,7 +303,7 @@ const OUTCOME: Record<Exclude<Front['status'], 'active'>, 'done' | 'failed' | 'c
 
 /**
  * Закрыть фронт: ведущий свободен, занятые объекты свободны, временные помощники и помехи исчезают,
- * дочерние фронты (атомарные дела, привязанные осложнения) умирают вместе с ним.
+ * якоря больше ничего не держат, дочерние фронты (атомарные дела, привязанные осложнения) умирают вместе с ним.
  * Место работ исчезает, если фронт завершён или провален; при отмене остаётся в городе без вклада.
  */
 export function closeFront(
@@ -273,7 +312,7 @@ export function closeFront(
   front: Front,
   status: Exclude<Front['status'], 'active'>,
   day: number,
-  opts: { outcome?: Extract<Change, { kind: 'front_closed' }>['outcome'] } = {},
+  opts: { outcome?: Extract<Change, { kind: 'front_closed' }>['outcome']; /** Чего не стало: носитель, вместе с которым фронт кончился. */ cause?: string } = {},
 ): Change[] {
   if (front.status !== 'active') return [];
   const changes: Change[] = [];
@@ -282,7 +321,8 @@ export function closeFront(
   front.resolvedDay = Math.max(0, Math.round(day));
   front.ratePerDay = 0;
   front.pulseDay = null;
-  changes.push({ kind: 'front_closed', frontId: front.id, title: frontGist(front), outcome: opts.outcome ?? OUTCOME[status] });
+  changes.push({ kind: 'front_closed', frontId: front.id, title: frontGist(front), outcome: opts.outcome ?? OUTCOME[status], ...(opts.cause ? { cause: opts.cause } : {}) });
+  dropHoldsOn(city, front.id);
 
   const lead = leadOf(city, front.id);
   if (lead) closeAssignment(city, lead, day);

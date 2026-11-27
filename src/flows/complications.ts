@@ -9,7 +9,7 @@ import type { City, Front, StakeOp, StoryTags, WorldObject } from '../core/city.
 import type { Dynamic, Shape, StatMap } from '../core/rules.js';
 import { DAYS_PER_MONTH } from '../core/time.js';
 import { leadOf } from '../core/world/assignments.js';
-import { changedObjectIds, type Change } from '../core/world/changes.js';
+import { changedFrontIds, changedObjectIds, type Change } from '../core/world/changes.js';
 import { plainTitle } from '../core/text.js';
 import { accidentLoss, buildBound, buildOpportunity, buildSide, capSideHit, hindranceOp, type EventDress } from '../core/world/complications.js';
 import { dynamicTags, leanOf, markStory, plusChance, roomForTrouble } from '../core/world/director.js';
@@ -421,7 +421,7 @@ export async function refreshAfterChange(
   day: number,
 ): Promise<Change[]> {
   const out: Change[] = [];
-  for (const front of refreshTargets(deps.rules, city, changedObjectIds(changes), exceptFrontIds)) {
+  for (const front of refreshTargets(deps.rules, city, changedObjectIds(changes), exceptFrontIds, changedFrontIds(changes))) {
     if (front.status !== 'active') continue;
     const gate = await tryAgent(
       deps,
