@@ -4,18 +4,26 @@
  *
  * Локальные id сценария («tower») при посадке получают глобальные, и все
  * ссылки и цели ставок переписываются на них.
+ *
+ * Заготовка пишется на том же языке, что приказ и осложнение: фронт может жить на объекте
+ * (`livesOn`), объект может держать фронт (`holds`), а срок истории — отдельный фронт-часы
+ * (`window`): работой его не снять, можно удержать вещью или убрать то, на чём он живёт.
  */
 
 import { clipWords } from '../text.js';
 import { z } from 'zod';
 import { DRIFT_BANDS, emptyStatMap, ENGINES, IMPACT_LEVELS, OBJECT_TYPES, SCALES, SOURCES, STAT_IDS, type Rules, type StatMap } from '../rules.js';
-import type { City, Front, StakeOp, StoryTags, WorldObject } from '../city.js';
-import { createFront } from './fronts.js';
+import type { City, Front, HoldSpec, StakeOp, StoryTags, WorldObject } from '../city.js';
+import { createFront, findFront } from './fronts.js';
+import { applyHold } from './hold.js';
 import { magnitude, monthsToDays, rawToPoints, scaleOf, threatCapacity, troubleDays } from './numbers.js';
 import { createObject, scalePull, tug } from './objects.js';
 import { objectContribution } from './stats.js';
 
 const statPartial = z.object(Object.fromEntries(STAT_IDS.map((id) => [id, z.number().optional()])));
+
+/** Якорь в заготовке: какой фронт объект держит, пока цел, и как. Исход якорем заготовка не меняет. */
+const holdSchema = z.object({ front: z.string().min(1), effect: z.enum(['stop', 'slow', 'hurry', 'riskier', 'safer']), word: z.boolean().optional() });
 
 const stakeSchema = z.union([
   z.object({
@@ -26,6 +34,8 @@ const stakeSchema = z.union([
       weight: z.enum(IMPACT_LEVELS).optional(),
       statProfile: statPartial.optional(),
       refs: z.array(z.string()).optional(),
+      /** Что готовое будет держать, пока цело: взятый случай так закрепляют за городом. */
+      holds: z.array(holdSchema).optional(),
     }),
   }),
   z.object({ modify: z.object({ target: z.string(), intent: z.string().optional() }) }),
@@ -54,9 +64,26 @@ const scenarioBase = z.object({
         statProfile: statPartial.optional(),
         /** Скрыт от игрока, пока его не откроет фронт. */
         hidden: z.boolean().optional(),
+        /** Фронты истории, которые объект держит с самого начала, пока цел. */
+        holds: z.array(holdSchema).optional(),
+        /** Объект, внутри которого или на котором этот находится: уйдёт тот, уйдёт и этот. */
+        inside: z.string().optional(),
       }),
     )
     .default([]),
+  /**
+   * Срок истории-возможности: что закроет окно. Сажается отдельным фронтом-часами, который живёт
+   * на объекте `livesOn`; когда время выйдет, этот объект уйдёт навсегда со всем вложенным, а фронты,
+   * которые на нём жили, кончатся. Без окна возможность ждёт, пока о ней помнят.
+   */
+  window: z
+    .object({
+      id: z.string().min(1).default('window'),
+      title: z.string().optional(),
+      description: z.string().min(1),
+      livesOn: z.string().min(1),
+    })
+    .optional(),
   fronts: z
     .array(
       z.object({
@@ -74,6 +101,8 @@ const scenarioBase = z.object({
         drift: z.enum(DRIFT_BANDS).default('NONE'),
         beatCount: z.number().int().nonnegative().default(0),
         refs: z.array(z.string()).default([]),
+        /** Носитель: объект, без которого фронту не на чем держаться. Исчез объект — фронт кончился без ставки. */
+        livesOn: z.string().optional(),
         alignment: z.string().default(''),
         stake: stakeSchema.nullable().default(null),
         /**
@@ -92,7 +121,21 @@ type ScenarioBase = z.infer<typeof scenarioBase>;
 
 function checkScenario(s: ScenarioBase, ctx: z.RefinementCtx): void {
   const ids = new Set(s.fronts.map((f) => f.id));
+  const held = new Set([...ids, ...(s.window ? [s.window.id] : [])]);
+  if (s.window && (ids.has(s.window.id) || s.objects.some((o) => o.id === s.window?.id))) {
+    ctx.addIssue({ code: 'custom', path: ['window', 'id'], message: 'id окна занят объектом или фронтом истории' });
+  }
+  s.objects.forEach((o, i) => {
+    if (o.inside === o.id) ctx.addIssue({ code: 'custom', path: ['objects', i, 'inside'], message: 'inside ведёт на другой объект' });
+    (o.holds ?? []).forEach((h, j) => {
+      if (!held.has(h.front)) ctx.addIssue({ code: 'custom', path: ['objects', i, 'holds', j, 'front'], message: 'holds ведёт на фронт или окно этой истории' });
+    });
+  });
   s.fronts.forEach((f, i) => {
+    const made = f.stake && 'create' in f.stake ? (f.stake.create.holds ?? []) : [];
+    made.forEach((h, j) => {
+      if (!held.has(h.front) || h.front === f.id) ctx.addIssue({ code: 'custom', path: ['fronts', i, 'stake', 'create', 'holds', j, 'front'], message: 'holds ведёт на другой фронт или окно этой истории' });
+    });
     f.closes.forEach((c, j) => {
       if (!ids.has(c.target) || c.target === f.id) ctx.addIssue({ code: 'custom', path: ['fronts', i, 'closes', j, 'target'], message: 'closes ведёт на другой фронт этой истории' });
     });
@@ -154,13 +197,18 @@ function stakeOps(rules: Rules, city: Pick<City, 'statScale'>, stake: Scenario['
   if ('create' in stake) {
     const c = stake.create;
     const points = times(rawToPoints(city, objectContribution(rules, c.weight ?? 'NONE', c.statProfile ?? {})), k);
-    return [{ op: 'create', object: { type: c.type, name: c.name, description: c.description, points, refs: (c.refs ?? []).map(map) }, result: true }];
+    const holds = holdSpecs(c.holds, map);
+    return [{ op: 'create', object: { type: c.type, name: c.name, description: c.description, points, refs: (c.refs ?? []).map(map), ...(holds.length ? { holds } : {}) }, result: true }];
   }
   if ('modify' in stake) return [{ op: 'modify', target: map(stake.modify.target), intent: stake.modify.intent ?? '' }];
   if ('delete' in stake) return [{ op: 'delete', target: map(stake.delete.target) }];
   if ('stats' in stake) return [{ op: 'stats', points: k === 1 ? stake.stats : times(stake.stats, k) }];
   if ('uncover' in stake) return [{ op: 'reveal', target: map(stake.uncover.target) }];
   return [{ op: 'fact', text: stake.reveal.text }];
+}
+
+function holdSpecs(holds: ReadonlyArray<z.infer<typeof holdSchema>> | undefined, map: (id: string) => string): HoldSpec[] {
+  return (holds ?? []).map((h) => ({ frontId: map(h.front), effect: h.effect, ...(h.word ? { word: true } : {}) }));
 }
 
 /** Ходы ключа из скрытой логики заготовки: по фразе на ход, плюс подходы к уликам. */
@@ -189,6 +237,9 @@ export function plantScenario(
   const ids = new Map<string, string>();
   for (const o of scenario.objects) ids.set(o.id, args.newId('obj'));
   for (const f of scenario.fronts) ids.set(f.id, args.newId('front'));
+  // Окно есть только у возможности: у беды время задают её собственные фронты, идущие к сроку.
+  const win = storyKind(scenario) === 'chance' ? (scenario.window ?? null) : null;
+  if (win) ids.set(win.id, args.newId('front'));
   const map = (id: string) => ids.get(id) ?? id;
   const tweak = args.adapted ?? {};
 
@@ -205,6 +256,7 @@ export function plantScenario(
       name: tweak[o.id]?.name ?? o.name,
       description: tweak[o.id]?.description ?? o.description,
       refs: o.refs.map(map),
+      parentId: o.inside ? map(o.inside) : null,
       statEffect: atRisk.has(o.id) ? objectContribution(rules, o.weight ?? 'NONE', o.statProfile ?? {}) : emptyStatMap(),
       hidden: o.hidden ?? false,
       day: args.day,
@@ -257,9 +309,10 @@ export function plantScenario(
       return target ? [{ op: 'progress' as const, frontId: map(c.target), amount: Math.round(ownCapacity(target) * c.share * 100) / 100 }] : [];
     });
   const capacityOf = (f: F) => Math.max(ownCapacity(f), pushesOf(f).reduce((sum, p) => sum + p.amount, 0));
-  // История-возможность живёт окно: не взялись и не довели — она уходит.
+  // История-возможность живёт окно, если миру есть чем его закрыть: срок идёт у отдельного фронта-часов.
   const chance = storyKind(scenario) === 'chance';
   const windowDays = troubleDays(rules, scenario.fronts.reduce((acc, f) => acc + capacityOf(f), 0), rules.seeding.chanceMonths);
+  const carrier = (f: F) => (f.livesOn ? map(f.livesOn) : chance && win ? map(win.livesOn) : null);
   const fronts = scenario.fronts.map((f) => {
     const pushes = pushesOf(f);
     const capacity = capacityOf(f);
@@ -277,8 +330,9 @@ export function plantScenario(
       description,
       capacity,
       milestones: Math.max(scaleOf(rules, capacity).milestones, Math.min(4, f.beatCount + 1)),
-      deadlineDay: drifting ? args.day + driftDays : chance ? args.day + windowDays : null,
+      deadlineDay: drifting ? args.day + driftDays : null,
       plus: chance,
+      livesOn: carrier(f),
       scale: scenario.scale ?? null,
       // События истории наступают сами, через равные доли срока.
       pulseDay: drifting && f.events.length ? args.day + Math.max(1, Math.floor(driftDays / (f.events.length + 1))) : null,
@@ -295,8 +349,37 @@ export function plantScenario(
       day: args.day,
     });
   });
+  if (win) {
+    const description = tweak[win.id]?.description ?? win.description;
+    const on = map(win.livesOn);
+    fronts.push(
+      createFront({
+        id: map(win.id),
+        form: 'clock',
+        origin: 'story',
+        title: clipWords(tweak[win.id]?.name ?? win.title ?? description.split(/[.!?]/)[0] ?? '', 80) || scenario.title,
+        description,
+        capacity: 0,
+        deadlineDay: args.day + windowDays,
+        scale: scenario.scale ?? null,
+        livesOn: on,
+        refs: [on],
+        // Время вышло: носитель уходит навсегда и уносит всё, что на нём было и жило.
+        stake: [{ op: 'retire', target: on, forever: true }],
+        day: args.day,
+      }),
+    );
+  }
   city.objects.push(...objects);
   city.fronts.push(...fronts);
+  // Объекты истории, которые с порога что-то держат.
+  for (const o of scenario.objects) {
+    const obj = objects.find((x) => x.id === map(o.id));
+    for (const spec of holdSpecs(o.holds, map)) {
+      const front = findFront(city, spec.frontId);
+      if (obj && front) applyHold(rules, city, front, obj, spec, args.day);
+    }
+  }
   city.scenariosUsed.push(scenario.id);
   return { objects, fronts };
 }
@@ -307,9 +390,14 @@ export function touchedMysteries(raw: Scenario, mystery: ReadonlySet<string>): s
   const see = (id: string | null | undefined) => {
     if (id && mystery.has(id)) touched.add(id);
   };
-  for (const o of raw.objects) o.refs.forEach(see);
+  for (const o of raw.objects) {
+    o.refs.forEach(see);
+    see(o.inside);
+  }
+  see(raw.window?.livesOn);
   for (const f of raw.fronts) {
     f.refs.forEach(see);
+    see(f.livesOn);
     const s = f.stake;
     if (s && 'modify' in s) see(s.modify.target);
     if (s && 'delete' in s) see(s.delete.target);

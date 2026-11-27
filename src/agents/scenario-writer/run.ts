@@ -44,9 +44,14 @@ function repairRefs(raw: Scenario, existing: Set<string>, local: Set<string>): v
     const hits = [...existing].filter((e) => e.startsWith(id) && e.length - id.length <= 2);
     return hits.length === 1 ? hits[0]! : id;
   };
-  for (const o of raw.objects) o.refs = o.refs.map(fix);
+  for (const o of raw.objects) {
+    o.refs = o.refs.map(fix);
+    if (o.inside) o.inside = fix(o.inside);
+  }
+  if (raw.window) raw.window.livesOn = fix(raw.window.livesOn);
   for (const f of raw.fronts) {
     f.refs = f.refs.map(fix);
+    if (f.livesOn) f.livesOn = fix(f.livesOn);
     const s = f.stake;
     if (s && 'modify' in s) s.modify.target = fix(s.modify.target);
     if (s && 'delete' in s) s.delete.target = fix(s.delete.target);
@@ -54,17 +59,26 @@ function repairRefs(raw: Scenario, existing: Set<string>, local: Set<string>): v
   }
 }
 
-function checkIds(raw: Scenario, existing: Set<string>): string | null {
+/** `carriers` — сверять носители и окно: у подогнанной заготовки они берутся из заготовки, а не из черновика. */
+function checkIds(raw: Scenario, existing: Set<string>, carriers: boolean): string | null {
   repairRefs(raw, existing, new Set([...raw.objects.map((o) => o.id), ...raw.fronts.map((f) => f.id)]));
   const local = new Set<string>();
   for (const id of [...raw.objects.map((o) => o.id), ...raw.fronts.map((f) => f.id)]) {
     if (local.has(id)) return `id ${id} повторяется`;
     local.add(id);
   }
+  // Носитель — объект: этой истории или города.
+  const objectIds = new Set(raw.objects.map((o) => o.id));
+  const carrier = (id: string) => objectIds.has(id) || existing.has(id);
   const known = (id: string) => local.has(id) || existing.has(id);
-  for (const o of raw.objects) for (const r of o.refs) if (!known(r)) return `объект ${o.id}: нет ссылки ${r}`;
+  for (const o of raw.objects) {
+    for (const r of o.refs) if (!known(r)) return `объект ${o.id}: нет ссылки ${r}`;
+    if (carriers && o.inside && (!carrier(o.inside) || o.inside === o.id)) return `объект ${o.id}: нет объекта inside ${o.inside}`;
+  }
+  if (carriers && raw.window && !carrier(raw.window.livesOn)) return `window.livesOn: нет объекта ${raw.window.livesOn}`;
   for (const f of raw.fronts) {
     for (const r of f.refs) if (!known(r)) return `фронт ${f.id}: нет ссылки ${r}`;
+    if (carriers && f.livesOn && !carrier(f.livesOn)) return `фронт ${f.id}: нет объекта livesOn ${f.livesOn}`;
     const s = f.stake;
     const target = s && 'modify' in s ? s.modify.target : s && 'delete' in s ? s.delete.target : s && 'uncover' in s ? s.uncover.target : null;
     if (target && !known(target)) return `фронт ${f.id}: нет цели ставки ${target}`;
@@ -79,18 +93,21 @@ function checkIds(raw: Scenario, existing: Set<string>): string | null {
 
 /**
  * Подгонка меняет слова, а не устройство: состав объектов, числа, род и срок фронтов, вклад и
- * скрытость объектов берутся из заготовки. Новых объектов и фронтов нет: дописанные писателем
+ * скрытость и вложенность объектов, носители, якоря и окно берутся из заготовки. Новых объектов и фронтов нет: дописанные писателем
  * объекты забегали вперёд истории (готовый результат, разгадка тайны) и выдавали её с первого дня.
  */
 function keepTemplate(raw: Scenario, template: Scenario): Scenario {
   const tObjects = new Map(template.objects.map((o) => [o.id, o]));
+  // Под каким id объект заготовки вышел у писателя: носители и окно переводятся на него.
+  const objectId = new Map<string, string>();
   // Писатель иногда переименовывает id: тогда объект заготовки узнаём по месту и типу.
   const objects = raw.objects.flatMap((o, i) => {
     const byPlace = template.objects[i];
     const t = tObjects.get(o.id) ?? (byPlace && byPlace.type === o.type && !raw.objects.some((x) => x.id === byPlace.id) ? byPlace : undefined);
     if (!t) return [];
-    const { weight: _w, statProfile: _p, hidden: _h, ...rest } = o;
-    return [{ ...rest, type: t.type, ...(t.weight ? { weight: t.weight } : {}), ...(t.statProfile ? { statProfile: t.statProfile } : {}), ...(t.hidden ? { hidden: true } : {}) }];
+    objectId.set(t.id, o.id);
+    const { weight: _w, statProfile: _p, hidden: _h, holds: _a, inside: _i, ...rest } = o;
+    return [{ ...rest, type: t.type, ...(t.weight ? { weight: t.weight } : {}), ...(t.statProfile ? { statProfile: t.statProfile } : {}), ...(t.hidden ? { hidden: true } : {}), ...(t.holds ? { holds: t.holds } : {}), ...(t.inside ? { inside: t.inside } : {}) }];
   });
   // Объект заготовки, который писатель потерял, возвращается как есть.
   const kept = new Set(objects.map((o) => o.id));
@@ -114,10 +131,11 @@ function keepTemplate(raw: Scenario, template: Scenario): Scenario {
         ? w.stake
         : t.stake;
     const fixed = stake && t.stake && 'create' in t.stake && 'create' in stake
-      ? { create: { ...stake.create, type: t.stake.create.type, weight: t.stake.create.weight, statProfile: t.stake.create.statProfile } }
+      ? { create: { ...stake.create, type: t.stake.create.type, weight: t.stake.create.weight, statProfile: t.stake.create.statProfile, holds: t.stake.create.holds } }
       : stake;
     return {
       ...w,
+      livesOn: t.livesOn ? (objectId.get(t.livesOn) ?? t.livesOn) : undefined,
       impact: t.impact,
       drift: t.drift,
       beatCount: t.beatCount,
@@ -129,11 +147,19 @@ function keepTemplate(raw: Scenario, template: Scenario): Scenario {
   });
   // Толчки другим фронтам берутся из заготовки, а цели переводятся на id, которые дал писатель.
   const finalId = new Map(template.fronts.map((t, i) => [t.id, fronts[i]!.id]));
+  const anchors = <H extends { front: string }>(holds: H[] | undefined) => holds?.map((h) => ({ ...h, front: finalId.get(h.front) ?? h.front }));
   const withCloses = fronts.map((f, i) => ({
     ...f,
     closes: template.fronts[i]!.closes.map((c) => ({ target: finalId.get(c.target) ?? c.target, share: c.share })),
+    ...(f.stake && 'create' in f.stake && f.stake.create.holds ? { stake: { create: { ...f.stake.create, holds: anchors(f.stake.create.holds) } } } : {}),
   }));
-  return { ...raw, id: template.id, objects, fronts: withCloses, ...(template.axes ? { axes: template.axes } : {}), ...(template.scale ? { scale: template.scale } : {}) };
+  const withAnchors = objects.map((o) => ({ ...o, ...(o.holds ? { holds: anchors(o.holds) } : {}), ...(o.inside ? { inside: objectId.get(o.inside) ?? o.inside } : {}) }));
+  // Окно: что его закрывает и на чём оно живёт, решает заготовка; слова может дать писатель.
+  const words = raw.window?.description.trim();
+  const window = template.window
+    ? { ...template.window, livesOn: objectId.get(template.window.livesOn) ?? template.window.livesOn, ...(words ? { description: words, title: raw.window?.title ?? template.window.title } : {}) }
+    : undefined;
+  return { ...raw, id: template.id, objects: withAnchors, fronts: withCloses, window, ...(template.axes ? { axes: template.axes } : {}), ...(template.scale ? { scale: template.scale } : {}) };
 }
 
 export const scenarioWriter: StructuredAgent<ScenarioWriterInput, Scenario, Scenario> = {
@@ -163,7 +189,7 @@ export const scenarioWriter: StructuredAgent<ScenarioWriterInput, Scenario, Scen
     }
     const touched = touchedMysteries(raw, new Set(unknowns.flatMap((u) => u.objectIds)));
     if (touched.length) return `история касается тайны острова: ${touched.join(', ')}. Эти объекты не трогай`;
-    return checkIds(raw, new Set(objects.filter((o) => o.status === 'active').map((o) => o.id)));
+    return checkIds(raw, new Set(objects.filter((o) => o.status === 'active').map((o) => o.id)), !template);
   },
   finish: (raw, { template }) => (template ? keepTemplate(raw, template) : raw),
 };

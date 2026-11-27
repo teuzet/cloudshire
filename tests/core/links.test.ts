@@ -2,13 +2,14 @@ import { describe, expect, test } from 'vitest';
 import type { City, Front, StakeOp } from '../../src/core/city.js';
 import { createAssignment } from '../../src/core/world/assignments.js';
 import { changedFrontIds, describeChanges } from '../../src/core/world/changes.js';
-import { tensionToThreat } from '../../src/core/world/complications.js';
+import { buildBound, buildOpportunity, buildSide, tensionToThreat, type EventDress } from '../../src/core/world/complications.js';
 import { refreshTargets } from '../../src/core/world/echo.js';
-import { closeFront, createFront, dueEvent, frontObjectIds, neighbors, nextEventDay, recomputeRate } from '../../src/core/world/fronts.js';
+import { closeFront, createFront, dueEvent, frontObjectIds, isFrozen, neighbors, nextEventDay, recomputeRate } from '../../src/core/world/fronts.js';
 import { holdersOf, isAsleep } from '../../src/core/world/hold.js';
 import { createObject } from '../../src/core/world/objects.js';
 import { applyStake } from '../../src/core/world/stake.js';
 import { recomputeStats } from '../../src/core/world/stats.js';
+import { seededRng } from '../../src/core/random.js';
 import { blankCity, ids, rules } from '../helpers/fixtures.js';
 
 const r = rules();
@@ -32,7 +33,7 @@ function islet() {
   );
   city.fronts.push(
     createFront({ id: 'drift', form: 'clock', origin: 'story', title: 'Островок отчалит', description: 'Островок уносит ветром.', capacity: 0, deadlineDay: 100, livesOn: 'islet', stake: [{ op: 'retire', target: 'islet', forever: true }], refs: ['islet'], day: 0 }),
-    createFront({ id: 'trip', form: 'find', origin: 'story', title: 'Экспедиция в башню', description: 'Найти рецепт в башне.', capacity: 12, milestones: 3, livesOn: 'tower', refs: ['tower'], day: 0 }),
+    createFront({ id: 'trip', form: 'find', origin: 'story', title: 'Экспедиция в башню', description: 'Найти рецепт в башне.', capacity: 12, milestones: 3, livesOn: 'tower', refs: ['tower'], plus: true, day: 0 }),
   );
   recomputeStats(city, r);
   return city;
@@ -186,7 +187,7 @@ describe('держит: якорь и дело', () => {
 });
 
 describe('живёт на: носитель исчез, фронт кончился без ставки', () => {
-  test('беда уходит вместе с носителем, дело упущено; ведущий свободен, ставки не исполнены', () => {
+  test('беда отпадает вместе с носителем, удобный случай упущен; ведущий свободен, ставки не исполнены', () => {
     const city = islet();
     city.fronts.push(createFront({ id: 'rebels', form: 'threat', origin: 'story', title: 'Бунтовщики в башне', description: 'Бунтовщики засели в башне.', capacity: 9, deadlineDay: 200, livesOn: 'tower', failStake: [{ op: 'delete', target: 'pier' }], day: 0 }));
     const officer = city.officers[1]!;
@@ -201,7 +202,7 @@ describe('живёт на: носитель исчез, фронт кончил�
       { kind: 'front_closed', frontId: 'trip', title: 'Найти рецепт в башне', outcome: 'expired', cause: 'Башня на островке' },
       { kind: 'front_closed', frontId: 'rebels', title: 'Бунтовщики засели в башне', outcome: 'gone', cause: 'Башня на островке' },
     ]);
-    expect(describeChanges(r, out.changes)).toContain('Ушло само: «Бунтовщики засели в башне». Не стало того, на чём это держалось: Башня на островке');
+    expect(describeChanges(r, out.changes)).toContain('Отпало само: «Бунтовщики засели в башне». Не стало того, на чём это держалось: Башня на островке');
   });
 
   test('носитель выбыл от беды: фронт на нём тоже кончился; дочерние фронты закрыты', () => {
@@ -235,6 +236,36 @@ describe('живёт на: носитель исчез, фронт кончил�
   });
 });
 
+describe('осложнение живёт на своей стороне', () => {
+  const dress: EventDress = { title: 'Ропот у причала', description: 'Грузчики недовольны.', outburst: 'Причал встанет.', newObject: null };
+
+  test('привязанное: не стало стороны — осложнение отпало, дело свободно', () => {
+    const city = islet();
+    city.objects.push(createObject(r, { id: 'dockers', type: 'community', name: 'Грузчики', description: 'Артель у причала.', day: 0 }));
+    const deed = createFront({ id: 'crane', form: 'deed', origin: 'player', title: 'Подъёмник', description: 'Поставить подъёмник.', capacity: 8, milestones: 2, risk: 'hard', day: 0 });
+    const murmur = buildBound(r, deed, { shape: 'threat', dress, key: null, dynamicId: null, roleId: 'dockers', id: 'murmur', day: 0, rng: seededRng(2) });
+    city.fronts.push(deed, murmur);
+    expect(murmur.livesOn).toBe('dockers');
+    expect(isFrozen(city, deed)).toBe(true);
+    const out = applyStake(r, city, [{ op: 'delete', target: 'dockers' }], ctx(5));
+    expect(murmur.status).toBe('cancelled');
+    expect(isFrozen(city, deed)).toBe(false);
+    expect(describeChanges(r, out.changes)).toContain('Отпало само: «Грузчики недовольны». Не стало того, на чём это держалось: Грузчики');
+  });
+
+  test('стороннее и удобный случай: живут на том, чему грозят и что дают', () => {
+    const city = islet();
+    const pier = city.objects.find((o) => o.id === 'pier')!;
+    const side = buildSide(r, city, { shape: 'threat', origin: 'complication', target: pier, newPoints: zero, dress, key: null, dynamicId: null, id: 'side', day: 0, rng: seededRng(2) });
+    const luck = buildOpportunity(r, { origin: 'complication', stake: [], gain: 3, dress, key: null, dynamicId: null, refs: ['pier'], id: 'luck', day: 0 });
+    city.fronts.push(side, luck);
+    expect([side.livesOn, luck.livesOn]).toEqual(['pier', 'pier']);
+    const out = applyStake(r, city, [{ op: 'delete', target: 'pier' }], ctx(5));
+    expect([side.status, luck.status]).toEqual(['cancelled', 'cancelled']);
+    expect(out.changes.filter((c) => c.kind === 'front_closed').map((c) => c.kind === 'front_closed' && c.outcome)).toEqual(['gone', 'expired']);
+  });
+});
+
 describe('история с цепями целиком', () => {
   test('цепи держат островок; в башне селятся бунтовщики; цепи сбиты — островок уносит всё с собой', () => {
     const city = islet();
@@ -263,7 +294,7 @@ describe('история с цепями целиком', () => {
       'Исчезло: Прибившийся островок',
       'Исчезло: Башня на островке',
       'Упущено: «Найти рецепт в башне». Не стало того, на чём это держалось: Башня на островке',
-      'Ушло само: «Бунтовщики засели в башне». Не стало того, на чём это держалось: Башня на островке',
+      'Отпало само: «Бунтовщики засели в башне». Не стало того, на чём это держалось: Башня на островке',
     ]);
   });
 });
@@ -296,8 +327,8 @@ describe('условия фронта изменились: обновляютс
   test('перемены якоря словами мира', () => {
     const city = islet();
     const made = applyStake(r, city, [chains()], ctx(40));
-    expect(describeChanges(r, made.changes)).toEqual(['Появилось: Цепи (вещь)', 'Пока держится Цепи, не случится: «Островок уносит ветром»']);
+    expect(describeChanges(r, made.changes)).toEqual(['Появилось: Цепи (вещь)', 'Пока есть Цепи, не случится: «Островок уносит ветром»']);
     const out = applyStake(r, city, [{ op: 'delete', target: made.resultId! }], ctx(50, 4));
-    expect(describeChanges(r, out.changes)).toEqual(['Исчезло: Цепи', 'Больше не держит: Цепи. Снова надвигается: «Островок уносит ветром»']);
+    expect(describeChanges(r, out.changes)).toEqual(['Исчезло: Цепи', 'Опоры больше нет: Цепи. Снова надвигается: «Островок уносит ветром»']);
   });
 });

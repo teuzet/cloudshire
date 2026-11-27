@@ -17,6 +17,12 @@ objects:
     name: Башня на островке
     description: Закрытая башня. Дверь держит старый засов, окна темны.
     refs: [island]
+    inside: island
+
+window:
+  title: "Островок отчалит"
+  description: "Островок с фонарями отчалит и уйдёт вместе с башней: его прибило к краю ненадолго, и тот же ветер унесёт его дальше."
+  livesOn: island
 
 fronts:
   - id: obtain-recipe

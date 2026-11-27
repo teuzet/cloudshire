@@ -20,6 +20,7 @@ fronts:
     impact: SIGNIFICANT
     drift: STEADY
     refs: [storms]
+    livesOn: storms
     alignment: |
       Берегут город дозоры с водой на высоких кровлях, снятые шпили и флюгера, железные шесты с цепью в землю, как советуют кузнецы.
     stake:

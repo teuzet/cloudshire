@@ -45,6 +45,7 @@ fronts:
     impact: MINOR
     drift: STEADY
     refs: [wake]
+    livesOn: wake
     alignment: |
       Берегут людей ночлег в других кварталах, смены покороче, сонные отвары.
     stake:

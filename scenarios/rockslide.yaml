@@ -32,6 +32,7 @@ fronts:
     impact: SIGNIFICANT
     drift: STEADY
     refs: [slide]
+    livesOn: slide
     alignment: |
       Отводят беду вьючные тропы, дрова из ближнего леса, мера на уголь для кузен и пекарен.
     stake:

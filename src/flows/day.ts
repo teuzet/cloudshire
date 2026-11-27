@@ -91,6 +91,9 @@ function consequenceWords(city: City, ops: readonly StakeOp[]): string | null {
       case 'delete':
         parts.push(`утрачено: ${findObject(city, op.target)?.name ?? 'часть города'}`);
         break;
+      case 'retire':
+        parts.push(`${op.forever ? 'ушло из города насовсем' : 'больше не служит городу'}: ${findObject(city, op.target)?.name ?? 'часть города'}`);
+        break;
       case 'create':
         parts.push(`появилось: ${op.object.name}`);
         break;
@@ -506,6 +509,7 @@ async function onDeadline(deps: FlowDeps, city: City, front: Front, day: number,
     await record(deps, city, { gist: `Случай упущен: ${frontGist(front)}.`, changes, source: 'deadline', frontId: front.id, day, kind: 'resolution', officer: null, announce: false });
     return;
   }
+  // Часы пришли. У окна истории это уход того, с чем пришёл случай: он уносит всё, что на нём было и жило.
   if (front.form === 'clock') return strike(deps, city, front, front.stake, 'done', day, out);
   // Напряжение прорывается: мелкое сразу бьёт, остальное становится угрозой с коротким сроком.
   if (front.form === 'tension' && front.bound !== 'slow') {

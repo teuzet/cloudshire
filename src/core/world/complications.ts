@@ -79,6 +79,8 @@ export function buildBound(
     failStake,
     key: args.key,
     refs: args.roleId ? [args.roleId] : [],
+    // Беда держится на том, кто её несёт: не станет его — отпадёт и она.
+    livesOn: args.roleId,
     parentId: parent.id,
     bound,
     atStake,
@@ -130,6 +132,8 @@ export function buildSide(
     description: args.dress.description,
     key: args.key,
     refs: [args.target.id, ...(args.extraRefs ?? [])],
+    // Беда грозит объекту: не станет его — грозить будет нечему.
+    livesOn: args.target.id,
     atStake,
     outburst: args.dress.outburst,
     dynamicId: args.dynamicId,
@@ -161,6 +165,7 @@ export function buildOpportunity(
     stake: args.stake,
     key: args.key,
     refs: args.refs,
+    livesOn: args.refs[0] ?? null,
     plus: true,
     atStake: args.gain,
     outburst: args.dress.outburst,

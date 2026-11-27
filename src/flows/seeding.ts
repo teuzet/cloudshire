@@ -7,9 +7,9 @@
 
 import { scheduleJob } from '../core/jobs.js';
 import type { Change } from '../core/world/changes.js';
-import { activeFronts, closeFront } from '../core/world/fronts.js';
+import { activeFronts, closeFront, endersOf } from '../core/world/fronts.js';
 import { leadOf } from '../core/world/assignments.js';
-import { rawToPoints } from '../core/world/numbers.js';
+import { monthsToDays, rawToPoints } from '../core/world/numbers.js';
 import { mysteryObjectIds } from '../core/lore.js';
 import type { City, StoryTags } from '../core/city.js';
 import { IMPACT_LEVELS, SCALES, type Scale } from '../core/rules.js';
@@ -95,7 +95,8 @@ function seedWords(deps: FlowDeps, city: City, tags: StoryTags, kind: Kind | nul
  */
 export function storyCount(city: City): number {
   return activeFronts(city)
-    .filter((f) => f.origin === 'story')
+    // Часы истории — её срок, а не отдельная история.
+    .filter((f) => f.origin === 'story' && f.form !== 'clock')
     .reduce((acc, f) => acc + (f.form === 'threat' || f.form === 'tension' || leadOf(city, f.id) ? 1 : 0.5), 0);
 }
 
@@ -156,11 +157,19 @@ export async function plantStory(deps: FlowDeps, city: City, day: number, kind: 
   return record(deps, city, { gist: gist || planted.pitch || planted.title, changes, source: 'scenario', frontId: fronts[0]?.id ?? null, day, kind: 'beat', officer: null, announce: true });
 }
 
-/** Нетронутые поиски и дела историй, за которые так никто и не взялся, тихо уходят из дел города. */
-function fadeDormant(deps: FlowDeps, city: City, day: number): void {
+/**
+ * Нетронутые поиски и дела историй, за которые так никто и не взялся, тихо уходят из дел города.
+ * Удобный случай без срока забывается раньше; то, с чем он пришёл, остаётся в городе.
+ * Пока срок идёт, решает он; случай, чей срок удержали, ждёт как обычный поиск.
+ */
+export function fadeDormant(deps: Pick<FlowDeps, 'rules'>, city: City, day: number): void {
+  const chanceDays = monthsToDays(deps.rules.seeding.chanceMonths);
   for (const f of activeFronts(city)) {
     if (f.origin !== 'story' || (f.form !== 'find' && f.form !== 'deed') || leadOf(city, f.id)) continue;
-    if (f.progress > 0 || day - f.createdDay < deps.rules.seeding.dormantDays) continue;
+    const enders = endersOf(city, f);
+    if (enders.some((e) => e.deadlineDay != null)) continue;
+    const wait = f.plus && !enders.length ? chanceDays : deps.rules.seeding.dormantDays;
+    if (f.progress > 0 || day - f.createdDay < wait) continue;
     closeFront(deps.rules, city, f, 'cancelled', day);
   }
 }

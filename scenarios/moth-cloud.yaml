@@ -26,6 +26,7 @@ fronts:
     impact: SIGNIFICANT
     drift: STEADY
     refs: [moths, weavers]
+    livesOn: moths
     alignment: |
       Спасают товар дым горьких трав, проветривание и перетряска тюков, сундуки из пахучего дерева, костры-приманки ночью.
     stake:

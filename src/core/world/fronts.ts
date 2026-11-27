@@ -228,6 +228,32 @@ export function daysLeft(front: Front, day: number): number | null {
   return Math.max(0, Math.ceil((front.capacity - progressAt(front, day)) / front.ratePerDay - EPS));
 }
 
+/** Кончат ли эти операции фронт: отменой или уходом того, на чём он живёт. */
+function opsEnd(ops: readonly StakeOp[], front: Pick<Front, 'id'>, carriers: ReadonlySet<string>): boolean {
+  return ops.some((op) => (op.op === 'cancel' && op.frontId === front.id) || ((op.op === 'delete' || op.op === 'retire') && carriers.has(op.target)));
+}
+
+/**
+ * Срок фронта с учётом чужих сроков: день, когда он кончится сам или когда часы и угрозы
+ * рядом унесут то, на чём он живёт. Остановленные якорем часы срока не дают.
+ */
+export function deadlineOf(city: Pick<City, 'fronts' | 'objects'>, front: Front): number | null {
+  let best = front.deadlineDay;
+  for (const other of endersOf(city, front)) {
+    if (other.deadlineDay == null) continue;
+    best = best == null ? other.deadlineDay : Math.min(best, other.deadlineDay);
+  }
+  return best;
+}
+
+/** Часы и угрозы, которые своим срабатыванием кончат этот фронт; среди них и остановленные якорем. */
+export function endersOf(city: Pick<City, 'fronts' | 'objects'>, front: Front): Front[] {
+  const carriers = front.livesOn ? withOuter(city, [front.livesOn]) : new Set<string>();
+  return activeFronts(city).filter(
+    (other) => other.id !== front.id && (other.form === 'clock' || other.form === 'threat') && opsEnd(other.form === 'clock' ? other.stake : other.failStake, front, carriers),
+  );
+}
+
 // ───────────────────────────── соседство ─────────────────────────────
 
 /** Все объекты, которых фронт касается: отпечаток, участники, цели ставок, место работ, носитель. */

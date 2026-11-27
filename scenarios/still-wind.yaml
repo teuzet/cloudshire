@@ -36,6 +36,7 @@ fronts:
     impact: MINOR
     drift: STEADY
     refs: [calm]
+    livesOn: calm
     alignment: |
       Успокаивают людей слово храма, общее дело для всех кварталов, ясный рассказ о том, что штили бывали и раньше.
     stake:

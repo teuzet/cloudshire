@@ -29,8 +29,8 @@ export type Change =
   | { kind: 'linked'; a: string; b: string; names: [string, string] }
   | { kind: 'stats'; points: Partial<StatMap> }
   | { kind: 'front_opened'; frontId: string; title: string; form: FrontForm; plus: boolean }
-  /** gone — беда ушла сама: не стало того, на чём она держалась (cause). */
-  | { kind: 'front_closed'; frontId: string; title: string; outcome: 'done' | 'averted' | 'failed' | 'cancelled' | 'expired' | 'gone'; cause?: string }
+  /** Не стало того, на чём это держалось (cause): gone — беда отпала сама, cut — дело или поиск оборвались. */
+  | { kind: 'front_closed'; frontId: string; title: string; outcome: 'done' | 'averted' | 'failed' | 'cancelled' | 'expired' | 'gone' | 'cut'; cause?: string }
   /** Объект стал якорем: пока он цел, фронт идёт иначе. motion — что у фронта держат: срок или работу. */
   | { kind: 'front_held'; frontId: string; title: string; objectId: string; name: string; effect: HoldEffect; motion: 'clock' | 'work' }
   /** Якорь пал: фронт идёт как прежде. */
@@ -105,7 +105,8 @@ const CLOSED_WORDS = {
   failed: 'Случилось',
   cancelled: 'Брошено',
   expired: 'Упущено',
-  gone: 'Ушло само',
+  gone: 'Отпало само',
+  cut: 'Оборвалось',
 } as const;
 
 type HeldWords = Record<HoldEffect, (title: string, name: string) => string>;
@@ -113,27 +114,27 @@ type HeldWords = Record<HoldEffect, (title: string, name: string) => string>;
 /** Якорь встал, словами мира: что теперь иначе и благодаря чему. */
 const HELD_WORDS: Record<'clock' | 'work', HeldWords> = {
   clock: {
-    stop: (t, n) => `Пока держится ${n}, не случится: «${t}»`,
-    slow: (t, n) => `Пока держится ${n}, медленнее надвигается: «${t}»`,
-    hurry: (t, n) => `Пока держится ${n}, быстрее надвигается: «${t}»`,
-    riskier: (t, n) => `Пока держится ${n}, опаснее стало: «${t}»`,
-    safer: (t, n) => `Пока держится ${n}, спокойнее стало: «${t}»`,
-    outcome: (t, n) => `Пока держится ${n}, иначе кончится: «${t}»`,
+    stop: (t, n) => `Пока есть ${n}, не случится: «${t}»`,
+    slow: (t, n) => `Пока есть ${n}, медленнее надвигается: «${t}»`,
+    hurry: (t, n) => `Пока есть ${n}, быстрее надвигается: «${t}»`,
+    riskier: (t, n) => `Пока есть ${n}, опаснее стало: «${t}»`,
+    safer: (t, n) => `Пока есть ${n}, спокойнее стало: «${t}»`,
+    outcome: (t, n) => `Пока есть ${n}, иначе кончится: «${t}»`,
   },
   work: {
-    stop: (t, n) => `Пока держится ${n}, стоит работа над «${t}»`,
-    slow: (t, n) => `Пока держится ${n}, медленнее идёт работа над «${t}»`,
-    hurry: (t, n) => `Пока держится ${n}, быстрее идёт работа над «${t}»`,
-    riskier: (t, n) => `Пока держится ${n}, опаснее работа над «${t}»`,
-    safer: (t, n) => `Пока держится ${n}, безопаснее работа над «${t}»`,
-    outcome: (t, n) => `Пока держится ${n}, иначе кончится: «${t}»`,
+    stop: (t, n) => `Пока есть ${n}, стоит работа над «${t}»`,
+    slow: (t, n) => `Пока есть ${n}, медленнее идёт работа над «${t}»`,
+    hurry: (t, n) => `Пока есть ${n}, быстрее идёт работа над «${t}»`,
+    riskier: (t, n) => `Пока есть ${n}, опаснее работа над «${t}»`,
+    safer: (t, n) => `Пока есть ${n}, безопаснее работа над «${t}»`,
+    outcome: (t, n) => `Пока есть ${n}, иначе кончится: «${t}»`,
   },
 };
 
 /** Якорь пал, словами мира. */
 function freedWords(c: Extract<Change, { kind: 'front_freed' }>): string {
-  if (c.effect === 'stop') return c.motion === 'clock' ? `Больше не держит: ${c.name}. Снова надвигается: «${c.title}»` : `Больше не держит: ${c.name}. Работа над «${c.title}» пошла снова`;
-  return `Больше не держит: ${c.name}. Идёт как прежде: «${c.title}»`;
+  if (c.effect === 'stop') return c.motion === 'clock' ? `Опоры больше нет: ${c.name}. Снова надвигается: «${c.title}»` : `Опоры больше нет: ${c.name}. Работа над «${c.title}» пошла снова`;
+  return `Опоры больше нет: ${c.name}. Идёт как прежде: «${c.title}»`;
 }
 
 const MOVED_WORDS: Record<Extract<Change, { kind: 'front_moved' }>['how'], (t: string) => string> = {

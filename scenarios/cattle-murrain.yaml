@@ -20,6 +20,7 @@ fronts:
     impact: SIGNIFICANT
     drift: STEADY
     refs: [murrain]
+    livesOn: murrain
     alignment: |
       Останавливают мор отделение больных стад, запрет гонять скот по общим тропам, дёготь и известь на копыта, сжигание павших.
     stake:

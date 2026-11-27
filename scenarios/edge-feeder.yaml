@@ -26,6 +26,7 @@ fronts:
     impact: SIGNIFICANT
     drift: STEADY
     refs: [raptors]
+    livesOn: raptors
     alignment: |
       Отводят беду сети и трещотки над дворами, разорение гнёзд, запрет бросать отбросы с кромки, стрелки на вышках.
     stake:

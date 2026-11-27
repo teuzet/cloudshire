@@ -3,7 +3,7 @@ import path from 'node:path';
 import yaml from 'js-yaml';
 import { describe, expect, test } from 'vitest';
 import { changedObjectIds, describeChanges, isNotable, type Change } from '../../src/core/world/changes.js';
-import { nextEventDay } from '../../src/core/world/fronts.js';
+import { deadlineOf, nextEventDay } from '../../src/core/world/fronts.js';
 import { parseScenario, plantScenario, storyKind } from '../../src/core/world/scenario.js';
 import { magnitude } from '../../src/core/world/numbers.js';
 import { pullOf } from '../../src/core/world/objects.js';
@@ -71,14 +71,22 @@ describe('сценарий', () => {
   test('история ложится на новую модель: поиск без срока или угроза со сроком, скрытая логика уходит в ключ', () => {
     const scenario = parseScenario(raw);
     const city = blankCity();
-    const { fronts } = plantScenario(r, city, scenario, { day: 3, newId: ids(9) });
-    for (const [i, front] of fronts.entries()) {
+    const { fronts, objects } = plantScenario(r, city, scenario, { day: 3, newId: ids(9) });
+    // Срок истории — отдельный фронт-часы: он живёт на островке и унесёт его навсегда.
+    const island = objects.find((o) => o.type === 'site')!;
+    const clock = fronts.find((f) => f.form === 'clock')!;
+    expect(clock).toMatchObject({ origin: 'story', plus: false, capacity: 0, deadlineDay: 3 + r.seeding.chanceMonths * 30, livesOn: island.id, stake: [{ op: 'retire', target: island.id, forever: true }] });
+    for (const [i, front] of fronts.filter((f) => f.form !== 'clock').entries()) {
       const source = scenario.fronts[i]!;
       const drifting = source.drift !== 'NONE';
       expect(front).toMatchObject({ origin: 'story', form: drifting ? 'threat' : 'find', capacity: r.seeding.capacity[source.impact] });
-      // История без беды — возможность: у её фронтов окно, после которого она уходит.
+      // История без беды — возможность: своего срока у её фронтов нет, он приходит от часов.
       const chance = scenario.fronts.every((f) => f.drift === 'NONE');
-      expect(front.deadlineDay == null).toBe(!drifting && !chance);
+      expect(front.deadlineDay == null).toBe(!drifting);
+      if (chance) {
+        expect(front.livesOn).toBe(island.id);
+        expect(deadlineOf(city, front)).toBe(clock.deadlineDay);
+      }
       expect(front.plus).toBe(chance);
       expect(drifting ? front.failStake.length : front.stake.length).toBe(source.stake ? 1 : 0);
       expect(front.script?.clues.map((c) => c.fact)).toEqual(source.clues.map((c) => c.fact));
@@ -109,6 +117,88 @@ describe('сценарий', () => {
     expect(fronts[0]!.deadlineDay).not.toBeNull();
     expect(fronts[1]).toMatchObject({ form: 'deed', stake: [{ op: 'reveal', target: objects[1]!.id }] });
     expect(() => parseScenario({ id: 'x', title: 'x', fronts: [{ id: 'f', form: 'tension', description: 'd', impact: 'MINOR' }] })).toThrow(/fronts\.0\.form/);
+  });
+
+  test('язык правок в заготовке: вложенность, носитель, срок-часы и якорь у результата', () => {
+    const scenario = parseScenario({
+      id: 'x',
+      title: 'x',
+      objects: [
+        { id: 'isle', type: 'site', name: 'Островок' },
+        { id: 'hut', type: 'structure', name: 'Хижина', inside: 'isle' },
+      ],
+      window: { description: 'Островок унесёт ветром. Он едва держится у кромки.', livesOn: 'isle' },
+      fronts: [
+        { id: 'moor', form: 'deed', description: 'Привязать островок.', impact: 'MINOR', stake: { create: { type: 'structure', name: 'Причальные цепи', description: 'Цепи.', holds: [{ front: 'window', effect: 'stop' }] } } },
+        { id: 'search', description: 'Обыскать хижину.', impact: 'MINOR', livesOn: 'hut' },
+      ],
+    });
+    const city = blankCity();
+    const newId = ids(9);
+    const { objects, fronts } = plantScenario(r, city, scenario, { day: 0, newId });
+    const [isle, hut] = objects as [(typeof objects)[number], (typeof objects)[number]];
+    const [moor, search, clock] = fronts as [(typeof fronts)[number], (typeof fronts)[number], (typeof fronts)[number]];
+    expect(hut.parentId).toBe(isle.id);
+    // Название часов без своего title — первая фраза описания.
+    expect(clock).toMatchObject({ form: 'clock', title: 'Островок унесёт ветром', livesOn: isle.id });
+    expect(moor.livesOn).toBe(isle.id);
+    expect(search.livesOn).toBe(hut.id);
+    const end = clock.deadlineDay!;
+    // Хижина стоит на островке: её поиск кончится вместе с ним.
+    expect(deadlineOf(city, search)).toBe(end);
+
+    // Цепи готовы: срок встал, пока они целы.
+    const made = applyStake(r, city, moor.stake, { day: 30, newId });
+    const chains = city.objects.find((o) => o.name === 'Причальные цепи')!;
+    expect(describeChanges(r, made.changes)).toContain('Пока есть Причальные цепи, не случится: «Островок унесёт ветром»');
+    expect(clock).toMatchObject({ deadlineDay: null, sleepLeft: end - 30 });
+    expect(deadlineOf(city, search)).toBeNull();
+
+    // Цепи сбили: срок пошёл с того места, где встал.
+    const cut = applyStake(r, city, [{ op: 'delete', target: chains.id }], { day: 50, newId });
+    expect(describeChanges(r, cut.changes)).toContain('Опоры больше нет: Причальные цепи. Снова надвигается: «Островок унесёт ветром»');
+    expect(clock.deadlineDay).toBe(50 + end - 30);
+
+    // Время вышло: островок уходит со всем, что на нём стояло и жило.
+    const gone = applyStake(r, city, clock.stake, { day: clock.deadlineDay!, newId, trouble: clock.title });
+    expect(isle.status).toBe('deleted');
+    expect(hut.status).toBe('deleted');
+    expect(isle.out).toMatchObject({ forever: true, cause: 'Островок унесёт ветром' });
+    expect([moor.status, search.status]).toEqual(['cancelled', 'cancelled']);
+    expect(describeChanges(r, gone.changes)).toContain('Упущено: «Обыскать хижину». Не стало того, на чём это держалось: Хижина');
+  });
+
+  test('объект истории держит её беду с порога; беда, что унесёт носитель, даёт срок делу на нём', () => {
+    const story = (holds: unknown[]) =>
+      parseScenario({
+        id: 'y',
+        title: 'y',
+        objects: [{ id: 'dam', type: 'structure', name: 'Старая плотина', holds }],
+        fronts: [{ id: 'flood', description: 'Вода поднимается.', impact: 'MINOR', drift: 'STEADY', stake: { stats: { prosperity: -2 } } }],
+      });
+    const free = plantScenario(r, blankCity(), story([]), { day: 0, newId: ids(4) }).fronts[0]!;
+    const city = blankCity();
+    const { fronts, objects } = plantScenario(r, city, story([{ front: 'flood', effect: 'slow' }]), { day: 0, newId: ids(4) });
+    expect(objects[0]!.holds).toMatchObject([{ frontId: fronts[0]!.id, effect: 'slow' }]);
+    expect(fronts[0]!.deadlineDay).toBe(Math.ceil(free.deadlineDay! / r.fronts.hold.slowFactor));
+
+    const shard = parseScenario(yaml.load(fs.readFileSync(path.resolve(import.meta.dirname, '../../scenarios/drift-shard.yaml'), 'utf8')));
+    const town = blankCity();
+    const planted = plantScenario(r, town, shard, { day: 0, newId: ids(5) });
+    const [cedar, leaves] = planted.fronts as [(typeof fronts)[number], (typeof fronts)[number]];
+    expect(cedar).toMatchObject({ form: 'deed', deadlineDay: null, livesOn: planted.objects[0]!.id });
+    expect(deadlineOf(town, cedar)).toBe(leaves.deadlineDay);
+    // Осколок оторвало: дело на нём оборвалось.
+    const hit = applyStake(r, town, leaves.failStake, { day: leaves.deadlineDay!, newId: ids(6), trouble: leaves.title });
+    expect(cedar.status).toBe('cancelled');
+    expect(describeChanges(r, hit.changes)).toContain('Оборвалось: «Кедровый брус не гниёт и не боится жучка». Не стало того, на чём это держалось: Кедровый осколок');
+  });
+
+  test('заготовка с якорем на чужой фронт, занятым id окна или объектом внутри себя не проходит', () => {
+    const base = { id: 'x', title: 'x', fronts: [{ id: 'f', description: 'd', impact: 'MINOR' }] };
+    expect(() => parseScenario({ ...base, objects: [{ id: 'a', type: 'site', name: 'A', holds: [{ front: 'nope', effect: 'stop' }] }] })).toThrow(/objects\.0\.holds\.0\.front/);
+    expect(() => parseScenario({ ...base, objects: [{ id: 'a', type: 'site', name: 'A', inside: 'a' }] })).toThrow(/objects\.0\.inside/);
+    expect(() => parseScenario({ ...base, objects: [{ id: 'a', type: 'site', name: 'A' }], window: { id: 'f', description: 'd', livesOn: 'a' } })).toThrow(/window\.id/);
   });
 
   test('фронт истории толкает другой фронт и платит за это ёмкостью', () => {
@@ -193,10 +283,18 @@ describe('сценарий', () => {
       const { fronts } = plantScenario(r, city, scenario, { day: 0, newId: ids(11) });
       const budget = r.seeding.scale[scenario.scale!].budget;
       let hit = 0;
-      for (const [i, f] of fronts.entries()) {
+      // У возможности с окном срок несут часы; они живут на объекте истории.
+      const clock = fronts.find((f) => f.form === 'clock');
+      expect(Boolean(clock), file).toBe(kind === 'chance' && Boolean(scenario.window));
+      if (clock) {
+        expect(clock.deadlineDay, file).toBeGreaterThanOrEqual(r.seeding.chanceMonths * 30);
+        expect(city.objects.some((o) => o.id === clock.livesOn), file).toBe(true);
+      }
+      for (const [i, f] of fronts.filter((x) => x.form !== 'clock').entries()) {
         const drifting = scenario.fronts[i]!.drift !== 'NONE';
         expect(f.plus, file).toBe(kind === 'chance');
-        if (kind === 'chance') expect(f.deadlineDay, file).toBeGreaterThanOrEqual(r.seeding.chanceMonths * 30);
+        if (kind === 'chance') expect(deadlineOf(city, f), file).toBe(clock?.deadlineDay ?? null);
+        if (f.livesOn) expect(city.objects.some((o) => o.id === f.livesOn), file).toBe(true);
         if (!drifting) continue;
         expect(f.deadlineDay! / 30, file).toBeGreaterThanOrEqual((f.capacity / r.fronts.deadlines.unitsPerMonth) * r.fronts.deadlines.slack - 0.05);
         const op = f.failStake[0];

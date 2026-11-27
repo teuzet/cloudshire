@@ -20,6 +20,7 @@ fronts:
     impact: SIGNIFICANT
     drift: STEADY
     refs: [fog]
+    livesOn: fog
     alignment: |
       Берегут людей канаты вдоль дорог и кромки, колокола и рожки на перекрёстках, запрет ходить в одиночку.
     stake:
@@ -30,6 +31,7 @@ fronts:
     impact: MINOR
     drift: STEADY
     refs: [fog]
+    livesOn: fog
     alignment: |
       Спасают урожай ранняя жатва и сушка под крышей у огня, сбор того, что туман любит, грибов и мха.
     stake:

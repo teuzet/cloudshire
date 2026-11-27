@@ -24,6 +24,7 @@ fronts:
     impact: MAJOR
     drift: STEADY
     refs: [storm, cellars]
+    livesOn: storm
     alignment: |
       Спасают людей новые укрытия в каменоломнях и погребах, порядок, кто куда идёт, открытые подвалы богатых домов, запасы в каждом убежище.
     stake:

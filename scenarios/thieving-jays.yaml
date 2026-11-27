@@ -42,6 +42,7 @@ fronts:
     impact: MINOR
     drift: STEADY
     refs: [jays]
+    livesOn: jays
     alignment: |
       Успокаивают улицу сетки и ставни, поимка птиц, поиск хозяина вместо избиения всех пернатых.
     stake:

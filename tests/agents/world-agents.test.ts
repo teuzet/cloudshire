@@ -76,6 +76,55 @@ describe('посев и генезис объектов', () => {
     expect(s.objects[0]).toMatchObject({ id: 'isle_x', statProfile: template.objects[0]!.statProfile });
     expect(s.fronts).toHaveLength(1);
     expect(s.fronts[0]).toMatchObject({ id: 'recipe_x', impact: template.fronts[0]!.impact, refs: ['isle_x'] });
+    // Окно и вложенность берутся из заготовки и переводятся на id, которые дал писатель.
+    expect(s.window).toMatchObject({ livesOn: 'isle_x', description: template.window!.description });
+    expect(s.objects[1]).toMatchObject({ inside: 'isle_x' });
+  });
+
+  test('scenario-writer: носители, якоря и окно остаются из заготовки, слова окна может дать писатель', async () => {
+    const shard = parseScenario({
+      id: 'shard',
+      title: 'Осколок',
+      objects: [
+        { id: 'thing', type: 'site', name: 'Осколок у кромки' },
+        { id: 'grove', type: 'resource', name: 'Роща на осколке', inside: 'thing' },
+      ],
+      window: { title: 'Осколок оторвёт', description: 'Осколок оторвёт от кромки и унесёт.', livesOn: 'thing' },
+      fronts: [
+        { id: 'main', form: 'deed', description: 'Удержать осколок.', impact: 'MINOR', refs: ['thing'], stake: { create: { type: 'district', name: 'Новая земля', description: 'Осколок сросся с островом.', holds: [{ front: 'window', effect: 'stop' }] } } },
+        { id: 'wood', form: 'deed', description: 'Взять лес из рощи.', impact: 'MINOR', livesOn: 'grove' },
+      ],
+    });
+    const draft = structuredClone(shard) as unknown as { objects: Array<Record<string, unknown>>; fronts: Array<Record<string, unknown>>; window: Record<string, unknown> };
+    draft.objects[0]!.id = 'land_x';
+    draft.objects[1]!.inside = undefined;
+    draft.objects[1]!.holds = [{ front: 'main', effect: 'stop' }];
+    draft.fronts[0]!.refs = ['land_x'];
+    draft.fronts[0]!.stake = { create: { type: 'district', name: 'Прирезанная земля', description: 'Осколок прирос к Мерву.' } };
+    draft.fronts[1]!.livesOn = 'land_x';
+    draft.window = { description: 'Осколок сорвёт с кромки первым же сильным ветром.', livesOn: 'grove' };
+    const llm = new FakeLlm().script('scenario-writer', toolReply('submit_scenario', draft));
+    const s = await writeScenario(deps(llm), { cityBrief: 'Мерв', objects: [], template: shard, seed: null, names: [], unknowns: [] });
+    expect(s.window).toMatchObject({ id: 'window', livesOn: 'land_x', description: 'Осколок сорвёт с кромки первым же сильным ветром.' });
+    expect(s.objects[1]).toMatchObject({ id: 'grove', inside: 'land_x' });
+    expect(s.objects[1]!.holds).toBeUndefined();
+    expect(s.fronts[0]!.stake).toMatchObject({ create: { name: 'Прирезанная земля', holds: [{ front: 'window', effect: 'stop' }] } });
+    expect(s.fronts[1]!.livesOn).toBe('grove');
+  });
+
+  test('scenario-writer: в истории по зерну носитель и окно ведут на объект истории или города', async () => {
+    const story = (livesOn: string) => ({
+      id: 'x',
+      title: 'x',
+      objects: [{ id: 'flock', type: 'resource', name: 'Перелётная стая' }],
+      window: { description: 'Стая снимется и уйдёт с первым холодом.', livesOn },
+      fronts: [{ id: 'f', description: 'Собрать пух со стаи.', impact: 'MINOR', livesOn }],
+    });
+    const llm = new FakeLlm().script('scenario-writer', toolReply('submit_scenario', story('herd')), toolReply('submit_scenario', story('flock')));
+    const out = await writeScenario(deps(llm), { cityBrief: '', objects: [], template: null, seed: 'стая', names: [], unknowns: [] });
+    expect(JSON.stringify(llm.requests[1]?.messages)).toContain('window.livesOn: нет объекта herd');
+    expect(out.window?.livesOn).toBe('flock');
+    expect(out.fronts[0]?.livesOn).toBe('flock');
   });
 
   test('scenario-writer: можно ссылаться на живой объект города', async () => {

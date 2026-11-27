@@ -45,6 +45,7 @@ fronts:
     impact: MINOR
     drift: STEADY
     refs: [letters]
+    livesOn: letters
     alignment: |
       Развязывают языки защита тем, кто признается, огласка писем, общий отказ платить.
     stake:

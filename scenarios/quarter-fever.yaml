@@ -20,6 +20,7 @@ fronts:
     impact: SIGNIFICANT
     drift: STEADY
     refs: [fever]
+    livesOn: fever
     alignment: |
       Сдерживают лихорадку уход за больными в отдельных домах, осушение стоячих луж, дым и полог от мошки, горькая кора из леса.
     stake:

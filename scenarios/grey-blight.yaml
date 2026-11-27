@@ -26,6 +26,7 @@ fronts:
     impact: SIGNIFICANT
     drift: STEADY
     refs: [blight]
+    livesOn: blight
     alignment: |
       Сдерживают ржу выжигание поражённого, запреты на перенос земли и семян, отбор здоровых ростков.
       Помогают знающие садоводы и травники.
@@ -62,6 +63,7 @@ fronts:
     impact: MINOR
     drift: FAST
     refs: [blight]
+    livesOn: blight
     alignment: |
       Успокаивают людей ясные вести о том, что делается, помощь пострадавшим, защита тех, на кого показывают.
     stake:

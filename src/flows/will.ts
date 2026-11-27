@@ -16,7 +16,8 @@ import { emptyStatMap } from '../core/rules.js';
 import { realWaitLabel, spanBand, DAYS_PER_MONTH } from '../core/time.js';
 import { assignmentOf, closeAssignment, createAssignment, leadOf, officerOf } from '../core/world/assignments.js';
 import type { Change } from '../core/world/changes.js';
-import { activeFronts, childFronts, closeFront, createFront, daysLeft, findFront, frontGist, occupyFootprint } from '../core/world/fronts.js';
+import { activeFronts, childFronts, closeFront, createFront, daysLeft, deadlineOf, findFront, frontGist, occupyFootprint } from '../core/world/fronts.js';
+import { carriedWork } from '../core/world/links.js';
 import {
   basePrice,
   changeCapacity,
@@ -68,12 +69,14 @@ function busy(deps: FlowDeps, city: City, officer: Officer): WillOutcome {
 }
 
 /** Сколько ждать: словами и в реальном времени. */
-function waitWords(deps: FlowDeps, front: Front, day: number): string {
+function waitWords(deps: FlowDeps, city: City, front: Front, day: number): string {
   const left = daysLeft(front, day);
   if (left == null) return '';
   const work = `Работы: ${spanBand(left)} (${realWaitLabel(left, deps.rules)}).`;
   // Полосы грубые: «сезон» работы и «сезон» срока не скажут, успеет ли сановник. Это считает код.
-  if (front.deadlineDay == null || day + left <= front.deadlineDay) return work;
+  // Срок бывает и чужой: часы рядом унесут то, на чём дело держится.
+  const deadline = deadlineOf(city, front);
+  if (deadline == null || day + left <= deadline) return work;
   return `${work} До срока меньше: к сроку не успеть${front.plus ? ', случай уйдёт раньше' : ''}.`;
 }
 
@@ -82,7 +85,7 @@ function willInput(city: City) {
     fronts: activeFronts(city).map((f) => ({
       id: f.id,
       title: frontGist(f),
-      kind: f.plus ? 'удобный случай со сроком' : FORM_WORDS[f.form],
+      kind: f.plus ? (deadlineOf(city, f) != null ? 'удобный случай со сроком' : 'удобный случай') : FORM_WORDS[f.form],
       description: f.description,
       lead: leadLabel(city, f).label,
       hindrances: attachedTo(city, f.id)
@@ -218,7 +221,7 @@ interface StagePlan {
   target: WorldObject | null;
 }
 
-async function planStake(deps: FlowDeps, city: City, stage: ProjectStage): Promise<StagePlan | string> {
+async function planStake(deps: FlowDeps, city: City, stage: ProjectStage, day: number): Promise<StagePlan | string> {
   const r = stage.result;
   const target = r.objectId ? findObject(city, r.objectId) : null;
   switch (r.kind) {
@@ -240,7 +243,7 @@ async function planStake(deps: FlowDeps, city: City, stage: ProjectStage): Promi
         const delta = diffPoints(target.out.was, rawToPoints(city, target.statEffect));
         return { capacity: changeCapacity(deps.rules, target.type, delta), stake: [{ op: 'restore', target: target.id, description: r.description }], points: delta, target };
       }
-      return planStake(deps, city, { ...stage, result: { ...r, kind: 'change_object' } });
+      return planStake(deps, city, { ...stage, result: { ...r, kind: 'change_object' } }, day);
     }
     case 'change_object': {
       if (!target || target.status !== 'active') return 'Того, что этот шаг должен был изменить, в городе больше нет.';
@@ -258,7 +261,9 @@ async function planStake(deps: FlowDeps, city: City, stage: ProjectStage): Promi
       if (!target || target.status !== 'active') return 'Того, что этот шаг должен был убрать, в городе больше нет.';
       if (target.protected) return `${target.name} убрать нельзя: на этом держится сам город.`;
       const before = rawToPoints(city, target.statEffect);
-      return { capacity: changeCapacity(deps.rules, target.type, before), stake: [{ op: 'delete', target: target.id }], points: before, target };
+      // Убрать то, на чём живёт беда, значит снять саму беду: это стоит остаток её шкалы.
+      const capacity = changeCapacity(deps.rules, target.type, before) + carriedWork(city, target, day);
+      return { capacity, stake: [{ op: 'delete', target: target.id }], points: before, target };
     }
     case 'fact':
       return { capacity: basePrice(deps.rules, 'fact'), stake: [{ op: 'fact', text: r.description }], points: emptyStatMap(), target: null };
@@ -272,7 +277,7 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
     project.status = 'done';
     return refuse('no_stage', 'Этот замысел уже доведён до конца.');
   }
-  const plan = await planStake(deps, city, stage);
+  const plan = await planStake(deps, city, stage, day);
   if (typeof plan === 'string') {
     project.status = 'cancelled';
     return refuse('stage_lost', plan);
@@ -376,7 +381,7 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
     ok: true,
     say: [
       `${title(deps, officer)} начал работу: ${frontGist(front)}.`,
-      waitWords(deps, front, day),
+      waitWords(deps, city, front, day),
       RISK_WORDS[risk],
       names.length ? `На время работ заняты и дают городу меньше: ${names.join(', ')}.` : '',
       later.length ? `Это первый шаг замысла. Дальше, по слову покровителя: ${later.join('; ')}.` : '',
@@ -424,7 +429,7 @@ async function setStrategy(deps: FlowDeps, city: City, officer: Officer, will: W
   refreshAllFronts(deps, city, day);
   return {
     ok: true,
-    say: [`${title(deps, officer)} ведёт «${front.title || frontGist(front)}» так, как велено.`, answerWords(answer), waitWords(deps, front, day), leftBehind(city, officer, front, day)]
+    say: [`${title(deps, officer)} ведёт «${front.title || frontGist(front)}» так, как велено.`, answerWords(answer), waitWords(deps, city, front, day), leftBehind(city, officer, front, day)]
       .filter(Boolean)
       .join(' '),
   };
@@ -509,7 +514,7 @@ async function atomicDeed(deps: FlowDeps, city: City, officer: Officer, will: Wi
   refreshAllFronts(deps, city, day);
   return {
     ok: true,
-    say: [`${title(deps, officer)} взялся за задание для дела «${frontGist(parent)}»: ${frontGist(front)}.`, waitWords(deps, front, day), RISK_WORDS[risk]].filter(Boolean).join(' '),
+    say: [`${title(deps, officer)} взялся за задание для дела «${frontGist(parent)}»: ${frontGist(front)}.`, waitWords(deps, city, front, day), RISK_WORDS[risk]].filter(Boolean).join(' '),
   };
 }
 
@@ -533,7 +538,7 @@ function setTempo(deps: FlowDeps, city: City, will: Will, day: number): WillOutc
   }
   if (!said.length) return refuse('no_lead', `«${frontGist(front)}» сейчас никто не ведёт: торопить некого.`);
   refreshAllFronts(deps, city, day);
-  return { ok: true, say: [`«${frontGist(front)}»: ${said.join('; ')}.`, waitWords(deps, front, day), 'Спешка ускоряет работу и чаще приводит к бедам, осторожность наоборот.'].filter(Boolean).join(' ') };
+  return { ok: true, say: [`«${frontGist(front)}»: ${said.join('; ')}.`, waitWords(deps, city, front, day), 'Спешка ускоряет работу и чаще приводит к бедам, осторожность наоборот.'].filter(Boolean).join(' ') };
 }
 
 async function cancelWork(deps: FlowDeps, city: City, will: Will, day: number): Promise<WillOutcome> {

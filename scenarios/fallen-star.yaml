@@ -25,6 +25,7 @@ fronts:
     impact: SIGNIFICANT
     beatCount: 2
     refs: [star, field]
+    livesOn: star
     alignment: |
       Двигают дело наблюдение за полем, опыты с осколками, сравнение с записями о прежних падениях.
     stake:

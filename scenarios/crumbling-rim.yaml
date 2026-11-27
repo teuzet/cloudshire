@@ -17,6 +17,7 @@ objects:
     name: Трещины в кромке
     description: Длинные трещины идут через огороды и под крайние дома. После каждого дождя они шире на палец.
     refs: [village]
+    inside: village
 
 fronts:
   - id: rim-falls
@@ -25,6 +26,7 @@ fronts:
     impact: SIGNIFICANT
     drift: STEADY
     refs: [village, cracks]
+    livesOn: cracks
     alignment: |
       Спасают людей новое место для деревни поблизости от их промысла, крепь и отвод воды, слово стариков, которым деревня верит.
     stake:

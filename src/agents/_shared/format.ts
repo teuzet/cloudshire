@@ -9,7 +9,10 @@ import type { ChronicleEntry, City, Front, Officer, PoolName, WorldObject } from
 import { gameDate, spanBand } from '../../core/time.js';
 import { leadOf, officerOf } from '../../core/world/assignments.js';
 import { EFFECT_WORDS, effectOf, hindrancesOf } from '../../core/world/hindrance.js';
-import { daysLeft, isFrozen, progressAt, shareDone } from '../../core/world/fronts.js';
+import { daysLeft, deadlineOf, isFrozen, progressAt, shareDone } from '../../core/world/fronts.js';
+import { holdersOf, ownMotion } from '../../core/world/hold.js';
+import { findObject } from '../../core/world/objects.js';
+import type { HoldEffect } from '../../core/rules.js';
 import { leadRatePerDay } from '../../core/world/numbers.js';
 
 export function bullets(lines: Array<string | null | undefined | false>): string {
@@ -37,6 +40,12 @@ const FRONT_FORM_WORDS: Record<Front['form'], string> = {
   find: 'поиск',
 };
 
+/** Что якорь делает с фронтом, словами мира: для беды со сроком и для дела. */
+const HOLD_WORDS: Record<'clock' | 'work', Record<HoldEffect, string>> = {
+  clock: { stop: 'срок не идёт', slow: 'надвигается медленнее', hurry: 'надвигается быстрее', riskier: 'стало опаснее', safer: 'стало спокойнее', outcome: 'кончится иначе' },
+  work: { stop: 'работа стоит', slow: 'работа идёт медленнее', hurry: 'работа идёт быстрее', riskier: 'работа опаснее', safer: 'работа безопаснее', outcome: 'кончится иначе' },
+};
+
 function shareWords(share: number): string {
   if (share <= 0.05) return 'в самом начале';
   if (share < 0.4) return 'пройдена меньшая часть';
@@ -59,6 +68,8 @@ export function frontLine(
   const officer = lead ? officerOf(city, lead) : null;
   const left = daysLeft(front, day);
   const parts: string[] = [front.plus ? 'удобный случай' : FRONT_FORM_WORDS[front.form]];
+  // Срок бывает и чужой: часы или угроза рядом унесут то, на чём этот фронт живёт.
+  const deadline = deadlineOf(city, front);
   if (front.capacity > 0) parts.push(shareWords(shareDone(front, day)));
   if (isFrozen(city, front)) parts.push('стоит, пока не снята угроза');
   else if (front.capacity > 0 && left == null && officer) {
@@ -71,11 +82,19 @@ export function frontLine(
     if (rate > 0) parts.push(`одному сановнику работы на: ${spanBand(Math.ceil((front.capacity - progressAt(front, day)) / rate))}`);
   }
   else if (front.capacity > 0 && left != null) parts.push(`работы осталось: ${spanBand(left)}`);
-  if (front.deadlineDay != null) parts.push(`срок: ${spanBand(Math.max(0, front.deadlineDay - day))}`);
+  if (deadline != null) parts.push(`срок: ${spanBand(Math.max(0, deadline - day))}`);
   // Полосы грубые: «сезон» работы и «сезон» срока не скажут, успеет ли ведущий. Это считает код.
-  if (front.capacity > 0 && left != null && front.deadlineDay != null && day + left > front.deadlineDay) {
+  if (front.capacity > 0 && left != null && deadline != null && day + left > deadline) {
     parts.push('при нынешней работе к сроку не успеть');
   }
+  // Якоря: что держит фронт, пока цело. Скрытое жрецу не названо.
+  const motion = ownMotion(front);
+  for (const { obj, hold } of holdersOf(city, front.id)) {
+    if (!obj.hidden) parts.push(`пока есть ${obj.name}: ${HOLD_WORDS[motion][hold.effect]}`);
+  }
+  // Носитель: без него фронту не на чем держаться.
+  const carrier = front.livesOn ? findObject(city, front.livesOn) : null;
+  if (carrier && carrier.status === 'active' && !carrier.hidden) parts.push(`держится на: ${carrier.name}`);
   if (officer) parts.push(`ведёт ${officer.title.toLowerCase()} ${officer.name}`);
   // Что мешает делу и как: словами мира. Как с этим быть, решает покровитель.
   for (const obj of hindrancesOf(city, front.id)) {

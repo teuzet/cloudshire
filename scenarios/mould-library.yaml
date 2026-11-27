@@ -17,6 +17,7 @@ objects:
     name: Чёрная плесень
     description: Плесень, от которой пергамент слипается и крошится. Переходит с книги на книгу и с рук на руки.
     refs: [library]
+    inside: library
 
 fronts:
   - id: books-rot
@@ -25,6 +26,7 @@ fronts:
     impact: SIGNIFICANT
     drift: STEADY
     refs: [library, mould]
+    livesOn: mould
     alignment: |
       Спасают книги просушка и окуривание, вынос здоровых книг в сухое место, переписывание самого ценного, жаровни и продухи в палатах.
     stake:

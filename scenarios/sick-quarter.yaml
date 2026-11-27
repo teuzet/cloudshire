@@ -19,6 +19,7 @@ objects:
     weight: MINOR
     statProfile: { security: -1 }
     refs: [quarter]
+    inside: quarter
 
 fronts:
   - id: plague-spreads
@@ -27,6 +28,7 @@ fronts:
     impact: MAJOR
     drift: STEADY
     refs: [quarter, sores]
+    livesOn: sores
     alignment: |
       Сдерживают язву отделение больных от здоровых, сжигание заражённых шкур, еда и уход для запертых.
       Помогают лекари, которые не боятся войти в квартал.

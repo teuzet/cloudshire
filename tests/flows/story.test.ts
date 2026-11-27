@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { toolReply, toolsReply } from '../../src/adapters/llm/fake.js';
 import { scheduleJob } from '../../src/core/jobs.js';
-import { findFront } from '../../src/core/world/fronts.js';
+import { deadlineOf, findFront } from '../../src/core/world/fronts.js';
 import { patronMessage } from '../../src/flows/priest-turn.js';
 import { runDueCities } from '../../src/flows/scheduler.js';
 import { storyCount, trimFree } from '../../src/flows/seeding.js';
@@ -46,12 +46,14 @@ describe('история от посева до развязки', () => {
     expect(city.scenariosUsed[1]).toBe('lantern-isle');
     expect(lastUser(s.llm.callsTo('scenario-writer')[0]!)).toContain('Зерно истории');
     expect(city.storyLog?.map((m) => m.kind)).toEqual(['trouble', 'chance']);
-    // Возможность живёт окно и уходит, если её не довели.
-    expect(story).toMatchObject({ form: 'find', plus: true, capacity: s.r.seeding.capacity.SIGNIFICANT, milestones: 3, ratePerDay: 0 });
-    expect(story.deadlineDay).toBe(3 + 120);
+    // Возможность живёт окно: своего срока у поиска нет, его несут часы «островок отчалит».
+    expect(story).toMatchObject({ form: 'find', plus: true, capacity: s.r.seeding.capacity.SIGNIFICANT, milestones: 3, ratePerDay: 0, deadlineDay: null });
+    const drift = city.fronts.find((f) => f.form === 'clock')!;
+    expect(drift).toMatchObject({ origin: 'story', deadlineDay: 3 + 120, livesOn: story.livesOn });
+    expect(deadlineOf(city, story)).toBe(3 + 120);
     expect(city.objects.map((o) => o.name)).toContain('Башня на островке');
     expect(s.inbox.sent).toHaveLength(2);
-    expect(city.fronts.filter((f) => f.origin === 'story')).toHaveLength(2);
+    expect(city.fronts.filter((f) => f.origin === 'story')).toHaveLength(3);
     expect(city.jobs.find((j) => j.kind === 'seed' && j.state === 'pending')?.dueDay).toBe(3 + s.r.seeding.checkEveryDays);
 
     // Жрец поручает хранителю надписи; Толкователь видит в этом стратегию для идущей истории.
