@@ -1,12 +1,13 @@
 import { describe, expect, test } from 'vitest';
 import { FakeLlm, textReply, toolReply, toolsReply } from '../../src/adapters/llm/fake.js';
 import { fixedSettings } from '../../src/agents/_shared/settings.js';
-import { writeGenesisAspects, writeGenesisCore } from '../../src/agents/city-genesis/run.js';
-import { aspectBatches } from '../../src/agents/city-genesis/aspects.js';
+import { writeCityPortrait } from '../../src/agents/city-genesis/run.js';
+import { auditPitch } from '../../src/agents/pitch-auditor/run.js';
+import { writeCityIntro } from '../../src/agents/city-intro/run.js';
 import { writeOfficerNatures } from '../../src/agents/officer-nature/run.js';
 import { writeCityBrief } from '../../src/agents/city-brief/run.js';
 import { createObject } from '../../src/core/world/objects.js';
-import { aspectText } from '../helpers/genesis.js';
+import { PORTRAIT } from '../helpers/genesis.js';
 import { guideOnboarding } from '../../src/agents/onboarding-guide/run.js';
 import { writeNews } from '../../src/agents/herald/run.js';
 import { priestTurnBlock, runPriestTurn, type PriestHandlers } from '../../src/agents/priest/run.js';
@@ -21,56 +22,63 @@ const tower = () =>
 describe('генезис и онбординг', () => {
   const seed = { cityName: 'Мерв', patronName: 'Алаэр', patronGender: 'female' as const, pitch: 'Город каменотёсов' };
   const pool = ['Таэн', 'Иса', 'Орм', 'Лиэ', 'Кайр', 'Вэс'].map((name, i) => ({ name, gender: i % 2 ? ('male' as const) : ('female' as const) }));
-  const core = (over: Record<string, unknown> = {}) => ({
+  const portrait = (over: Record<string, unknown> = {}) => ({
     city_name: 'Мерв',
     priest_name: 'Таэн',
-    priest_description: 'Тиха и внимательна к знамениям.',
-    greeting: 'Алаэр, город слышит тебя.',
-    opening_lore: Array.from({ length: 8 }, (_, i) => `Факт ${i + 1}.`),
+    priest_nature: 'Тиха и внимательна к знамениям.',
+    portrait: PORTRAIT,
+    hidden: 'Под башней спит старая жила.',
     ...over,
   });
 
-  test('city-genesis ядро: имя жреца из пула, имя города как дал игрок, приветствие слуги по имени', async () => {
+  test('city-genesis портрет: имя города как дал игрок, жрец из пула, правила сезона в контексте', async () => {
     const llm = new FakeLlm().script(
       'city-genesis',
-      toolReply('submit_core', core({ city_name: 'Другое' })),
-      toolReply('submit_core', core({ priest_name: 'Чужой' })),
-      toolReply('submit_core', core({ greeting: 'Добро пожаловать в Мерв!' })),
+      toolReply('submit_portrait', portrait({ city_name: 'Другое' })),
+      toolReply('submit_portrait', portrait({ priest_name: 'Чужой' })),
+      toolReply('submit_portrait', portrait()),
     );
-    await expect(writeGenesisCore(deps(llm), { seed, names: pool, seasonRules: [] })).rejects.toThrow(/greeting/);
+    const c = await writeCityPortrait(deps(llm), { seed, names: pool, seasonRules: ['Через месяц придут драконы'] });
+    // Пол жреца — из пула мира, не от модели.
+    expect(c).toMatchObject({ cityName: 'Мерв', priest: { name: 'Таэн', gender: 'female' }, hidden: 'Под башней спит старая жила.' });
     const sent = JSON.stringify(llm.requests.map((q) => q.messages));
     expect(sent).toContain('ровно «Мерв»');
     expect(sent).toContain('Чужой нет в списке');
-  });
-
-  test('city-genesis ядро: правила сезона в контексте, факты и жрец в ответе', async () => {
-    const llm = new FakeLlm().script('city-genesis', toolReply('submit_core', core()));
-    const c = await writeGenesisCore(deps(llm), { seed, names: pool, seasonRules: ['Через месяц придут драконы'] });
-    // Пол жреца — из пула мира, не от модели.
-    expect(c).toMatchObject({ cityName: 'Мерв', priest: { name: 'Таэн', gender: 'female' } });
-    expect(c.openingLore).toHaveLength(8);
     expect(llm.requests[0]?.system).toContain('драконы');
-    expect(llm.requests[0]?.messages[0]?.content).toContain('ИЗОЛЯЦИЯ ДЛЯ ГЕНЕЗИСА');
+    expect(llm.requests[0]?.messages[0]?.content).toContain('Город каменотёсов');
   });
 
-  test('city-genesis аспекты: короткий или повторённый раздел отбивается', async () => {
-    const batch = aspectBatches()[0]!;
-    const good = Object.fromEntries(batch.map((a) => [a.id, aspectText(a.id)]));
-    const dup = Object.fromEntries(batch.map((a) => [a.id, aspectText('одно')]));
+  test('pitch-auditor: место детали — объект из списка, brief или missing', async () => {
     const llm = new FakeLlm().script(
-      'city-genesis',
-      toolReply('submit_aspects', { ...good, [batch[0]!.id]: 'коротко' }),
-      toolReply('submit_aspects', dup),
-      toolReply('submit_aspects', good),
+      'pitch-auditor',
+      toolReply('submit_audit', { details: [{ detail: 'башня', place: 'Колокольня' }] }),
+      toolReply('submit_audit', { details: [{ detail: 'башня', place: 'Башня' }, { detail: 'колокол', place: 'missing' }, { detail: 'камень', place: 'brief' }] }),
     );
-    const out = await writeGenesisAspects(deps(llm), {
-      seed,
-      core: { cityName: 'Мерв', priest: { name: 'Таэн', gender: 'female', nature: '' }, greeting: '', openingLore: [] },
-      batch,
-      already: {},
+    const out = await auditPitch(deps(llm), { pitch: 'Башня, колокол, камень', brief: 'Камень.', objects: [tower()] });
+    expect(out.missing).toEqual(['колокол']);
+    expect(out.found.map((f) => f.place)).toEqual(['Башня', 'brief']);
+    expect(JSON.stringify(llm.requests[1]?.messages)).toContain('таких объектов нет в списке: Колокольня');
+  });
+
+  test('city-intro: вид сверху нужного объёма, зов жреца короткими сообщениями', async () => {
+    const view = 'Внизу плывёт остров, в его середине город каменотёсов. '.repeat(13);
+    const llm = new FakeLlm().script(
+      'city-intro',
+      toolReply('submit_intro', { view: 'Остров.'.repeat(20), priest_call: ['Алаэр?', 'Слышишь?'] }),
+      toolReply('submit_intro', { view, priest_call: ['Алаэр? '.repeat(40), 'Слышишь?'] }),
+      toolReply('submit_intro', { view, priest_call: ['Алаэр?', 'Слышишь меня?'] }),
+    );
+    const out = await writeCityIntro(deps(llm), {
+      cityName: 'Мерв',
+      patronName: 'Алаэр',
+      patronGender: 'female',
+      brief: 'Камень.',
+      objects: [tower()],
+      priest: { name: 'Таэн', nature: 'Тиха.' },
     });
-    expect(Object.keys(out)).toEqual(batch.map((a) => a.id));
-    expect(JSON.stringify(llm.requests[2]?.messages)).toContain('повторяют');
+    expect(out.priestCall).toEqual(['Алаэр?', 'Слышишь меня?']);
+    expect(JSON.stringify(llm.requests[1]?.messages)).toContain('view');
+    expect(JSON.stringify(llm.requests[2]?.messages)).toContain('длиннее');
   });
 
   test('officer-nature: четыре должности, имена из пула без жреца и повторов', async () => {
@@ -89,7 +97,7 @@ describe('генезис и онбординг', () => {
 
   test('city-brief: неизвестности привязаны только к настоящим объектам', async () => {
     const objects = [tower()];
-    const brief = 'Мерв живёт камнем. '.repeat(10);
+    const brief = 'Мерв живёт камнем. '.repeat(90);
     const llm = new FakeLlm().script(
       'city-brief',
       toolReply('submit_city_brief', { brief, unknowns: [{ text: 'Кто построил башню, не установлено.', object_ids: ['nowhere'] }] }),
@@ -98,6 +106,19 @@ describe('генезис и онбординг', () => {
     const out = await writeCityBrief(deps(llm), { cityName: 'Мерв', patronName: 'Алаэр', patronGender: 'female', description: 'Город', objects });
     expect(out.unknowns).toEqual([{ text: 'Кто построил башню, не установлено.', objectIds: ['tower'] }]);
     expect(llm.requests[0]?.system).toContain('ОБЪЕКТЫ');
+  });
+
+  test('city-brief: бриф не называет людей и объекты с собственными именами', async () => {
+    const gate = createObject(r, { id: 'gate', type: 'structure', name: 'Ворота Ирмы', description: 'Ворота.', statEffect: { security: 1 }, day: 0 });
+    const brief = 'Мерв живёт камнем и помнит прошлое. '.repeat(45);
+    const llm = new FakeLlm().script(
+      'city-brief',
+      toolReply('submit_city_brief', { brief: `${brief} Жрица Таэн правит у ворот Ирмы.`, unknowns: [] }),
+      toolReply('submit_city_brief', { brief, unknowns: [] }),
+    );
+    const out = await writeCityBrief(deps(llm), { cityName: 'Мерв', patronName: 'Алаэр', patronGender: 'female', description: 'Город', objects: [gate, tower()], people: ['Таэн'] });
+    expect(out.brief).toBe(brief.trim());
+    expect(JSON.stringify(llm.requests[1]?.messages)).toContain('Ворота Ирмы, Таэн');
   });
 
   test('onboarding-guide: seed появляется, только когда игрок видел питч и согласился', async () => {

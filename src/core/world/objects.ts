@@ -3,7 +3,7 @@
  */
 
 import { emptyStatMap, STAT_IDS, type ObjectType, type Rules, type Scale, type StatMap } from '../rules.js';
-import type { Attachment, City, Pull, WorldObject } from '../city.js';
+import type { Arc, Attachment, City, Pull, WorldObject } from '../city.js';
 
 function clip(text: string, max: number): string {
   return text.trim().slice(0, max);
@@ -34,6 +34,7 @@ export function createObject(
     hidden?: boolean;
     temporary?: boolean;
     attach?: Attachment | null;
+    arc?: Arc | null;
   },
 ): WorldObject {
   const limits = rules.fronts.objects;
@@ -62,6 +63,7 @@ export function createObject(
     attach: args.attach ?? null,
     themes: [],
     freshDay: day,
+    ...(args.arc ? { arc: args.arc } : {}),
   };
 }
 

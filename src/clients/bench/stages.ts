@@ -32,7 +32,7 @@ export type StageName = (typeof STAGES)[number];
 
 /** Какие агенты участвуют в этапе — для отчёта и подсказок. Фактический список берётся из вызовов. */
 export const STAGE_AGENTS: Record<StageName, string[]> = {
-  genesis: ['onboarding-guide', 'city-genesis', 'world-objects-genesis', 'officer-nature', 'city-brief'],
+  genesis: ['onboarding-guide', 'city-genesis', 'world-objects-genesis', 'officer-nature', 'city-brief', 'pitch-auditor', 'city-intro'],
   will: [
     'priest',
     'loremaster',

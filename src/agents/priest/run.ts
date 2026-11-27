@@ -124,6 +124,10 @@ export function priestTurnBlock(rules: Rules, city: City, day: number): string {
     section('ОПИСАНИЕ ГОРОДА', city.brief),
     `Ты: ${city.priest.name} (${city.priest.gender === 'female' ? 'она' : 'он'}), ${city.priest.nature}`,
     `Город: ${city.name}. Покровитель: ${city.patronName}.`,
+    // Стартовая сцена: жрец позвал первым; первый ответ бога — радость, дела потом.
+    city.dialog.some((d) => d.role === 'patron')
+      ? ''
+      : 'Это первое слово покровителя за всю историю города: ритуал удался, и бог впервые тебе ответил. Порадуйся этому как живой человек, а о делах города заговори после.',
     section('Состояние города', qualitativeStats(rules, city.stats)),
     section('Наказ покровителя на беду, пока он молчит', standingOrderLine(rules, city)),
     section('Память', bullets(city.notes.map((n) => n.text))),

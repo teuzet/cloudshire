@@ -66,11 +66,11 @@ describe('стенд агентов', () => {
     const g = await runStage(cfg, { stage: 'genesis', caseName: 'fishers' });
     expect(g.error).toBeNull();
     expect(g.outcome).toContain('Сетьград');
-    expect(Object.keys(g.agents)).toEqual(expect.arrayContaining(['onboarding-guide', 'city-genesis', 'world-objects-genesis', 'officer-nature', 'city-brief']));
+    expect(Object.keys(g.agents)).toEqual(expect.arrayContaining(['onboarding-guide', 'city-genesis', 'world-objects-genesis', 'officer-nature', 'city-brief', 'pitch-auditor', 'city-intro']));
     const report = read(cfg, 'runs', g.id, 'report.md');
     expect(report).toContain('[city-brief](agents/city-brief.md)');
     expect(report).toContain('**Игрок:** Я Тарн, хочу город рыбаков');
-    expect(read(cfg, 'runs', g.id, 'agents', 'city-genesis.md')).toContain('submit_core');
+    expect(read(cfg, 'runs', g.id, 'agents', 'city-genesis.md')).toContain('submit_portrait');
 
     saveState(cfg, g.id, 'day0', 'город после генезиса');
     const snap = JSON.parse(read(cfg, 'states', 'day0.json')) as Snapshot;

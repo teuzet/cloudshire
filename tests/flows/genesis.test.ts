@@ -2,8 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { toolReply } from '../../src/adapters/llm/fake.js';
 import { STAT_IDS } from '../../src/core/rules.js';
 import { onboardingMessage, runGenesis, GENESIS_STEPS } from '../../src/flows/onboarding.js';
-import { ASPECTS } from '../../src/agents/city-genesis/aspects.js';
-import { scriptGenesis } from '../helpers/genesis.js';
+import { PORTRAIT, scriptGenesis } from '../helpers/genesis.js';
 import { lastUser, stand } from '../helpers/game.js';
 
 describe('онбординг → генезис', () => {
@@ -16,7 +15,12 @@ describe('онбординг → генезис', () => {
         toolReply('submit_onboarding', { path: 'knows', reply: 'Вот что вышло. Всё так?', pitch: 'Каменотёсы', city_name: 'Мерв', patron_name: 'Алаэр', patron_gender: 'female', ready: false }),
         toolReply('submit_onboarding', { path: 'knows', reply: 'Записано.', pitch: 'Каменотёсы', city_name: 'Мерв', patron_name: 'Алаэр', patron_gender: 'female', ready: true }),
       );
-    scriptGenesis(s.llm, s.r, { cityName: 'Мерв', patronName: 'Алаэр', unknowns: [{ text: 'Кто вырезал знаки в первой мастерской, не установлено.', object_ids: ['$first'] }] });
+    scriptGenesis(s.llm, s.r, {
+      cityName: 'Мерв',
+      patronName: 'Алаэр',
+      unknowns: [{ text: 'Кто вырезал знаки в первой мастерской, не установлено.', object_ids: ['$first'] }],
+      missing: ['колокол на скале'],
+    });
 
     expect(await onboardingMessage(s.deps, { ownerId: 'u1', text: 'привет' })).toMatchObject({ kind: 'reply', ready: false });
     // Питч показывается игроку один раз, пока не изменится; сборка стартует только после согласия.
@@ -41,16 +45,34 @@ describe('онбординг → генезис', () => {
       expect(city!.stats[id]).toBeGreaterThanOrEqual(s.r.genesis.statMin);
       expect(city!.stats[id]).toBeLessThanOrEqual(s.r.genesis.statMax);
     }
-    // Конвейер старого генезиса: ядро, аспекты пачками, объекты, сановники, бриф.
-    const genesisCalls = s.llm.callsTo('city-genesis').map((q) => q.tools![0]!.name);
-    expect(genesisCalls).toEqual(['submit_core', ...Array(Math.ceil(ASPECTS.length / 4)).fill('submit_aspects')]);
-    for (const a of ASPECTS) expect(city!.description).toContain(`## ${a.title}`);
-    expect(city!.facts).toHaveLength(8);
-    expect(city!.facts.every((f) => f.author === 'genesis' && f.status === 'active')).toBe(true);
+    // Портрет, объекты в два шага, добор пропавшей детали питча тоже в два шага.
+    expect(s.llm.callsTo('city-genesis').map((q) => q.tools![0]!.name)).toEqual(['submit_portrait']);
+    expect(s.llm.callsTo('world-objects-genesis').map((q) => q.tools![0]!.name)).toEqual([
+      'submit_object_list',
+      'submit_object_details',
+      'submit_object_list',
+      'submit_object_details',
+    ]);
+    expect(JSON.stringify(s.llm.callsTo('world-objects-genesis')[2]!.messages)).toContain('колокол на скале');
+    expect(city!.objects.map((o) => o.name)).toContain('Добор');
+    expect(city!.objects).toHaveLength(s.r.fronts.genesisObjects.minCount + 1);
+    // Связи стали ссылками в обе стороны, скрытое и большие вещи на месте.
+    const [first, second] = city!.objects;
+    expect(first!.refs).toContain(second!.id);
+    expect(second!.refs).toContain(first!.id);
+    expect(city!.objects.filter((o) => o.hidden)).toHaveLength(1);
+    expect(city!.objects.filter((o) => o.arc).map((o) => o.arc)).toEqual(['mystery', 'danger']);
+    expect(city!.description).toBe(PORTRAIT.trim());
+    expect(city!.facts).toHaveLength(0);
     expect(city!.unknowns).toEqual([{ text: 'Кто вырезал знаки в первой мастерской, не установлено.', objectIds: [city!.objects[0]!.id] }]);
     expect(city!.brief).toContain('Мерв живёт камнем.');
     expect(city!.jobs.find((j) => j.kind === 'seed')?.dueDay).toBe(s.r.seeding.firstStoryDay);
-    expect(s.inbox.sent.map((m) => m.text)).toEqual(['Алаэр, город слышит тебя.']);
+    // Стартовая запись хроники — ритуал, не основание.
+    expect(city!.chronicle[0]?.text).toContain('ритуал');
+    // Сначала вид сверху от системы, потом зов жреца несколькими сообщениями.
+    expect(s.inbox.sent.map((m) => m.kind)).toEqual(['system', 'news', 'news']);
+    expect(s.inbox.sent[1]?.text).toBe('Алаэр... Ты слышишь меня?');
+    expect(city!.dialog.map((d) => d.text)).toEqual(['Алаэр... Ты слышишь меня?', 'Я жду.']);
     expect(await s.deps.storage.getDraft('u1')).toBeNull();
 
     // Пять человек взяли имена из пула мира, остальные имена вернулись.
@@ -76,7 +98,7 @@ describe('онбординг → генезис', () => {
         toolReply('submit_onboarding', { path: 'knows', reply: 'Всё так?', pitch: 'x', patron_name: 'Алаэр', patron_gender: 'male', ready: false }),
         toolReply('submit_onboarding', { path: 'knows', reply: 'Записано.', pitch: 'x', patron_name: 'Алаэр', patron_gender: 'male', ready: true }),
       )
-      .always('city-genesis', toolReply('submit_core', { city_name: 'М' }));
+      .always('city-genesis', toolReply('submit_portrait', { city_name: 'М' }));
     await onboardingMessage(s.deps, { ownerId: 'u1', text: 'город x, я Алаэр' });
     await onboardingMessage(s.deps, { ownerId: 'u1', text: 'старт' });
     expect(await runGenesis(s.deps, 'u1')).toBeNull();

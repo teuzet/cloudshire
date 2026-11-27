@@ -34,7 +34,8 @@ async function main(): Promise<void> {
     fs.appendFileSync(transcript, text + '\n');
   };
 
-  const app = await buildApp(process.env, new MemoryNotifier());
+  const inbox = new MemoryNotifier();
+  const app = await buildApp(process.env, inbox);
   try {
     const book = clerkBook();
     const draft = await app.deps.storage.getDraft(OWNER);
@@ -58,9 +59,19 @@ async function main(): Promise<void> {
       if (!city) return out('\n_Генезис не удался, подробности в calls/_');
       fs.writeFileSync(path.join(dir, 'city.json'), JSON.stringify(city, null, 2));
       out(`\n## ${city.name}\n\n**Жрец:** ${city.priest.name}\n\n**Сановники:** ${city.officers.map((o) => `${o.title} ${o.name}`).join('; ')}`);
-      out(`\n**Объекты (${city.objects.length}):**\n${city.objects.map((o) => `- ${o.name} (${o.type}): ${o.description}`).join('\n')}`);
-      out(`\n**Бриф:**\n\n${city.brief}`);
-      out(`\n**Первое слово жреца:**\n\n${city.dialog.at(-1)?.text ?? '—'}`);
+      const byId = new Map(city.objects.map((o) => [o.id, o.name]));
+      out(
+        `\n**Объекты (${city.objects.length}):**\n${city.objects
+          .map((o) => `- ${o.name} (${[o.type, o.hidden ? 'скрыт' : '', o.arc ?? ''].filter(Boolean).join(', ')}): ${o.description} → ${o.refs.map((r) => byId.get(r)).join(', ')}`)
+          .join('\n')}`,
+      );
+      out(`\n**Бриф (${city.brief.length} знаков):**\n\n${city.brief}`);
+      out(`\n**Неизвестности:** ${city.unknowns.map((u) => u.text).join(' | ') || '—'}`);
+      out(`\n**Хроника:** ${city.chronicle.map((c) => c.text).join(' | ')}`);
+      out(`\n**Портрет (${city.description.length} знаков):**\n\n${city.description}`);
+      const sent = inbox.drain(OWNER);
+      out(`\n---\n**Что видит игрок:**\n\n_${(sent.find((m) => m.kind === 'system')?.text ?? '—').replace(/\n+/g, ' ')}_`);
+      for (const m of sent.filter((x) => x.kind === 'news')) out(`\n**${city.priest.name}:** ${m.text}`);
       return;
     }
     const text = rest.join(' ').trim();

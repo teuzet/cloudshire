@@ -59,6 +59,10 @@ export interface Attachment {
   riskBefore?: RiskStep;
 }
 
+/** Большая нерешённая вещь города: загадка, медленная опасность, великое недоделанное дело. */
+export const ARCS = ['mystery', 'danger', 'promise'] as const;
+export type Arc = (typeof ARCS)[number];
+
 export interface WorldObject {
   id: string;
   type: ObjectType;
@@ -89,6 +93,8 @@ export interface WorldObject {
   themes: string[];
   /** День создания или последней перемены: год после него объект «свежий» для подбора ролей. */
   freshDay: number;
+  /** Большая нерешённая вещь, заложенная генезисом. Механики пробуждения пока нет. */
+  arc?: Arc | null;
   /**
    * Объект выбыл: сгорел, распущен, заброшен, ушёл. Он остаётся в городе и в памяти жреца,
    * но городу больше ничего не даёт; `was` — прежний вклад, который вернёт восстановление.

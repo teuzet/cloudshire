@@ -385,8 +385,8 @@ fronts:
     # Память объекта: столько последних строк о том, что с ним случалось.
     logMax: 5
   genesisObjects:
-    minCount: 20
-    maxCount: 100
+    minCount: 30
+    maxCount: 45
     profileRange: 5
   # Словарь динамик: скелеты осложнений без конкретики города.
   #   class    — bound (бьёт по делу), side (бьёт по объекту), plus (удобный случай);

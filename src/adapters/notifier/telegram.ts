@@ -5,7 +5,9 @@
 import type TelegramBot from 'node-telegram-bot-api';
 import type { Notifier, OutboundMessage } from '../../ports/notifier.js';
 
-const TG_MAX = 4096;
+const TG_MAX = 4000;
+
+const escapeHtml = (text: string): string => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 export function splitForTelegram(text: string): string[] {
   const chunks: string[] = [];
@@ -31,6 +33,11 @@ export class TelegramNotifier implements Notifier {
   constructor(private readonly bot: TelegramBot) {}
 
   async send(message: OutboundMessage): Promise<void> {
+    // Сообщения системы идут курсивом, речь жреца — обычным текстом.
+    if (message.kind === 'system') {
+      for (const chunk of splitForTelegram(message.text)) await this.bot.sendMessage(message.ownerId, `<i>${escapeHtml(chunk)}</i>`, { parse_mode: 'HTML' });
+      return;
+    }
     await sendText(this.bot, message.ownerId, message.text);
   }
 }

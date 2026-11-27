@@ -44,7 +44,8 @@ async function main(): Promise<void> {
       if (bar) await bot.editMessageText(text, { chat_id: chatId, message_id: bar.message_id, parse_mode: 'HTML' });
       else bar = await bot.sendMessage(chatId, text, { parse_mode: 'HTML' });
     });
-    if (city) await sendText(bot, chatId, '<i>Город поднялся. Отвечай жрецу прямо здесь.</i>', true);
+    // Вид сверху и зов жреца приходят через Notifier; отвечать жрецу игрок будет прямо здесь.
+    void city;
   }
 
   async function handle(msg: TelegramBot.Message): Promise<void> {
