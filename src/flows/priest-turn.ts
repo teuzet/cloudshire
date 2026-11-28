@@ -5,12 +5,15 @@
  */
 
 import type { City } from '../core/city.js';
+import type { Office } from '../core/rules.js';
 import { appendDialog } from '../core/chronicle.js';
 import { canAfford, spendMana, turnCost } from '../core/mana.js';
 import { runPriestTurn, type PriestHandlers, type ToolOutcome } from '../agents/priest/run.js';
 import { askLoremaster } from '../agents/loremaster/run.js';
 import { judgeExistence } from '../agents/existence-judge/run.js';
 import { activeFacts } from '../core/lore.js';
+import { conditionalOrders } from '../core/world/conditions.js';
+import { activeFronts, frontGist } from '../core/world/fronts.js';
 import type { CityLocks } from './city-lock.js';
 import { newId, requireWorld, sendAll, today, tryAgent, type FlowDeps } from './context.js';
 import { processDue } from './day.js';
@@ -24,7 +27,22 @@ export type PatronReply =
   | { kind: 'no_city' }
   | { kind: 'failed'; text: string };
 
-function handlersFor(deps: FlowDeps, city: City, day: number): PriestHandlers {
+/** Поручение, которое ждёт события: следит за идущими делами, которые назвал жрец, или за новыми бедами. */
+function conditionalOrder(deps: FlowDeps, city: City, args: { office: Office | null; task: string; text: string; watch: string[]; day: number }): ToolOutcome {
+  const max = deps.rules.fronts.steward.conditionsMax;
+  if (conditionalOrders(city).length >= max) {
+    return { ok: false, error: 'too_many_conditions', say: `Поручений с условием уже ${max}, больше разом не уследить. Пусть покровитель снимет одно из них или велит делать сразу.` };
+  }
+  const fronts = activeFronts(city).filter((f) => args.watch.includes(f.id));
+  const condition = { text: args.text, watch: fronts.map((f) => f.id), heard: [] };
+  city.queue = [...(city.queue ?? []), { id: newId(deps, 'queue'), office: args.office, task: args.task, day: args.day, condition }];
+  const who = args.office ? (city.officers.find((o) => o.office === args.office)?.name ?? args.office) : 'первый свободный';
+  const watched = fronts.length ? `Следить буду за тем, что идёт: ${fronts.map((f) => frontGist(f)).join('; ')}.` : 'Следить буду за новыми бедами города.';
+  return { ok: true, say: `Поручение ждёт условия «${args.text}»: когда оно сбудется, за него возьмётся ${who}. ${watched}` };
+}
+
+/** Инструменты жреца на этот ход. Экспорт — для тестов. */
+export function handlersFor(deps: FlowDeps, city: City, day: number): PriestHandlers {
   const tired = (): ToolOutcome => ({ ok: false, error: 'no_mana', say: 'Сил на новое дело сегодня нет: веры не хватает. Можно только говорить.' });
   const withAction = deps.rules.mana.turnCostWithAction;
 
@@ -46,8 +64,10 @@ function handlersFor(deps: FlowDeps, city: City, day: number): PriestHandlers {
       if (city.notes.length > MAX_NOTES) city.notes.splice(0, city.notes.length - MAX_NOTES);
       return { ok: true, say: 'Запомнил.' };
     },
-    async queueOrder({ office, task }) {
+    async queueOrder({ office, task, condition, watch }) {
       if (!canAfford(city, withAction)) return tired();
+      const text = condition?.trim().replace(/[.!]+$/, '');
+      if (text) return conditionalOrder(deps, city, { office, task, text, watch: watch ?? [], day });
       city.queue = [...(city.queue ?? []), { id: newId(deps, 'queue'), office, task, day }];
       const who = office ? (city.officers.find((o) => o.office === office)?.name ?? office) : 'первый, кто освободится';
       return { ok: true, say: `Поручение в очереди: ${who} возьмётся за него, как только освободится, раньше новых бед.` };

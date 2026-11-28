@@ -8,6 +8,7 @@ import type { ChronicleEntry, City, Officer } from '../core/city.js';
 import { appendChronicle, appendDialog } from '../core/chronicle.js';
 import { clipWords } from '../core/text.js';
 import { describeChanges, isNotable, type Change } from '../core/world/changes.js';
+import { hearEvent } from '../core/world/conditions.js';
 import type { OutboundMessage } from '../ports/notifier.js';
 import { writeChronicleEntry } from '../agents/chronicler/run.js';
 import { writeNews } from '../agents/herald/run.js';
@@ -66,6 +67,8 @@ export async function record(deps: FlowDeps, city: City, h: Happening): Promise<
 
   const entry = appendChronicle(city, { id: newId(deps, 'chr'), day: h.day, text, source: h.source, frontId: h.frontId });
   remember(deps, city, h.changes, text, h.day);
+  // Поручения с условием слышат то, что случилось с отслеживаемым: сверит их ближайший проход жреца.
+  hearEvent(city, entry, h.changes);
   if (!h.announce) return null;
 
   const news = await tryAgent(

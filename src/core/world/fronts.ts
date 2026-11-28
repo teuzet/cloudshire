@@ -172,11 +172,15 @@ export function recomputeRate(rules: Rules, city: City, front: Front, day: numbe
   const officer = lead ? officerOf(city, lead) : null;
   // Ведущий отвлёкся на малое дело: его работа здесь стоит, пока он не вернётся.
   if (lead && officer && !lead.paused) {
-    rate += leadRatePerDay(rules, {
+    const own = leadRatePerDay(rules, {
       verdict: lead.verdict,
       tempoSum: tempoSum(city, front),
       fit: officerFit(rules, city, officer, front.profile),
     });
+    rate += own;
+    // То, что уже стоит рядом и помогает или мешает, меняет работу ведущего, но не больше потолка.
+    const cap = own * rules.fronts.hold.foundCap;
+    rate += Math.max(-cap, Math.min(cap, attachRatePerDay(rules, held.foundUnits, front.tempo)));
   }
   for (const obj of attachedTo(city, front.id)) rate += attachRatePerDay(rules, paceOf(obj), front.tempo);
   if (held.unitsPerMonth) rate += attachRatePerDay(rules, held.unitsPerMonth, front.tempo);

@@ -22,6 +22,8 @@ export const RELATION_WORDS: Record<Relation, string> = {
   linked: 'связано с результатом',
   pressures: 'работа давит',
   benefits: 'результат выгоден',
+  helps: 'помогает работе',
+  hinders: 'мешает работе',
 };
 
 export const riskAppraiser: StructuredAgent<RiskInput, RiskRaw, RiskRuling> = {

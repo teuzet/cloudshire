@@ -11,6 +11,7 @@ import type { Dynamic, Rules, Shape } from '../rules.js';
 import type { City, Front, WorldObject } from '../city.js';
 import type { Rng } from '../random.js';
 import { leadOf } from './assignments.js';
+import { findFront, frontGist, frontTouches, withOuter } from './fronts.js';
 import { riskRank } from './numbers.js';
 import { dynamicTags, varietyWeight } from './director.js';
 import { attachedTo, findObject, isFresh, linkedObjects, pullOf, visibleObjects } from './objects.js';
@@ -32,6 +33,27 @@ export function shapeFor(dynamic: Dynamic, kind: RollKind): Shape | null {
   if (kind === 'plus') return dynamic.class === 'plus' ? (dynamic.light ?? dynamic.heavy) : null;
   if (dynamic.class === 'plus') return null;
   return kind === 'light' ? dynamic.light : dynamic.heavy;
+}
+
+/** Вещь держит что-то на слове: слух, уговор, перемирие. */
+export function isWordAnchor(obj: WorldObject): boolean {
+  return Boolean(obj.holds?.some((h) => h.word));
+}
+
+/**
+ * Вещи на слове рядом с делом: сами в его отпечатке (или там, где он стоит), либо держат фронт,
+ * который касается того же, что и дело. Скрытые и временные не берутся.
+ */
+function wordAnchorsNear(city: City, front: Front): WorldObject[] {
+  const mine = withOuter(city, [...front.footprint.map((f) => f.objectId), ...struckIds(front)]);
+  return city.objects.filter((o) => {
+    if (o.status !== 'active' || o.out || o.hidden || o.temporary || !isWordAnchor(o)) return false;
+    if ([...withOuter(city, [o.id])].some((id) => mine.has(id))) return true;
+    return (o.holds ?? []).some((h) => {
+      const held = h.word ? findFront(city, h.frontId) : null;
+      return Boolean(held && held.status === 'active' && frontTouches(city, held).some((id) => mine.has(id)));
+    });
+  });
 }
 
 /** Что задела беда: её участники и цели её ставок. */
@@ -58,6 +80,8 @@ function roleObjects(city: City, front: Front, dynamic: Dynamic, resultId: strin
       case 'linked':
       case 'pressures':
       case 'benefits':
+      case 'helps':
+      case 'hinders':
         for (const entry of front.footprint) {
           if (entry.relation !== source) continue;
           const obj = findObject(city, entry.objectId);
@@ -93,6 +117,9 @@ function roleObjects(city: City, front: Front, dynamic: Dynamic, resultId: strin
         }
         break;
       }
+      case 'word':
+        for (const obj of wordAnchorsNear(city, front)) push(obj, `держит на слове: ${obj.holds?.filter((h) => h.word).map((h) => `«${frontGist(findFront(city, h.frontId) ?? front)}»`).join(', ')}`);
+        break;
       case 'opponent':
         for (const r of front.resist ?? []) {
           if (r.answered) continue;
@@ -160,7 +187,9 @@ export function candidateWeight(rules: Rules, city: DrawCity, c: Candidate, day:
   const pull = c.object ? 1 + d.pullWeight * pullOf(c.object, day) : 1;
   // Противник дела ждёт своего часа: его осложнение выпадает охотнее прочих.
   const opponent = c.dynamic.from.includes('opponent') ? d.opponentWeight : 1;
-  return fresh * recency * pull * opponent * varietyWeight(rules, city, dynamicTags(c.dynamic), day);
+  // То, что держится на слове, ломается легче прочного: режиссёр бьёт по нему охотнее.
+  const word = c.object && isWordAnchor(c.object) ? d.wordWeight : 1;
+  return fresh * recency * pull * opponent * word * varietyWeight(rules, city, dynamicTags(c.dynamic), day);
 }
 
 /** Взвешенная перестановка: первый элемент — взвешенный жребий, второй — жребий среди оставшихся и так далее. */

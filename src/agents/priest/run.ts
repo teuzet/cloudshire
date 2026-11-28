@@ -87,8 +87,8 @@ function standingOrderLine(rules: Rules, city: City): string {
 
 function queueLines(city: City): string[] {
   return (city.queue ?? []).map((q, i) => {
-    const who = q.office ? (city.officers.find((o) => o.office === q.office)?.name ?? q.office) : 'первый освободившийся';
-    return `${i + 1}. ${who}: ${q.task}`;
+    const who = q.office ? (city.officers.find((o) => o.office === q.office)?.name ?? q.office) : q.condition ? 'первый свободный' : 'первый освободившийся';
+    return `${i + 1}. ${who}: ${q.task}${q.condition ? ` (когда: ${q.condition.text})` : ''}`;
   });
 }
 
@@ -166,7 +166,7 @@ const TOOLS: LoopTool<PriestHandlers>[] = [
   tool<NoteArgs>('write_note', 'Постоянная заметка памяти.', noteSchema, (h, a) => h.writeNote(a)),
   tool<QueueOrderArgs>(
     'queue_order',
-    'Поручение на потом: сановник возьмётся за него, как только освободится, раньше любой новой беды.',
+    'Поручение на потом: сановник возьмётся за него, как только освободится, раньше любой новой беды. С условием — когда случится то, о чём сказал покровитель.',
     queueOrderSchema,
     (h, a) => h.queueOrder(a),
   ),

@@ -85,7 +85,7 @@ export type StewardWait = (typeof STEWARD_WAITS)[number];
 export type Verdict = (typeof VERDICTS)[number];
 
 /** Отношения дела с объектами города (отпечаток). */
-export const RELATIONS = ['occupies', 'linked', 'pressures', 'benefits'] as const;
+export const RELATIONS = ['occupies', 'linked', 'pressures', 'benefits', 'helps', 'hinders'] as const;
 export type Relation = (typeof RELATIONS)[number];
 
 /** Во что выливается осложнение: какой род события соберёт код. */
@@ -135,7 +135,7 @@ const faithRow = table(
 );
 
 /** Откуда берётся объект в роль записи словаря динамик. */
-export const ROLE_SOURCES = [...RELATIONS, 'helper', 'site', 'result', 'nearby', 'same-type', 'struck', 'opponent'] as const;
+export const ROLE_SOURCES = [...RELATIONS, 'helper', 'site', 'result', 'nearby', 'same-type', 'struck', 'opponent', 'word'] as const;
 export type RoleSource = (typeof ROLE_SOURCES)[number];
 
 /** Двигатель истории: почему сюжет идёт вперёд. Мягкая ось режиссёра. */
@@ -241,6 +241,8 @@ export const rulesSchema = z.object({
       priceMin: z.number().positive(),
       /** Смягчённый удар: какая доля прежнего удара остаётся, пока якорь цел. */
       softenKeep: z.number().min(0).max(1),
+      /** Найденное на старте дела (стоящее рядом помогает или мешает) меняет скорость ведущего не больше этой доли. */
+      foundCap: z.number().min(0).max(1),
     }),
     push: z.object({ share: z.number().positive(), min: z.number().positive() }),
     detour: z.object({ maxCapacity: z.number().positive() }),
@@ -278,6 +280,8 @@ export const rulesSchema = z.object({
       pullWeight: z.number().nonnegative(),
       /** Противник дела (сторона, которой результат во вред) охотнее становится участником осложнения: вес × opponentWeight. */
       opponentWeight: z.number().positive(),
+      /** Вещь, которая держит фронт на слове (слух, уговор, перемирие), охотнее становится участником осложнения: вес × wordWeight. */
+      wordWeight: z.number().positive(),
       /** Поток бед: сколько сановников и какую долю их времени беды должны занимать при хорошей игре. */
       pressure: z.object({ officers: z.number().positive(), share: z.number().min(0).max(1), verdict: z.enum(VERDICTS), windowMonths: z.number().int().positive() }),
       plusBase: z.number().min(0).max(1),
@@ -294,6 +298,8 @@ export const rulesSchema = z.object({
       wait: z.enum(STEWARD_WAITS),
       waitDays: table(STEWARD_WAITS, z.number().int().nonnegative()),
       verdict: z.enum(VERDICTS),
+      /** Сколько поручений с условием может стоять в очереди сразу. */
+      conditionsMax: z.number().int().nonnegative(),
     }),
     failure: z.object({ chance: z.number().min(0).max(1), heavyShare: z.number().min(0).max(1) }),
     refresh: z.object({ maxFronts: z.number().int().nonnegative() }),

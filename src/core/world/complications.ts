@@ -116,14 +116,19 @@ export function buildSide(
     key: FrontKey | null;
     dynamicId: string | null;
     extraRefs?: string[];
+    /**
+     * Беда бьёт по вещи на слове: случившись, она ломает её (слух развеян, уговор нарушен), и всё, что
+     * вещь держала, идёт как прежде. Число — что на кону: цена того, что вещь держит.
+     */
+    breaks?: number;
     id: string;
     day: number;
     rng: Rng;
   },
 ): Front {
   const delta = diffPoints(args.newPoints, rawToPoints(city, args.target.statEffect));
-  const atStake = magnitude(delta);
-  const hit: StakeOp[] = [{ op: 'revalue', target: args.target.id, points: { ...args.newPoints } }];
+  const atStake = args.breaks ?? magnitude(delta);
+  const hit: StakeOp[] = args.breaks != null ? [{ op: 'delete', target: args.target.id }] : [{ op: 'revalue', target: args.target.id, points: { ...args.newPoints } }];
   const months = args.origin === 'echo' ? rules.fronts.deadlines.worldMonths : rules.fronts.deadlines.ownRiskMonths;
   const base = {
     id: args.id,

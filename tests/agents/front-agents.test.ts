@@ -43,7 +43,7 @@ const masons: ObjectBrief = { id: 'o2', type: 'community', name: 'Артель �
 const fronts = [{ id: 'f1', title: 'Стройка башни', kind: 'дело', description: 'Артель кладёт цоколь.', lead: 'казначей Ада', hindrances: [{ name: 'Грозовые птицы', description: 'Стая вьёт гнёзда на лесах.' }] }];
 
 const GENERATORS = ['stage-planner', 'key-sealer', 'costumer', 'dynamics-composer', 'beat-writer', 'resolver', 'description-rewriter', 'chronicler'];
-const EVALUATORS = ['existence-judge', 'will-interpreter', 'canon-warden', 'contribution-appraiser', 'risk-appraiser', 'footprint-mapper', 'influence-appraiser', 'alignment-judge', 'role-fitter', 'faith-appraiser', 'theme-tagger'];
+const EVALUATORS = ['existence-judge', 'will-interpreter', 'canon-warden', 'contribution-appraiser', 'risk-appraiser', 'footprint-mapper', 'influence-appraiser', 'alignment-judge', 'role-fitter', 'condition-judge', 'faith-appraiser', 'theme-tagger'];
 
 describe('гигиена промптов системы фронтов', () => {
   const read = (agent: string) => fs.readFileSync(path.join(ROOT, 'src/agents', agent, 'prompt.md'), 'utf8');

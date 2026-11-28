@@ -14,9 +14,10 @@ import { changedFrontIds, changedObjectIds, type Change } from '../core/world/ch
 import { plainTitle } from '../core/text.js';
 import { accidentLoss, buildBound, buildOpportunity, buildSide, capSideHit, hindranceOp, type EventDress } from '../core/world/complications.js';
 import { dynamicTags, leanOf, markStory, plusChance, roomForTrouble } from '../core/world/director.js';
-import { candidates, drawOrder, rollRisk, type Candidate, type Moment, type RollKind } from '../core/world/dynamics.js';
+import { candidates, drawOrder, isWordAnchor, rollRisk, type Candidate, type Moment, type RollKind } from '../core/world/dynamics.js';
 import { refreshTargets } from '../core/world/echo.js';
-import { closeFront, frontGist, shareDone, tempoSum } from '../core/world/fronts.js';
+import { closeFront, findFront, frontGist, shareDone, tempoSum } from '../core/world/fronts.js';
+import { linkPrice } from '../core/world/patch.js';
 import { complicationChance, diffPoints, dominantStat, magnitude, newObjectCapacity, rawToPoints } from '../core/world/numbers.js';
 import { findObject } from '../core/world/objects.js';
 import { applyStake } from '../core/world/stake.js';
@@ -50,6 +51,8 @@ interface Plan {
   helps: string;
   needsNew: boolean;
   newHidden: boolean;
+  /** Откуда объект в роли: запись словаря знает, свободная динамика — нет. */
+  from?: Dynamic['from'];
   /** Оси для журнала режиссёра. */
   tags: StoryTags;
 }
@@ -159,6 +162,7 @@ export async function complicate(
         helps: chosen.dynamic.helps,
         needsNew: chosen.dynamic.needsNew,
         newHidden: chosen.dynamic.newHidden,
+        from: chosen.dynamic.from,
         tags: dynamicTags(chosen.dynamic),
       }
     : null;
@@ -279,10 +283,13 @@ export async function complicate(
     if (made.resultId) extraRefs.push(made.resultId);
   }
   const before = rawToPoints(city, hit.statEffect);
-  const appraised = await appraise(deps, city, briefOf(hit), { points: before, event: costume.outburst });
+  // Слову перестают верить: беда ломает саму вещь, на кону то, что она держит. Переоценивать нечего.
+  const breaks = plan.from?.includes('word') && isWordAnchor(hit) ? wordToll(deps, city, hit, day) : null;
+  const appraised = breaks != null ? { points: before } : await appraise(deps, city, briefOf(hit), { points: before, event: costume.outburst });
   const capped = capSideHit(deps.rules, before, appraised.points);
-  const newPoints = magnitude(diffPoints(capped, before)) > 0 ? capped : fallbackHit(deps, before);
+  const newPoints = breaks != null ? before : magnitude(diffPoints(capped, before)) > 0 ? capped : fallbackHit(deps, before);
   const front = buildSide(deps.rules, city, {
+    ...(breaks != null ? { breaks } : {}),
     shape: plan.shape,
     origin: 'complication',
     target: hit,
@@ -299,6 +306,17 @@ export async function complicate(
   city.fronts.push(front);
   changes.push({ kind: 'front_opened', frontId: front.id, title: frontGist(front), form: front.form, plus: false });
   return born({ changes, gist: costume.rumor });
+}
+
+/** Что на кону, когда ломается вещь на слове: цена того, что она держит, не меньше малого удара. */
+function wordToll(deps: FlowDeps, city: City, obj: WorldObject, day: number): number {
+  const toll = (obj.holds ?? [])
+    .filter((h) => h.word)
+    .reduce((acc, h) => {
+      const f = findFront(city, h.frontId);
+      return f && f.status === 'active' ? acc + linkPrice(deps.rules, city, f, { effect: h.effect, word: true }, day) : acc;
+    }, 0);
+  return Math.max(deps.rules.fronts.hold.priceMin * 2, Math.round(toll * 100) / 100);
 }
 
 // ───────────────────────────── бросок риска ─────────────────────────────

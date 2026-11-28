@@ -21,7 +21,7 @@ import { moveSaving, withNested } from '../core/world/patch.js';
 import { hiddenAbout, prizeFronts, type HiddenAbout } from '../core/world/hidden.js';
 import { carriedWork, frontsOn, linkLines, resultName } from '../core/world/links.js';
 import { setResistance } from '../core/world/resist.js';
-import { holdersOf, ownMotion } from '../core/world/hold.js';
+import { applyHold, holdersOf, ownMotion } from '../core/world/hold.js';
 import {
   basePrice,
   changeCapacity,
@@ -295,6 +295,26 @@ function heldBy(city: City, objectId: string): string[] {
   return [...new Set(city.objects.filter((o) => ids.has(o.id)).flatMap((o) => (o.holds ?? []).map((h) => h.frontId)))];
 }
 
+/**
+ * То, что уже стоит рядом, помогает работе или мешает ей, пока она идёт: каменоломня у стройки,
+ * слух на плато. Держит дело, пока оно идёт; общий потолок считает код скорости. Слова для жреца.
+ */
+function holdFound(deps: FlowDeps, city: City, front: Front, day: number): string {
+  const help: string[] = [];
+  const hinder: string[] = [];
+  for (const entry of front.footprint) {
+    if (entry.relation !== 'helps' && entry.relation !== 'hinders') continue;
+    const obj = findObject(city, entry.objectId);
+    if (!obj || obj.status !== 'active' || obj.hidden || obj.temporary || obj.out) continue;
+    // Что занято работой, уже в ней; что работа меняет, само ей не помогает.
+    if (front.footprint.some((f) => f.objectId === obj.id && f.relation === 'occupies')) continue;
+    if (front.stake.some((op) => 'target' in op && op.target === obj.id)) continue;
+    const hold = applyHold(deps.rules, city, front, obj, { frontId: front.id, effect: entry.relation === 'helps' ? 'hurry' : 'slow', found: true }, day);
+    if (hold) (entry.relation === 'helps' ? help : hinder).push(obj.name);
+  }
+  return [help.length ? `Работе поможет то, что рядом: ${help.join(', ')}.` : '', hinder.length ? `Работе будет мешать то, что рядом: ${hinder.join(', ')}.` : ''].filter(Boolean).join(' ');
+}
+
 /** Что результат отпустит: оно пойдёт как прежде, и жрецу надо это знать заранее. */
 function freedWords(city: City, ids: readonly string[]): string {
   const parts = [...new Set(ids)].flatMap((id) => {
@@ -563,6 +583,7 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
   setResistance(front, resist);
   city.fronts.push(front);
   const occupied = occupyFootprint(city, front);
+  const nearby = holdFound(deps, city, front, day);
   recomputeStats(city, deps.rules);
 
   const key = await seal(deps, city, front, { twistNeeded });
@@ -614,6 +635,7 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
       linkWords(city, front.links ?? [], stage.result.name),
       freedWords(city, [...settled.freed, ...(patch?.released ?? [])]),
       names.length ? `На время работ заняты и дают городу меньше: ${names.join(', ')}.` : '',
+      nearby,
       later.length ? `Это первый шаг замысла. Дальше, по слову покровителя: ${later.join('; ')}.` : '',
     ]
       .filter(Boolean)

@@ -1,9 +1,9 @@
 /**
  * Живая сверка оценщиков на размеченных случаях: оценщик влияния, оценщик вклада (что посчитано
- * отдельно) и толкователь воли.
+ * отдельно), толкователь воли и сверщик условия.
  * Ходит в настоящие модели: запускать только по просьбе Ника.
  *
- *   npx tsx bench/live/influence-check.ts [influence|contribution|will] [--repeat N]
+ *   npx tsx bench/live/influence-check.ts [influence|contribution|will|condition] [--repeat N]
  *
  * Случаи намеренно не повторяют примеры из промптов: проверяется правило, а не память о примере.
  * В конце печатает расход по токенам и цену.
@@ -11,6 +11,7 @@
 
 import { parseAgentSettings } from '../../src/agents/_shared/settings.js';
 import type { AgentDeps } from '../../src/agents/_shared/runtime.js';
+import { judgeCondition, type ConditionInput } from '../../src/agents/condition-judge/run.js';
 import { appraiseContribution, type ContributionInput } from '../../src/agents/contribution-appraiser/run.js';
 import { appraiseInfluence, type InfluenceInput } from '../../src/agents/influence-appraiser/run.js';
 import { interpretWill, type WillInput } from '../../src/agents/will-interpreter/run.js';
@@ -264,6 +265,44 @@ const WILL: WillCase[] = [
   { name: 'маяк без доклада', order: 'Поставь маяк на кромке.', expect: { label: ['project'], frontId: [null], report: false } },
 ];
 
+interface ConditionCase {
+  name: string;
+  input: ConditionInput;
+  met: boolean;
+}
+
+const CONDITION: ConditionCase[] = [
+  { name: 'китобои вошли в наши воды', input: { condition: 'если китобои зайдут в наши воды у кромки', events: ['Три китобойных баркаса встали на якорь у восточной кромки, где рыбачит слобода, и спустили гарпунные лодки.'] }, met: true },
+  { name: 'китобои грозят на совете', input: { condition: 'если китобои зайдут в наши воды у кромки', events: ['Старшина китобоев на совете грозил, что весной его люди возьмут воды силой.'] }, met: false },
+  { name: 'скала треснула над домами', input: { condition: 'когда скала начнёт падать', events: ['Ночью от Сизой скалы откололся пласт и раздавил два гончарных двора, люди бегут из квартала.'] }, met: true },
+  { name: 'скала стоит, сыплется щебень', input: { condition: 'когда скала начнёт падать', events: ['С Сизой скалы сыплется мелкий щебень, гончары ворчат и метут дворы.'] }, met: false },
+  { name: 'собор достроен', input: { condition: 'как только собор будет готов', events: ['Над собором подняли купол, в первый раз отслужили службу.'] }, met: true },
+  { name: 'собор: стены подняты', input: { condition: 'как только собор будет готов', events: ['Каменщики свели стены собора под крышу, теперь берутся за купол.'] }, met: false },
+  { name: 'торговцы собрались уходить', input: { condition: 'если бродячие торговцы соберутся уходить', events: ['Торговцы у причала сворачивают шатры и грузят тюки на свои лодки.'] }, met: true },
+  { name: 'торговцы торгуются', input: { condition: 'если бродячие торговцы соберутся уходить', events: ['Торговцы подняли цену на семена вдвое: говорят, покупателей много.'] }, met: false },
+  { name: 'рынок разнесли', input: { condition: 'если на рынке начнутся погромы', events: ['Толпа опрокинула ряды обвесчиков и подожгла две лавки, стража отступила к ратуше.'] }, met: true },
+  { name: 'рынок: обвес разоблачили', input: { condition: 'если на рынке начнутся погромы', events: ['Весовая палата поймала трёх купцов на обвесе, их лавки закрыли, ропот стих.'] }, met: false },
+  { name: 'вести из экспедиции: нашли', input: { condition: 'когда экспедиция найдёт рудную жилу', events: ['Гонец с северного склона: рудознатцы вскрыли богатую медную жилу под старым кедром.'] }, met: true },
+  { name: 'вести из экспедиции: пусто', input: { condition: 'когда экспедиция найдёт рудную жилу', events: ['Рудознатцы прошли северный склон до ледника и вернулись с пустыми мешками.'] }, met: false },
+  { name: 'новая беда: мор у пристани', input: { condition: 'если в город придёт мор', events: ['В портовой слободе слегли с горячкой два десятка грузчиков, лекари говорят о заразе с чужого корабля.'] }, met: true },
+  { name: 'застава: северяне готовятся', input: { condition: 'когда горцы спустятся к заставе', events: ['Пастухи видели дымы горцев на верхних пастбищах: те собирают отары и людей.'] }, met: false },
+  { name: 'застава: горцы пришли', input: { condition: 'когда горцы спустятся к заставе', events: ['Сотня горцев с топорами вышла из ущелья прямо к заставе и встала лагерем под стеной.'] }, met: true },
+  { name: 'новая беда: пожар', input: { condition: 'если в город придёт мор', events: ['В кожевенном ряду сгорели три мастерских, огонь остановили у канала.'] }, met: false },
+];
+
+async function runCondition(deps: AgentDeps, repeat: number): Promise<number> {
+  let bad = 0;
+  for (const c of CONDITION) {
+    for (let i = 0; i < repeat; i++) {
+      const out = await judgeCondition(deps, c.input);
+      const ok = out.met === c.met;
+      if (!ok) bad++;
+      console.log(`${ok ? '✓' : '✗'} ${c.name}: ${out.met} — ${out.reason}${ok ? '' : `\n    ждали ${c.met}`}`);
+    }
+  }
+  return bad;
+}
+
 interface ContributionCase {
   name: string;
   subject: { type: ObjectType; name: string; description: string };
@@ -363,6 +402,10 @@ async function main(): Promise<void> {
   if (which === 'all' || which === 'will') {
     console.log('— толкователь воли —');
     bad += await runWill(deps, repeat);
+  }
+  if (which === 'all' || which === 'condition') {
+    console.log('— сверщик условия —');
+    bad += await runCondition(deps, repeat);
   }
   console.log(`\nмимо: ${bad}. Токены: вход ${total.inputTokens} (из кэша ${total.cachedInputTokens}, запись ${total.cacheWriteTokens}), выход ${total.outputTokens}. Цена: $${cost(total).toFixed(4)}`);
 }

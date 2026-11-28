@@ -25,6 +25,17 @@ export const queueOrderSchema = z.object({
     .nullable()
     .describe('Кому поручено, когда освободится. null — первому, кто освободится.'),
   task: z.string().trim().min(1).max(400).describe('Что поручено, одной-двумя фразами, как приказ сановнику.'),
+  condition: z
+    .string()
+    .trim()
+    .max(300)
+    .optional()
+    .describe('Условие словами покровителя, если поручение ждёт события: «если бунтовщики пойдут на склады». Тогда в task только само поручение, без условия. Без условия поле пустое.'),
+  watch: z
+    .array(z.string().trim().min(1))
+    .max(4)
+    .optional()
+    .describe('Id того, что идёт в городе (из блока хода) и о чём условие. Пусто, если условие ни о чём из идущего.'),
 });
 
 export const consultSchema = z.object({

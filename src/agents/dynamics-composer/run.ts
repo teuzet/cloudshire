@@ -11,6 +11,8 @@ const TOUCH: Record<Relation, string> = {
   linked: 'связано с результатом',
   pressures: 'работа давит',
   benefits: 'результат выгоден',
+  helps: 'помогает работе',
+  hinders: 'мешает работе',
 };
 
 export interface DynamicInput {

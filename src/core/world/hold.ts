@@ -89,16 +89,22 @@ export function retime(rules: Rules, city: Pick<City, 'objects'>, front: Front, 
 // ───────────────────────────── работа ─────────────────────────────
 
 /** Что якоря делают с работой над делом: стоит ли она и сколько единиц в месяц прибавлено или отнято. */
-export function workHold(rules: Rules, city: Pick<City, 'objects'>, front: Pick<Front, 'id' | 'form'>): { stopped: boolean; unitsPerMonth: number } {
-  if (ownMotion(front) !== 'work') return { stopped: false, unitsPerMonth: 0 };
+/**
+ * Что якоря делают с работой: стоит ли она и сколько единиц в месяц прибавляют или отнимают.
+ * Найденное на старте дела (`found`) считается отдельно: у него общий потолок от работы ведущего.
+ */
+export function workHold(rules: Rules, city: Pick<City, 'objects'>, front: Pick<Front, 'id' | 'form'>): { stopped: boolean; unitsPerMonth: number; foundUnits: number } {
+  if (ownMotion(front) !== 'work') return { stopped: false, unitsPerMonth: 0, foundUnits: 0 };
   let stopped = false;
   let units = 0;
+  let found = 0;
   for (const { hold } of holdersOf(city, front.id)) {
     if (hold.effect === 'stop') stopped = true;
-    if (hold.effect === 'slow') units -= rules.fronts.hold.unitsPerMonth;
-    if (hold.effect === 'hurry') units += rules.fronts.hold.unitsPerMonth;
+    const step = hold.effect === 'slow' ? -rules.fronts.hold.unitsPerMonth : hold.effect === 'hurry' ? rules.fronts.hold.unitsPerMonth : 0;
+    if (hold.found) found += step;
+    else units += step;
   }
-  return { stopped, unitsPerMonth: units };
+  return { stopped, unitsPerMonth: units, foundUnits: found };
 }
 
 // ───────────────────────────── поставить и снять ─────────────────────────────
@@ -131,6 +137,7 @@ export function applyHold(rules: Rules, city: Pick<City, 'objects'>, front: Fron
   if (obj.holds?.some((h) => h.frontId === front.id && h.effect === effect)) return null;
   const hold: Hold = { frontId: front.id, effect, day: Math.max(0, Math.round(day)) };
   if (spec.word) hold.word = true;
+  if (spec.found) hold.found = true;
   if (effect === 'riskier' || effect === 'safer') {
     const rank = RISK_STEPS.indexOf(front.risk);
     const next = effect === 'riskier' ? Math.min(rank + 1, RISKY) : Math.max(rank - 1, 0);
