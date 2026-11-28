@@ -220,7 +220,7 @@ async function newProject(deps: FlowDeps, city: City, officer: Officer, will: Wi
   const words = ruling.verdict === 'possible' ? order : null;
   const planned = await tryAgent(deps, 'stage-planner', () => planStages(deps.agents, { goal: ruling.goal, order: words, gaps: ruling.gaps, objects }), null);
   if (!planned && !unattainable) return refuse('failed', 'Волю не удалось облечь в дело. Пусть покровитель скажет иначе.');
-  const stages: ProjectStage[] = unattainable ? [doomedStage(ruling.goal, planned)] : (planned ?? []);
+  const stages: ProjectStage[] = unattainable ? [doomedStage(ruling.goal, planned)] : withoutSuccessor(city, planned ?? []);
   if (officer.assignmentId && (unattainable || stages.length > 1)) return busy(deps, city, officer);
 
   const project: Project = {
@@ -329,6 +329,16 @@ function freedWords(city: City, ids: readonly string[]): string {
     return [ownMotion(f) === 'clock' ? `снова надвигается «${frontGist(f)}»` : `снова пойдёт работа над «${frontGist(f)}»`];
   });
   return parts.length ? `Когда будет готово, ${parts.join('; ')}.` : '';
+}
+
+/**
+ * Снять человека с должности — его этап и есть вся замена: преемника назначает город сам, в тот же день.
+ * Этап, который заводит нового человека после такого снятия, повторил бы преемника.
+ */
+function withoutSuccessor(city: City, stages: ProjectStage[]): ProjectStage[] {
+  const cut = stages.findIndex((s) => s.result.kind === 'remove_object' && Boolean(s.result.objectId && findObject(city, s.result.objectId)?.post));
+  if (cut < 0) return stages;
+  return stages.filter((s, i) => i <= cut || !(s.result.kind === 'new_object' && s.result.type === 'person'));
 }
 
 /** Узнавать нечего: жрец говорит это до начала дела, как о недостижимом. */
