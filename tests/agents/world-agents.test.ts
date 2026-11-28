@@ -5,7 +5,8 @@ import { describe, expect, test } from 'vitest';
 import { FakeLlm, toolReply } from '../../src/adapters/llm/fake.js';
 import { fixedSettings, parseAgentSettings } from '../../src/agents/_shared/settings.js';
 import { writeScenario } from '../../src/agents/scenario-writer/run.js';
-import { extractWorldObjects } from '../../src/agents/world-objects-genesis/run.js';
+import { describeWorldObjects, keepArcs, listProblem, planWorldObjects } from '../../src/agents/world-objects-genesis/run.js';
+import { objectPlan } from '../helpers/genesis.js';
 import { createObject } from '../../src/core/world/objects.js';
 import { parseScenario } from '../../src/core/world/scenario.js';
 import { rules } from '../helpers/fixtures.js';
@@ -154,12 +155,42 @@ describe('посев и генезис объектов', () => {
     expect(JSON.stringify(llm.requests[1]?.messages)).toContain('касается тайны острова: tower');
   });
 
-  test('world-objects-genesis: число объектов из правил', async () => {
-    const one = { type: 'building', name: 'Храм', description: 'Храм', weight: 'MAJOR', stat_profile: { influence: 3 } };
-    const many = Array.from({ length: r.fronts.genesisObjects.minCount }, (_, i) => ({ ...one, name: `Храм ${i}` }));
-    const llm = new FakeLlm().script('world-objects-genesis', toolReply('submit_world_objects', { objects: [one] }), toolReply('submit_world_objects', { objects: many }));
-    const out = await extractWorldObjects(deps(llm), { rules: r, cityName: 'Мерв', description: 'Город' });
-    expect(out).toHaveLength(r.fronts.genesisObjects.minCount);
-    expect(out[0]?.statProfile.influence).toBe(3);
+  test('world-objects-genesis: список проверяется на число, связи, скрытое и большие вещи', () => {
+    const n = r.fronts.genesisObjects.minCount;
+    const list = (objects: Array<Record<string, unknown>>) => ({ objects }) as Parameters<typeof listProblem>[0];
+    const ok = objectPlan(n);
+    expect(listProblem(list(ok), { rules: r })).toBeNull();
+    expect(listProblem(list(ok.slice(0, 3)), { rules: r })).toMatch(/объектов 3/);
+    // Связь к несуществующему просто не считается: объект без других связей становится сиротой.
+    expect(listProblem(list(ok.map((o, i) => (i === 5 ? { ...o, links: ['Нигде', ...(o.links as string[])] } : o))), { rules: r })).toBeNull();
+    // Объект без связей: ни своих, ни чужих.
+    const lonely = [...ok.slice(0, -1).map((o, i) => (i === n - 2 ? { ...o, links: ['Мастерская 0'] } : o)), { ...ok[n - 1]!, name: 'Сирота', links: [] }];
+    expect(listProblem(list(lonely), { rules: r })).toMatch(/Сирота/);
+    expect(listProblem(list(ok.map((o) => ({ ...o, arc: 'none' }))), { rules: r })).toMatch(/от двух до четырёх/);
+    expect(listProblem(list(ok.map((o, i) => ({ ...o, arc: i < 2 ? 'danger' : 'none' }))), { rules: r })).toMatch(/одного рода/);
+    // Лишние большие вещи снимаются кодом: остаётся по одной каждого рода, всего не больше четырёх.
+    expect(keepArcs(['danger', 'danger', 'danger', 'mystery', 'promise', null, 'danger'])).toEqual(['danger', 'danger', null, 'mystery', 'promise', null, null]);
+    expect(listProblem(list(ok.map((o, i) => (i === 3 ? { ...o, name: 'Таэн' } : o))), { rules: r, people: ['Таэн'] })).toMatch(/жреца и сановников/);
+    // Добор: малый список, связи к уже существующим, большие вещи не нужны.
+    const topup = list([{ name: 'Колокол', type: 'object', links: ['Мастерская 0'], parent: '', hidden: false, arc: 'none' }]);
+    expect(listProblem(topup, { rules: r, mustCover: ['колокол'], existing: ['Мастерская 0'] })).toBeNull();
+  });
+
+  test('world-objects-genesis: описания для каждого объекта списка, связи и пометки сохраняются', async () => {
+    const plan = await planWorldObjects(
+      deps(new FakeLlm().script('world-objects-genesis', toolReply('submit_object_list', { objects: objectPlan(r.fronts.genesisObjects.minCount) }))),
+      { rules: r, cityName: 'Мерв', portrait: 'Город', hidden: 'Тайна' },
+    );
+    const row = (name: string) => ({ name, description: 'Мастерская.', weight: 'MAJOR', stat_profile: { influence: 3 } });
+    const llm = new FakeLlm().script(
+      'world-objects-genesis',
+      toolReply('submit_object_details', { objects: [row('Мастерская 0')] }),
+      toolReply('submit_object_details', { objects: plan.map((p) => row(p.name)) }),
+    );
+    const out = await describeWorldObjects(deps(llm), { rules: r, cityName: 'Мерв', portrait: 'Город', hidden: 'Тайна', plan });
+    expect(out).toHaveLength(plan.length);
+    expect(out[0]).toMatchObject({ arc: 'mystery', links: ['Мастерская 1'], statProfile: { influence: 3 } });
+    expect(out[2]?.hidden).toBe(true);
+    expect(JSON.stringify(llm.requests[1]?.messages)).toContain('нет описаний для');
   });
 });

@@ -42,13 +42,15 @@ export async function ensureWorld(
   deps: FlowDeps,
   args: { names: NamesFile; season?: { name: string; rules: string[] } },
 ): Promise<World> {
+  const allNames = [...new Set([...args.names.female, ...args.names.male])];
   const existing = await deps.storage.getWorld();
-  if (existing) return existing;
+  if (existing) return existing.allNames ? existing : deps.storage.saveWorld({ ...existing, allNames });
   const world: World = {
     id: newId(deps, 'world'),
     clock: newClock(deps.clock.now()),
     season: { id: newId(deps, 'season'), name: args.season?.name ?? 'Первый сезон', rules: args.season?.rules ?? [], startedDay: 0 },
     namePool: buildNamePool(args.names, deps.random.rng),
+    allNames,
     revision: 0,
   };
   return deps.storage.saveWorld(world);

@@ -19,6 +19,7 @@ import { applyHold } from './hold.js';
 import { magnitude, monthsToDays, rawToPoints, scaleOf, threatCapacity, troubleDays } from './numbers.js';
 import { createObject, scalePull, tug } from './objects.js';
 import { objectContribution } from './stats.js';
+import { namePerson, type Namer } from '../people.js';
 
 const statPartial = z.object(Object.fromEntries(STAT_IDS.map((id) => [id, z.number().optional()])));
 
@@ -232,6 +233,8 @@ export function plantScenario(
     day: number;
     newId: (prefix: string) => string;
     adapted?: Record<string, { name?: string; description?: string }>;
+    /** Кто даёт имена людям истории. */
+    namer?: Namer | null;
   },
 ): { objects: WorldObject[]; fronts: Front[] } {
   const ids = new Map<string, string>();
@@ -253,7 +256,7 @@ export function plantScenario(
     const obj = createObject(rules, {
       id: map(o.id),
       type: o.type,
-      name: tweak[o.id]?.name ?? o.name,
+      name: namePerson(o.type, tweak[o.id]?.name ?? o.name, args.namer),
       description: tweak[o.id]?.description ?? o.description,
       refs: o.refs.map(map),
       parentId: o.inside ? map(o.inside) : null,

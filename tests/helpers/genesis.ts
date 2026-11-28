@@ -1,5 +1,4 @@
 import { toolReply, type FakeLlm } from '../../src/adapters/llm/fake.js';
-import { ASPECTS } from '../../src/agents/city-genesis/aspects.js';
 import { STAT_IDS, type Rules } from '../../src/core/rules.js';
 import type { LlmRequest } from '../../src/ports/llm.js';
 
@@ -13,42 +12,65 @@ export function poolFrom(req: LlmRequest): string[] {
     .filter(Boolean);
 }
 
-export function aspectText(id: string): string {
-  return `Раздел ${id}: устойчивый лор города, который живёт так поколениями. `.repeat(6);
+export const PORTRAIT = 'Город каменотёсов на крутом острове, живёт камнем и помнит своё прошлое. '.repeat(40);
+
+/** Список объектов: цепочка связей, две большие вещи разного рода, один скрытый. */
+export function objectPlan(count: number): Array<Record<string, unknown>> {
+  // Двое людей без личного имени: генезис даёт им имена сам.
+  const people: Record<number, string> = { 3: 'Старшая ткачиха', 4: 'Молодой стрелок' };
+  const nameOf = (i: number) => people[i] ?? `Мастерская ${i}`;
+  return Array.from({ length: count }, (_, i) => ({
+    name: nameOf(i),
+    type: people[i] ? 'person' : 'building',
+    links: [nameOf((i + 1) % count)],
+    parent: '',
+    hidden: i === 2,
+    arc: i === 0 ? 'mystery' : i === 1 ? 'danger' : 'none',
+  }));
 }
 
-/** Ответы всем агентам генезиса: ядро, аспекты, объекты, сановники, бриф. */
+/** Описания к списку из запроса: имена берутся из блока СПИСОК ОБЪЕКТОВ. */
+export function detailsFor(req: LlmRequest): Record<string, unknown> {
+  const text = req.messages.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
+  const block = text.split('СПИСОК ОБЪЕКТОВ')[1] ?? '';
+  const names = [...block.matchAll(/^- (.+?) \(/gm)].map((m) => m[1]!);
+  return {
+    objects: names.map((name, i) => ({
+      name,
+      description: 'Каменная мастерская.',
+      weight: i % 2 ? 'MINOR' : 'SIGNIFICANT',
+      stat_profile: { [STAT_IDS[i % 4]!]: 1 + (i % 3) },
+    })),
+  };
+}
+
+/** Ответы всем агентам генезиса: портрет, объекты в два шага, сановники, бриф, сверка, стартовая сцена. */
 export function scriptGenesis(
   llm: FakeLlm,
   r: Rules,
-  opts: { cityName: string; patronName: string; unknowns?: Array<{ text: string; object_ids: string[] }> },
+  opts: { cityName: string; patronName: string; unknowns?: Array<{ text: string; object_ids: string[] }>; missing?: string[] },
 ): FakeLlm {
   return llm
-    .always('city-genesis', (req) => {
-      const tool = req.tools![0]!.name;
-      if (tool === 'submit_core') {
-        return toolReply('submit_core', {
-          city_name: opts.cityName,
-          priest_name: poolFrom(req)[0],
-          priest_description: 'Тиха и внимательна к знамениям.',
-          greeting: `${opts.patronName}, город слышит тебя.`,
-          opening_lore: Array.from({ length: 8 }, (_, i) => `Постоянный факт ${i + 1}.`),
-        });
-      }
-      const ids = Object.keys((req.tools![0]!.parameters as { properties: Record<string, unknown> }).properties);
-      return toolReply('submit_aspects', Object.fromEntries(ids.map((id) => [id, aspectText(id)])));
-    })
-    .always('world-objects-genesis', () =>
-      toolReply('submit_world_objects', {
-        objects: Array.from({ length: r.fronts.genesisObjects.minCount }, (_, i) => ({
-          type: 'building',
-          name: `Мастерская ${i}`,
-          description: 'Каменная мастерская.',
-          weight: i % 2 ? 'MINOR' : 'SIGNIFICANT',
-          stat_profile: { [STAT_IDS[i % 4]!]: 1 + (i % 3) },
-        })),
+    .always('city-genesis', (req) =>
+      toolReply('submit_portrait', {
+        city_name: opts.cityName,
+        priest_name: poolFrom(req)[0],
+        priest_nature: 'Тиха и внимательна к знамениям.',
+        portrait: PORTRAIT,
+        hidden: 'Под первой мастерской спит старая жила.',
       }),
     )
+    .always('world-objects-genesis', (req) => {
+      const tool = req.tools![0]!.name;
+      if (tool === 'submit_object_list') {
+        const text = req.messages.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
+        if (text.includes('ДЕТАЛИ ИГРОКА')) {
+          return toolReply('submit_object_list', { objects: [{ name: 'Добор', type: 'site', links: ['Мастерская 0'], parent: '', hidden: false, arc: 'none' }] });
+        }
+        return toolReply('submit_object_list', { objects: objectPlan(r.fronts.genesisObjects.minCount) });
+      }
+      return toolReply('submit_object_details', detailsFor(req));
+    })
     .always('officer-nature', (req) => {
       const n = poolFrom(req);
       return toolReply('submit_officer_natures', {
@@ -63,8 +85,17 @@ export function scriptGenesis(
     .always('city-brief', (req) => {
       const objIds = [...req.system.matchAll(/^- (obj_\S+)/gm)].map((m) => m[1]!);
       const unknowns = (opts.unknowns ?? []).map((u) => ({ ...u, object_ids: u.object_ids.map((x) => (x === '$first' ? objIds[0]! : x)) }));
-      return toolReply('submit_city_brief', { brief: `${opts.cityName} живёт камнем. `.repeat(10), unknowns });
-    });
+      return toolReply('submit_city_brief', { brief: `${opts.cityName} живёт камнем. `.repeat(90), unknowns });
+    })
+    .always('pitch-auditor', () =>
+      toolReply('submit_audit', {
+        details: [{ detail: 'каменотёсы', place: 'brief' }, ...(opts.missing ?? []).map((detail) => ({ detail, place: 'missing' }))],
+      }),
+    )
+    .always('city-intro', () =>
+      toolReply('submit_intro', {
+        view: 'Внизу плывёт остров, в его середине лежит город каменотёсов, и в храме горят огни. '.repeat(9),
+        priest_call: [`${opts.patronName}... Ты слышишь меня?`, 'Я жду.'],
+      }),
+    );
 }
-
-export const ASPECT_COUNT = ASPECTS.length;

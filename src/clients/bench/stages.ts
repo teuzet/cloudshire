@@ -32,7 +32,7 @@ export type StageName = (typeof STAGES)[number];
 
 /** Какие агенты участвуют в этапе — для отчёта и подсказок. Фактический список берётся из вызовов. */
 export const STAGE_AGENTS: Record<StageName, string[]> = {
-  genesis: ['onboarding-guide', 'city-genesis', 'world-objects-genesis', 'officer-nature', 'city-brief'],
+  genesis: ['onboarding-guide', 'city-genesis', 'world-objects-genesis', 'officer-nature', 'city-brief', 'pitch-auditor', 'city-intro'],
   will: [
     'priest',
     'loremaster',
@@ -217,7 +217,7 @@ export async function runGenesisStage(env: StageEnv, c: GenesisCase, seed: numbe
       transcript.push({ who: 'patron', text: line });
       const r = await onboardingMessage(s.deps, { ownerId: OWNER, text: line });
       if (r.kind !== 'reply') break;
-      transcript.push({ who: 'guide', text: r.text });
+      transcript.push({ who: 'guide', text: r.pitch ? `${r.text}\n\n${r.pitch}` : r.text });
       if (r.ready) {
         ready = true;
         break;

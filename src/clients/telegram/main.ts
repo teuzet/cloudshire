@@ -10,6 +10,7 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { sendText, TelegramNotifier } from '../../adapters/notifier/telegram.js';
 import { onboardingMessage, resetPlayer, runGenesis } from '../../flows/onboarding.js';
+import { GENESIS_TUTORIAL, genesisProgressBar } from '../genesis-progress.js';
 import { patronMessage } from '../../flows/priest-turn.js';
 import { runDueCities } from '../../flows/scheduler.js';
 import { requireWorld, today } from '../../flows/context.js';
@@ -17,6 +18,8 @@ import { buildApp, loadDotEnv } from '../app.js';
 import { cityStatus } from '../views.js';
 
 const TICK_MS = 20_000;
+
+const escapeHtml = (text: string): string => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 async function main(): Promise<void> {
   loadDotEnv();
@@ -30,9 +33,19 @@ async function main(): Promise<void> {
   const busy = new Set<string>();
 
   async function startGenesis(ownerId: string, chatId: number): Promise<void> {
-    await bot.sendChatAction(chatId, 'typing');
-    const city = await runGenesis(deps, ownerId);
-    if (city) await sendText(bot, chatId, '<i>Город поднялся. Отвечай жрецу прямо здесь.</i>', true);
+    // Сообщения системы идут курсивом, речь жреца — обычным текстом.
+    await sendText(bot, chatId, `<i>${escapeHtml(GENESIS_TUTORIAL)}</i>`, true);
+    let bar: { message_id: number } | null = null;
+    let shown = '';
+    const city = await runGenesis(deps, ownerId, async (step, total, label) => {
+      const text = `<i>${escapeHtml(genesisProgressBar(step, total, label))}</i>`;
+      if (text === shown) return;
+      shown = text;
+      if (bar) await bot.editMessageText(text, { chat_id: chatId, message_id: bar.message_id, parse_mode: 'HTML' });
+      else bar = await bot.sendMessage(chatId, text, { parse_mode: 'HTML' });
+    });
+    // Вид сверху и зов жреца приходят через Notifier; отвечать жрецу игрок будет прямо здесь.
+    void city;
   }
 
   async function handle(msg: TelegramBot.Message): Promise<void> {
@@ -65,6 +78,8 @@ async function main(): Promise<void> {
     }
     const r = await onboardingMessage(deps, { ownerId, text: text === '/start' ? '' : text });
     if (r.kind === 'reply' || r.kind === 'busy') await sendText(bot, chatId, r.text, r.kind === 'reply');
+    // Питч идёт отдельным сообщением-цитатой: это текст города, а не слова клерка.
+    if (r.kind === 'reply' && r.pitch) await sendText(bot, chatId, `<blockquote>${escapeHtml(r.pitch)}</blockquote>`, true);
     if (r.kind === 'reply' && r.ready) await startGenesis(ownerId, chatId);
   }
 

@@ -211,6 +211,10 @@ export const rulesSchema = z.object({
     statMax: z.number().int(),
   }),
   officers: z.array(officeDef).length(OFFICES.length),
+  succession: z.object({
+    /** Масштабы историй, ставка которых может унести жреца или сановника. */
+    lossScales: z.array(z.enum(SCALES)),
+  }),
   fronts: z.object({
     impact: z.object({ rawBudget: byImpact }),
     work: z.object({

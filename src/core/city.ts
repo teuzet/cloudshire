@@ -30,6 +30,8 @@ export interface World {
   season: Season;
   /** Пул имён людей с полом; вынимается по одному, чтобы имена не повторялись. */
   namePool: PoolName[];
+  /** Все имена людей мира, и розданные, и свободные: по ним видно, есть ли у человека личное имя. */
+  allNames?: string[];
   revision: number;
 }
 
@@ -106,6 +108,9 @@ export interface Hold {
   /** Ставки фронта до якоря: вернутся, когда якорь падёт. */
   saved?: { stake: StakeOp[]; failStake: StakeOp[] };
 }
+/** Большая нерешённая вещь города: загадка, медленная опасность, великое недоделанное дело. */
+export const ARCS = ['mystery', 'danger', 'promise'] as const;
+export type Arc = (typeof ARCS)[number];
 
 export interface WorldObject {
   id: string;
@@ -139,6 +144,10 @@ export interface WorldObject {
   themes: string[];
   /** День создания или последней перемены: год после него объект «свежий» для подбора ролей. */
   freshDay: number;
+  /** Большая нерешённая вещь, заложенная генезисом. Механики пробуждения пока нет. */
+  arc?: Arc | null;
+  /** Человек на должности: его можно потерять только ставкой крупной истории или волей покровителя. */
+  post?: Post | null;
   /**
    * Объект выбыл: сгорел, распущен, заброшен, ушёл. Он остаётся в городе и в памяти жреца,
    * но городу больше ничего не даёт; `was` — прежний вклад, который вернёт восстановление.
@@ -417,6 +426,8 @@ export interface Officer {
   /** Собственный темп: третий рычаг. Бросается при рождении города, от должности не зависит. */
   temper: Temper;
   assignmentId: string | null;
+  /** Человек на должности — объект города (тип person). Пропал объект — должность занимает преемник. */
+  objectId?: string | null;
 }
 
 export type Gender = 'female' | 'male';
@@ -433,14 +444,21 @@ export interface Priest {
   name: string;
   gender: Gender;
   nature: string;
+  /** Человек-объект города (тип person), как у сановников. */
+  objectId?: string | null;
+  /** Кого жрец сменил: чтобы новый жрец знал, что он недавно на месте. */
+  predecessor?: { name: string; day: number; cause: string } | null;
 }
+
+/** Должность, которую держит человек-объект: верховный жрец или один из сановников. */
+export type Post = 'priest' | Office;
 
 export interface ChronicleEntry {
   id: string;
   day: number;
   text: string;
   /** Откуда запись: генезис, веха, завершение или срок фронта, осложнение, посадка истории, воля игрока. */
-  source: 'genesis' | 'milestone' | 'completion' | 'deadline' | 'complication' | 'scenario' | 'will' | 'steward';
+  source: 'genesis' | 'milestone' | 'completion' | 'deadline' | 'complication' | 'scenario' | 'will' | 'steward' | 'succession';
   frontId: string | null;
 }
 

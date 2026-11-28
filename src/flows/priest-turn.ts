@@ -7,6 +7,7 @@
 import type { City } from '../core/city.js';
 import type { Office } from '../core/rules.js';
 import { appendDialog } from '../core/chronicle.js';
+import { fillOffices } from './succession.js';
 import { canAfford, spendMana, turnCost } from '../core/mana.js';
 import { runPriestTurn, type PriestHandlers, type ToolOutcome } from '../agents/priest/run.js';
 import { askLoremaster } from '../agents/loremaster/run.js';
@@ -174,6 +175,8 @@ export async function patronMessage(
         if (!spendMana(city, cost)) spendMana(city, turnCost(deps.rules, { acted: false }));
         appendDialog(city, { role: 'patron', text: args.text, day, kind: 'reply' });
         appendDialog(city, { role: 'priest', text: turn.reply, day, kind: 'reply' });
+        // Воля покровителя могла унести человека с должности: преемник встаёт сразу.
+        news.push(...(await fillOffices(deps, city, day)));
         reply = { kind: 'reply', text: turn.reply, acted: turn.acted, manaLeft: Math.floor(city.mana.value) };
       } catch (err) {
         deps.log?.warn('priest_failed', { cityId: city.id, error: String(err) });

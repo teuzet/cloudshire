@@ -29,6 +29,12 @@ agents:
     maxOutputTokens: 3000
   world-objects-genesis:
     maxOutputTokens: 16000
+  pitch-auditor:
+    maxOutputTokens: 3000
+  city-intro:
+    maxOutputTokens: 2000
+  successor:
+    maxOutputTokens: 1500
   scenario-writer:
     maxOutputTokens: 4000
     effort: medium

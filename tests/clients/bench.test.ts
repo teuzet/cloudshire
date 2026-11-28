@@ -17,8 +17,9 @@ function scripted(): FakeLlm {
   const llm = new FakeLlm()
     .script(
       'onboarding-guide',
-      toolReply('submit_onboarding', { reply: 'Как тебя звать, покровитель?' }),
-      toolReply('submit_onboarding', { reply: 'Начинаем.', seed: { patron_name: 'Тарн', patron_gender: 'male', pitch: 'Город облачных рыбаков' } }),
+      toolReply('submit_onboarding', { path: 'knows', reply: 'Каким ты видишь город?', ready: false }),
+      toolReply('submit_onboarding', { path: 'knows', reply: 'Всё так?', pitch: 'Город облачных рыбаков', patron_name: 'Тарн', patron_gender: 'male', ready: false }),
+      toolReply('submit_onboarding', { path: 'knows', reply: 'Записано.', pitch: 'Город облачных рыбаков', patron_name: 'Тарн', patron_gender: 'male', ready: true }),
     )
     .always('chronicler', toolReply('submit_chronicle', { text: 'К краю прибило островок с фонарями.' }))
     .always('herald', toolReply('submit_news', { text: 'Покровитель, у края горят чужие фонари.' }))
@@ -65,11 +66,11 @@ describe('стенд агентов', () => {
     const g = await runStage(cfg, { stage: 'genesis', caseName: 'fishers' });
     expect(g.error).toBeNull();
     expect(g.outcome).toContain('Сетьград');
-    expect(Object.keys(g.agents)).toEqual(expect.arrayContaining(['onboarding-guide', 'city-genesis', 'world-objects-genesis', 'officer-nature', 'city-brief']));
+    expect(Object.keys(g.agents)).toEqual(expect.arrayContaining(['onboarding-guide', 'city-genesis', 'world-objects-genesis', 'officer-nature', 'city-brief', 'pitch-auditor', 'city-intro']));
     const report = read(cfg, 'runs', g.id, 'report.md');
     expect(report).toContain('[city-brief](agents/city-brief.md)');
     expect(report).toContain('**Игрок:** Я Тарн, хочу город рыбаков');
-    expect(read(cfg, 'runs', g.id, 'agents', 'city-genesis.md')).toContain('submit_core');
+    expect(read(cfg, 'runs', g.id, 'agents', 'city-genesis.md')).toContain('submit_portrait');
 
     saveState(cfg, g.id, 'day0', 'город после генезиса');
     const snap = JSON.parse(read(cfg, 'states', 'day0.json')) as Snapshot;

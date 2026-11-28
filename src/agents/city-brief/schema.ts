@@ -1,14 +1,15 @@
 import { z } from 'zod';
 
-export const BRIEF_MAX = 3500;
+export const BRIEF_MIN = 1500;
+export const BRIEF_MAX = 2000;
 
 export const cityBriefSchema = z.object({
   brief: z
     .string()
     .trim()
-    .min(80)
-    .max(BRIEF_MAX + 500)
-    .describe(`Сухие постоянные факты города, до ${BRIEF_MAX} символов: места, институты, ресурсы, уклады, напряжения. Без сиюминутного, без сюжета и без пересказа неизвестностей.`),
+    .min(BRIEF_MIN - 300)
+    .max(BRIEF_MAX + 800)
+    .describe(`Неизменное в городе: от ${BRIEF_MIN} до ${BRIEF_MAX} знаков связного текста.`),
   unknowns: z
     .array(
       z.object({
@@ -17,7 +18,7 @@ export const cityBriefSchema = z.object({
       }),
     )
     .default([])
-    .describe('Узкие канонические неизвестности из описания (что в мире официально не установлено). Не слухи, не календарь, не бытовые дыры. Пустой массив, если таких нет.'),
+    .describe('Что в мире прямо не установлено, с привязкой к объектам. Пустой массив, если такого нет.'),
 });
 
 export type CityBriefRaw = z.infer<typeof cityBriefSchema>;

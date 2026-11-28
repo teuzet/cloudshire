@@ -15,7 +15,8 @@ import { DAYS_PER_MONTH } from '../core/time.js';
 import { describeChanges, type Change } from '../core/world/changes.js';
 import { tensionToThreat } from '../core/world/complications.js';
 import { dueEvent, findFront, frontGist, frontObjectIds, neighbors, closeFront, settleProgress, shareDone } from '../core/world/fronts.js';
-import { attachedTo, findObject, scalePull } from '../core/world/objects.js';
+import { attachedTo, findObject, deleteWithChildren, scalePull } from '../core/world/objects.js';
+import { fillOffices } from './succession.js';
 import { biting, effectOf, hindrancesOf } from '../core/world/hindrance.js';
 import { applyStake } from '../core/world/stake.js';
 import { rememberSides } from '../core/world/seamless.js';
@@ -31,7 +32,7 @@ import { appraise, briefOf, leadLabel, situationOf, workWords } from './briefs.j
 import { record, type Happening } from './chronicle.js';
 import { runSteward } from './steward.js';
 import { complicateRolled, describeHits, refreshAfterChange, resolveModify, rollFor, rollForFailure } from './complications.js';
-import { newId, requireWorld, sendAll, today, tryAgent, type FlowDeps } from './context.js';
+import { newId, requireWorld, sendAll, today, tryAgent, withNamer, type FlowDeps } from './context.js';
 import { faithEvent, refreshAllFronts, willWords } from './fronts.js';
 import { autoStage, autoStageBlock } from './will.js';
 import { seedStories } from './seeding.js';
@@ -42,8 +43,10 @@ const MAX_PARTICIPANTS = 6;
 /** Скольким соседним делам предложить готовый результат в помощь. */
 const MAX_NEIGHBORS = 2;
 
-function stakeCtx(deps: FlowDeps, front: Pick<Front, 'id' | 'scale'>, day: number) {
-  return { day, newId: (p: string) => newId(deps, p), frontId: front.id, pull: scalePull(deps.rules, front.scale, day) };
+function stakeCtx(deps: FlowDeps, front: Pick<Front, 'id' | 'scale' | 'origin'>, day: number) {
+  // Жреца и сановника уносит только крупная история или воля покровителя.
+  const holderLoss = front.origin === 'player' || Boolean(front.scale && deps.rules.succession.lossScales.includes(front.scale));
+  return { day, newId: (p: string) => newId(deps, p), frontId: front.id, pull: scalePull(deps.rules, front.scale, day), holderLoss, namer: deps.namer ?? null };
 }
 
 /** Кого событие касается: объекты отпечатка, участники, цели ставок. Без места работ. */
@@ -647,6 +650,10 @@ async function handle(deps: FlowDeps, city: City, job: Job, out: OutboundMessage
  * в памяти; вести возвращаются, чтобы отправить их после сохранения.
  */
 export async function processDue(deps: FlowDeps, world: World, city: City): Promise<OutboundMessage[]> {
+  return withNamer(deps, (d) => runDue(d, world, city));
+}
+
+async function runDue(deps: FlowDeps, world: World, city: City): Promise<OutboundMessage[]> {
   const now = today(deps, world);
   const out: OutboundMessage[] = [];
   recoverRunningJobs(city);
@@ -663,6 +670,8 @@ export async function processDue(deps: FlowDeps, world: World, city: City): Prom
     }
   }
   out.push(...(await runSteward(deps, city, now)));
+  // Должности не пустуют: кого унесли истории дня, того сменяет преемник.
+  out.push(...(await fillOffices(deps, city, now)));
   accrueMana(deps.rules, city, now);
   pruneJobs(city);
   return out;
