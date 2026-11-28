@@ -9,3 +9,5 @@ logs/
 .DS_Store
 /playtest/
 /playtest2/
+bench/runs/*
+!bench/runs/.gitkeep
