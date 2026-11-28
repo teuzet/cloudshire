@@ -51,9 +51,10 @@ export function anthropicToolChoice(model: string, choice: LlmRequest['toolChoic
 export class AnthropicLlm implements Llm {
   private readonly client: Anthropic;
 
-  constructor(opts: { apiKey?: string; timeoutMs?: number } = {}) {
+  constructor(opts: { apiKey?: string; baseURL?: string; timeoutMs?: number } = {}) {
     this.client = new Anthropic({
       ...(opts.apiKey ? { apiKey: opts.apiKey } : {}),
+      ...(opts.baseURL ? { baseURL: opts.baseURL } : {}),
       timeout: opts.timeoutMs ?? 120_000,
       maxRetries: 0,
     });

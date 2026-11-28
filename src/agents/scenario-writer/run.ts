@@ -202,7 +202,7 @@ export const scenarioWriter: StructuredAgent<ScenarioWriterInput, Scenario, Scen
     ),
   user: ({ template, seed }) =>
     template
-      ? `Заготовка (id объектов и фронтов сохрани как есть):\n${JSON.stringify(template, null, 2)}`
+      ? `Заготовка. Расскажи её заново для этого острова: устройство и id объектов и фронтов сохрани как есть, а землю, природу, места, вещи и ремёсла возьми из описания и объектов города.\n${JSON.stringify(template, null, 2)}`
       : `Зерно истории: ${seed ?? 'на твой выбор, по городу'}`,
   check: (raw, { objects, unknowns, template, grow }) => {
     const whole = scenarioDraftSchema.safeParse(template ? keepTemplate(raw, template) : raw);

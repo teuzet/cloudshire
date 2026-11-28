@@ -56,6 +56,9 @@ export function buildLlm(env: NodeJS.ProcessEnv): Llm {
   const providers: Record<string, Llm> = {};
   if (env.OPENAI_API_KEY) providers.openai = new OpenAiLlm({ apiKey: env.OPENAI_API_KEY, cacheKey: env.LLM_CACHE_KEY !== '0', explicitCache: env.LLM_CACHE_EXPLICIT !== '0', ...(env.LLM_PREFIX_FILE ? { prefixFile: env.LLM_PREFIX_FILE } : {}) });
   if (env.ANTHROPIC_API_KEY) providers.anthropic = new AnthropicLlm({ apiKey: env.ANTHROPIC_API_KEY });
+  // В облачной сессии Claude Code переменную ANTHROPIC_API_KEY не видно, а ANTHROPIC_BASE_URL ведёт в прокси сессии:
+  // ключ под другим именем идёт прямо в API Anthropic.
+  else if (env.CLOUDSHIRE_ANTHROPIC_KEY) providers.anthropic = new AnthropicLlm({ apiKey: env.CLOUDSHIRE_ANTHROPIC_KEY, baseURL: 'https://api.anthropic.com' });
   if (!Object.keys(providers).length) throw new Error('нет ключей моделей: задай OPENAI_API_KEY и/или ANTHROPIC_API_KEY');
   const router = new RoutingLlm(providers);
   // Журнал вызовов агентов: каждый вызов отдельным файлом, см. adapters/llm/logging.ts.
