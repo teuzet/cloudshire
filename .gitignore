@@ -11,3 +11,4 @@ logs/
 /playtest2/
 bench/runs/*
 !bench/runs/.gitkeep
+pt-*/
