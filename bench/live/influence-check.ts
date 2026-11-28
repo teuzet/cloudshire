@@ -3,7 +3,7 @@
  * отдельно), толкователь воли и сверщик условия.
  * Ходит в настоящие модели: запускать только по просьбе Ника.
  *
- *   npx tsx bench/live/influence-check.ts [influence|contribution|will|condition] [--repeat N]
+ *   npx tsx bench/live/influence-check.ts [influence|crowd|contribution|will|condition] [--repeat N]
  *
  * Случаи намеренно не повторяют примеры из промптов: проверяется правило, а не память о примере.
  * В конце печатает расход по токенам и цену.
@@ -233,6 +233,44 @@ interface WillCase {
   expect: { label: string[]; frontId?: Array<string | null>; report?: boolean };
 }
 
+// Весь город рядом: восемь записей, явно касается работа одной-двух. Ловит лишние связи.
+const FIND_HELPS = ['действия, которые исследуют устройство башни, преодолевают её защиту и приближают людей к тайнику', 'расшифровка надписей, языков и символов'];
+const TOWN = [
+  near('t1', 'угроза со сроком', 'Густой туман лёг в падь и отрезал хутора от города: ни обозов, ни вестей.'),
+  near('t2', 'угроза со сроком', 'Пожар в Нижнем квартале никак не потушат, огонь идёт к библиотеке.'),
+  near('t3', 'угроза со сроком', 'Бунтовщики из башни грабят причалы по ночам и скоро пойдут на склады города.', { carrier: 'Бунтовщики в башне' }),
+  near('t4', 'растущее напряжение', 'Чужие старатели бьют шурфы на рудном плато и не уходят: рудокопы города грозят прогнать их силой.', { carrier: 'Чужие старатели' }),
+  near('t5', 'удобный случай', 'Добраться до рецепта, который спрятан в башне.', { carrier: 'Островок с горящими фонарями', helps: FIND_HELPS }),
+  near('t6', 'отложенная перемена', 'Островок с фонарями отчалит и уйдёт вместе с башней.', { carrier: 'Островок с горящими фонарями' }),
+  near('t7', 'угроза со сроком', 'Угольные копи иссякают: к зиме кузням нечем будет топить.'),
+  near('t8', 'дело', 'Каменщики кладут стену вдоль восточной кромки: камень везут с северных скал.'),
+];
+const TOWN_SIDES = [side('s1', 'Бунтовщики в башне'), side('s2', 'Чужие старатели'), side('s3', 'Кузнечный ряд', 'organization')];
+const quiet = (ids: string[]) => Object.fromEntries(TOWN.map((n) => n.id).filter((id) => !ids.includes(id)).map((id) => [id, ['-']]));
+
+const CROWD: InfluenceCase[] = [
+  {
+    name: 'птичья почта с хуторами',
+    input: { work: 'Завести почтовых птиц: найти птиц, поставить голубятню, выучить их летать между городом и хуторами', result: 'Птичья почта (умение или знание): в городе есть почтовые птицы и умение отправлять их на хутора за туманной падью.', nearby: TOWN, sides: TOWN_SIDES },
+    expect: { ...quiet(['t1']), t1: ['slow', 'outcome', '-'] },
+  },
+  {
+    name: 'упряжные исполины для стены',
+    input: { work: 'Приручить исполинов северных скал и выучить их тянуть каменные волокуши', result: 'Возка исполинами (умение или знание): город умеет впрягать северных исполинов и возить на них камень.', nearby: TOWN, sides: TOWN_SIDES },
+    expect: { ...quiet(['t8']), t8: ['hurry'] },
+  },
+  {
+    name: 'знаток ловушек при отряде',
+    input: { work: 'Найти в городе того, кто разбирается в ловушках вроде башенных', result: 'Старый оружейник Тит (человек): ставил самострелы и ямы на складах и знает, как их обезвредить.', nearby: TOWN, sides: TOWN_SIDES },
+    expect: { ...quiet(['t5']), t5: ['safer', 'hurry'] },
+  },
+  {
+    name: 'вышка над причалами',
+    input: { work: 'Поставить над причалами сторожевую вышку с колоколом', result: 'Вышка над причалами (большое сооружение): дозорные с колоколом видят все причалы и мостки к островку.', nearby: TOWN, sides: TOWN_SIDES },
+    expect: { ...quiet(['t3']), t3: ['slow', 'stop'] },
+  },
+];
+
 const FRONTS: WillInput['fronts'] = [
   { id: 'f1', title: '', description: 'Купцы на рынке обвешивают, горожане ропщут и грозят разнести ряды.', kind: 'растущее напряжение', lead: null, hindrances: [] },
   { id: 'f2', title: '', description: 'Небесные китобои и рыбаки города спорят за воды у кромки, дело идёт к стычке.', kind: 'растущее напряжение', lead: null, hindrances: [] },
@@ -240,6 +278,7 @@ const FRONTS: WillInput['fronts'] = [
   { id: 'f4', title: '', description: 'Сизая скала сползает и скоро ляжет на дома Гончарного квартала.', kind: 'отложенная перемена', lead: null, hindrances: [] },
   { id: 'f5', title: '', description: 'Собор на площади: каменщики тянут стены.', kind: 'дело', lead: 'казначей Ада (женщина)', hindrances: [] },
   { id: 'f6', title: '', description: 'Бродячие торговцы стоят у причала и продают редкие семена горных трав; скоро уйдут.', kind: 'удобный случай со сроком', lead: null, hindrances: [] },
+  { id: 'f7', title: '', description: 'Беглые каторжники засели в старой мельнице и грабят обозы на дороге к хуторам.', kind: 'угроза со сроком', lead: null, hindrances: [] },
 ];
 
 const WILL: WillCase[] = [
@@ -262,6 +301,9 @@ const WILL: WillCase[] = [
   { name: 'кто за обвесом', order: 'Разузнай, кто из купцов подбивает остальных обвешивать.', expect: { label: ['project'], frontId: ['f1'] } },
   { name: 'что со скалой', order: 'Выясни, отчего сползает Сизая скала.', expect: { label: ['project'], frontId: ['f4'] } },
   { name: 'маяк с докладом', order: 'Поставь маяк на кромке, только докладывай мне после каждого шага.', expect: { label: ['project'], frontId: [null], report: true } },
+  { name: 'слух, чтобы ушли сами', order: 'Пустить среди китобоев слух, что воды у кромки прокляты, чтобы они сами ушли; следить, чтобы слух дошёл до них.', expect: { label: ['project'], frontId: ['f2'] } },
+  { name: 'беглых на службу', order: 'Окружить мельницу, предложить беглым сдаться и пойти на службу в городскую стражу; взять их под надзор.', officer: 'маршал Бран (мужчина)', expect: { label: ['project'], frontId: ['f7'] } },
+  { name: 'выкурить беглых', order: 'Окружить мельницу и выкурить беглых дымом, а кто выйдет, тех в колодки.', officer: 'маршал Бран (мужчина)', expect: { label: ['strategy'], frontId: ['f7'] } },
   { name: 'маяк без доклада', order: 'Поставь маяк на кромке.', expect: { label: ['project'], frontId: [null], report: false } },
 ];
 
@@ -343,9 +385,9 @@ async function runContribution(deps: AgentDeps, repeat: number): Promise<number>
   return bad;
 }
 
-async function runInfluence(deps: AgentDeps, repeat: number): Promise<number> {
+async function runInfluence(deps: AgentDeps, repeat: number, cases = INFLUENCE): Promise<number> {
   let bad = 0;
-  for (const c of INFLUENCE) {
+  for (const c of cases) {
     for (let i = 0; i < repeat; i++) {
       const out = await appraiseInfluence(deps, c.input);
       const got = new Map(out.links.map((l) => [l.frontId, l]));
@@ -394,6 +436,10 @@ async function main(): Promise<void> {
   if (which === 'all' || which === 'influence') {
     console.log('— оценщик влияния —');
     bad += await runInfluence(deps, repeat);
+  }
+  if (which === 'all' || which === 'crowd') {
+    console.log('— оценщик влияния: весь город рядом —');
+    bad += await runInfluence(deps, repeat, CROWD);
   }
   if (which === 'all' || which === 'contribution') {
     console.log('— оценщик вклада: что посчитано отдельно —');

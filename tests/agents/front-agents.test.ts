@@ -173,6 +173,32 @@ describe('воля игрока', () => {
     expect(stages[0]!.outcomeKnown).toBe(true);
   });
 
+  test('страж канона и разбивщик видят слова приказа: в коротком названии цели подробностей нет', async () => {
+    const stage = { title: 'Огненные трубы', work: 'Кузнецы отливают трубы.', result: { kind: 'new_object', type: 'structure', name: 'Огненные трубы', description: 'Бьют пламенем.' }, site: null, outcome_known: true };
+    const llm = new FakeLlm()
+      .script('canon-warden', toolReply('submit_canon_verdict', { verdict: 'possible', reason: 'Кузни есть' }), toolReply('submit_canon_verdict', { verdict: 'possible', reason: 'Кузни есть' }))
+      .script('stage-planner', toolReply('submit_stages', { stages: [stage] }));
+    const order = 'Построить огненные трубы, которые бьют пламенем на сотню шагов';
+    await judgeCanon(deps(llm), { goal: 'Построить огненные трубы', order, facts: [], objects: [quarry] });
+    expect(lastUser(llm, 'canon-warden')).toContain(`Слова приказа: «${order}»`);
+    await planStages(deps(llm), { goal: 'Построить огненные трубы', order, gaps: [], objects: [quarry] });
+    expect(lastUser(llm, 'stage-planner')).toContain(`Слова приказа: «${order}»`);
+    // Слова, совпавшие с целью, второй раз не пишутся.
+    await judgeCanon(deps(llm), { goal: order, order, facts: [], objects: [quarry] });
+    expect(lastUser(llm, 'canon-warden')).not.toContain('Слова приказа');
+  });
+
+  test('stage-planner: id без последнего знака правится на единственный подходящий', async () => {
+    const chains: ObjectBrief = { id: 'obj_oeispna6ytdh', type: 'object', name: 'Причальные цепи', description: 'Держат островок.' };
+    const llm = new FakeLlm().script(
+      'stage-planner',
+      toolReply('submit_stages', { stages: [{ title: 'Сбить цепи', work: 'Кузнецы сбивают цепи.', result: { kind: 'remove_object', object_id: 'obj_oeispna6ytd', name: 'Причальные цепи', description: 'Сбиты.' }, site: null, outcome_known: true }] }),
+    );
+    const stages = await planStages(deps(llm), { goal: 'Сбить цепи', gaps: [], objects: [quarry, chains] });
+    expect(llm.callsTo('stage-planner')).toHaveLength(1);
+    expect(stages[0]!.result).toMatchObject({ kind: 'remove_object', objectId: 'obj_oeispna6ytdh' });
+  });
+
   test('contribution-appraiser: повтор стата отбивается, определения статов в системном промпте', async () => {
     const llm = new FakeLlm().script(
       'contribution-appraiser',

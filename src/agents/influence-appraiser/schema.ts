@@ -11,6 +11,8 @@ export const influenceSchema = z.object({
     .array(
       z.object({
         id: z.string().trim().min(1),
+        // Что готовый результат сам меняет в этой записи: пишется до слова, чтобы слово из неё следовало.
+        how: z.string().trim().max(300).default(''),
         effect: z.enum(INFLUENCE_WORDS),
         basis: z.enum(['solid', 'word']).default('solid'),
       }),
@@ -21,6 +23,7 @@ export const influenceSchema = z.object({
     .array(
       z.object({
         id: z.string().trim().min(1),
+        how: z.string().trim().max(300).default(''),
         // Что сторона получает от готового результата: loses — теряет, gains — выигрывает.
         stance: z.enum(['loses', 'gains']),
       }),

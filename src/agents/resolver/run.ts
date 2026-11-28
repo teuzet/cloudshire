@@ -1,3 +1,4 @@
+import { fixId } from '../_shared/ids.js';
 import type { ObjectType } from '../../core/rules.js';
 import { block, briefList, join, typesBlock, type ObjectBrief } from '../_shared/blocks.js';
 import { canon, composeSystem, loadPrompt } from '../_shared/canon.js';
@@ -60,6 +61,7 @@ export const resolver: StructuredAgent<ResolutionInput, ResolutionRaw, Resolutio
   check: (raw, input) => {
     if (!input.allowed.includes(raw.effect)) return `effect берётся из разрешённых: ${input.allowed.join(', ')}`;
     const ids = new Set(input.participants.map((p) => p.id));
+    raw.object_ids = raw.object_ids.map((id) => fixId(id, [...ids, ...input.keepable]));
     if (raw.effect === 'fact' && !raw.fact?.trim()) return 'для fact нужен текст факта в поле fact';
     if (raw.effect === 'link' && (raw.object_ids.length !== 2 || raw.object_ids.some((id) => !ids.has(id)) || raw.object_ids[0] === raw.object_ids[1])) {
       return 'для link нужны два разных id участников в object_ids';

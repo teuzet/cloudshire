@@ -7,6 +7,8 @@ const prompt = loadPrompt(import.meta.url);
 
 export interface CanonInput {
   goal: string;
+  /** Слова приказа, из которых взята цель: в них подробности замысла. */
+  order?: string | null;
   facts: string[];
   objects: ObjectBrief[];
 }
@@ -25,9 +27,10 @@ export const canonWarden: StructuredAgent<CanonInput, CanonRaw, CanonRuling> = {
   description: 'Достижима ли цель в этом мире и чего для неё недостаёт.',
   schema: canonSchema,
   system: () => composeSystem([], prompt, canon('setting')),
-  user: ({ goal, facts, objects }) =>
+  user: ({ goal, order, facts, objects }) =>
     join(
       `Цель: «${goal}»`,
+      order && order !== goal ? `Слова приказа: «${order}»` : '',
       block('Факты о городе', facts.length ? facts.map((f) => `- ${f}`).join('\n') : 'особых фактов нет'),
       block('В городе есть', briefList(objects)),
     ),

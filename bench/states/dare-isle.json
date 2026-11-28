@@ -1,0 +1,2422 @@
+{
+  "version": 1,
+  "now": 1793491200000,
+  "world": {
+    "id": "world_02zpieg8jq95",
+    "clock": {
+      "epochMs": 1793491200000,
+      "pausedMs": 0,
+      "heldAtMs": null
+    },
+    "season": {
+      "id": "season_ri7dajaz8v65",
+      "name": "Первый сезон",
+      "rules": [],
+      "startedDay": 0
+    },
+    "namePool": [
+      {
+        "name": "Юлина",
+        "gender": "female"
+      },
+      {
+        "name": "Горенд",
+        "gender": "male"
+      },
+      {
+        "name": "Села",
+        "gender": "female"
+      },
+      {
+        "name": "Терн",
+        "gender": "male"
+      },
+      {
+        "name": "Сольна",
+        "gender": "female"
+      },
+      {
+        "name": "Альдри",
+        "gender": "male"
+      },
+      {
+        "name": "Гаэра",
+        "gender": "female"
+      },
+      {
+        "name": "Эрвен",
+        "gender": "male"
+      },
+      {
+        "name": "Умира",
+        "gender": "female"
+      },
+      {
+        "name": "Норн",
+        "gender": "male"
+      },
+      {
+        "name": "Паэла",
+        "gender": "female"
+      },
+      {
+        "name": "Эмирн",
+        "gender": "male"
+      },
+      {
+        "name": "Шаэна",
+        "gender": "female"
+      },
+      {
+        "name": "Рельд",
+        "gender": "male"
+      },
+      {
+        "name": "Тешара",
+        "gender": "female"
+      },
+      {
+        "name": "Брен",
+        "gender": "male"
+      },
+      {
+        "name": "Мена",
+        "gender": "female"
+      },
+      {
+        "name": "Делмир",
+        "gender": "male"
+      },
+      {
+        "name": "Доэра",
+        "gender": "female"
+      },
+      {
+        "name": "Кален",
+        "gender": "male"
+      },
+      {
+        "name": "Алора",
+        "gender": "female"
+      },
+      {
+        "name": "Олдрин",
+        "gender": "male"
+      },
+      {
+        "name": "Далина",
+        "gender": "female"
+      },
+      {
+        "name": "Вендри",
+        "gender": "male"
+      },
+      {
+        "name": "Сира",
+        "gender": "female"
+      },
+      {
+        "name": "Сенирд",
+        "gender": "male"
+      },
+      {
+        "name": "Зарена",
+        "gender": "female"
+      },
+      {
+        "name": "Галенд",
+        "gender": "male"
+      },
+      {
+        "name": "Тена",
+        "gender": "female"
+      },
+      {
+        "name": "Уворн",
+        "gender": "male"
+      },
+      {
+        "name": "Овира",
+        "gender": "female"
+      },
+      {
+        "name": "Аквирн",
+        "gender": "male"
+      },
+      {
+        "name": "Жаэра",
+        "gender": "female"
+      },
+      {
+        "name": "Дивор",
+        "gender": "male"
+      },
+      {
+        "name": "Нораш",
+        "gender": "female"
+      },
+      {
+        "name": "Яренд",
+        "gender": "male"
+      },
+      {
+        "name": "Нарель",
+        "gender": "female"
+      },
+      {
+        "name": "Элдар",
+        "gender": "male"
+      },
+      {
+        "name": "Эшара",
+        "gender": "female"
+      },
+      {
+        "name": "Орен",
+        "gender": "male"
+      },
+      {
+        "name": "Вераш",
+        "gender": "female"
+      },
+      {
+        "name": "Рендри",
+        "gender": "male"
+      },
+      {
+        "name": "Астра",
+        "gender": "female"
+      },
+      {
+        "name": "Валд",
+        "gender": "male"
+      },
+      {
+        "name": "Кираш",
+        "gender": "female"
+      },
+      {
+        "name": "Вельд",
+        "gender": "male"
+      },
+      {
+        "name": "Кела",
+        "gender": "female"
+      },
+      {
+        "name": "Индро",
+        "gender": "male"
+      },
+      {
+        "name": "Ашель",
+        "gender": "female"
+      },
+      {
+        "name": "Нарен",
+        "gender": "male"
+      },
+      {
+        "name": "Невола",
+        "gender": "female"
+      },
+      {
+        "name": "Арен",
+        "gender": "male"
+      },
+      {
+        "name": "Мирала",
+        "gender": "female"
+      },
+      {
+        "name": "Далмир",
+        "gender": "male"
+      },
+      {
+        "name": "Лешара",
+        "gender": "female"
+      },
+      {
+        "name": "Елмир",
+        "gender": "male"
+      },
+      {
+        "name": "Елана",
+        "gender": "female"
+      },
+      {
+        "name": "Харвел",
+        "gender": "male"
+      },
+      {
+        "name": "Янера",
+        "gender": "female"
+      },
+      {
+        "name": "Хелд",
+        "gender": "male"
+      },
+      {
+        "name": "Лира",
+        "gender": "female"
+      },
+      {
+        "name": "Зельд",
+        "gender": "male"
+      },
+      {
+        "name": "Улна",
+        "gender": "female"
+      },
+      {
+        "name": "Евард",
+        "gender": "male"
+      },
+      {
+        "name": "Илена",
+        "gender": "female"
+      },
+      {
+        "name": "Олмир",
+        "gender": "male"
+      },
+      {
+        "name": "Сивера",
+        "gender": "female"
+      },
+      {
+        "name": "Тирен",
+        "gender": "male"
+      },
+      {
+        "name": "Лориша",
+        "gender": "female"
+      },
+      {
+        "name": "Ювор",
+        "gender": "male"
+      },
+      {
+        "name": "Раэна",
+        "gender": "female"
+      },
+      {
+        "name": "Памир",
+        "gender": "male"
+      },
+      {
+        "name": "Таэра",
+        "gender": "female"
+      },
+      {
+        "name": "Явел",
+        "gender": "male"
+      },
+      {
+        "name": "Оршана",
+        "gender": "female"
+      },
+      {
+        "name": "Колмир",
+        "gender": "male"
+      },
+      {
+        "name": "Херена",
+        "gender": "female"
+      },
+      {
+        "name": "Харн",
+        "gender": "male"
+      },
+      {
+        "name": "Даэна",
+        "gender": "female"
+      },
+      {
+        "name": "Солм",
+        "gender": "male"
+      },
+      {
+        "name": "Маэра",
+        "gender": "female"
+      },
+      {
+        "name": "Галд",
+        "gender": "male"
+      },
+      {
+        "name": "Неша",
+        "gender": "female"
+      },
+      {
+        "name": "Рашен",
+        "gender": "male"
+      },
+      {
+        "name": "Жорена",
+        "gender": "female"
+      },
+      {
+        "name": "Елвор",
+        "gender": "male"
+      },
+      {
+        "name": "Орена",
+        "gender": "female"
+      },
+      {
+        "name": "Хемир",
+        "gender": "male"
+      },
+      {
+        "name": "Морена",
+        "gender": "female"
+      },
+      {
+        "name": "Фавор",
+        "gender": "male"
+      },
+      {
+        "name": "Вира",
+        "gender": "female"
+      },
+      {
+        "name": "Маренд",
+        "gender": "male"
+      },
+      {
+        "name": "Лавина",
+        "gender": "female"
+      },
+      {
+        "name": "Ларвен",
+        "gender": "male"
+      },
+      {
+        "name": "Малина",
+        "gender": "female"
+      },
+      {
+        "name": "Реворн",
+        "gender": "male"
+      },
+      {
+        "name": "Гешана",
+        "gender": "female"
+      },
+      {
+        "name": "Дарен",
+        "gender": "male"
+      },
+      {
+        "name": "Олина",
+        "gender": "female"
+      },
+      {
+        "name": "Телмир",
+        "gender": "male"
+      },
+      {
+        "name": "Энора",
+        "gender": "female"
+      },
+      {
+        "name": "Тавро",
+        "gender": "male"
+      },
+      {
+        "name": "Исана",
+        "gender": "female"
+      },
+      {
+        "name": "Иварн",
+        "gender": "male"
+      },
+      {
+        "name": "Анеша",
+        "gender": "female"
+      },
+      {
+        "name": "Уленд",
+        "gender": "male"
+      },
+      {
+        "name": "Ольма",
+        "gender": "female"
+      },
+      {
+        "name": "Юленд",
+        "gender": "male"
+      },
+      {
+        "name": "Сарена",
+        "gender": "female"
+      },
+      {
+        "name": "Шелмир",
+        "gender": "male"
+      },
+      {
+        "name": "Дирель",
+        "gender": "female"
+      },
+      {
+        "name": "Урен",
+        "gender": "male"
+      },
+      {
+        "name": "Велора",
+        "gender": "female"
+      },
+      {
+        "name": "Барен",
+        "gender": "male"
+      },
+      {
+        "name": "Гаэна",
+        "gender": "female"
+      },
+      {
+        "name": "Цельд",
+        "gender": "male"
+      },
+      {
+        "name": "Элира",
+        "gender": "female"
+      },
+      {
+        "name": "Орвел",
+        "gender": "male"
+      },
+      {
+        "name": "Юрель",
+        "gender": "female"
+      },
+      {
+        "name": "Лемир",
+        "gender": "male"
+      },
+      {
+        "name": "Ална",
+        "gender": "female"
+      },
+      {
+        "name": "Зарвел",
+        "gender": "male"
+      },
+      {
+        "name": "Эмиша",
+        "gender": "female"
+      },
+      {
+        "name": "Велкор",
+        "gender": "male"
+      },
+      {
+        "name": "Зилара",
+        "gender": "female"
+      },
+      {
+        "name": "Фалд",
+        "gender": "male"
+      },
+      {
+        "name": "Найра",
+        "gender": "female"
+      },
+      {
+        "name": "Шаленд",
+        "gender": "male"
+      },
+      {
+        "name": "Эраш",
+        "gender": "female"
+      },
+      {
+        "name": "Невар",
+        "gender": "male"
+      },
+      {
+        "name": "Явела",
+        "gender": "female"
+      },
+      {
+        "name": "Парвен",
+        "gender": "male"
+      },
+      {
+        "name": "Церина",
+        "gender": "female"
+      },
+      {
+        "name": "Невор",
+        "gender": "male"
+      },
+      {
+        "name": "Тираш",
+        "gender": "female"
+      },
+      {
+        "name": "Гаренд",
+        "gender": "male"
+      },
+      {
+        "name": "Галера",
+        "gender": "female"
+      },
+      {
+        "name": "Карвен",
+        "gender": "male"
+      },
+      {
+        "name": "Шалина",
+        "gender": "female"
+      },
+      {
+        "name": "Лендри",
+        "gender": "male"
+      },
+      {
+        "name": "Шорена",
+        "gender": "female"
+      },
+      {
+        "name": "Кедр",
+        "gender": "male"
+      },
+      {
+        "name": "Ваэла",
+        "gender": "female"
+      },
+      {
+        "name": "Ширен",
+        "gender": "male"
+      },
+      {
+        "name": "Фарель",
+        "gender": "female"
+      },
+      {
+        "name": "Норвел",
+        "gender": "male"
+      },
+      {
+        "name": "Берина",
+        "gender": "female"
+      },
+      {
+        "name": "Жендри",
+        "gender": "male"
+      },
+      {
+        "name": "Сатра",
+        "gender": "female"
+      },
+      {
+        "name": "Каренд",
+        "gender": "male"
+      },
+      {
+        "name": "Вельда",
+        "gender": "female"
+      },
+      {
+        "name": "Искоре",
+        "gender": "male"
+      },
+      {
+        "name": "Айра",
+        "gender": "female"
+      },
+      {
+        "name": "Сатр",
+        "gender": "male"
+      },
+      {
+        "name": "Калина",
+        "gender": "female"
+      },
+      {
+        "name": "Жорн",
+        "gender": "male"
+      },
+      {
+        "name": "Кадра",
+        "gender": "female"
+      },
+      {
+        "name": "Парн",
+        "gender": "male"
+      },
+      {
+        "name": "Селина",
+        "gender": "female"
+      },
+      {
+        "name": "Гарвен",
+        "gender": "male"
+      },
+      {
+        "name": "Талина",
+        "gender": "female"
+      },
+      {
+        "name": "Олренд",
+        "gender": "male"
+      },
+      {
+        "name": "Пелана",
+        "gender": "female"
+      },
+      {
+        "name": "Земир",
+        "gender": "male"
+      },
+      {
+        "name": "Навеша",
+        "gender": "female"
+      },
+      {
+        "name": "Товард",
+        "gender": "male"
+      },
+      {
+        "name": "Увеша",
+        "gender": "female"
+      },
+      {
+        "name": "Морин",
+        "gender": "male"
+      },
+      {
+        "name": "Вереша",
+        "gender": "female"
+      },
+      {
+        "name": "Равор",
+        "gender": "male"
+      },
+      {
+        "name": "Велина",
+        "gender": "female"
+      },
+      {
+        "name": "Зорин",
+        "gender": "male"
+      },
+      {
+        "name": "Карели",
+        "gender": "female"
+      },
+      {
+        "name": "Сарвел",
+        "gender": "male"
+      },
+      {
+        "name": "Каэра",
+        "gender": "female"
+      },
+      {
+        "name": "Цевор",
+        "gender": "male"
+      },
+      {
+        "name": "Фелина",
+        "gender": "female"
+      },
+      {
+        "name": "Темир",
+        "gender": "male"
+      },
+      {
+        "name": "Ешара",
+        "gender": "female"
+      },
+      {
+        "name": "Дорин",
+        "gender": "male"
+      },
+      {
+        "name": "Решара",
+        "gender": "female"
+      },
+      {
+        "name": "Мендри",
+        "gender": "male"
+      },
+      {
+        "name": "Иоша",
+        "gender": "female"
+      },
+      {
+        "name": "Аскор",
+        "gender": "male"
+      },
+      {
+        "name": "Моэра",
+        "gender": "female"
+      },
+      {
+        "name": "Овирд",
+        "gender": "male"
+      },
+      {
+        "name": "Кореша",
+        "gender": "female"
+      },
+      {
+        "name": "Урвен",
+        "gender": "male"
+      },
+      {
+        "name": "Чилира",
+        "gender": "female"
+      },
+      {
+        "name": "Ларен",
+        "gender": "male"
+      },
+      {
+        "name": "Хела",
+        "gender": "female"
+      },
+      {
+        "name": "Мовард",
+        "gender": "male"
+      },
+      {
+        "name": "Ивела",
+        "gender": "female"
+      },
+      {
+        "name": "Сарн",
+        "gender": "male"
+      },
+      {
+        "name": "Мираш",
+        "gender": "female"
+      },
+      {
+        "name": "Венир",
+        "gender": "male"
+      },
+      {
+        "name": "Фаэра",
+        "gender": "female"
+      },
+      {
+        "name": "Пеленд",
+        "gender": "male"
+      },
+      {
+        "name": "Каэша",
+        "gender": "female"
+      },
+      {
+        "name": "Саренд",
+        "gender": "male"
+      },
+      {
+        "name": "Лаэна",
+        "gender": "female"
+      },
+      {
+        "name": "Авирн",
+        "gender": "male"
+      },
+      {
+        "name": "Лераш",
+        "gender": "female"
+      },
+      {
+        "name": "Фаренд",
+        "gender": "male"
+      },
+      {
+        "name": "Юна",
+        "gender": "female"
+      },
+      {
+        "name": "Кавор",
+        "gender": "male"
+      },
+      {
+        "name": "Элна",
+        "gender": "female"
+      },
+      {
+        "name": "Эрен",
+        "gender": "male"
+      },
+      {
+        "name": "Ошара",
+        "gender": "female"
+      },
+      {
+        "name": "Корн",
+        "gender": "male"
+      },
+      {
+        "name": "Хоэна",
+        "gender": "female"
+      },
+      {
+        "name": "Иворн",
+        "gender": "male"
+      },
+      {
+        "name": "Ваэри",
+        "gender": "female"
+      },
+      {
+        "name": "Юрн",
+        "gender": "male"
+      },
+      {
+        "name": "Авира",
+        "gender": "female"
+      },
+      {
+        "name": "Жален",
+        "gender": "male"
+      },
+      {
+        "name": "Рива",
+        "gender": "female"
+      },
+      {
+        "name": "Фендри",
+        "gender": "male"
+      },
+      {
+        "name": "Сарна",
+        "gender": "female"
+      },
+      {
+        "name": "Шаренд",
+        "gender": "male"
+      },
+      {
+        "name": "Эвела",
+        "gender": "female"
+      },
+      {
+        "name": "Вемир",
+        "gender": "male"
+      },
+      {
+        "name": "Аквира",
+        "gender": "female"
+      },
+      {
+        "name": "Мирд",
+        "gender": "male"
+      },
+      {
+        "name": "Арель",
+        "gender": "female"
+      },
+      {
+        "name": "Улдин",
+        "gender": "male"
+      },
+      {
+        "name": "Тавра",
+        "gender": "female"
+      },
+      {
+        "name": "Юндри",
+        "gender": "male"
+      },
+      {
+        "name": "Тальра",
+        "gender": "female"
+      },
+      {
+        "name": "Хенирд",
+        "gender": "male"
+      },
+      {
+        "name": "Ильна",
+        "gender": "female"
+      },
+      {
+        "name": "Торен",
+        "gender": "male"
+      },
+      {
+        "name": "Вена",
+        "gender": "female"
+      },
+      {
+        "name": "Явор",
+        "gender": "male"
+      },
+      {
+        "name": "Улара",
+        "gender": "female"
+      },
+      {
+        "name": "Иленд",
+        "gender": "male"
+      },
+      {
+        "name": "Ленеша",
+        "gender": "female"
+      },
+      {
+        "name": "Жаренд",
+        "gender": "male"
+      },
+      {
+        "name": "Ралина",
+        "gender": "female"
+      },
+      {
+        "name": "Эвирд",
+        "gender": "male"
+      },
+      {
+        "name": "Тоэна",
+        "gender": "female"
+      },
+      {
+        "name": "Хаэла",
+        "gender": "female"
+      },
+      {
+        "name": "Савела",
+        "gender": "female"
+      },
+      {
+        "name": "Мелора",
+        "gender": "female"
+      },
+      {
+        "name": "Рашеля",
+        "gender": "female"
+      },
+      {
+        "name": "Ирма",
+        "gender": "female"
+      },
+      {
+        "name": "Тивела",
+        "gender": "female"
+      },
+      {
+        "name": "Нериша",
+        "gender": "female"
+      },
+      {
+        "name": "Яэра",
+        "gender": "female"
+      },
+      {
+        "name": "Нела",
+        "gender": "female"
+      }
+    ],
+    "revision": 1
+  },
+  "cities": [
+    {
+      "id": "city_dare",
+      "worldId": "world_02zpieg8jq95",
+      "ownerId": "bench",
+      "name": "Туманск",
+      "patronName": "Астра",
+      "description": "Туманный торговый город у края обрыва.",
+      "brief": "Туманск — летающий город рыбаков и кузнецов у кромки неба. Каменные причалы, кузни на угле, библиотека у храма, хутора за туманной падью, рудник и плато на севере.",
+      "unknowns": [],
+      "facts": [],
+      "priest": {
+        "name": "Илан",
+        "gender": "male",
+        "nature": "тих и внимателен"
+      },
+      "officers": [
+        {
+          "office": "treasurer",
+          "statId": "prosperity",
+          "title": "Казначей",
+          "name": "Ада",
+          "gender": "female",
+          "nature": "скупа",
+          "temper": "even",
+          "assignmentId": "asg_rygvug18t5ds"
+        },
+        {
+          "office": "marshal",
+          "statId": "security",
+          "title": "Маршал",
+          "name": "Борислав",
+          "gender": "male",
+          "nature": "резок",
+          "temper": "even",
+          "assignmentId": null
+        },
+        {
+          "office": "keeper",
+          "statId": "knowledge",
+          "title": "Хранитель",
+          "name": "Вета",
+          "gender": "female",
+          "nature": "медлит",
+          "temper": "even",
+          "assignmentId": null
+        },
+        {
+          "office": "chancellor",
+          "statId": "influence",
+          "title": "Канцлер",
+          "name": "Гордей",
+          "gender": "male",
+          "nature": "любезен",
+          "temper": "even",
+          "assignmentId": null
+        }
+      ],
+      "stats": {
+        "prosperity": 82,
+        "security": 64,
+        "knowledge": 61,
+        "influence": 59
+      },
+      "statScale": 1,
+      "statLedger": {
+        "prosperity": 50,
+        "security": 50,
+        "knowledge": 50,
+        "influence": 50
+      },
+      "mana": {
+        "value": 50,
+        "day": 0
+      },
+      "faith": {
+        "value": 50,
+        "day": 0
+      },
+      "objects": [
+        {
+          "id": "obj_6raot16pwaun",
+          "type": "structure",
+          "name": "Причалы у кромки",
+          "description": "Каменные причалы на краю острова: сюда пристают небесные лодки и прибивает то, что несёт ветер.",
+          "statEffect": {
+            "prosperity": 5,
+            "security": 0,
+            "knowledge": 0,
+            "influence": 0
+          },
+          "refs": [],
+          "version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "description": "Каменные причалы на краю острова: сюда пристают небесные лодки и прибивает то, что несёт ветер.",
+              "statEffect": {
+                "prosperity": 5,
+                "security": 0,
+                "knowledge": 0,
+                "influence": 0
+              },
+              "createdDay": 0
+            }
+          ],
+          "status": "active",
+          "createdDay": 0,
+          "deletedDay": null,
+          "protected": false,
+          "parentId": null,
+          "hidden": false,
+          "occupiedBy": null,
+          "temporary": false,
+          "attach": null,
+          "themes": [],
+          "freshDay": 0
+        },
+        {
+          "id": "obj_b33zo9i2ifs5",
+          "type": "building",
+          "name": "Храм покровителя",
+          "description": "Белый храм на холме, где верховный жрец слушает волю покровителя.",
+          "statEffect": {
+            "prosperity": 0,
+            "security": 0,
+            "knowledge": 0,
+            "influence": 5
+          },
+          "refs": [],
+          "version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "description": "Белый храм на холме, где верховный жрец слушает волю покровителя.",
+              "statEffect": {
+                "prosperity": 0,
+                "security": 0,
+                "knowledge": 0,
+                "influence": 5
+              },
+              "createdDay": 0
+            }
+          ],
+          "status": "active",
+          "createdDay": 0,
+          "deletedDay": null,
+          "protected": false,
+          "parentId": null,
+          "hidden": false,
+          "occupiedBy": null,
+          "temporary": false,
+          "attach": null,
+          "themes": [],
+          "freshDay": 0
+        },
+        {
+          "id": "obj_q687v11xxhkp",
+          "type": "organization",
+          "name": "Городская стража",
+          "description": "Две сотни стражников: караулы у ворот, обходы рынка.",
+          "statEffect": {
+            "prosperity": 0,
+            "security": 12,
+            "knowledge": 0,
+            "influence": 0
+          },
+          "refs": [],
+          "version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "description": "Две сотни стражников: караулы у ворот, обходы рынка.",
+              "statEffect": {
+                "prosperity": 0,
+                "security": 12,
+                "knowledge": 0,
+                "influence": 0
+              },
+              "createdDay": 0
+            }
+          ],
+          "status": "active",
+          "createdDay": 0,
+          "deletedDay": null,
+          "protected": false,
+          "parentId": null,
+          "hidden": false,
+          "occupiedBy": null,
+          "temporary": false,
+          "attach": null,
+          "themes": [],
+          "freshDay": 0
+        },
+        {
+          "id": "obj_6i2lpu2kd2x9",
+          "type": "community",
+          "name": "Рыбачья слобода",
+          "description": "Семьи небесных рыбаков у кромки: сети, лодки, коптильни.",
+          "statEffect": {
+            "prosperity": 5,
+            "security": 0,
+            "knowledge": 0,
+            "influence": 0
+          },
+          "refs": [],
+          "version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "description": "Семьи небесных рыбаков у кромки: сети, лодки, коптильни.",
+              "statEffect": {
+                "prosperity": 5,
+                "security": 0,
+                "knowledge": 0,
+                "influence": 0
+              },
+              "createdDay": 0
+            }
+          ],
+          "status": "active",
+          "createdDay": 0,
+          "deletedDay": null,
+          "protected": false,
+          "parentId": null,
+          "hidden": false,
+          "occupiedBy": null,
+          "temporary": false,
+          "attach": null,
+          "themes": [],
+          "freshDay": 0
+        },
+        {
+          "id": "obj_5acstvrpvmpo",
+          "type": "organization",
+          "name": "Кузнечный ряд",
+          "description": "Кузни и литейные мастерские на угле: куют цепи, якоря, инструмент.",
+          "statEffect": {
+            "prosperity": 6,
+            "security": 2,
+            "knowledge": 0,
+            "influence": 0
+          },
+          "refs": [],
+          "version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "description": "Кузни и литейные мастерские на угле: куют цепи, якоря, инструмент.",
+              "statEffect": {
+                "prosperity": 6,
+                "security": 2,
+                "knowledge": 0,
+                "influence": 0
+              },
+              "createdDay": 0
+            }
+          ],
+          "status": "active",
+          "createdDay": 0,
+          "deletedDay": null,
+          "protected": false,
+          "parentId": null,
+          "hidden": false,
+          "occupiedBy": null,
+          "temporary": false,
+          "attach": null,
+          "themes": [],
+          "freshDay": 0
+        },
+        {
+          "id": "obj_benb8hlofp8q",
+          "type": "district",
+          "name": "Торговый квартал",
+          "description": "Лавки, склады и амбары у главной площади.",
+          "statEffect": {
+            "prosperity": 12,
+            "security": 0,
+            "knowledge": 0,
+            "influence": 0
+          },
+          "refs": [],
+          "version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "description": "Лавки, склады и амбары у главной площади.",
+              "statEffect": {
+                "prosperity": 12,
+                "security": 0,
+                "knowledge": 0,
+                "influence": 0
+              },
+              "createdDay": 0
+            }
+          ],
+          "status": "active",
+          "createdDay": 0,
+          "deletedDay": null,
+          "protected": false,
+          "parentId": null,
+          "hidden": false,
+          "occupiedBy": null,
+          "temporary": false,
+          "attach": null,
+          "themes": [],
+          "freshDay": 0
+        },
+        {
+          "id": "obj_ifet4jjnm2fy",
+          "type": "building",
+          "name": "Городская библиотека",
+          "description": "Каменная библиотека у храма, на краю Нижнего квартала.",
+          "statEffect": {
+            "prosperity": 0,
+            "security": 0,
+            "knowledge": 5,
+            "influence": 0
+          },
+          "refs": [],
+          "version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "description": "Каменная библиотека у храма, на краю Нижнего квартала.",
+              "statEffect": {
+                "prosperity": 0,
+                "security": 0,
+                "knowledge": 5,
+                "influence": 0
+              },
+              "createdDay": 0
+            }
+          ],
+          "status": "active",
+          "createdDay": 0,
+          "deletedDay": null,
+          "protected": false,
+          "parentId": null,
+          "hidden": false,
+          "occupiedBy": null,
+          "temporary": false,
+          "attach": null,
+          "themes": [],
+          "freshDay": 0
+        },
+        {
+          "id": "obj_pipbz2rg8h8u",
+          "type": "resource",
+          "name": "Книги библиотеки",
+          "description": "Три тысячи томов: летописи города, травники, звёздные таблицы.",
+          "statEffect": {
+            "prosperity": 0,
+            "security": 0,
+            "knowledge": 6,
+            "influence": 0
+          },
+          "refs": [],
+          "version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "description": "Три тысячи томов: летописи города, травники, звёздные таблицы.",
+              "statEffect": {
+                "prosperity": 0,
+                "security": 0,
+                "knowledge": 6,
+                "influence": 0
+              },
+              "createdDay": 0
+            }
+          ],
+          "status": "active",
+          "createdDay": 0,
+          "deletedDay": null,
+          "protected": false,
+          "parentId": "obj_ifet4jjnm2fy",
+          "hidden": false,
+          "occupiedBy": null,
+          "temporary": false,
+          "attach": null,
+          "themes": [],
+          "freshDay": 0
+        },
+        {
+          "id": "obj_zjy5h61pr70h",
+          "type": "building",
+          "name": "Ратуша",
+          "description": "Каменная ратуша на площади, с сухими подвалами.",
+          "statEffect": {
+            "prosperity": 0,
+            "security": 0,
+            "knowledge": 0,
+            "influence": 4
+          },
+          "refs": [],
+          "version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "description": "Каменная ратуша на площади, с сухими подвалами.",
+              "statEffect": {
+                "prosperity": 0,
+                "security": 0,
+                "knowledge": 0,
+                "influence": 4
+              },
+              "createdDay": 0
+            }
+          ],
+          "status": "active",
+          "createdDay": 0,
+          "deletedDay": null,
+          "protected": false,
+          "parentId": null,
+          "hidden": false,
+          "occupiedBy": null,
+          "temporary": false,
+          "attach": null,
+          "themes": [],
+          "freshDay": 0
+        },
+        {
+          "id": "obj_nbjxajpa3m4j",
+          "type": "settlement",
+          "name": "Хутора за туманной падью",
+          "description": "Два десятка хуторов на южном склоне: зерно, овцы, сыр.",
+          "statEffect": {
+            "prosperity": 4,
+            "security": 0,
+            "knowledge": 0,
+            "influence": 0
+          },
+          "refs": [],
+          "version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "description": "Два десятка хуторов на южном склоне: зерно, овцы, сыр.",
+              "statEffect": {
+                "prosperity": 4,
+                "security": 0,
+                "knowledge": 0,
+                "influence": 0
+              },
+              "createdDay": 0
+            }
+          ],
+          "status": "active",
+          "createdDay": 0,
+          "deletedDay": null,
+          "protected": false,
+          "parentId": null,
+          "hidden": false,
+          "occupiedBy": null,
+          "temporary": false,
+          "attach": null,
+          "themes": [],
+          "freshDay": 0
+        },
+        {
+          "id": "obj_gotqkrirmmlo",
+          "type": "site",
+          "name": "Северные скалы",
+          "description": "Голые скалы за рудником, куда люди ходят редко.",
+          "statEffect": {
+            "prosperity": 0,
+            "security": 0,
+            "knowledge": 0,
+            "influence": 0
+          },
+          "refs": [],
+          "version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "description": "Голые скалы за рудником, куда люди ходят редко.",
+              "statEffect": {
+                "prosperity": 0,
+                "security": 0,
+                "knowledge": 0,
+                "influence": 0
+              },
+              "createdDay": 0
+            }
+          ],
+          "status": "active",
+          "createdDay": 0,
+          "deletedDay": null,
+          "protected": false,
+          "parentId": null,
+          "hidden": false,
+          "occupiedBy": null,
+          "temporary": false,
+          "attach": null,
+          "themes": [],
+          "freshDay": 0
+        },
+        {
+          "id": "obj_rpvuom59z7w1",
+          "type": "community",
+          "name": "Исполины северных скал",
+          "description": "Стадо каменных исполинов: огромные, медленные, пугливые травоядные.",
+          "statEffect": {
+            "prosperity": 0,
+            "security": 0,
+            "knowledge": 0,
+            "influence": 0
+          },
+          "refs": [],
+          "version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "description": "Стадо каменных исполинов: огромные, медленные, пугливые травоядные.",
+              "statEffect": {
+                "prosperity": 0,
+                "security": 0,
+                "knowledge": 0,
+                "influence": 0
+              },
+              "createdDay": 0
+            }
+          ],
+          "status": "active",
+          "createdDay": 0,
+          "deletedDay": null,
+          "protected": false,
+          "parentId": "obj_gotqkrirmmlo",
+          "hidden": false,
+          "occupiedBy": null,
+          "temporary": false,
+          "attach": null,
+          "themes": [],
+          "freshDay": 0
+        },
+        {
+          "id": "obj_qit96bpnb3bx",
+          "type": "site",
+          "name": "Рудное плато",
+          "description": "Плоская вершина за рудником, где жилы выходят наружу.",
+          "statEffect": {
+            "prosperity": 0,
+            "security": 0,
+            "knowledge": 0,
+            "influence": 0
+          },
+          "refs": [],
+          "version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "description": "Плоская вершина за рудником, где жилы выходят наружу.",
+              "statEffect": {
+                "prosperity": 0,
+                "security": 0,
+                "knowledge": 0,
+                "influence": 0
+              },
+              "createdDay": 0
+            }
+          ],
+          "status": "active",
+          "createdDay": 0,
+          "deletedDay": null,
+          "protected": false,
+          "parentId": null,
+          "hidden": false,
+          "occupiedBy": null,
+          "temporary": false,
+          "attach": null,
+          "themes": [],
+          "freshDay": 0
+        },
+        {
+          "id": "obj_359q0p0ziyld",
+          "type": "community",
+          "name": "Чужие старатели",
+          "description": "Три десятка старателей с соседнего острова: ставят шатры и бьют шурфы на плато.",
+          "statEffect": {
+            "prosperity": 0,
+            "security": 0,
+            "knowledge": 0,
+            "influence": 0
+          },
+          "refs": [],
+          "version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "description": "Три десятка старателей с соседнего острова: ставят шатры и бьют шурфы на плато.",
+              "statEffect": {
+                "prosperity": 0,
+                "security": 0,
+                "knowledge": 0,
+                "influence": 0
+              },
+              "createdDay": 0
+            }
+          ],
+          "status": "active",
+          "createdDay": 0,
+          "deletedDay": null,
+          "protected": false,
+          "parentId": "obj_qit96bpnb3bx",
+          "hidden": false,
+          "occupiedBy": null,
+          "temporary": false,
+          "attach": null,
+          "themes": [],
+          "freshDay": 0
+        },
+        {
+          "id": "obj_r9dnrjqdm82e",
+          "type": "site",
+          "name": "Кладка стены у кромки",
+          "description": "Начатая стена вдоль восточной кромки: пока по колено.",
+          "statEffect": {
+            "prosperity": 0,
+            "security": 0,
+            "knowledge": 0,
+            "influence": 0
+          },
+          "refs": [],
+          "version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "description": "Начатая стена вдоль восточной кромки: пока по колено.",
+              "statEffect": {
+                "prosperity": 0,
+                "security": 0,
+                "knowledge": 0,
+                "influence": 0
+              },
+              "createdDay": 0
+            }
+          ],
+          "status": "active",
+          "createdDay": 0,
+          "deletedDay": null,
+          "protected": false,
+          "parentId": null,
+          "hidden": false,
+          "occupiedBy": null,
+          "temporary": false,
+          "attach": null,
+          "themes": [],
+          "freshDay": 0
+        },
+        {
+          "id": "obj_8r5b3cxvlqv0",
+          "type": "site",
+          "name": "Островок с горящими фонарями",
+          "description": "Малое тело, прибившееся к краю острова. Ночью вдоль его кромки сами зажигаются фонари.",
+          "statEffect": {
+            "prosperity": 0,
+            "security": 0,
+            "knowledge": 0,
+            "influence": 0
+          },
+          "refs": [],
+          "version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "description": "Малое тело, прибившееся к краю острова. Ночью вдоль его кромки сами зажигаются фонари.",
+              "statEffect": {
+                "prosperity": 0,
+                "security": 0,
+                "knowledge": 0,
+                "influence": 0
+              },
+              "createdDay": 0
+            }
+          ],
+          "status": "active",
+          "createdDay": 0,
+          "deletedDay": null,
+          "protected": false,
+          "parentId": null,
+          "hidden": false,
+          "occupiedBy": null,
+          "temporary": false,
+          "attach": null,
+          "themes": [],
+          "freshDay": 0,
+          "pull": {
+            "level": 1,
+            "day": 0,
+            "days": 360
+          }
+        },
+        {
+          "id": "obj_77eg5gd00mfa",
+          "type": "structure",
+          "name": "Башня на островке",
+          "description": "Закрытая башня. Дверь держит старый засов, окна темны.",
+          "statEffect": {
+            "prosperity": 0,
+            "security": 0,
+            "knowledge": 0,
+            "influence": 0
+          },
+          "refs": [
+            "obj_8r5b3cxvlqv0"
+          ],
+          "version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "description": "Закрытая башня. Дверь держит старый засов, окна темны.",
+              "statEffect": {
+                "prosperity": 0,
+                "security": 0,
+                "knowledge": 0,
+                "influence": 0
+              },
+              "createdDay": 0
+            }
+          ],
+          "status": "active",
+          "createdDay": 0,
+          "deletedDay": null,
+          "protected": false,
+          "parentId": "obj_8r5b3cxvlqv0",
+          "hidden": false,
+          "occupiedBy": null,
+          "temporary": false,
+          "attach": null,
+          "themes": [],
+          "freshDay": 0,
+          "pull": {
+            "level": 1,
+            "day": 0,
+            "days": 360
+          }
+        },
+        {
+          "id": "obj_gnwa0kh11e6o",
+          "type": "object",
+          "name": "Ловушки башни",
+          "description": "Самострелы и ямы у входа в башню: кто их ставил и как они устроены, никто в городе не знает.",
+          "statEffect": {
+            "prosperity": 0,
+            "security": 0,
+            "knowledge": 0,
+            "influence": 0
+          },
+          "refs": [],
+          "version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "description": "Самострелы и ямы у входа в башню: кто их ставил и как они устроены, никто в городе не знает.",
+              "statEffect": {
+                "prosperity": 0,
+                "security": 0,
+                "knowledge": 0,
+                "influence": 0
+              },
+              "createdDay": 0
+            }
+          ],
+          "status": "active",
+          "createdDay": 0,
+          "deletedDay": null,
+          "protected": false,
+          "parentId": "obj_77eg5gd00mfa",
+          "hidden": false,
+          "occupiedBy": null,
+          "temporary": false,
+          "attach": null,
+          "themes": [],
+          "freshDay": 0
+        },
+        {
+          "id": "obj_qsrsixwjyxcw",
+          "type": "community",
+          "name": "Бунтовщики в башне",
+          "description": "Два десятка беглых кузнецов засели в башне, грабят причалы и зовут к себе бедноту.",
+          "statEffect": {
+            "prosperity": 0,
+            "security": 0,
+            "knowledge": 0,
+            "influence": 0
+          },
+          "refs": [],
+          "version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "description": "Два десятка беглых кузнецов засели в башне, грабят причалы и зовут к себе бедноту.",
+              "statEffect": {
+                "prosperity": 0,
+                "security": 0,
+                "knowledge": 0,
+                "influence": 0
+              },
+              "createdDay": 0
+            }
+          ],
+          "status": "active",
+          "createdDay": 0,
+          "deletedDay": null,
+          "protected": false,
+          "parentId": "obj_77eg5gd00mfa",
+          "hidden": false,
+          "occupiedBy": null,
+          "temporary": false,
+          "attach": null,
+          "themes": [],
+          "freshDay": 0
+        },
+        {
+          "id": "obj_sheahyqcrqmp",
+          "type": "person",
+          "name": "Старый смотритель фонарей",
+          "description": "Старик, который когда-то зажигал фонари островка; это он подбивает беглых держаться башни.",
+          "statEffect": {
+            "prosperity": 0,
+            "security": 0,
+            "knowledge": 0,
+            "influence": 0
+          },
+          "refs": [],
+          "version": 1,
+          "versions": [
+            {
+              "version": 1,
+              "description": "Старик, который когда-то зажигал фонари островка; это он подбивает беглых держаться башни.",
+              "statEffect": {
+                "prosperity": 0,
+                "security": 0,
+                "knowledge": 0,
+                "influence": 0
+              },
+              "createdDay": 0
+            }
+          ],
+          "status": "active",
+          "createdDay": 0,
+          "deletedDay": null,
+          "protected": false,
+          "parentId": "obj_77eg5gd00mfa",
+          "hidden": true,
+          "occupiedBy": null,
+          "temporary": false,
+          "attach": null,
+          "themes": [],
+          "freshDay": 0
+        }
+      ],
+      "fronts": [
+        {
+          "id": "front_1frvjpzycvts",
+          "form": "find",
+          "origin": "story",
+          "title": "Тайна башни на островке",
+          "description": "Добраться до рецепта, который спрятан в башне.",
+          "capacity": 9,
+          "progress": 0,
+          "progressDay": 0,
+          "ratePerDay": 0,
+          "milestones": 3,
+          "milestonesFired": 0,
+          "deadlineDay": null,
+          "pulseDay": null,
+          "stake": [
+            {
+              "op": "fact",
+              "text": "Рецепт — состав, который светится без огня; им заправлены фонари островка."
+            }
+          ],
+          "failStake": [],
+          "risk": "safe",
+          "tempo": 0,
+          "key": {
+            "moves": [
+              "Продвигают поиск действия, которые реально исследуют устройство башни,",
+              "преодолевают её защиту и приближают людей к тайнику в башне.",
+              "Подготовка, не связанная с проникновением, сама по себе прогресс не даёт.",
+              "Расшифровка надписей, языков и символов.",
+              "Исследование механизмов, устройств и инженерных узлов."
+            ],
+            "twist": null
+          },
+          "footprint": [],
+          "refs": [
+            "obj_77eg5gd00mfa",
+            "obj_8r5b3cxvlqv0"
+          ],
+          "parentId": null,
+          "livesOn": "obj_8r5b3cxvlqv0",
+          "bound": null,
+          "atStake": 9,
+          "plus": true,
+          "scale": "episode",
+          "unattainable": null,
+          "rollsFired": 0,
+          "projectId": null,
+          "siteId": null,
+          "profile": null,
+          "deed": null,
+          "script": {
+            "events": [],
+            "clues": [
+              {
+                "id": "inscriptions",
+                "fact": "Надписи перечисляют травы и соли, смешанные в одном котле.",
+                "revealed": false
+              },
+              {
+                "id": "machinery",
+                "fact": "Механизм башни по трубкам разносит светящийся состав к фонарям.",
+                "revealed": false
+              }
+            ]
+          },
+          "outburst": null,
+          "dynamicId": null,
+          "status": "active",
+          "createdDay": 0,
+          "resolvedDay": null
+        },
+        {
+          "id": "front_xppbascr2kk8",
+          "form": "clock",
+          "origin": "story",
+          "title": "Островок отчалит",
+          "description": "Островок с фонарями отчалит и уйдёт вместе с башней: его прибило к краю ненадолго, и тот же ветер унесёт его дальше.",
+          "capacity": 0,
+          "progress": 0,
+          "progressDay": 0,
+          "ratePerDay": 0,
+          "milestones": 1,
+          "milestonesFired": 0,
+          "deadlineDay": 120,
+          "pulseDay": null,
+          "stake": [
+            {
+              "op": "retire",
+              "target": "obj_8r5b3cxvlqv0",
+              "forever": true
+            }
+          ],
+          "failStake": [],
+          "risk": "safe",
+          "tempo": 0,
+          "key": null,
+          "footprint": [],
+          "refs": [
+            "obj_8r5b3cxvlqv0"
+          ],
+          "parentId": null,
+          "livesOn": "obj_8r5b3cxvlqv0",
+          "bound": null,
+          "atStake": 0,
+          "plus": false,
+          "scale": "episode",
+          "unattainable": null,
+          "rollsFired": 0,
+          "projectId": null,
+          "siteId": null,
+          "profile": null,
+          "deed": null,
+          "script": null,
+          "outburst": null,
+          "dynamicId": null,
+          "status": "active",
+          "createdDay": 0,
+          "resolvedDay": null
+        },
+        {
+          "id": "front_mt3sx6eqrifx",
+          "form": "threat",
+          "origin": "story",
+          "title": "Набеги из башни",
+          "description": "Бунтовщики из башни грабят причалы по ночам и скоро пойдут на склады города.",
+          "capacity": 6,
+          "progress": 0,
+          "progressDay": 0,
+          "ratePerDay": 0,
+          "milestones": 1,
+          "milestonesFired": 0,
+          "deadlineDay": 75,
+          "pulseDay": null,
+          "stake": [],
+          "failStake": [
+            {
+              "op": "stats",
+              "points": {
+                "prosperity": -4,
+                "security": -2,
+                "knowledge": 0,
+                "influence": 0
+              }
+            }
+          ],
+          "risk": "safe",
+          "tempo": 0,
+          "key": null,
+          "footprint": [],
+          "refs": [
+            "obj_qsrsixwjyxcw",
+            "obj_6raot16pwaun",
+            "obj_sheahyqcrqmp"
+          ],
+          "parentId": null,
+          "livesOn": "obj_qsrsixwjyxcw",
+          "bound": null,
+          "atStake": 0,
+          "plus": false,
+          "scale": null,
+          "unattainable": null,
+          "rollsFired": 0,
+          "projectId": null,
+          "siteId": null,
+          "profile": null,
+          "deed": null,
+          "script": null,
+          "outburst": null,
+          "dynamicId": null,
+          "status": "active",
+          "createdDay": 0,
+          "resolvedDay": null
+        },
+        {
+          "id": "front_z5n8kgjeolu3",
+          "form": "threat",
+          "origin": "story",
+          "title": "Уголь на исходе",
+          "description": "Угольные копи иссякают: к зиме кузням нечем будет топить.",
+          "capacity": 7,
+          "progress": 0,
+          "progressDay": 0,
+          "ratePerDay": 0,
+          "milestones": 1,
+          "milestonesFired": 0,
+          "deadlineDay": 120,
+          "pulseDay": null,
+          "stake": [],
+          "failStake": [
+            {
+              "op": "delete",
+              "target": "obj_5acstvrpvmpo"
+            }
+          ],
+          "risk": "safe",
+          "tempo": 0,
+          "key": null,
+          "footprint": [],
+          "refs": [
+            "obj_5acstvrpvmpo"
+          ],
+          "parentId": null,
+          "livesOn": null,
+          "bound": null,
+          "atStake": 0,
+          "plus": false,
+          "scale": null,
+          "unattainable": null,
+          "rollsFired": 0,
+          "projectId": null,
+          "siteId": null,
+          "profile": null,
+          "deed": null,
+          "script": null,
+          "outburst": null,
+          "dynamicId": null,
+          "status": "active",
+          "createdDay": 0,
+          "resolvedDay": null
+        },
+        {
+          "id": "front_6u2tbnct75gl",
+          "form": "threat",
+          "origin": "story",
+          "title": "Пожар в Нижнем квартале",
+          "description": "Пожар в Нижнем квартале никак не потушат, огонь идёт к библиотеке.",
+          "capacity": 5,
+          "progress": 0,
+          "progressDay": 0,
+          "ratePerDay": 0,
+          "milestones": 1,
+          "milestonesFired": 0,
+          "deadlineDay": 40,
+          "pulseDay": null,
+          "stake": [],
+          "failStake": [
+            {
+              "op": "delete",
+              "target": "obj_ifet4jjnm2fy"
+            }
+          ],
+          "risk": "safe",
+          "tempo": 0,
+          "key": null,
+          "footprint": [],
+          "refs": [
+            "obj_ifet4jjnm2fy"
+          ],
+          "parentId": null,
+          "livesOn": null,
+          "bound": null,
+          "atStake": 0,
+          "plus": false,
+          "scale": null,
+          "unattainable": null,
+          "rollsFired": 0,
+          "projectId": null,
+          "siteId": null,
+          "profile": null,
+          "deed": null,
+          "script": null,
+          "outburst": null,
+          "dynamicId": null,
+          "status": "active",
+          "createdDay": 0,
+          "resolvedDay": null
+        },
+        {
+          "id": "front_3y2mi6sxo16l",
+          "form": "threat",
+          "origin": "story",
+          "title": "Туман у хуторов",
+          "description": "Густой туман лёг в падь и отрезал хутора от города: ни обозов, ни вестей.",
+          "capacity": 6,
+          "progress": 0,
+          "progressDay": 0,
+          "ratePerDay": 0,
+          "milestones": 1,
+          "milestonesFired": 0,
+          "deadlineDay": 90,
+          "pulseDay": null,
+          "stake": [],
+          "failStake": [
+            {
+              "op": "stats",
+              "points": {
+                "prosperity": -4,
+                "security": 0,
+                "knowledge": 0,
+                "influence": 0
+              }
+            }
+          ],
+          "risk": "safe",
+          "tempo": 0,
+          "key": null,
+          "footprint": [],
+          "refs": [
+            "obj_nbjxajpa3m4j"
+          ],
+          "parentId": null,
+          "livesOn": null,
+          "bound": null,
+          "atStake": 0,
+          "plus": false,
+          "scale": null,
+          "unattainable": null,
+          "rollsFired": 0,
+          "projectId": null,
+          "siteId": null,
+          "profile": null,
+          "deed": null,
+          "script": null,
+          "outburst": null,
+          "dynamicId": null,
+          "status": "active",
+          "createdDay": 0,
+          "resolvedDay": null
+        },
+        {
+          "id": "front_8af63hoynngc",
+          "form": "tension",
+          "origin": "story",
+          "title": "Старатели на плато",
+          "description": "Чужие старатели бьют шурфы на рудном плато и не уходят: рудокопы города грозят прогнать их силой.",
+          "capacity": 4,
+          "progress": 0,
+          "progressDay": 0,
+          "ratePerDay": 0,
+          "milestones": 1,
+          "milestonesFired": 0,
+          "deadlineDay": 80,
+          "pulseDay": null,
+          "stake": [],
+          "failStake": [
+            {
+              "op": "stats",
+              "points": {
+                "prosperity": 0,
+                "security": -3,
+                "knowledge": 0,
+                "influence": 0
+              }
+            }
+          ],
+          "risk": "safe",
+          "tempo": 0,
+          "key": null,
+          "footprint": [],
+          "refs": [
+            "obj_359q0p0ziyld",
+            "obj_qit96bpnb3bx"
+          ],
+          "parentId": null,
+          "livesOn": "obj_359q0p0ziyld",
+          "bound": null,
+          "atStake": 0,
+          "plus": false,
+          "scale": null,
+          "unattainable": null,
+          "rollsFired": 0,
+          "projectId": null,
+          "siteId": null,
+          "profile": null,
+          "deed": null,
+          "script": null,
+          "outburst": null,
+          "dynamicId": null,
+          "status": "active",
+          "createdDay": 0,
+          "resolvedDay": null
+        },
+        {
+          "id": "front_3bkmw292hpx2",
+          "form": "deed",
+          "origin": "player",
+          "title": "Стройка стены у кромки",
+          "description": "Каменщики кладут стену вдоль восточной кромки: камень везут с северных скал.",
+          "capacity": 20,
+          "progress": 0,
+          "progressDay": 0,
+          "ratePerDay": 0.128,
+          "milestones": 1,
+          "milestonesFired": 0,
+          "deadlineDay": null,
+          "pulseDay": null,
+          "stake": [
+            {
+              "op": "create",
+              "object": {
+                "type": "structure",
+                "name": "Стена у кромки",
+                "description": "Каменная стена вдоль восточной кромки.",
+                "points": {
+                  "prosperity": 0,
+                  "security": 6,
+                  "knowledge": 0,
+                  "influence": 0
+                }
+              },
+              "result": true
+            }
+          ],
+          "failStake": [],
+          "risk": "safe",
+          "tempo": 0,
+          "key": null,
+          "footprint": [],
+          "refs": [],
+          "parentId": null,
+          "livesOn": null,
+          "bound": null,
+          "atStake": 0,
+          "plus": false,
+          "scale": null,
+          "unattainable": null,
+          "rollsFired": 0,
+          "projectId": null,
+          "siteId": "obj_r9dnrjqdm82e",
+          "profile": null,
+          "deed": null,
+          "script": null,
+          "outburst": null,
+          "dynamicId": null,
+          "status": "active",
+          "createdDay": 0,
+          "resolvedDay": null
+        }
+      ],
+      "assignments": [
+        {
+          "id": "asg_rygvug18t5ds",
+          "frontId": "front_3bkmw292hpx2",
+          "office": "treasurer",
+          "text": "Класть стену из камня северных скал",
+          "verdict": "fits",
+          "tempo": 0,
+          "status": "active",
+          "startDay": 0,
+          "endDay": null
+        }
+      ],
+      "projects": [],
+      "dynamicsUsed": {},
+      "unattainableWarning": null,
+      "chronicle": [],
+      "dialog": [],
+      "notes": [],
+      "jobs": [
+        {
+          "id": "job_oeispna6ytdh",
+          "kind": "front_event",
+          "dueDay": 120,
+          "payload": {
+            "frontId": "front_xppbascr2kk8"
+          },
+          "state": "pending",
+          "attempts": 0,
+          "lastError": null
+        },
+        {
+          "id": "job_mu319vtysgbd",
+          "kind": "front_event",
+          "dueDay": 75,
+          "payload": {
+            "frontId": "front_mt3sx6eqrifx"
+          },
+          "state": "pending",
+          "attempts": 0,
+          "lastError": null
+        },
+        {
+          "id": "job_3h74cj9myz2x",
+          "kind": "front_event",
+          "dueDay": 120,
+          "payload": {
+            "frontId": "front_z5n8kgjeolu3"
+          },
+          "state": "pending",
+          "attempts": 0,
+          "lastError": null
+        },
+        {
+          "id": "job_upvgsxtc4e20",
+          "kind": "front_event",
+          "dueDay": 40,
+          "payload": {
+            "frontId": "front_6u2tbnct75gl"
+          },
+          "state": "pending",
+          "attempts": 0,
+          "lastError": null
+        },
+        {
+          "id": "job_s27f8xpczb9l",
+          "kind": "front_event",
+          "dueDay": 90,
+          "payload": {
+            "frontId": "front_3y2mi6sxo16l"
+          },
+          "state": "pending",
+          "attempts": 0,
+          "lastError": null
+        },
+        {
+          "id": "job_iyt1vys0g7i2",
+          "kind": "front_event",
+          "dueDay": 80,
+          "payload": {
+            "frontId": "front_8af63hoynngc"
+          },
+          "state": "pending",
+          "attempts": 0,
+          "lastError": null
+        },
+        {
+          "id": "job_5u45kvfvxc01",
+          "kind": "front_event",
+          "dueDay": 157,
+          "payload": {
+            "frontId": "front_3bkmw292hpx2"
+          },
+          "state": "pending",
+          "attempts": 0,
+          "lastError": null
+        }
+      ],
+      "scenariosUsed": [
+        "lantern-isle"
+      ],
+      "createdDay": 0,
+      "revision": 0,
+      "steward": {
+        "mode": "report",
+        "wait": "weeks",
+        "spare": [],
+        "text": "Только сообщать и ждать моего слова."
+      }
+    }
+  ],
+  "drafts": [],
+  "origin": {
+    "run": null,
+    "stage": null,
+    "case": null,
+    "note": "дерзкие приказы: островок у причалов, бунтовщики в башне, беды города"
+  }
+}

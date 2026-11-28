@@ -1,3 +1,4 @@
+import { fixId } from '../_shared/ids.js';
 import type { LinkEffect } from '../../core/rules.js';
 import { block, briefList, join, type ObjectBrief } from '../_shared/blocks.js';
 import { canon, composeSystem, loadPrompt } from '../_shared/canon.js';
@@ -76,6 +77,7 @@ export const influenceAppraiser: StructuredAgent<InfluenceInput, InfluenceRaw, I
     ),
   check: (raw, input) => {
     const fronts = new Set(input.nearby.map((n) => n.id));
+    for (const e of raw.effects) e.id = fixId(e.id, fronts);
     const alien = raw.effects.find((e) => !fronts.has(e.id));
     if (alien) return `id «${alien.id}» нет в списке «Что идёт рядом»; бери id только оттуда`;
     // Слово должно подходить к записи: то, что надвигается само, и работа людей описываются разными словами.
@@ -85,6 +87,7 @@ export const influenceAppraiser: StructuredAgent<InfluenceInput, InfluenceRaw, I
       if (people === false && PEOPLE_WORDS.includes(e.effect)) return `${e.id} надвигается само: для него годятся removes_cause, stops, slows, hurries, changes_outcome`;
     }
     const sides = new Set(input.sides.map((s) => s.id));
+    for (const s of raw.sides) s.id = fixId(s.id, sides);
     const stranger = raw.sides.find((s) => !sides.has(s.id));
     return stranger ? `id «${stranger.id}» нет в списке «Кто рядом»; бери id только оттуда` : null;
   },

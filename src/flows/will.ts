@@ -79,7 +79,10 @@ function busy(deps: FlowDeps, city: City, officer: Officer): WillOutcome {
   const more = a?.returnTo
     ? `Это малое дело, ради него ${she ? 'она уже отвлеклась' : 'он уже отвлёкся'} от большого; пусть закончит, или возьмётся другой.`
     : `Отвлечься ${she ? 'она' : 'он'} может только на малое дело, а это большое. Сначала снять с нынешнего дела или взять другого.`;
-  return refuse('officer_busy', `${now} ${more}`);
+  // Кто свободен прямо сейчас: жрецу не нужно искать это в блоке хода.
+  const free = city.officers.filter((o) => !o.assignmentId).map((o) => title(deps, o));
+  const others = free.length ? ` Свободны сейчас: ${free.join(', ')}.` : ' Свободных сейчас нет.';
+  return refuse('officer_busy', `${now} ${more}${others}`);
 }
 
 /** Что жрец скажет, когда занятый сановник отвлекается на малое дело. Пусто — сановник свободен. */
@@ -139,7 +142,7 @@ export async function playerWill(deps: FlowDeps, city: City, office: Office, tex
   let outcome: WillOutcome;
   switch (will.label) {
     case 'project':
-      outcome = await newProject(deps, city, officer, will, day);
+      outcome = await newProject(deps, city, officer, will, day, order);
       break;
     case 'continue':
       outcome = await continueProject(deps, city, officer, will, day);
@@ -175,7 +178,7 @@ function doomedStage(goal: string, planned: PlannedStage[] | null): ProjectStage
   };
 }
 
-async function newProject(deps: FlowDeps, city: City, officer: Officer, will: Will, day: number): Promise<WillOutcome> {
+async function newProject(deps: FlowDeps, city: City, officer: Officer, will: Will, day: number, order: string | null = null): Promise<WillOutcome> {
   // Занятый сановник берётся только за малое: насколько дело мало, станет ясно по его цене.
   if (officer.assignmentId && !canDetour(city, officer)) return busy(deps, city, officer);
   const objects = visibleBriefs(city);
@@ -183,7 +186,8 @@ async function newProject(deps: FlowDeps, city: City, officer: Officer, will: Wi
     deps,
     'canon-warden',
     // Страж судит о мире, а не о событиях: то, что идёт рядом, приказ как раз и меняет, поэтому он видит только место.
-    () => judgeCanon(deps.agents, { goal: will.goal, facts: activeFacts(city).slice(-30).map((f) => f.text), objects: visibleBriefs(city, false) }),
+    // Цель — короткое название; подробности замысла есть только в словах приказа.
+    () => judgeCanon(deps.agents, { goal: will.goal, order, facts: activeFacts(city).slice(-30).map((f) => f.text), objects: visibleBriefs(city, false) }),
     { verdict: 'possible' as const, reason: '', goal: will.goal, gaps: [] as string[] },
   );
 
@@ -212,7 +216,9 @@ async function newProject(deps: FlowDeps, city: City, officer: Officer, will: Wi
     city.unattainableWarning = null;
   }
 
-  const planned = await tryAgent(deps, 'stage-planner', () => planStages(deps.agents, { goal: ruling.goal, gaps: ruling.gaps, objects }), null);
+  // Поправленная цель расходится со словами приказа: тогда планировщик идёт только по ней.
+  const words = ruling.verdict === 'possible' ? order : null;
+  const planned = await tryAgent(deps, 'stage-planner', () => planStages(deps.agents, { goal: ruling.goal, order: words, gaps: ruling.gaps, objects }), null);
   if (!planned && !unattainable) return refuse('failed', 'Волю не удалось облечь в дело. Пусть покровитель скажет иначе.');
   const stages: ProjectStage[] = unattainable ? [doomedStage(ruling.goal, planned)] : (planned ?? []);
   if (officer.assignmentId && (unattainable || stages.length > 1)) return busy(deps, city, officer);

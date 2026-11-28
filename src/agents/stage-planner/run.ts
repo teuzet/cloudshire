@@ -1,3 +1,4 @@
+import { fixId } from '../_shared/ids.js';
 import type { ObjectType } from '../../core/rules.js';
 import { block, briefList, join, typesBlock, type ObjectBrief } from '../_shared/blocks.js';
 import { canon, composeSystem, loadPrompt } from '../_shared/canon.js';
@@ -11,6 +12,8 @@ const EXISTING: readonly ResultKind[] = ['change_object', 'remove_object', 'rest
 
 export interface StagesInput {
   goal: string;
+  /** Слова приказа, из которых взята цель: в них подробности замысла. */
+  order?: string | null;
   gaps: string[];
   objects: ObjectBrief[];
 }
@@ -36,9 +39,10 @@ export const stagePlanner: StructuredAgent<StagesInput, StagesRaw, PlannedStage[
   description: 'Цепочка этапов работы с результатом каждого.',
   schema: stagesSchema,
   system: () => composeSystem([], prompt, canon('setting'), block('Виды частей города (type)', typesBlock())),
-  user: ({ goal, gaps, objects }) =>
+  user: ({ goal, order, gaps, objects }) =>
     join(
       `Цель: «${goal}»`,
+      order && order !== goal ? `Слова приказа: «${order}»` : '',
       block('Чего недостаёт', gaps.length ? gaps.map((g) => `- ${g}`).join('\n') : 'всё нужное есть'),
       block('В городе есть', briefList(objects)),
     ),
@@ -46,6 +50,8 @@ export const stagePlanner: StructuredAgent<StagesInput, StagesRaw, PlannedStage[
     const ids = new Set(input.objects.map((o) => o.id));
     for (const [i, s] of raw.stages.entries()) {
       const r = s.result;
+      r.object_id = fixId(r.object_id, ids);
+      r.parent_id = fixId(r.parent_id, ids);
       const at = `этап ${i + 1}`;
       if (EXISTING.includes(r.kind) && (!r.object_id || !ids.has(r.object_id))) {
         return `${at}: для ${r.kind} нужен object_id из списка «В городе есть»`;

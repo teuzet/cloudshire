@@ -1,3 +1,4 @@
+import { fixId } from '../_shared/ids.js';
 import type { Relation } from '../../core/rules.js';
 import { block, briefList, join, type ObjectBrief } from '../_shared/blocks.js';
 import { composeSystem, loadPrompt } from '../_shared/canon.js';
@@ -27,6 +28,7 @@ export const footprintMapper: StructuredAgent<FootprintInput, FootprintRaw, Foot
   user: ({ work, result, objects }) => join(`Работа: «${work}»`, `Ожидаемый результат: ${result}`, block('В городе есть', briefList(objects))),
   check: (raw, input) => {
     const ids = new Set(input.objects.map((o) => o.id));
+    for (const r of raw.relations) r.object_id = fixId(r.object_id, ids);
     const alien = raw.relations.find((r) => !ids.has(r.object_id));
     return alien ? `object_id «${alien.object_id}» нет в списке «В городе есть»; бери id только оттуда` : null;
   },

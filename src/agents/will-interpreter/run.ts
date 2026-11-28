@@ -1,3 +1,4 @@
+import { fixId } from '../_shared/ids.js';
 import { tempoOf, type Tempo } from '../../core/rules.js';
 import { block, join } from '../_shared/blocks.js';
 import { composeSystem, loadPrompt } from '../_shared/canon.js';
@@ -70,6 +71,8 @@ export const willInterpreter: StructuredAgent<WillInput, WillRaw, Will> = {
       block('Ждущие замыслы', projects.length ? projects.map((p) => `- ${p.id} «${p.title}», следующий шаг: «${p.next}»`).join('\n') : 'ждущих замыслов нет'),
     ),
   check: (raw, input) => {
+    raw.front_id = fixId(raw.front_id, input.fronts.map((f) => f.id));
+    raw.project_id = fixId(raw.project_id, input.projects.map((p) => p.id));
     if (NEEDS_FRONT.includes(raw.label)) {
       if (!raw.front_id || !input.fronts.some((f) => f.id === raw.front_id)) {
         return `для ${raw.label} нужен front_id из списка идущих дел; если подходящего дела в списке нет, это project`;
