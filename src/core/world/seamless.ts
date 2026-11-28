@@ -69,5 +69,5 @@ export function bringBack(city: Pick<City, 'objects'>, obj: WorldObject, day: nu
   obj.freshDay = day;
   // Того, в чём сторона была, может уже не быть: тогда она просто в городе.
   if (obj.parentId && findObject(city, obj.parentId)?.status !== 'active') obj.parentId = null;
-  return [{ kind: 'object_back', objectId: obj.id, name: obj.name, delta: { prosperity: 0, security: 0, knowledge: 0, influence: 0 }, description: null }];
+  return [{ kind: 'object_back', objectId: obj.id, name: obj.name, delta: { prosperity: 0, security: 0, knowledge: 0, influence: 0 }, description: null, returned: true }];
 }

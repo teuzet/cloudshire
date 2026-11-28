@@ -23,7 +23,7 @@ export type Change =
   /** Объект выбыл: остался в городе, но ничего не даёт. */
   | { kind: 'object_out'; objectId: string; name: string; delta: StatMap }
   /** Выбывший объект вернулся к жизни. */
-  | { kind: 'object_back'; objectId: string; name: string; delta: StatMap; description: string | null }
+  | { kind: 'object_back'; objectId: string; name: string; delta: StatMap; description: string | null; /** Ушедшая сторона пришла назад, а не починена. */ returned?: boolean }
   | { kind: 'object_revealed'; objectId: string; name: string; description?: string }
   /** Объект перенесли: теперь он находится в другом месте и уходит только вместе с ним. */
   | { kind: 'object_moved'; objectId: string; name: string; from: string | null; to: string | null }
@@ -181,7 +181,7 @@ export function describeChanges(rules: Pick<Rules, 'stats'>, changes: readonly C
       }
       case 'object_back': {
         const shift = statShiftWords(rules, c.delta);
-        out.push(`Возвращено к жизни: ${c.name}${c.description ? `. Теперь: ${c.description}` : ''}${shift ? `. В жизни города: ${shift}` : ''}`);
+        out.push(`${c.returned ? 'Снова в городе, после того как ушло' : 'Снова служит городу'}: ${c.name}${c.description ? `. Теперь: ${c.description}` : ''}${shift ? `. В жизни города: ${shift}` : ''}`);
         break;
       }
       case 'object_removed': {
