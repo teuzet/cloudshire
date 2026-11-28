@@ -82,6 +82,19 @@ export function addObjectVersion(
   return obj;
 }
 
+/** Стороны: люди, учреждения, персоны. У них есть воля и память, и они переживают историю. */
+export const SIDE_TYPES: readonly ObjectType[] = ['community', 'organization', 'person'];
+
+/** Видимая сторона, которую город помнит. */
+export function isSide(obj: Pick<WorldObject, 'type' | 'temporary' | 'hidden'>): boolean {
+  return SIDE_TYPES.includes(obj.type) && !obj.temporary && !obj.hidden;
+}
+
+/** Сторона ушла из города: её здесь нет, но она помнит и может вернуться с новой историей. */
+export function isDeparted(obj: WorldObject): boolean {
+  return obj.status !== 'active' && Boolean(obj.out?.forever) && isSide(obj);
+}
+
 export function deleteObject(obj: WorldObject, day: number): WorldObject {
   obj.status = 'deleted';
   obj.deletedDay = Math.max(0, Math.round(day));

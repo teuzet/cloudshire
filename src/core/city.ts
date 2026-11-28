@@ -148,6 +148,8 @@ export interface WorldObject {
   log?: Array<{ day: number; text: string }>;
   /** Тяга: метка режиссёра от истории, которая объект породила или изменила. */
   pull?: Pull | null;
+  /** День, когда посев последний раз взял объект в новую историю: сыгранный узел больше не ждёт. */
+  playedDay?: number;
 }
 
 // ───────────────────────────── фронты ─────────────────────────────
@@ -296,6 +298,8 @@ export interface Front {
   resist?: Resist[];
   /** На сколько ступеней сопротивление подняло риск дела: вернётся, когда помешать станет некому. */
   resistShift?: number;
+  /** Стороны, которым готовый результат во вред или на пользу: с готовностью это ляжет в их память. */
+  sides?: Array<{ objectId: string; stance: 'harms' | 'helps' }>;
   /** Материал посаженной истории. */
   script: {
     events: Array<{ id: string; description: string; fired: boolean }>;
@@ -587,6 +591,8 @@ export interface City {
   notes: PriestNote[];
   /** Отложенные поручения покровителя: исполняются раньше наказа, по порядку. */
   queue?: QueuedOrder[];
+  /** Сколько историй посажено: каждая N-я вырастает из узла с прошлым. */
+  seeded?: number;
   jobs: Job[];
   /** Сценарии, которые уже сыграли в этом городе. */
   scenariosUsed: string[];

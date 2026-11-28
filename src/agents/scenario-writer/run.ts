@@ -21,6 +21,26 @@ export interface ScenarioWriterInput {
   unknowns: readonly CanonicalUnknown[];
   /** Имена объектов, вокруг которых город живёт сейчас: история охотнее цепляется за них. */
   focus?: readonly string[];
+  /** Узлы с прошлым: история обязана взять в роль хотя бы один из них. */
+  grow?: ReadonlyArray<{ id: string; name: string }>;
+}
+
+/** Какие объекты города история берёт в роли: участники и носители фронтов, цели ставок, вложенность и связи объектов. */
+export function rolesTaken(s: Scenario): Set<string> {
+  const ids = new Set<string>();
+  for (const f of s.fronts) {
+    for (const r of f.refs) ids.add(r);
+    if (f.livesOn) ids.add(f.livesOn);
+    const st = f.stake;
+    const target = st && 'modify' in st ? st.modify.target : st && 'delete' in st ? st.delete.target : st && 'uncover' in st ? st.uncover.target : null;
+    if (target) ids.add(target);
+  }
+  for (const o of s.objects) {
+    for (const r of o.refs) ids.add(r);
+    if (o.inside) ids.add(o.inside);
+  }
+  if (s.window) ids.add(s.window.livesOn);
+  return ids;
 }
 
 const prompt = loadPrompt(import.meta.url);
@@ -168,13 +188,15 @@ export const scenarioWriter: StructuredAgent<ScenarioWriterInput, Scenario, Scen
   description: 'Объекты и фронты новой истории.',
   // Черновик сверяется по итогу: по заготовке — после слияния с ней, без заготовки — как есть.
   schema: scenarioLooseDraftSchema as unknown as typeof scenarioDraftSchema,
-  system: ({ cityBrief, objects, names, unknowns, focus }) =>
+  system: ({ cityBrief, objects, names, unknowns, focus, grow }) =>
     composeSystem(
       ['world', 'style-names'],
       prompt,
       section('Город', cityBrief),
       section('Объекты города', objectsBlock(objects)),
-      section('Сейчас город живёт вокруг этого (историю лучше связать с одним из них)', focus?.length ? bullets([...focus]) : null),
+      grow?.length
+        ? section('Эта история вырастает из того, что уже было в городе: возьми в неё хотя бы одно из этого (в refs фронта, как livesOn или как цель ставки)', bullets(grow.map((g) => `${g.id} — ${g.name}`)))
+        : section('Сейчас город живёт вокруг этого (историю лучше связать с одним из них)', focus?.length ? bullets([...focus]) : null),
       mysteryBlock(unknowns),
       namesBlock(names),
     ),
@@ -182,14 +204,20 @@ export const scenarioWriter: StructuredAgent<ScenarioWriterInput, Scenario, Scen
     template
       ? `Заготовка (id объектов и фронтов сохрани как есть):\n${JSON.stringify(template, null, 2)}`
       : `Зерно истории: ${seed ?? 'на твой выбор, по городу'}`,
-  check: (raw, { objects, unknowns, template }) => {
+  check: (raw, { objects, unknowns, template, grow }) => {
     const whole = scenarioDraftSchema.safeParse(template ? keepTemplate(raw, template) : raw);
     if (!whole.success) {
       return whole.error.issues.slice(0, 5).map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
     }
     const touched = touchedMysteries(raw, new Set(unknowns.flatMap((u) => u.objectIds)));
     if (touched.length) return `история касается тайны острова: ${touched.join(', ')}. Эти объекты не трогай`;
-    return checkIds(raw, new Set(objects.filter((o) => o.status === 'active').map((o) => o.id)), !template);
+    const ids = checkIds(raw, new Set(objects.filter((o) => o.status === 'active').map((o) => o.id)), !template);
+    if (ids) return ids;
+    if (grow?.length) {
+      const taken = rolesTaken(template ? keepTemplate(raw, template) : raw);
+      if (!grow.some((g) => taken.has(g.id))) return `история не взяла в роль ничего из того, что уже было в городе: возьми хотя бы одно из ${grow.map((g) => g.id).join(', ')}`;
+    }
+    return null;
   },
   finish: (raw, { template }) => (template ? keepTemplate(raw, template) : raw),
 };

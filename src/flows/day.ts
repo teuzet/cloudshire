@@ -18,6 +18,7 @@ import { dueEvent, findFront, frontGist, frontObjectIds, neighbors, closeFront, 
 import { attachedTo, findObject, scalePull } from '../core/world/objects.js';
 import { biting, effectOf, hindrancesOf } from '../core/world/hindrance.js';
 import { applyStake } from '../core/world/stake.js';
+import { rememberSides } from '../core/world/seamless.js';
 import { themeNames } from '../core/world/themes.js';
 import type { OutboundMessage } from '../ports/notifier.js';
 import type { ObjectBrief } from '../agents/_shared/blocks.js';
@@ -229,6 +230,11 @@ function hiddenRefs(city: City, front: Front): WorldObject[] {
   });
 }
 
+/** Развязка истории всегда оставляет в мире узел для следующей: «следа нет» у неё не бывает. У осложнения как выйдет. */
+function endings(front: Front): Array<'none'> {
+  return front.origin === 'story' ? [] : ['none'];
+}
+
 async function avert(deps: FlowDeps, city: City, front: Front, day: number, out: OutboundMessage[]): Promise<void> {
   const lead = leadLabel(city, front);
   const will = willWords(city, front);
@@ -252,7 +258,7 @@ async function avert(deps: FlowDeps, city: City, front: Front, day: number, out:
         keepable: helpers.map((h) => h.id),
         lead: lead.label,
         manner: lead.manner,
-        allowed: ['none', 'fact', 'gone', ...(people.length >= 2 ? (['link'] as const) : []), ...(helpers.length ? (['keep'] as const) : [])],
+        allowed: [...endings(front), 'fact', 'gone', ...(people.length >= 2 ? (['link'] as const) : []), ...(helpers.length ? (['keep'] as const) : [])],
       }),
     { text: `Обошлось: ${frontGist(front)}.`, effect: 'none' },
   );
@@ -396,6 +402,7 @@ async function complete(deps: FlowDeps, city: City, front: Front, day: number, o
   const changes = closeFront(deps.rules, city, front, 'done', day);
   const applied = applyStake(deps.rules, city, ops, stakeCtx(deps, front, day));
   changes.push(...applied.changes);
+  rememberSides(deps.rules, city, front, day);
   const result = applied.resultId ? findObject(city, applied.resultId) : null;
   // Что дело узнало: это и есть его итог, рассказчик называет его прямо.
   const found = front.stake.some((op) => op.op === 'uncover') ? foundWords(applied.changes) : null;
@@ -494,7 +501,7 @@ async function strike(deps: FlowDeps, city: City, front: Front, stake: readonly 
         keepable: [],
         lead: lead.label,
         manner: lead.manner,
-        allowed: ['none', 'fact', ...(people.length >= 2 ? (['link'] as const) : [])],
+        allowed: [...endings(front), 'fact', ...(people.length >= 2 ? (['link'] as const) : [])],
       }),
     { text: event, effect: 'none' },
   );

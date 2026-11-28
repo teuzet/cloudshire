@@ -580,6 +580,8 @@ async function startStage(deps: FlowDeps, city: City, project: Project, officer:
     day,
   });
   if (patch?.links.length) front.links = patch.links;
+  // Кому готовое во вред или на пользу, то ляжет в их память, когда дело будет сделано.
+  if (patch?.sides.length) front.sides = patch.sides.map((s) => ({ objectId: s.objectId, stance: s.stance }));
   setResistance(front, resist);
   city.fronts.push(front);
   const occupied = occupyFootprint(city, front);

@@ -9,6 +9,7 @@ import type { City, DialogEntry } from '../../core/city.js';
 import type { Rules } from '../../core/rules.js';
 import { activeAssignments, pausedFor } from '../../core/world/assignments.js';
 import { activeFronts, findFront, frontGist } from '../../core/world/fronts.js';
+import { isSide } from '../../core/world/objects.js';
 import { activeFacts } from '../../core/lore.js';
 import { qualitativeStats } from '../../core/world/stats.js';
 import { gameDate } from '../../core/time.js';
@@ -117,7 +118,8 @@ export function priestTurnBlock(rules: Rules, city: City, day: number): string {
     .filter((o) => o.out && (o.status === 'active' || o.out.forever))
     .sort((a, b) => (b.out?.day ?? 0) - (a.out?.day ?? 0))
     .slice(0, 12)
-    .map((o) => `${o.name}: ${o.out?.forever ? 'утрачено навсегда' : 'не действует, можно вернуть делом'} — ${gameDate(o.out?.day ?? 0).label}, после беды «${o.out?.cause}»`);
+    // Стороны не пропадают, а уходят: разбитые и изгнанные помнят, что с ними было, и могут вернуться.
+    .map((o) => `${o.name}: ${o.out?.forever ? (isSide(o) ? 'ушли из города' : 'утрачено навсегда') : 'не действует, можно вернуть делом'} — ${gameDate(o.out?.day ?? 0).label}, после «${o.out?.cause}»`);
   const memory = seen
     .filter((o) => o.log?.length && (o.status === 'active' || o.out?.forever))
     .sort((a, b) => (b.log?.at(-1)?.day ?? 0) - (a.log?.at(-1)?.day ?? 0))

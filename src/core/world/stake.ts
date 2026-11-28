@@ -9,7 +9,7 @@ import { addFact } from '../lore.js';
 import type { Change } from './changes.js';
 import { closeFront, findFront, frontGist, rollbackMilestone, settleProgress, withOuter } from './fronts.js';
 import { diffPoints, pointsToRaw, rawToPoints } from './numbers.js';
-import { addObjectVersion, createObject, deleteWithChildren, findObject, tug } from './objects.js';
+import { addObjectVersion, createObject, deleteWithChildren, findObject, isSide, tug } from './objects.js';
 import { applyHindrance, feasibleEffect, liftHindrance } from './hindrance.js';
 import { hiddenAbout } from './hidden.js';
 import { holdFront, objectsGone, releaseFront } from './links.js';
@@ -46,10 +46,19 @@ export function applyStake(
     changes.push({ kind: 'object_out', objectId: obj.id, name: obj.name, delta: diffPoints(points, before) });
     changes.push(...objectsGone(rules, city, [obj], day));
   };
-  /** Стереть объект со всем вложенным; что на них жило, кончилось, что они держали, идёт как прежде. */
+  /** Отчего ушло: случившаяся беда или дело, которое это сделало. */
+  const cause = (): string => {
+    const front = ctx.frontId ? findFront(city, ctx.frontId) : null;
+    return ctx.trouble ?? (front ? frontGist(front) : 'перемена в городе');
+  };
+  /**
+   * Стереть объект со всем вложенным; что на них жило, кончилось, что они держали, идёт как прежде.
+   * Стороны не стираются, а уходят из города: разбитые, изгнанные, улетевшие помнят, что с ними было.
+   */
   const remove = (obj: WorldObject) => {
     if (obj.attach) liftHindrance(findFront(city, obj.attach.frontId), obj);
     const gone = deleteWithChildren(city, obj, day);
+    for (const o of gone) if (isSide(o) && !o.out) o.out = { day, cause: cause(), was: { ...rawToPoints(city, o.statEffect) }, forever: true };
     for (const o of gone) changes.push({ kind: 'object_removed', objectId: o.id, name: o.name, points: rawToPoints(city, o.statEffect), hidden: o.hidden });
     changes.push(...objectsGone(rules, city, gone, day));
     return gone;

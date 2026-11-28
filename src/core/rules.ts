@@ -343,6 +343,8 @@ export const rulesSchema = z.object({
     gainShare: z.number().positive(),
     /** Окно истории-возможности в месяцах: не взялись и не довели — она уходит. */
     chanceMonths: z.number().positive(),
+    /** Каждая N-я посаженная история берёт в роль узел с прошлым, если такой есть. Ноль — никогда. */
+    nodeEvery: z.number().int().nonnegative(),
   }),
   priest: z.object({ dialogDepth: z.number().int().positive() }),
 });

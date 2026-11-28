@@ -12,14 +12,15 @@ import { leadOf } from '../core/world/assignments.js';
 import { monthsToDays, rawToPoints } from '../core/world/numbers.js';
 import { mysteryObjectIds } from '../core/lore.js';
 import { nearWords } from '../core/world/links.js';
-import type { City, StoryTags } from '../core/city.js';
+import type { City, StoryTags, WorldObject } from '../core/city.js';
 import { IMPACT_LEVELS, SCALES, type Scale } from '../core/rules.js';
 import { leanOf, markStory, roomForTrouble, varietyWeight, wantsChance, wantsTrouble } from '../core/world/director.js';
-import { pullOf } from '../core/world/objects.js';
+import { isDeparted, pullOf } from '../core/world/objects.js';
+import { bringBack, nodeObjects } from '../core/world/seamless.js';
 import { weightedOrder } from '../core/world/dynamics.js';
 import { plantScenario, scenarioTags, storyKind, touchedMysteries, type Scenario } from '../core/world/scenario.js';
 import type { OutboundMessage } from '../ports/notifier.js';
-import { writeScenario } from '../agents/scenario-writer/run.js';
+import { rolesTaken, writeScenario } from '../agents/scenario-writer/run.js';
 import { record } from './chronicle.js';
 import { namesUsed, newId, returnNames, takeNames, tryAgent, type FlowDeps } from './context.js';
 import { refreshFront } from './fronts.js';
@@ -63,13 +64,32 @@ function freeScale(deps: FlowDeps): Scale {
   return weightedOrder(allowed, (s) => table[s].weight, deps.random.rng)[0] ?? 'situation';
 }
 
-/** Вокруг чего город живёт сейчас: видимые объекты с самой сильной тягой. */
+/**
+ * Вокруг чего город живёт сейчас: узлы с прошлым, которые ещё не сыграли снова (их тяга не сходит),
+ * потом видимые объекты с самой сильной тягой.
+ */
 function focusNames(city: City, day: number): string[] {
-  return city.objects
+  const nodes = nodeObjects(city).filter((o) => o.status === 'active');
+  const pulled = city.objects
     .filter((o) => o.status === 'active' && !o.hidden && !o.temporary && pullOf(o, day) > 0)
-    .sort((a, b) => pullOf(b, day) - pullOf(a, day))
-    .slice(0, 4)
-    .map((o) => o.name);
+    .sort((a, b) => pullOf(b, day) - pullOf(a, day));
+  return [...new Set([...nodes, ...pulled].map((o) => o.name))].slice(0, 4);
+}
+
+/** Что с объектом было: последние строки его памяти, чтобы новая история помнила старую. */
+function pastWords(o: WorldObject): string {
+  return o.log?.length ? `Что с этим было: ${o.log.slice(-2).map((l) => l.text).join(' / ')}` : '';
+}
+
+/** Объекты для посевщика: стоящие в городе с окрестностью и ушедшие стороны, которые могут вернуться; у всех память. */
+function writerObjects(city: City): WorldObject[] {
+  return city.objects
+    .filter((o) => o.status === 'active' || isDeparted(o))
+    .map((o) => ({
+      ...o,
+      status: 'active' as const,
+      description: [o.description, isDeparted(o) ? `Сейчас их в городе нет: ушли после «${o.out?.cause}».` : nearWords(city, o, true), pastWords(o)].filter(Boolean).join(' '),
+    }));
 }
 
 /** Зерно для истории без заготовки: то, чего режиссёр давно не видел, и о другом, чем то, что уже идёт. */
@@ -108,14 +128,18 @@ export async function plantStory(deps: FlowDeps, city: City, day: number, kind: 
   const template = weightedOrder(fresh, (s) => (uniform ? 1 : varietyWeight(deps.rules, city, scenarioTags(s), day)) * deps.rules.seeding.scale[s.scale ?? 'situation'].weight, deps.random.rng)[0] ?? null;
   const lean = template ? null : leanOf(deps.rules, city, day, deps.random.rng);
   const names = await takeNames(deps, deps.rules.seeding.namesPerCall);
+  // Каждая N-я история растёт из узла с прошлым, если такой есть: мир тянется, а не делится на эпизоды.
+  const every = deps.rules.seeding.nodeEvery;
+  const grow = every > 0 && (city.seeded ?? 0) % every === every - 1 ? nodeObjects(city).slice(0, 6) : [];
   const scenario: Scenario | null = await tryAgent(
     deps,
     'scenario-writer',
     () =>
       writeScenario(deps.agents, {
         cityBrief: city.brief,
-        // Сценарист видит окрестность: что где стоит, что чем удержано и что на чём держится.
-        objects: city.objects.filter((o) => o.status === 'active').map((o) => ({ ...o, description: [o.description, nearWords(city, o, true)].filter(Boolean).join(' ') })),
+        // Сценарист видит окрестность (что где стоит, что чем удержано и что на чём держится) и память объектов.
+        objects: writerObjects(city),
+        grow: grow.map((o) => ({ id: o.id, name: o.name })),
         template,
         seed: lean ? seedWords(deps, city, lean, kind) : null,
         names,
@@ -141,12 +165,18 @@ export async function plantStory(deps: FlowDeps, city: City, day: number, kind: 
 
   const tags = scenarioTags(planted);
   markStory(city, lean ? { ...lean, mystery: tags.mystery } : tags, day, { kind: storyKind(planted), scale: planted.scale ?? null });
+  // Ушедшая сторона, которую история взяла в роль, возвращается в город.
+  const taken = rolesTaken(planted);
+  const back = city.objects.filter((o) => taken.has(o.id) && isDeparted(o)).flatMap((o) => bringBack(city, o, day));
   const { objects, fronts } = plantScenario(deps.rules, city, planted, { day, newId: (p) => newId(deps, p) });
+  // Сыгранные снова узлы больше не ждут: узлом их сделает новое прошлое.
+  for (const o of city.objects) if (taken.has(o.id) && o.status === 'active') o.playedDay = day;
+  city.seeded = (city.seeded ?? 0) + 1;
   for (const front of fronts) refreshFront(deps, city, front, day);
   // Скрытое в истории город пока не видел: оно не идёт ни в весть, ни в хронику.
   const seen = objects.filter((o) => !o.hidden);
   const gist = [...seen.map((o) => `${o.name}. ${o.description}`), ...(seen.length ? [] : fronts.map((f) => f.description))].join('\n');
-  const changes: Change[] = seen.map((o) => ({
+  const changes: Change[] = [...back, ...seen.map((o): Change => ({
     kind: 'object_created',
     objectId: o.id,
     name: o.name,
@@ -155,7 +185,7 @@ export async function plantStory(deps: FlowDeps, city: City, day: number, kind: 
     temporary: false,
     hidden: o.hidden,
     story: true,
-  }));
+  }))];
   return record(deps, city, { gist: gist || planted.pitch || planted.title, changes, source: 'scenario', frontId: fronts[0]?.id ?? null, day, kind: 'beat', officer: null, announce: true });
 }
 
